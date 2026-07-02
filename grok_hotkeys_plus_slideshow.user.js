@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      3.1
+// @version      3.2
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help (F1) + Play/Pause (Pause) + ScrollLock (звук)
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -283,6 +283,11 @@
                 <button id="btn13" style="padding:8px 18px; background:#1f2937; color:#e5e7eb; border:2px solid #374151; border-radius:8px; cursor:pointer; font-weight:600; min-width:46px;">13</button>
                 <div id="minus13" style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">−</div>
             </div>
+
+            <label style="display:flex; align-items:center; gap:6px; margin-left:10px; cursor:pointer; color:#d1d5db; font-size:15px;">
+                <input type="checkbox" id="cbDownload" style="width:18px; height:18px; accent-color:#3b82f6;">
+                <span>↓</span>
+            </label>
         `;
 
         document.body.appendChild(slideshowPanel);
@@ -293,6 +298,8 @@
         const minus7 = slideshowPanel.querySelector('#minus7');
         const plus13 = slideshowPanel.querySelector('#plus13');
         const minus13 = slideshowPanel.querySelector('#minus13');
+        const cbDownload = slideshowPanel.querySelector('#cbDownload');
+        cbDownload.checked = false; // по умолчанию выключено
 
         function updateButtonLabel(btn, val) {
             btn.textContent = val;
@@ -327,7 +334,10 @@
         }
 
         function downloadIfChecked() {
-            // Можно добавить чекбокс позже, если нужно. Пока без него.
+            if (cbDownload && cbDownload.checked) {
+                const btn = document.querySelector('button[aria-label*="Скачать"], button[aria-label="Скачать"]');
+                if (btn) btn.click();
+            }
         }
 
         function startSlideshow(seconds, btn) {
@@ -342,40 +352,31 @@
             }, seconds * 1000);
         }
 
-        // Клик по кнопкам
+        // Клик по кнопкам — запускаем с текущим currentInterval
         btn7.onclick = () => {
-            if (slideshowInterval && currentInterval === 7) {
+            if (slideshowInterval) {
                 stopSlideshow();
             } else {
-                startSlideshow(7, btn7);
+                startSlideshow(currentInterval, btn7);
             }
         };
 
         btn13.onclick = () => {
-            if (slideshowInterval && currentInterval === 13) {
+            if (slideshowInterval) {
                 stopSlideshow();
             } else {
-                startSlideshow(13, btn13);
+                startSlideshow(currentInterval, btn13);
             }
         };
 
-        // +/- для 7
-        plus7.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.min(currentInterval + 1, 60); updateButtonLabel(btn7, currentInterval); localStorage.setItem('grok_slideshow_interval', currentInterval); };
-        minus7.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.max(currentInterval - 1, 3); updateButtonLabel(btn7, currentInterval); localStorage.setItem('grok_slideshow_interval', currentInterval); };
+        // +/- меняют currentInterval
+        plus7.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.min(currentInterval + 1, 60); localStorage.setItem('grok_slideshow_interval', currentInterval); };
+        minus7.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.max(currentInterval - 1, 3); localStorage.setItem('grok_slideshow_interval', currentInterval); };
 
-        plus13.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.min(currentInterval + 1, 60); updateButtonLabel(btn13, currentInterval); localStorage.setItem('grok_slideshow_interval', currentInterval); };
-        minus13.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.max(currentInterval - 1, 3); updateButtonLabel(btn13, currentInterval); localStorage.setItem('grok_slideshow_interval', currentInterval); };
+        plus13.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.min(currentInterval + 1, 60); localStorage.setItem('grok_slideshow_interval', currentInterval); };
+        minus13.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.max(currentInterval - 1, 3); localStorage.setItem('grok_slideshow_interval', currentInterval); };
 
-        // Hover: показать текущий интервал
-        [btn7, btn13].forEach(btn => {
-            btn.addEventListener('mouseenter', () => {
-                updateButtonLabel(btn, currentInterval);
-            });
-            btn.addEventListener('mouseleave', () => {
-                // Возвращаем "номинальное" значение кнопки
-                updateButtonLabel(btn, btn === btn7 ? 7 : 13);
-            });
-        });
+        // Hover убираем — кнопки всегда показывают 7 и 13
 
         // Показать панель по Insert
         document.addEventListener('keydown', function(e) {
