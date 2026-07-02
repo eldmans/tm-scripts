@@ -347,16 +347,15 @@
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
 
-            slideshowInterval = setInterval(() => {
-                // Скачивание за 2 секунды до конца интервала
-                setTimeout(() => {
-                    downloadIfChecked();
-                }, (seconds - 2) * 1000);
+            // Первый цикл сразу
+            setTimeout(() => downloadIfChecked(), (seconds - 2) * 1000);
 
-                // Переключение слайда ровно в конце интервала
+            // Основной цикл
+            slideshowInterval = setInterval(() => {
+                setTimeout(() => downloadIfChecked(), (seconds - 2) * 1000);
                 nextSlide();
             }, seconds * 1000);
-        }
+        }       
         
         // Клик по главной кнопке — toggle
         btnInterval.onclick = () => {
