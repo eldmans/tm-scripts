@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.1
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help (F1) + Play/Pause (Pause) + ScrollLock (звук)
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -366,11 +366,14 @@
         plus13.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.min(currentInterval + 1, 60); updateButtonLabel(btn13, currentInterval); localStorage.setItem('grok_slideshow_interval', currentInterval); };
         minus13.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.max(currentInterval - 1, 3); updateButtonLabel(btn13, currentInterval); localStorage.setItem('grok_slideshow_interval', currentInterval); };
 
-        // Показать текущий интервал при наведении (опционально)
+        // Hover: показать текущий интервал
         [btn7, btn13].forEach(btn => {
             btn.addEventListener('mouseenter', () => {
-                if (btn === btn7) updateButtonLabel(btn7, currentInterval);
-                if (btn === btn13) updateButtonLabel(btn13, currentInterval);
+                updateButtonLabel(btn, currentInterval);
+            });
+            btn.addEventListener('mouseleave', () => {
+                // Возвращаем "номинальное" значение кнопки
+                updateButtonLabel(btn, btn === btn7 ? 7 : 13);
             });
         });
 
