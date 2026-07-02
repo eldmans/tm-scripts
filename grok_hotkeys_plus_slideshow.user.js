@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      3.2
+// @version      3.3
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help (F1) + Play/Pause (Pause) + ScrollLock (звук)
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -261,7 +261,7 @@
 
         // Загружаем сохранённый интервал
         const saved = localStorage.getItem('grok_slideshow_interval');
-        if (saved) currentInterval = parseInt(saved, 10) || 7;
+        if (saved) currentInterval = parseInt(saved, 10) || 13;
 
         slideshowPanel = document.createElement('div');
         slideshowPanel.style.cssText = `
@@ -272,61 +272,61 @@
         `;
 
         slideshowPanel.innerHTML = `
-            <div style="display:flex; flex-direction:column; align-items:center; position:relative;">
-                <div id="plus7" style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">+</div>
-                <button id="btn7" style="padding:8px 18px; background:#1f2937; color:#e5e7eb; border:2px solid #374151; border-radius:8px; cursor:pointer; font-weight:600; min-width:46px;">7</button>
-                <div id="minus7" style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">−</div>
-            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+                <!-- Пресеты слева -->
+                <div style="display:flex; flex-direction:column; align-items:center; gap:2px; font-size:11px; color:#888;">
+                    <div id="preset13" style="cursor:pointer; user-select:none; padding:1px 4px;">13</div>
+                    <div id="preset7" style="cursor:pointer; user-select:none; padding:1px 4px;">7</div>
+                </div>
 
-            <div style="display:flex; flex-direction:column; align-items:center; position:relative;">
-                <div id="plus13" style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">+</div>
-                <button id="btn13" style="padding:8px 18px; background:#1f2937; color:#e5e7eb; border:2px solid #374151; border-radius:8px; cursor:pointer; font-weight:600; min-width:46px;">13</button>
-                <div id="minus13" style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">−</div>
-            </div>
+                <!-- Главная кнопка с +/- -->
+                <div style="display:flex; flex-direction:column; align-items:center; position:relative;">
+                    <div id="plus" style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">+</div>
+                    <button id="btnInterval" style="padding:8px 20px; background:#1f2937; color:#e5e7eb; border:2px solid #374151; border-radius:8px; cursor:pointer; font-weight:600; min-width:52px; font-size:15px;">13</button>
+                    <div id="minus" style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">−</div>
+                </div>
 
-            <label style="display:flex; align-items:center; gap:6px; margin-left:10px; cursor:pointer; color:#d1d5db; font-size:15px;">
-                <input type="checkbox" id="cbDownload" style="width:18px; height:18px; accent-color:#3b82f6;">
-                <span>↓</span>
-            </label>
+                <!-- Галочка скачивания -->
+                <label style="display:flex; align-items:center; gap:6px; margin-left:6px; cursor:pointer; color:#d1d5db; font-size:15px;">
+                    <input type="checkbox" id="cbDownload" style="width:18px; height:18px; accent-color:#3b82f6;">
+                    <span>↓</span>
+                </label>
+            </div>
         `;
 
         document.body.appendChild(slideshowPanel);
 
-        const btn7 = slideshowPanel.querySelector('#btn7');
-        const btn13 = slideshowPanel.querySelector('#btn13');
-        const plus7 = slideshowPanel.querySelector('#plus7');
-        const minus7 = slideshowPanel.querySelector('#minus7');
-        const plus13 = slideshowPanel.querySelector('#plus13');
-        const minus13 = slideshowPanel.querySelector('#minus13');
+        const btnInterval = slideshowPanel.querySelector('#btnInterval');
+        const plus = slideshowPanel.querySelector('#plus');
+        const minus = slideshowPanel.querySelector('#minus');
+        const preset13 = slideshowPanel.querySelector('#preset13');
+        const preset7 = slideshowPanel.querySelector('#preset7');
         const cbDownload = slideshowPanel.querySelector('#cbDownload');
         cbDownload.checked = false; // по умолчанию выключено
+
+        // Устанавливаем начальный текст кнопки
+        btnInterval.textContent = currentInterval;
 
         function updateButtonLabel(btn, val) {
             btn.textContent = val;
         }
 
-        function setActive(btn) {
-            [btn7, btn13].forEach(b => {
-                if (b === btn) {
-                    b.style.background = '#2563eb';
-                    b.style.borderColor = '#3b82f6';
-                    b.style.color = 'white';
-                } else {
-                    b.style.background = '#1f2937';
-                    b.style.borderColor = '#374151';
-                    b.style.color = '#e5e7eb';
-                }
-            });
+        function setActive(active) {
+            if (active) {
+                btnInterval.style.background = '#2563eb';
+                btnInterval.style.borderColor = '#3b82f6';
+                btnInterval.style.color = 'white';
+            } else {
+                btnInterval.style.background = '#1f2937';
+                btnInterval.style.borderColor = '#374151';
+                btnInterval.style.color = '#e5e7eb';
+            }
         }
 
         function stopSlideshow() {
             if (slideshowInterval) clearInterval(slideshowInterval);
             slideshowInterval = null;
-            [btn7, btn13].forEach(b => {
-                b.style.background = '#1f2937';
-                b.style.borderColor = '#374151';
-                b.style.color = '#e5e7eb';
-            });
+            setActive(false);
         }
 
         function nextSlide() {
@@ -340,10 +340,11 @@
             }
         }
 
-        function startSlideshow(seconds, btn) {
+        function startSlideshow(seconds) {
             stopSlideshow();
-            setActive(btn);
+            setActive(true);
             currentInterval = seconds;
+            btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
 
             slideshowInterval = setInterval(() => {
@@ -352,31 +353,44 @@
             }, seconds * 1000);
         }
 
-        // Клик по кнопкам — запускаем с текущим currentInterval
-        btn7.onclick = () => {
+        // Клик по главной кнопке — toggle
+        btnInterval.onclick = () => {
             if (slideshowInterval) {
                 stopSlideshow();
             } else {
-                startSlideshow(currentInterval, btn7);
+                startSlideshow(currentInterval);
             }
         };
 
-        btn13.onclick = () => {
-            if (slideshowInterval) {
-                stopSlideshow();
-            } else {
-                startSlideshow(currentInterval, btn13);
-            }
+        // +/- меняют интервал и текст кнопки
+        plus.onclick = (e) => { 
+            e.stopImmediatePropagation(); 
+            currentInterval = Math.min(currentInterval + 1, 60); 
+            btnInterval.textContent = currentInterval;
+            localStorage.setItem('grok_slideshow_interval', currentInterval); 
+        };
+        minus.onclick = (e) => { 
+            e.stopImmediatePropagation(); 
+            currentInterval = Math.max(currentInterval - 1, 3); 
+            btnInterval.textContent = currentInterval;
+            localStorage.setItem('grok_slideshow_interval', currentInterval); 
         };
 
-        // +/- меняют currentInterval
-        plus7.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.min(currentInterval + 1, 60); localStorage.setItem('grok_slideshow_interval', currentInterval); };
-        minus7.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.max(currentInterval - 1, 3); localStorage.setItem('grok_slideshow_interval', currentInterval); };
-
-        plus13.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.min(currentInterval + 1, 60); localStorage.setItem('grok_slideshow_interval', currentInterval); };
-        minus13.onclick = (e) => { e.stopImmediatePropagation(); currentInterval = Math.max(currentInterval - 1, 3); localStorage.setItem('grok_slideshow_interval', currentInterval); };
-
-        // Hover убираем — кнопки всегда показывают 7 и 13
+        // Пресеты
+        preset13.onclick = (e) => { 
+            e.stopImmediatePropagation(); 
+            currentInterval = 13; 
+            btnInterval.textContent = 13;
+            localStorage.setItem('grok_slideshow_interval', currentInterval); 
+            if (slideshowInterval) startSlideshow(13);
+        };
+        preset7.onclick = (e) => { 
+            e.stopImmediatePropagation(); 
+            currentInterval = 7; 
+            btnInterval.textContent = 7;
+            localStorage.setItem('grok_slideshow_interval', currentInterval); 
+            if (slideshowInterval) startSlideshow(7);
+        };
 
         // Показать панель по Insert
         document.addEventListener('keydown', function(e) {
