@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      4.0
+// @version      4.1
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -108,6 +108,15 @@
 
     document.addEventListener('keydown', function (e) {
         if (capturingFor !== null) return; // не выполняем действия во время захвата
+
+        // В текстовых полях разрешаем только F-клавиши — остальное браузеру
+        const activeEl = document.activeElement;
+        const isEditing = activeEl && (
+            activeEl.tagName === 'INPUT' ||
+            activeEl.tagName === 'TEXTAREA' ||
+            activeEl.isContentEditable
+        );
+        if (isEditing && !/^F\d+$/.test(e.key)) return;
 
         if (hotkeyMatches(e, config.download)) {
             e.preventDefault();
