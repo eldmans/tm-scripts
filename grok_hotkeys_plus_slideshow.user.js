@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.1
 // @description  Полный набор горячих клавиш для Grok + автолистание слайдов на /imagine/post/* (Insert = показать/скрыть панель)
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -188,12 +188,19 @@
     }
 
     function findSoundButton() {
-        const words = ['звук', 'sound', 'mute', 'unmute'];
-        return Array.from(document.querySelectorAll('button')).find(b => {
+        const words = ['заглушить', 'включить звук', 'звук', 'sound', 'mute', 'unmute'];
+        let btn = Array.from(document.querySelectorAll('button')).find(b => {
             const aria = (b.getAttribute('aria-label') || '').toLowerCase();
             const text = (b.textContent || '').toLowerCase();
             return words.some(w => aria.includes(w) || text.includes(w));
         });
+        if (btn) return btn;
+
+        // Дополнительный поиск по aria-label (на случай, если текст только в aria-label)
+        return document.querySelector('button[aria-label*="Заглушить"]') ||
+               document.querySelector('button[aria-label*="Включить звук"]') ||
+               document.querySelector('button[aria-label*="Mute"]') ||
+               document.querySelector('button[aria-label*="Unmute"]');
     }
 
     function triggerClick(btn, action) {
