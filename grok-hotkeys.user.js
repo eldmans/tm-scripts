@@ -7,8 +7,8 @@
 // @match        *://grok.com/*
 // @match        *://*.grok.com/*
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/eldmans/tm-scripts/main/grok/grok-hotkeys.user.js
-// @downloadURL  https://raw.githubusercontent.com/eldmans/tm-scripts/main/grok/grok-hotkeys.user.js
+// @updateURL    https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok-hotkeys.user.js
+// @downloadURL  https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok-hotkeys.user.js
 // @supportURL   https://github.com/eldmans/tm-scripts
 // ==/UserScript==
 
