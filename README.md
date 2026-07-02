@@ -1,95 +1,58 @@
-# Grok Hotkeys
+# Grok Hotkeys + Slideshow
 
-> **Keyboard shortcuts for Grok Imagine** — quickly download, upscale, delete, toggle sound, and access your saved generations without touching the mouse.
+> Единый мощный userscript для Grok: все основные горячие клавиши + умное автолистание слайдов на страницах генераций.
 
-A lightweight Tampermonkey / Violentmonkey userscript that adds convenient hotkeys to [grok.com](https://grok.com), especially on the Imagine section.
+**Версия:** 2.0  
+**Автообновление:** Включено
 
-![Version](https://img.shields.io/badge/version-1.2-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Auto-update](https://img.shields.io/badge/auto--update-enabled-success)
+## ✨ Возможности
 
-## ✨ Features
+### Глобальные хоткеи (работают везде)
+| Клавиша                    | Действие                              |
+|---------------------------|---------------------------------------|
+| `PageDown`                | Скачать изображение/видео             |
+| `PageUp`                  | Улучшить качество / Upscale           |
+| `Right Ctrl` + `Delete`   | Удалить видео                         |
+| `End`                     | Включить/выключить звук               |
+| `Home`                    | Открыть сохранённые генерации         |
+| `Ctrl` + `Home`           | Открыть сохранённые генерации (новая вкладка) |
 
-- **PageDown** — Download current image or video
-- **PageUp** — Upscale / Enhance quality
-- **Right Ctrl + Delete** — Delete current video (safe combination)
-- **End** — Toggle sound (mute / unmute)
-- **Home** — Open saved generations history (current tab)
-- **Ctrl + Home** — Open saved generations history (new tab)
+### Автолистание слайдов (только на `/imagine/post/*`)
+- Нажми **`Insert`** (Ins) — покажется/скроется панель управления.
+- Кнопки **7** и **13** — запускают автоматическое листание слайдов каждые 7 или 13 секунд.
+- Галочка **↓** — при включении дополнительно скачивает каждый слайд.
+- Кнопка **Стоп** — останавливает автолистание.
+- Кнопки 7/13 взаимоисключающие и визуально активные.
 
-Works on both **Russian** and **English** Grok interfaces.
+## 📦 Установка
 
-## 📦 Installation (with auto-updates)
+**Рекомендуется** (с автообновлением):
 
-### Recommended way
+1. Установи [Tampermonkey](https://www.tampermonkey.net/)
+2. Перейди по ссылке:
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) (recommended) or [Violentmonkey](https://violentmonkey.github.io/).
-2. Click the link below — Tampermonkey will open and offer to install the script:
+   **[Установить Grok Hotkeys + Slideshow](https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok_hotkeys_plus_slideshow.user.js)**
 
-   **[➡️ Install Grok Hotkeys](https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok-hotkeys.user.js)**
+Скрипт будет автоматически обновляться при выходе новых версий.
 
-3. Confirm installation.  
-   **Auto-updates are enabled** — whenever a new version is pushed to this repository, your script will update automatically.
+## 🛠 Как использовать автолистание
 
-### Manual installation
+1. Зайди на страницу конкретной генерации (`https://grok.com/imagine/post/...`)
+2. Нажми клавишу **`Insert`**
+3. Выбери интервал **7** или **13** секунд
+4. При необходимости включи галочку **↓** для автоскачивания
+5. Чтобы остановить — нажми **Стоп** или `Insert` снова (чтобы скрыть панель)
 
-1. Open Tampermonkey dashboard → **Create a new script**.
-2. Delete the default template.
-3. Paste the entire content of `grok-hotkeys.user.js`.
-4. Save (`Ctrl + S`).
+## 📝 Примечания
 
-## ⌨️ Hotkeys Reference
+- Скрипт определяет страницу автоматически и показывает панель автолистания только на `/imagine/post/*`
+- `Insert` работает как toggle (показать/скрыть)
+- Все остальные хоткеи работают глобально на всём сайте grok.com
 
-| Shortcut                    | Action                              | Notes                                      |
-|----------------------------|-------------------------------------|--------------------------------------------|
-| `PageDown`                 | Download                            | Prevents page scroll                       |
-| `PageUp`                   | Upscale / Enhance quality           | Prevents page scroll                       |
-| `Right Ctrl` + `Delete`    | Delete video                        | Uses Right Ctrl to avoid browser conflicts |
-| `End`                      | Toggle sound (mute/unmute)          | Works for both states                      |
-| `Home`                     | Saved generations (current tab)     | -                                          |
-| `Ctrl` + `Home`            | Saved generations (new tab)         | Opens in background tab                    |
+## 🔄 Обновление
 
-## 🛠 How it works
-
-The script uses a single global `keydown` listener (with `capture: true`) and searches for buttons using `aria-label` attributes and visible text content. It supports multiple languages out of the box.
-
-A subtle scale animation provides visual feedback when a hotkey successfully triggers an action.
-
-## 📝 Notes & Limitations
-
-- Best experience on `https://grok.com/imagine*` pages.
-- Some hotkeys call `preventDefault()` to block default browser behavior (scrolling on PageUp/PageDown).
-- Right Ctrl + Delete was chosen because Left Ctrl is already heavily used by browsers and OS.
-- If Grok changes button labels significantly, the script may need a small update (easy to maintain).
-
-## 🔄 Updating the script
-
-1. Edit `grok-hotkeys.user.js`
-2. Bump the `@version` number
-3. Commit and push to the repository
-
-All users who installed via the raw GitHub link will receive the update automatically within a few hours (Tampermonkey checks periodically).
-
-## 🤝 Contributing
-
-Pull requests are welcome!
-
-Repository: [https://github.com/eldmans/tm-scripts](https://github.com/eldmans/tm-scripts)
-
-Suggested folder structure inside the repo:
-
-```
-tm-scripts/
-└── grok/
-    ├── grok-hotkeys.user.js
-    └── README.md
-```
-
-## 📄 License
-
-MIT — feel free to use, modify and share.
+Просто замени файл в репозитории и запуш — все пользователи получат обновление автоматически.
 
 ---
 
-Made with ❤️ for Grok power users.  
-If you have ideas for new hotkeys or improvements — open an issue or PR!
+Репозиторий: [github.com/eldmans/tm-scripts](https://github.com/eldmans/tm-scripts) (папка `grok/`)
