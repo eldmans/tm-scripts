@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      3.3
+// @version      3.32
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help (F1) + Play/Pause (Pause) + ScrollLock (звук)
 // @author       Grok + eldmans
 // @match        *://grok.com/*
