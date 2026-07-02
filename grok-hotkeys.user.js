@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys
 // @namespace    http://tampermonkey.net/
-// @version      1.200
+// @version      1.3
 // @description  Keyboard shortcuts for Grok Imagine: PageDown = Download, PageUp = Upscale/Enhance, RightCtrl+Delete = Delete video, End = Toggle sound, Home = Saved history (current tab), Ctrl+Home = new tab. Works on both Russian and English UI.
 // @author       Grok + eldmans
 // @match        *://grok.com/*

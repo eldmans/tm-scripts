@@ -26,7 +26,7 @@ Works on both **Russian** and **English** Grok interfaces.
 1. Install [Tampermonkey](https://www.tampermonkey.net/) (recommended) or [Violentmonkey](https://violentmonkey.github.io/).
 2. Click the link below — Tampermonkey will open and offer to install the script:
 
-   **[➡️ Install Grok Hotkeys](https://raw.githubusercontent.com/eldmans/tm-scripts/main/grok/grok-hotkeys.user.js)**
+   **[➡️ Install Grok Hotkeys](https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok-hotkeys.user.js)**
 
 3. Confirm installation.  
    **Auto-updates are enabled** — whenever a new version is pushed to this repository, your script will update automatically.
