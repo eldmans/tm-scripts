@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      4.1
+// @version      4.2
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v4.0] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v4.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const isPostPage = location.pathname.includes('/imagine/post/');
 
@@ -120,7 +120,15 @@
 
         if (hotkeyMatches(e, config.download)) {
             e.preventDefault();
-            triggerClick(findButton(['Download', 'Скачать']), 'Download');
+            // Если панель слайдшоу видна — скачать + 0.5с + следующий слайд
+            if (isPostPage && slideshowPanel && slideshowPanel.style.display !== 'none') {
+                triggerClick(findButton(['Download', 'Скачать']), 'Download');
+                setTimeout(() => {
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+                }, 500);
+            } else {
+                triggerClick(findButton(['Download', 'Скачать']), 'Download');
+            }
         }
 
         if (hotkeyMatches(e, config.upscale)) {
@@ -554,7 +562,7 @@
         if (slideshowPanel || !isPostPage) return;
 
         const saved = localStorage.getItem('grok_slideshow_interval');
-        if (saved) currentInterval = parseInt(saved, 10) || 13;
+        if (saved) currentInterval = parseInt(saved, 10) || 7;
 
         slideshowPanel = document.createElement('div');
         slideshowPanel.style.cssText = `
@@ -564,11 +572,15 @@
             box-shadow:0 4px 12px rgba(0,0,0,0.4); font-family:system-ui,sans-serif;
         `;
 
+        const initDownload   = localStorage.getItem('grok_slideshow_download')    !== 'false';
+        const initOnlyActive = localStorage.getItem('grok_slideshow_only_active') !== 'false';
+
         slideshowPanel.innerHTML = `
             <div style="display:flex; align-items:center; gap:8px;">
                 <!-- Пресеты слева -->
                 <div style="display:flex; flex-direction:column; align-items:center; gap:2px; font-size:11px; color:#888;">
-                    <div id="preset13" style="cursor:pointer; user-select:none; padding:1px 4px;">13</div>
+                    <div id="preset17" style="cursor:pointer; user-select:none; padding:1px 4px;">17</div>
+                    <div id="preset12" style="cursor:pointer; user-select:none; padding:1px 4px;">12</div>
                     <div id="preset7"  style="cursor:pointer; user-select:none; padding:1px 4px;">7</div>
                 </div>
 
@@ -579,41 +591,62 @@
                     <div id="minus" style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">−</div>
                 </div>
 
-                <!-- Галочка скачивания -->
-                <label style="display:flex; align-items:center; gap:6px; margin-left:6px; cursor:pointer; color:#d1d5db; font-size:15px;">
-                    <input type="checkbox" id="cbDownload" style="width:18px; height:18px; accent-color:#3b82f6;">
-                    <span>↓</span>
-                </label>
+                <!-- x2 -->
+                <div id="btnX2" style="font-size:11px; color:#888; cursor:pointer; user-select:none; padding:2px 5px; border:1px solid #555; border-radius:4px; line-height:1.6;">x2</div>
+
+                <!-- Галочки: Download + Only Active -->
+                <div style="display:flex; flex-direction:column; gap:6px; margin-left:2px;">
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#d1d5db; font-size:13px;" title="Скачивать каждый слайд">
+                        <input type="checkbox" id="cbDownload" style="width:13px; height:13px; accent-color:#3b82f6;" ${initDownload ? 'checked' : ''}>
+                        <span>↓</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#9ca3af;" title="Слайдшоу только когда вкладка активна">
+                        <input type="checkbox" id="cbOnlyActive" style="width:13px; height:13px; accent-color:#3b82f6;" ${initOnlyActive ? 'checked' : ''}>
+                        <span style="font-size:9px; line-height:1.2; display:flex; flex-direction:column;"><span>Only</span><span>active</span></span>
+                    </label>
+                </div>
             </div>
         `;
 
         document.body.appendChild(slideshowPanel);
 
-        const btnInterval = slideshowPanel.querySelector('#btnInterval');
-        const plus        = slideshowPanel.querySelector('#plus');
-        const minus       = slideshowPanel.querySelector('#minus');
-        const preset13    = slideshowPanel.querySelector('#preset13');
-        const preset7     = slideshowPanel.querySelector('#preset7');
-        const cbDownload  = slideshowPanel.querySelector('#cbDownload');
-        cbDownload.checked = false;
+        const btnInterval  = slideshowPanel.querySelector('#btnInterval');
+        const plus         = slideshowPanel.querySelector('#plus');
+        const minus        = slideshowPanel.querySelector('#minus');
+        const preset17     = slideshowPanel.querySelector('#preset17');
+        const preset12     = slideshowPanel.querySelector('#preset12');
+        const preset7      = slideshowPanel.querySelector('#preset7');
+        const btnX2        = slideshowPanel.querySelector('#btnX2');
+        const cbDownload   = slideshowPanel.querySelector('#cbDownload');
+        const cbOnlyActive = slideshowPanel.querySelector('#cbOnlyActive');
 
         btnInterval.textContent = currentInterval;
 
+        cbDownload.addEventListener('change', () => {
+            localStorage.setItem('grok_slideshow_download', cbDownload.checked);
+        });
+        cbOnlyActive.addEventListener('change', () => {
+            localStorage.setItem('grok_slideshow_only_active', cbOnlyActive.checked);
+        });
+
         function setActive(active) {
             if (active) {
-                btnInterval.style.background   = '#2563eb';
-                btnInterval.style.borderColor  = '#3b82f6';
-                btnInterval.style.color        = 'white';
+                btnInterval.style.background  = '#2563eb';
+                btnInterval.style.borderColor = '#3b82f6';
+                btnInterval.style.color       = 'white';
             } else {
-                btnInterval.style.background   = '#1f2937';
-                btnInterval.style.borderColor  = '#374151';
-                btnInterval.style.color        = '#e5e7eb';
+                btnInterval.style.background  = '#1f2937';
+                btnInterval.style.borderColor = '#374151';
+                btnInterval.style.color       = '#e5e7eb';
             }
         }
+
+        let slideshowPaused = false;
 
         function stopSlideshow() {
             if (slideshowInterval) clearInterval(slideshowInterval);
             slideshowInterval = null;
+            slideshowPaused   = false;
             setActive(false);
         }
 
@@ -645,14 +678,33 @@
             }, seconds * 1000);
         }
 
+        // Пауза/возобновление при переключении вкладки (Only Active)
+        document.addEventListener('visibilitychange', () => {
+            if (!cbOnlyActive.checked) return;
+            if (document.hidden) {
+                // Уходим в фон — пауза, кнопка остаётся синей
+                if (slideshowInterval) {
+                    clearInterval(slideshowInterval);
+                    slideshowInterval = null;
+                    slideshowPaused   = true;
+                }
+            } else {
+                // Возвращаемся — возобновляем
+                if (slideshowPaused) {
+                    slideshowPaused = false;
+                    startSlideshow(currentInterval);
+                }
+            }
+        });
+
         btnInterval.onclick = () => {
-            if (slideshowInterval) stopSlideshow();
+            if (slideshowInterval || slideshowPaused) stopSlideshow();
             else startSlideshow(currentInterval);
         };
 
         plus.onclick = (e) => {
             e.stopImmediatePropagation();
-            currentInterval = Math.min(currentInterval + 1, 60);
+            currentInterval = Math.min(currentInterval + 1, 100);
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
         };
@@ -663,12 +715,27 @@
             localStorage.setItem('grok_slideshow_interval', currentInterval);
         };
 
-        preset13.onclick = (e) => {
+        btnX2.onclick = (e) => {
             e.stopImmediatePropagation();
-            currentInterval = 13;
-            btnInterval.textContent = 13;
+            currentInterval = Math.min(currentInterval * 2, 100);
+            btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
-            if (slideshowInterval) startSlideshow(13);
+            if (slideshowInterval) startSlideshow(currentInterval);
+        };
+
+        preset17.onclick = (e) => {
+            e.stopImmediatePropagation();
+            currentInterval = 17;
+            btnInterval.textContent = 17;
+            localStorage.setItem('grok_slideshow_interval', currentInterval);
+            if (slideshowInterval) startSlideshow(17);
+        };
+        preset12.onclick = (e) => {
+            e.stopImmediatePropagation();
+            currentInterval = 12;
+            btnInterval.textContent = 12;
+            localStorage.setItem('grok_slideshow_interval', currentInterval);
+            if (slideshowInterval) startSlideshow(12);
         };
         preset7.onclick = (e) => {
             e.stopImmediatePropagation();
