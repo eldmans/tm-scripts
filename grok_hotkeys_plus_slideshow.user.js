@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      4.2
+// @version      4.3
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v4.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v4.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const isPostPage = location.pathname.includes('/imagine/post/');
 
@@ -120,14 +120,12 @@
 
         if (hotkeyMatches(e, config.download)) {
             e.preventDefault();
-            // Если панель слайдшоу видна — скачать + 0.5с + следующий слайд
-            if (isPostPage && slideshowPanel && slideshowPanel.style.display !== 'none') {
-                triggerClick(findButton(['Download', 'Скачать']), 'Download');
+            triggerClick(findButton(['Download', 'Скачать']), 'Download');
+            // Если панель слайдшоу скрыта — дополнительно листаем через 0.5с
+            if (isPostPage && (!slideshowPanel || slideshowPanel.style.display === 'none')) {
                 setTimeout(() => {
                     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
                 }, 500);
-            } else {
-                triggerClick(findButton(['Download', 'Скачать']), 'Download');
             }
         }
 
