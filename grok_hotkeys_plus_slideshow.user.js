@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      4.3
+// @version      4.4
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v4.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v4.4] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const isPostPage = location.pathname.includes('/imagine/post/');
 
@@ -29,15 +29,16 @@
     // onlyF1F4: true — для этого действия допустимы только F1-F4 без модификаторов.
     // postOnly: true  — действие отображается и работает только на страницах поста.
     const ACTIONS = {
-        download:   { label: 'Скачать',                      defaultKey: { key: 'PageDown',   ctrl: false, alt: false, shift: false } },
-        upscale:    { label: 'Улучшить качество',             defaultKey: { key: 'PageUp',     ctrl: false, alt: false, shift: false } },
-        deleteVid:  { label: 'Удалить видео',                 defaultKey: { key: 'Delete',     ctrl: true,  alt: false, shift: false } },
-        sound:      { label: 'Вкл/Выкл звук',                defaultKey: { key: 'ScrollLock', ctrl: false, alt: false, shift: false } },
-        playPause:  { label: 'Play / Pause видео',           defaultKey: { key: 'Pause',      ctrl: false, alt: false, shift: false } },
-        help:       { label: 'Справка / Настройки',          defaultKey: { key: 'F1',         ctrl: false, alt: false, shift: false }, onlyF1F4: true },
-        lagMonitor: { label: 'Lag Monitor (страница поста)',  defaultKey: { key: 'F8',         ctrl: false, alt: false, shift: false }, postOnly: true },
-        history:    { label: 'История сохранённых',           defaultKey: { key: 'Home',       ctrl: false, alt: false, shift: false } },
-        slideshow:  { label: 'Панель слайдшоу',              defaultKey: { key: 'Insert',     ctrl: false, alt: false, shift: false }, postOnly: true },
+        download:       { label: 'Скачать',                          defaultKey: { key: 'PageDown',   ctrl: false, alt: false, shift: false } },
+        upscale:        { label: 'Улучшить качество',                  defaultKey: { key: 'PageUp',     ctrl: false, alt: false, shift: false } },
+        deleteVid:      { label: 'Удалить видео',                     defaultKey: { key: 'Delete',     ctrl: false, alt: false, shift: false } },
+        sound:          { label: 'Вкл/Выкл звук',                    defaultKey: { key: 'ScrollLock', ctrl: false, alt: false, shift: false } },
+        playPause:      { label: 'Play / Pause видео',          defaultKey: { key: 'Pause',      ctrl: false, alt: false, shift: false } },
+        help:           { label: 'Справка / Настройки',           defaultKey: { key: 'F1',         ctrl: false, alt: false, shift: false }, onlyF1F4: true },
+        lagMonitor:     { label: 'Lag Monitor (страница поста)',   defaultKey: { key: 'F8',         ctrl: false, alt: false, shift: false }, postOnly: true },
+        history:        { label: 'История сохранённых',            defaultKey: { key: 'Home',       ctrl: false, alt: false, shift: false } },
+        slideshowPanel: { label: 'Показать/скрыть панель слайдшоу', defaultKey: { key: 'Insert',     ctrl: true,  alt: false, shift: false }, postOnly: true },
+        slideshow:      { label: 'Запуск/остановка слайдшоу',      defaultKey: { key: 'Insert',     ctrl: false, alt: false, shift: false }, postOnly: true },
     };
 
     // Загрузка конфига
@@ -50,6 +51,11 @@
     // Заполняем пропущенные записи дефолтами
     for (const [id, action] of Object.entries(ACTIONS)) {
         if (!config[id]) config[id] = { ...action.defaultKey };
+    }
+
+    // Миграция v4.4: Delete стал без Ctrl
+    if (config.deleteVid && config.deleteVid.ctrl === true && config.deleteVid.key === 'Delete') {
+        config.deleteVid = { ...ACTIONS.deleteVid.defaultKey };
     }
 
     function saveConfig() {
@@ -124,7 +130,7 @@
             // Если панель слайдшоу скрыта — дополнительно листаем через 0.5с
             if (isPostPage && (!slideshowPanel || slideshowPanel.style.display === 'none')) {
                 setTimeout(() => {
-                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
                 }, 500);
             }
         }
@@ -136,7 +142,18 @@
 
         if (hotkeyMatches(e, config.deleteVid)) {
             e.preventDefault();
-            triggerClick(findButton(['Delete video', 'Delete', 'Удалить видео']), 'Delete video');
+            const delBtn = findButton(['Delete video', 'Delete', 'Удалить видео']);
+            triggerClick(delBtn, 'Delete video');
+            if (delBtn) {
+                // Автоподтверждение диалога через 500мс
+                setTimeout(() => {
+                    const confirmBtn = Array.from(document.querySelectorAll('button')).find(btn =>
+                        btn !== delBtn && btn.offsetParent !== null &&
+                        (btn.textContent || '').trim().includes('Удалить')
+                    );
+                    if (confirmBtn) confirmBtn.click();
+                }, 500);
+            }
         }
 
         if (hotkeyMatches(e, config.sound)) {
@@ -168,11 +185,17 @@
             else if (hotkeyMatches(e, config.history)) window.location.href = url;
         }
 
-        if (hotkeyMatches(e, config.slideshow) && isPostPage) {
+        if (hotkeyMatches(e, config.slideshowPanel) && isPostPage) {
             e.preventDefault();
             if (slideshowPanel) {
                 slideshowPanel.style.display = slideshowPanel.style.display === 'none' ? 'flex' : 'none';
             }
+        }
+
+        if (hotkeyMatches(e, config.slideshow) && isPostPage) {
+            e.preventDefault();
+            if (slideshowInterval || slideshowPaused) { if (slideshowStop) slideshowStop(); }
+            else { if (slideshowStart) slideshowStart(); }
         }
 
     }, true);
@@ -547,14 +570,18 @@
     }
 
     // ============================================
-    // SLIDESHOW PANEL (Insert) — только на /imagine/post/*
-    // ПРИМЕЧАНИЕ: Toggle панели управляется из главного keydown-обработчика
-    //             через config.slideshow (по умолчанию Insert)
+    // SLIDESHOW PANEL — только на /imagine/post/*
+    // Ctrl+Insert = показать/скрыть панель (config.slideshowPanel)
+    // Insert      = старт/стоп слайдшоу   (config.slideshow)
     // ============================================
 
-    let slideshowPanel    = null;
-    let slideshowInterval = null;
-    let currentInterval   = 7;
+    let slideshowPanel       = null;
+    let slideshowInterval    = null;
+    let slideshowPaused      = false;
+    let slideshowStart       = null; // назначается в initSlideshowPanel
+    let slideshowStop        = null; // назначается в initSlideshowPanel
+    let slideshowOrientation = localStorage.getItem('grok_slideshow_orientation') || 'v';
+    let currentInterval      = 7;
 
     function initSlideshowPanel() {
         if (slideshowPanel || !isPostPage) return;
@@ -570,8 +597,9 @@
             box-shadow:0 4px 12px rgba(0,0,0,0.4); font-family:system-ui,sans-serif;
         `;
 
-        const initDownload   = localStorage.getItem('grok_slideshow_download')    !== 'false';
-        const initOnlyActive = localStorage.getItem('grok_slideshow_only_active') !== 'false';
+        const initDownload = localStorage.getItem('grok_slideshow_download') !== 'false';
+        const initTab      = localStorage.getItem('grok_slideshow_tab')  === 'true';
+        const initBrsr     = localStorage.getItem('grok_slideshow_brsr') === 'true';
 
         slideshowPanel.innerHTML = `
             <div style="display:flex; align-items:center; gap:8px;">
@@ -592,15 +620,22 @@
                 <!-- x2 -->
                 <div id="btnX2" style="font-size:11px; color:#888; cursor:pointer; user-select:none; padding:2px 5px; border:1px solid #555; border-radius:4px; line-height:1.6;">x2</div>
 
-                <!-- Галочки: Download + Only Active -->
-                <div style="display:flex; flex-direction:column; gap:6px; margin-left:2px;">
+                <!-- Ориентация ↕/↔ -->
+                <div id="btnOrient" style="font-size:13px; color:#888; cursor:pointer; user-select:none; padding:2px 5px; border:1px solid #555; border-radius:4px; line-height:1.6;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</div>
+
+                <!-- Галочки: Download + Tab + Brsr -->
+                <div style="display:flex; flex-direction:column; gap:5px; margin-left:2px;">
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#d1d5db; font-size:13px;" title="Скачивать каждый слайд">
                         <input type="checkbox" id="cbDownload" style="width:13px; height:13px; accent-color:#3b82f6;" ${initDownload ? 'checked' : ''}>
                         <span>↓</span>
                     </label>
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#9ca3af;" title="Слайдшоу только когда вкладка активна">
-                        <input type="checkbox" id="cbOnlyActive" style="width:13px; height:13px; accent-color:#3b82f6;" ${initOnlyActive ? 'checked' : ''}>
-                        <span style="font-size:9px; line-height:1.2; display:flex; flex-direction:column;"><span>Only</span><span>active</span></span>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#9ca3af;" title="Пауза когда вкладка неактивна">
+                        <input type="checkbox" id="cbTab" style="width:13px; height:13px; accent-color:#3b82f6;" ${initTab ? 'checked' : ''}>
+                        <span style="font-size:9px;">Tab</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#9ca3af;" title="Пауза когда браузер теряет фокус">
+                        <input type="checkbox" id="cbBrsr" style="width:13px; height:13px; accent-color:#3b82f6;" ${initBrsr ? 'checked' : ''}>
+                        <span style="font-size:9px;">Brsr</span>
                     </label>
                 </div>
             </div>
@@ -608,24 +643,23 @@
 
         document.body.appendChild(slideshowPanel);
 
-        const btnInterval  = slideshowPanel.querySelector('#btnInterval');
-        const plus         = slideshowPanel.querySelector('#plus');
-        const minus        = slideshowPanel.querySelector('#minus');
-        const preset17     = slideshowPanel.querySelector('#preset17');
-        const preset12     = slideshowPanel.querySelector('#preset12');
-        const preset7      = slideshowPanel.querySelector('#preset7');
-        const btnX2        = slideshowPanel.querySelector('#btnX2');
-        const cbDownload   = slideshowPanel.querySelector('#cbDownload');
-        const cbOnlyActive = slideshowPanel.querySelector('#cbOnlyActive');
+        const btnInterval = slideshowPanel.querySelector('#btnInterval');
+        const plus        = slideshowPanel.querySelector('#plus');
+        const minus       = slideshowPanel.querySelector('#minus');
+        const preset17    = slideshowPanel.querySelector('#preset17');
+        const preset12    = slideshowPanel.querySelector('#preset12');
+        const preset7     = slideshowPanel.querySelector('#preset7');
+        const btnX2       = slideshowPanel.querySelector('#btnX2');
+        const btnOrient   = slideshowPanel.querySelector('#btnOrient');
+        const cbDownload  = slideshowPanel.querySelector('#cbDownload');
+        const cbTab       = slideshowPanel.querySelector('#cbTab');
+        const cbBrsr      = slideshowPanel.querySelector('#cbBrsr');
 
         btnInterval.textContent = currentInterval;
 
-        cbDownload.addEventListener('change', () => {
-            localStorage.setItem('grok_slideshow_download', cbDownload.checked);
-        });
-        cbOnlyActive.addEventListener('change', () => {
-            localStorage.setItem('grok_slideshow_only_active', cbOnlyActive.checked);
-        });
+        cbDownload.addEventListener('change', () => localStorage.setItem('grok_slideshow_download', cbDownload.checked));
+        cbTab.addEventListener('change',      () => localStorage.setItem('grok_slideshow_tab',      cbTab.checked));
+        cbBrsr.addEventListener('change',     () => localStorage.setItem('grok_slideshow_brsr',     cbBrsr.checked));
 
         function setActive(active) {
             if (active) {
@@ -639,8 +673,6 @@
             }
         }
 
-        let slideshowPaused = false;
-
         function stopSlideshow() {
             if (slideshowInterval) clearInterval(slideshowInterval);
             slideshowInterval = null;
@@ -649,7 +681,8 @@
         }
 
         function nextSlide() {
-            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+            const key = slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp';
+            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
         }
 
         function downloadIfChecked() {
@@ -676,28 +709,60 @@
             }, seconds * 1000);
         }
 
-        // Пауза/возобновление при переключении вкладки (Only Active)
-        document.addEventListener('visibilitychange', () => {
-            if (!cbOnlyActive.checked) return;
-            if (document.hidden) {
-                // Уходим в фон — пауза, кнопка остаётся синей
+        // Экспорт для keydown handler (Insert без Ctrl)
+        slideshowStart = () => startSlideshow(currentInterval);
+        slideshowStop  = stopSlideshow;
+
+        // ── Пауза/возобновление (Tab + Brsr) ────────────────────────
+        let tabVisible    = !document.hidden;
+        let windowFocused = document.hasFocus();
+
+        function checkPauseResume() {
+            const shouldPause = (cbTab.checked && !tabVisible) || (cbBrsr.checked && !windowFocused);
+            if (shouldPause) {
                 if (slideshowInterval) {
                     clearInterval(slideshowInterval);
                     slideshowInterval = null;
                     slideshowPaused   = true;
                 }
             } else {
-                // Возвращаемся — возобновляем
                 if (slideshowPaused) {
                     slideshowPaused = false;
                     startSlideshow(currentInterval);
                 }
             }
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            tabVisible = !document.hidden;
+            checkPauseResume();
+        });
+
+        window.addEventListener('focus', () => {
+            windowFocused = true;
+            checkPauseResume();
+        });
+
+        window.addEventListener('blur', () => {
+            // Задержка: даём visibilitychange сработать первым.
+            // Если вкладка стала скрытой — смена вкладки, не потеря фокуса браузером.
+            setTimeout(() => {
+                if (!document.hidden) windowFocused = false;
+                checkPauseResume();
+            }, 100);
         });
 
         btnInterval.onclick = () => {
             if (slideshowInterval || slideshowPaused) stopSlideshow();
             else startSlideshow(currentInterval);
+        };
+
+        // ── Ориентация ─────────────────────────────────────────
+        btnOrient.onclick = (e) => {
+            e.stopImmediatePropagation();
+            slideshowOrientation = slideshowOrientation === 'v' ? 'h' : 'v';
+            localStorage.setItem('grok_slideshow_orientation', slideshowOrientation);
+            btnOrient.textContent = slideshowOrientation === 'h' ? '↔' : '↕';
         };
 
         plus.onclick = (e) => {
