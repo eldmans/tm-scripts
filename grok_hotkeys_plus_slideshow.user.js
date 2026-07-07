@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      4.4
+// @version      4.4.1
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v4.4] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v4.4.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const isPostPage = location.pathname.includes('/imagine/post/');
 
@@ -142,17 +142,23 @@
 
         if (hotkeyMatches(e, config.deleteVid)) {
             e.preventDefault();
-            const delBtn = findButton(['Delete video', 'Delete', 'Удалить видео']);
-            triggerClick(delBtn, 'Delete video');
-            if (delBtn) {
+            // Сначала ищем кнопку удаления отдельного видео
+            const delVidBtn = findButton(['Delete video', 'Удалить видео']);
+            if (delVidBtn) {
+                triggerClick(delVidBtn, 'Delete video');
                 // Автоподтверждение диалога через 500мс
                 setTimeout(() => {
                     const confirmBtn = Array.from(document.querySelectorAll('button')).find(btn =>
-                        btn !== delBtn && btn.offsetParent !== null &&
+                        btn !== delVidBtn && btn.offsetParent !== null &&
                         (btn.textContent || '').trim().includes('Удалить')
                     );
                     if (confirmBtn) confirmBtn.click();
                 }, 500);
+            } else {
+                // Кнопка удаления публикации (первый пост в стопке — удалит всё).
+                // Автоподтверждение НЕ жмём: пользователь подтверждает сам.
+                const delPubBtn = findButton(['Delete post', 'Удалить публикацию']);
+                if (delPubBtn) triggerClick(delPubBtn, 'Delete post');
             }
         }
 
