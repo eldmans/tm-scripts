@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      4.4.1
+// @version      4.5
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v4.4.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v4.5] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const isPostPage = location.pathname.includes('/imagine/post/');
 
@@ -29,16 +29,17 @@
     // onlyF1F4: true — для этого действия допустимы только F1-F4 без модификаторов.
     // postOnly: true  — действие отображается и работает только на страницах поста.
     const ACTIONS = {
-        download:       { label: 'Скачать',                          defaultKey: { key: 'PageDown',   ctrl: false, alt: false, shift: false } },
-        upscale:        { label: 'Улучшить качество',                  defaultKey: { key: 'PageUp',     ctrl: false, alt: false, shift: false } },
-        deleteVid:      { label: 'Удалить видео',                     defaultKey: { key: 'Delete',     ctrl: false, alt: false, shift: false } },
-        sound:          { label: 'Вкл/Выкл звук',                    defaultKey: { key: 'ScrollLock', ctrl: false, alt: false, shift: false } },
-        playPause:      { label: 'Play / Pause видео',          defaultKey: { key: 'Pause',      ctrl: false, alt: false, shift: false } },
-        help:           { label: 'Справка / Настройки',           defaultKey: { key: 'F1',         ctrl: false, alt: false, shift: false }, onlyF1F4: true },
-        lagMonitor:     { label: 'Lag Monitor (страница поста)',   defaultKey: { key: 'F8',         ctrl: false, alt: false, shift: false }, postOnly: true },
-        history:        { label: 'История сохранённых',            defaultKey: { key: 'Home',       ctrl: false, alt: false, shift: false } },
-        slideshowPanel: { label: 'Показать/скрыть панель слайдшоу', defaultKey: { key: 'Insert',     ctrl: true,  alt: false, shift: false }, postOnly: true },
-        slideshow:      { label: 'Запуск/остановка слайдшоу',      defaultKey: { key: 'Insert',     ctrl: false, alt: false, shift: false }, postOnly: true },
+        download:       { label: 'Скачать',                                         defaultKey: { key: 'PageDown',   ctrl: false, alt: false, shift: false } },
+        upscale:        { label: 'Улучшить качество',                              defaultKey: { key: 'PageUp',     ctrl: false, alt: false, shift: false } },
+        deleteVid:      { label: 'Удалить видео',                                   defaultKey: { key: 'Delete',     ctrl: false, alt: false, shift: false } },
+        sound:          { label: 'Вкл/Выкл звук',                                  defaultKey: { key: 'ScrollLock', ctrl: false, alt: false, shift: false } },
+        playPause:      { label: 'Play / Pause видео',                             defaultKey: { key: 'Pause',      ctrl: false, alt: false, shift: false } },
+        help:           { label: 'Справка / Настройки',                            defaultKey: { key: 'F1',         ctrl: false, alt: false, shift: false }, onlyF1F4: true },
+        lagMonitor:     { label: 'Lag Monitor (страница поста)',                    defaultKey: { key: 'F8',         ctrl: false, alt: false, shift: false }, postOnly: true },
+        history:        { label: 'История сохранённых',                             defaultKey: { key: 'Home',       ctrl: false, alt: false, shift: false } },
+        slideshowPanel: { label: 'Виджет: нажать = полоска → настройки → скрыт', defaultKey: { key: 'Insert', ctrl: true, alt: false, shift: false } },
+        slideshow:      { label: 'Запуск/остановка слайдшоу',                       defaultKey: { key: 'Insert',     ctrl: false, alt: false, shift: false }, postOnly: true },
+        focusWidget:    { label: 'Фокус на панель управления',                          defaultKey: { key: 'F7',         ctrl: false, alt: false, shift: false }, postOnly: true },
     };
 
     // Загрузка конфига
@@ -61,6 +62,12 @@
     function saveConfig() {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
     }
+
+    // Синхронизация конфига между вкладками
+    window.addEventListener('storage', (ev) => {
+        if (ev.key !== STORAGE_KEY || capturingFor !== null) return;
+        try { const nc = JSON.parse(ev.newValue); if (nc) Object.assign(config, nc); } catch {}
+    });
 
     // Форматирует хоткей в читаемую строку: "Ctrl+PageDown"
     function formatHotkey(hk) {
@@ -113,6 +120,12 @@
     let capturingFor = null; // id действия, для которого ждём нажатие новой клавиши
 
     document.addEventListener('keydown', function (e) {
+        // Обновляем NumLock-индикатор на любом нажатии
+        if (numLockEl) {
+            const nl = e.getModifierState('NumLock');
+            if (numLockState !== nl) { numLockState = nl; numLockEl.textContent = nl ? 'NumPad' : 'Mouse'; }
+        }
+
         if (capturingFor !== null) return; // не выполняем действия во время захвата
 
         // В текстовых полях разрешаем только F-клавиши — остальное браузеру
@@ -127,11 +140,14 @@
         if (hotkeyMatches(e, config.download)) {
             e.preventDefault();
             triggerClick(findButton(['Download', 'Скачать']), 'Download');
-            // Если панель слайдшоу скрыта — дополнительно листаем через 0.5с
-            if (isPostPage && (!slideshowPanel || slideshowPanel.style.display === 'none')) {
-                setTimeout(() => {
-                    document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
-                }, 500);
+            if (isPostPage) {
+                if (pdAction === 'up') {
+                    setTimeout(() => {
+                        document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
+                    }, 500);
+                } else if (pdAction === 'del') {
+                    setTimeout(() => runDeleteLogic(), 1000);
+                }
             }
         }
 
@@ -142,24 +158,7 @@
 
         if (hotkeyMatches(e, config.deleteVid)) {
             e.preventDefault();
-            // Сначала ищем кнопку удаления отдельного видео
-            const delVidBtn = findButton(['Delete video', 'Удалить видео']);
-            if (delVidBtn) {
-                triggerClick(delVidBtn, 'Delete video');
-                // Автоподтверждение диалога через 500мс
-                setTimeout(() => {
-                    const confirmBtn = Array.from(document.querySelectorAll('button')).find(btn =>
-                        btn !== delVidBtn && btn.offsetParent !== null &&
-                        (btn.textContent || '').trim().includes('Удалить')
-                    );
-                    if (confirmBtn) confirmBtn.click();
-                }, 500);
-            } else {
-                // Кнопка удаления публикации (первый пост в стопке — удалит всё).
-                // Автоподтверждение НЕ жмём: пользователь подтверждает сам.
-                const delPubBtn = findButton(['Delete post', 'Удалить публикацию']);
-                if (delPubBtn) triggerClick(delPubBtn, 'Delete post');
-            }
+            runDeleteLogic();
         }
 
         if (hotkeyMatches(e, config.sound)) {
@@ -191,11 +190,9 @@
             else if (hotkeyMatches(e, config.history)) window.location.href = url;
         }
 
-        if (hotkeyMatches(e, config.slideshowPanel) && isPostPage) {
+        if (hotkeyMatches(e, config.slideshowPanel)) {
             e.preventDefault();
-            if (slideshowPanel) {
-                slideshowPanel.style.display = slideshowPanel.style.display === 'none' ? 'flex' : 'none';
-            }
+            cycleWidgetState();
         }
 
         if (hotkeyMatches(e, config.slideshow) && isPostPage) {
@@ -204,11 +201,37 @@
             else { if (slideshowStart) slideshowStart(); }
         }
 
+        if (hotkeyMatches(e, config.focusWidget) && isPostPage) {
+            e.preventDefault();
+            if (widgetState !== 'panel') setWidgetState('panel');
+            setTimeout(() => panelEl?.querySelector('button, input[type="radio"], input[type="checkbox"]')?.focus(), 50);
+        }
+
     }, true);
 
     // ============================================
     // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
     // ============================================
+
+    function runDeleteLogic() {
+        const delVidBtn = findButton(['Delete video', 'Удалить видео']);
+        if (delVidBtn) {
+            triggerClick(delVidBtn, 'Delete video');
+            if (autoConfirm) {
+                setTimeout(() => {
+                    const confirmBtn = Array.from(document.querySelectorAll('button')).find(btn =>
+                        btn !== delVidBtn && btn.offsetParent !== null &&
+                        (btn.textContent || '').trim().includes('Удалить')
+                    );
+                    if (confirmBtn) confirmBtn.click();
+                }, 500);
+            }
+        } else {
+            // Кнопка удаления публикации (первый пост) — без автоподтверждения
+            const delPubBtn = findButton(['Delete post', 'Удалить публикацию']);
+            if (delPubBtn) triggerClick(delPubBtn, 'Delete post');
+        }
+    }
 
     function findButton(labels) {
         if (!Array.isArray(labels)) labels = [labels];
@@ -576,96 +599,381 @@
     }
 
     // ============================================
-    // SLIDESHOW PANEL — только на /imagine/post/*
-    // Ctrl+Insert = показать/скрыть панель (config.slideshowPanel)
-    // Insert      = старт/стоп слайдшоу   (config.slideshow)
+    // WIDGET — NumLock-полоска + панель управления
+    // Ctrl+Insert = цикл (полоска → настройки → скрыт)
+    // Insert      = старт/стоп слайдшоу
+    // F7          = фокус на панель (Tab-навигация)
     // ============================================
 
-    let slideshowPanel       = null;
     let slideshowInterval    = null;
     let slideshowPaused      = false;
-    let slideshowStart       = null; // назначается в initSlideshowPanel
-    let slideshowStop        = null; // назначается в initSlideshowPanel
+    let slideshowStart       = null;
+    let slideshowStop        = null;
     let slideshowOrientation = localStorage.getItem('grok_slideshow_orientation') || 'v';
     let currentInterval      = 7;
 
-    function initSlideshowPanel() {
-        if (slideshowPanel || !isPostPage) return;
+    const WIDGET_STATE_KEY = 'grok_widget_state';
+    const PD_ACTION_KEY    = 'grok_pd_action';
+    const AUTO_CONFIRM_KEY = 'grok_delete_autoconfirm';
 
+    let widgetState  = localStorage.getItem(WIDGET_STATE_KEY) || 'strip';
+    let pdAction     = localStorage.getItem(PD_ACTION_KEY)    || 'up';
+    let autoConfirm  = localStorage.getItem(AUTO_CONFIRM_KEY) !== 'false';
+
+    let widgetEl     = null; // весь виджет
+    let gearRowEl    = null; // строка с шестерёнкой
+    let panelEl      = null; // развёрнутая панель
+    let numLockEl    = null; // индикатор NumLock
+    let numLockState = null; // null=?, true=вкл, false=выкл
+
+    function setWidgetState(state) {
+        widgetState = state;
+        localStorage.setItem(WIDGET_STATE_KEY, state);
+        applyWidgetState();
+    }
+
+    function cycleWidgetState() {
+        const states = isPostPage ? ['strip', 'panel', 'hidden'] : ['strip', 'hidden'];
+        setWidgetState(states[(states.indexOf(widgetState) + 1) % states.length]);
+    }
+
+    function applyWidgetState() {
+        if (!widgetEl) return;
+        widgetEl.style.display = widgetState === 'hidden' ? 'none' : 'block';
+        if (panelEl) panelEl.style.display = widgetState === 'panel' ? 'flex' : 'none';
+    }
+
+    function updateGearRow() {
+        if (gearRowEl) gearRowEl.textContent = `↓ ${formatHotkey(config.slideshowPanel)} ⚙ ↓`;
+    }
+
+    function initWidget() {
+        if (widgetEl) return;
+
+        // Внедряем стили для виджета
+        const style = document.createElement('style');
+        style.textContent = `
+            #grok-widget-container {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                z-index: 999999;
+                background: rgba(20, 20, 20, 0.85);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                font-family: system-ui, -apple-system, sans-serif;
+                color: #e5e7eb;
+                display: none;
+                flex-direction: column;
+                gap: 8px;
+                padding: 10px 14px;
+                min-width: 155px;
+                user-select: none;
+                transition: box-shadow 0.3s ease;
+            }
+            #grok-widget-container:hover {
+                box-shadow: 0 10px 30px rgba(0,0,0,0.7), 0 0 10px rgba(59, 130, 246, 0.2);
+                border-color: rgba(255, 255, 255, 0.15);
+            }
+            .grok-widget-btn {
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                cursor: pointer;
+                background: #1f2937;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                color: #e5e7eb;
+                font-weight: 500;
+            }
+            .grok-widget-btn:hover {
+                background: #374151;
+                border-color: #4b5563;
+                transform: translateY(-1px);
+            }
+            .grok-widget-btn:active {
+                transform: translateY(0);
+            }
+            .grok-preset-item {
+                cursor: pointer;
+                padding: 2px 6px;
+                border: 1px solid #374151;
+                border-radius: 4px;
+                background: #1f2937;
+                transition: all 0.15s ease;
+            }
+            .grok-preset-item:hover {
+                background: #374151;
+                border-color: #ef4444;
+                color: #fff;
+            }
+            .grok-preset-item:active {
+                transform: scale(0.95);
+            }
+            .grok-plus-minus {
+                font-size: 14px;
+                color: #9ca3af;
+                cursor: pointer;
+                padding: 2px 8px;
+                line-height: 1;
+                transition: color 0.15s ease, transform 0.15s ease;
+            }
+            .grok-plus-minus:hover {
+                color: #fff;
+                transform: scale(1.2);
+            }
+            #grok-widget-close {
+                cursor: pointer;
+                color: #9ca3af;
+                font-weight: bold;
+                font-size: 16px;
+                transition: color 0.15s ease, transform 0.15s ease;
+                line-height: 1;
+            }
+            #grok-widget-close:hover {
+                color: #f87171;
+                transform: scale(1.1);
+            }
+            #grok-gear-row {
+                cursor: pointer;
+                color: #9ca3af;
+                font-size: 11px;
+                padding: 3px 6px;
+                border-radius: 6px;
+                border: 1px solid #374151;
+                background: #1f2937;
+                transition: all 0.2s ease;
+            }
+            #grok-gear-row:hover {
+                background: #374151;
+                color: #fff;
+                border-color: #4b5563;
+            }
+            #grok-btn-interval {
+                padding: 6px 14px;
+                background: #1f2937;
+                color: #e5e7eb;
+                border: 2px solid #374151;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 600;
+                min-width: 48px;
+                font-size: 14px;
+                transition: all 0.2s ease;
+            }
+            #grok-btn-interval:hover {
+                border-color: #4b5563;
+            }
+            #grok-btn-x2 {
+                border-color: rgba(239, 68, 68, 0.4);
+            }
+            #grok-btn-x2:hover {
+                background: rgba(239, 68, 68, 0.2);
+                border-color: #ef4444;
+                color: #fff;
+            }
+            #grok-btn-div2 {
+                border-color: rgba(59, 130, 246, 0.4);
+            }
+            #grok-btn-div2:hover {
+                background: rgba(59, 130, 246, 0.2);
+                border-color: #3b82f6;
+                color: #fff;
+            }
+            .grok-settings-row label {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                cursor: pointer;
+                padding: 2px 4px;
+                border-radius: 4px;
+                transition: background 0.15s ease;
+            }
+            .grok-settings-row label:hover {
+                background: rgba(255, 255, 255, 0.05);
+            }
+            .grok-settings-row input[type="radio"], 
+            .grok-settings-row input[type="checkbox"] {
+                cursor: pointer;
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Загружаем сохраненный интервал
         const saved = localStorage.getItem('grok_slideshow_interval');
         if (saved) currentInterval = parseInt(saved, 10) || 7;
 
-        slideshowPanel = document.createElement('div');
-        slideshowPanel.style.cssText = `
-            position:fixed; top:70px; right:20px; z-index:999999;
-            background:rgba(20,20,20,0.95); padding:10px 14px; border-radius:12px;
-            border:1px solid #444; display:none; gap:10px; align-items:center;
-            box-shadow:0 4px 12px rgba(0,0,0,0.4); font-family:system-ui,sans-serif;
+        widgetEl = document.createElement('div');
+        widgetEl.id = 'grok-widget-container';
+        
+        let stripHtml = `
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 500; width: 100%;">
+                <span id="grok-numlock" style="color: #10b981;" title="Статус NumLock">?</span>
+                ${isPostPage ? `<span id="grok-gear-row">↓ ${formatHotkey(config.slideshowPanel)} ⚙ ↓</span>` : ''}
+                <span id="grok-widget-close" title="Скрыть виджет">×</span>
+            </div>
         `;
+        widgetEl.innerHTML = stripHtml;
+        document.body.appendChild(widgetEl);
 
+        numLockEl = widgetEl.querySelector('#grok-numlock');
+        const closeBtn = widgetEl.querySelector('#grok-widget-close');
+
+        closeBtn.onclick = (e) => {
+            e.stopPropagation();
+            setWidgetState('hidden');
+        };
+
+        if (isPostPage) {
+            gearRowEl = widgetEl.querySelector('#grok-gear-row');
+            gearRowEl.onclick = (e) => {
+                e.stopPropagation();
+                setWidgetState(widgetState === 'panel' ? 'strip' : 'panel');
+            };
+
+            panelEl = document.createElement('div');
+            panelEl.id = 'grok-settings-panel';
+            panelEl.style.cssText = `
+                display: none;
+                flex-direction: column;
+                gap: 10px;
+                border-top: 1px solid #374151;
+                padding-top: 8px;
+                margin-top: 4px;
+                width: 100%;
+            `;
+            widgetEl.appendChild(panelEl);
+
+            initPanelContent(panelEl);
+        }
+
+        applyWidgetState();
+    }
+
+    function initPanelContent(container) {
         const initDownload = localStorage.getItem('grok_slideshow_download') !== 'false';
         const initTab      = localStorage.getItem('grok_slideshow_tab')  === 'true';
         const initBrsr     = localStorage.getItem('grok_slideshow_brsr') === 'true';
 
-        slideshowPanel.innerHTML = `
-            <div style="display:flex; align-items:center; gap:8px;">
-                <!-- Пресеты слева -->
-                <div style="display:flex; flex-direction:column; align-items:center; gap:2px; font-size:11px; color:#888;">
-                    <div id="preset17" style="cursor:pointer; user-select:none; padding:1px 4px;">17</div>
-                    <div id="preset12" style="cursor:pointer; user-select:none; padding:1px 4px;">12</div>
-                    <div id="preset7"  style="cursor:pointer; user-select:none; padding:1px 4px;">7</div>
+        container.innerHTML = `
+            <!-- Секция слайдшоу: пресеты, интервал, x2/÷2, ориентация, паузы -->
+            <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between; width: 100%;">
+                <!-- Пресеты слева в колонку -->
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: #9ca3af;">
+                    <div id="grok-preset-17" class="grok-preset-item" tabindex="0" title="Установить 17с">17</div>
+                    <div id="grok-preset-12" class="grok-preset-item" tabindex="0" title="Установить 12с">12</div>
+                    <div id="grok-preset-7"  class="grok-preset-item" tabindex="0" title="Установить 7с">7</div>
                 </div>
 
-                <!-- Главная кнопка с +/- -->
-                <div style="display:flex; flex-direction:column; align-items:center; position:relative;">
-                    <div id="plus"  style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">+</div>
-                    <button id="btnInterval" style="padding:8px 20px; background:#1f2937; color:#e5e7eb; border:2px solid #374151; border-radius:8px; cursor:pointer; font-weight:600; min-width:52px; font-size:15px;">${currentInterval}</button>
-                    <div id="minus" style="font-size:11px; color:#888; cursor:pointer; user-select:none; line-height:1;">−</div>
+                <!-- Главное управление интервалом (кнопка и +/-) -->
+                <div style="display: flex; flex-direction: column; align-items: center; position: relative;">
+                    <div id="grok-plus" class="grok-plus-minus" tabindex="0">+</div>
+                    <button id="grok-btn-interval">${currentInterval}</button>
+                    <div id="grok-minus" class="grok-plus-minus" tabindex="0">−</div>
                 </div>
 
-                <!-- x2 -->
-                <div id="btnX2" style="font-size:11px; color:#888; cursor:pointer; user-select:none; padding:2px 5px; border:1px solid #555; border-radius:4px; line-height:1.6;">x2</div>
+                <!-- Множители (x2 и ÷2) в колонку -->
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <button id="grok-btn-x2" class="grok-widget-btn" title="Умножить на 2">x2</button>
+                    <button id="grok-btn-div2" class="grok-widget-btn" title="Разделить на 2 (округление вверх)">÷2</button>
+                </div>
 
                 <!-- Ориентация ↕/↔ -->
-                <div id="btnOrient" style="font-size:13px; color:#888; cursor:pointer; user-select:none; padding:2px 5px; border:1px solid #555; border-radius:4px; line-height:1.6;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</div>
+                <button id="grok-btn-orient" class="grok-widget-btn" style="font-size: 13px; padding: 4px 6px;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</button>
 
-                <!-- Галочки: Download + Tab + Brsr -->
-                <div style="display:flex; flex-direction:column; gap:5px; margin-left:2px;">
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#d1d5db; font-size:13px;" title="Скачивать каждый слайд">
-                        <input type="checkbox" id="cbDownload" style="width:13px; height:13px; accent-color:#3b82f6;" ${initDownload ? 'checked' : ''}>
+                <!-- Чекбоксы: ↓, Tab, Brsr -->
+                <div class="grok-settings-row" style="display: flex; flex-direction: column; gap: 4px;">
+                    <label title="Скачивать каждый слайд в слайдшоу">
+                        <input type="checkbox" id="grok-cb-download" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDownload ? 'checked' : ''}>
                         <span>↓</span>
                     </label>
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#9ca3af;" title="Пауза когда вкладка неактивна">
-                        <input type="checkbox" id="cbTab" style="width:13px; height:13px; accent-color:#3b82f6;" ${initTab ? 'checked' : ''}>
-                        <span style="font-size:9px;">Tab</span>
+                    <label title="Пауза при переключении вкладки">
+                        <input type="checkbox" id="grok-cb-tab" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initTab ? 'checked' : ''}>
+                        <span>Tab</span>
                     </label>
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#9ca3af;" title="Пауза когда браузер теряет фокус">
-                        <input type="checkbox" id="cbBrsr" style="width:13px; height:13px; accent-color:#3b82f6;" ${initBrsr ? 'checked' : ''}>
-                        <span style="font-size:9px;">Brsr</span>
+                    <label title="Пауза при потере фокуса браузера">
+                        <input type="checkbox" id="grok-cb-brsr" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initBrsr ? 'checked' : ''}>
+                        <span>Brsr</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Разделитель -->
+            <div style="border-top: 1px solid #374151; margin: 4px 0; width: 100%;"></div>
+
+            <!-- Секция Скачивание: radio-кнопки -->
+            <div class="grok-settings-row" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; width: 100%;">
+                <div style="color: #9ca3af; font-weight: 500;">
+                    ${formatHotkey(config.download)} :
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <label>
+                        <input type="radio" name="grok-pd-action" value="none" style="accent-color: #3b82f6;" ${pdAction === 'none' ? 'checked' : ''}>
+                        <span>—</span>
+                    </label>
+                    <label title="Скачать + листать вверх/вправо">
+                        <input type="radio" name="grok-pd-action" value="up" style="accent-color: #3b82f6;" ${pdAction === 'up' ? 'checked' : ''}>
+                        <span>+↑</span>
+                    </label>
+                    <label title="Скачать + подождать 1с + Удалить">
+                        <input type="radio" name="grok-pd-action" value="del" style="accent-color: #3b82f6;" ${pdAction === 'del' ? 'checked' : ''}>
+                        <span>del</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Разделитель -->
+            <div style="border-top: 1px solid #374151; margin: 4px 0; width: 100%;"></div>
+
+            <!-- Секция Del: чекбоксы -->
+            <div class="grok-settings-row" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; width: 100%;">
+                <div style="color: #9ca3af; font-weight: 500;">
+                    ${formatHotkey(config.deleteVid)} :
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <label title="Автоподтверждение при удалении одиночного видео">
+                        <input type="checkbox" id="grok-cb-aconfirm" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${autoConfirm ? 'checked' : ''}>
+                        <span>a.confirm</span>
+                    </label>
+                    <label style="color: #6b7280;" title="Умный возврат к посту (заглушка)">
+                        <input type="checkbox" id="grok-cb-holdpost" style="width: 12px; height: 12px; accent-color: #3b82f6;" disabled>
+                        <span>hold post</span>
                     </label>
                 </div>
             </div>
         `;
 
-        document.body.appendChild(slideshowPanel);
-
-        const btnInterval = slideshowPanel.querySelector('#btnInterval');
-        const plus        = slideshowPanel.querySelector('#plus');
-        const minus       = slideshowPanel.querySelector('#minus');
-        const preset17    = slideshowPanel.querySelector('#preset17');
-        const preset12    = slideshowPanel.querySelector('#preset12');
-        const preset7     = slideshowPanel.querySelector('#preset7');
-        const btnX2       = slideshowPanel.querySelector('#btnX2');
-        const btnOrient   = slideshowPanel.querySelector('#btnOrient');
-        const cbDownload  = slideshowPanel.querySelector('#cbDownload');
-        const cbTab       = slideshowPanel.querySelector('#cbTab');
-        const cbBrsr      = slideshowPanel.querySelector('#cbBrsr');
-
-        btnInterval.textContent = currentInterval;
+        const btnInterval = container.querySelector('#grok-btn-interval');
+        const plus        = container.querySelector('#grok-plus');
+        const minus       = container.querySelector('#grok-minus');
+        const preset17    = container.querySelector('#grok-preset-17');
+        const preset12    = container.querySelector('#grok-preset-12');
+        const preset7     = container.querySelector('#grok-preset-7');
+        const btnX2       = container.querySelector('#grok-btn-x2');
+        const btnDiv2     = container.querySelector('#grok-btn-div2');
+        const btnOrient   = container.querySelector('#grok-btn-orient');
+        const cbDownload  = container.querySelector('#grok-cb-download');
+        const cbTab       = container.querySelector('#grok-cb-tab');
+        const cbBrsr      = container.querySelector('#grok-cb-brsr');
+        const radios      = container.querySelectorAll('input[name="grok-pd-action"]');
+        const cbAConfirm  = container.querySelector('#grok-cb-aconfirm');
 
         cbDownload.addEventListener('change', () => localStorage.setItem('grok_slideshow_download', cbDownload.checked));
         cbTab.addEventListener('change',      () => localStorage.setItem('grok_slideshow_tab',      cbTab.checked));
         cbBrsr.addEventListener('change',     () => localStorage.setItem('grok_slideshow_brsr',     cbBrsr.checked));
+
+        radios.forEach(radio => {
+            radio.addEventListener('change', () => {
+                pdAction = radio.value;
+                localStorage.setItem(PD_ACTION_KEY, pdAction);
+            });
+        });
+
+        cbAConfirm.addEventListener('change', () => {
+            autoConfirm = cbAConfirm.checked;
+            localStorage.setItem(AUTO_CONFIRM_KEY, autoConfirm);
+        });
 
         function setActive(active) {
             if (active) {
@@ -715,11 +1023,10 @@
             }, seconds * 1000);
         }
 
-        // Экспорт для keydown handler (Insert без Ctrl)
         slideshowStart = () => startSlideshow(currentInterval);
         slideshowStop  = stopSlideshow;
 
-        // ── Пауза/возобновление (Tab + Brsr) ────────────────────────
+        // Пауза/возобновление (Tab + Brsr)
         let tabVisible    = !document.hidden;
         let windowFocused = document.hasFocus();
 
@@ -750,8 +1057,6 @@
         });
 
         window.addEventListener('blur', () => {
-            // Задержка: даём visibilitychange сработать первым.
-            // Если вкладка стала скрытой — смена вкладки, не потеря фокуса браузером.
             setTimeout(() => {
                 if (!document.hidden) windowFocused = false;
                 checkPauseResume();
@@ -763,7 +1068,6 @@
             else startSlideshow(currentInterval);
         };
 
-        // ── Ориентация ─────────────────────────────────────────
         btnOrient.onclick = (e) => {
             e.stopImmediatePropagation();
             slideshowOrientation = slideshowOrientation === 'v' ? 'h' : 'v';
@@ -776,17 +1080,27 @@
             currentInterval = Math.min(currentInterval + 1, 100);
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
+            if (slideshowInterval) startSlideshow(currentInterval);
         };
         minus.onclick = (e) => {
             e.stopImmediatePropagation();
             currentInterval = Math.max(currentInterval - 1, 3);
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
+            if (slideshowInterval) startSlideshow(currentInterval);
         };
 
         btnX2.onclick = (e) => {
             e.stopImmediatePropagation();
             currentInterval = Math.min(currentInterval * 2, 100);
+            btnInterval.textContent = currentInterval;
+            localStorage.setItem('grok_slideshow_interval', currentInterval);
+            if (slideshowInterval) startSlideshow(currentInterval);
+        };
+
+        btnDiv2.onclick = (e) => {
+            e.stopImmediatePropagation();
+            currentInterval = Math.max(Math.ceil(currentInterval / 2), 3);
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
             if (slideshowInterval) startSlideshow(currentInterval);
@@ -813,16 +1127,25 @@
             localStorage.setItem('grok_slideshow_interval', currentInterval);
             if (slideshowInterval) startSlideshow(7);
         };
+
+        // Поддержка нажатия Enter / Space на элементах для клавиатурной навигации
+        const handleDivKey = (el) => {
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    el.click();
+                }
+            });
+        };
+        handleDivKey(preset17);
+        handleDivKey(preset12);
+        handleDivKey(preset7);
+        handleDivKey(plus);
+        handleDivKey(minus);
     }
 
-    // Инициализация панели слайдшоу
-    if (isPostPage) {
-        initSlideshowPanel();
-    }
-
-    // ============================================
-    // ИНИЦИАЛИЗАЦИЯ
-    // ============================================
+    // Инициализация виджета
+    initWidget();
 
     console.log('%c[Grok Hotkeys + Slideshow] Все модули инициализированы', 'color:#10b981');
 
