@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pinterest FullScale Auto-Clicker
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Автоматически нажимает "Показать в полном масштабе" на Pinterest.
 // @author       eldmans
 // @match        *://*.pinterest.com/*
@@ -156,4 +156,13 @@
             triggerAction();
         }
     });
+
+    // Отслеживание смены URL (SPA-навигация)
+    let lastUrl = location.href;
+    setInterval(() => {
+        if (location.href !== lastUrl) {
+            lastUrl = location.href;
+            triggerAction();
+        }
+    }, 300);
 })();
