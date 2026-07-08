@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      4.5.1
+// @version      4.5.2
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v4.5] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v4.5.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
@@ -272,6 +272,27 @@
         const btn = findSoundButton();
         if (btn) triggerClick(btn, 'Toggle sound');
         else console.log('%c❌ Кнопка звука не найдена', 'color:#ef4444');
+    }
+
+    function checkAndAutoUnmute() {
+        const wordsUnmute = ['включить звук', 'unmute'];
+        const wordsMute = ['заглушить', 'выключить звук', 'mute'];
+        
+        const allButtons = Array.from(document.querySelectorAll('button'));
+        const hasUnmute = allButtons.some(b => {
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const text = (b.textContent || '').toLowerCase();
+            return wordsUnmute.some(w => aria.includes(w) || text.includes(w));
+        });
+        const hasMute = allButtons.some(b => {
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const text = (b.textContent || '').toLowerCase();
+            return wordsMute.some(w => aria.includes(w) || text.includes(w));
+        });
+        
+        if (hasUnmute && !hasMute) {
+            toggleSound();
+        }
     }
 
     function findSoundButton() {
@@ -812,6 +833,10 @@
             .grok-settings-row input[type="checkbox"] {
                 cursor: pointer;
             }
+            #grok-widget-container *:focus {
+                outline: 2px solid #3b82f6 !important;
+                outline-offset: 1px !important;
+            }
         `;
         document.head.appendChild(style);
 
@@ -955,13 +980,34 @@
                     </label>
                 </div>
             </div>
+
+            <!-- Разделитель -->
+            <div style="border-top: 1px solid #374151; margin: 4px 0; width: 100%;"></div>
+
+            <!-- Секция Звук: кнопка-динамик -->
+            <div class="grok-settings-row" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; width: 100%;">
+                <div id="grok-label-sound-hotkey" style="color: #9ca3af; font-weight: 500;">
+                    ${formatHotkey(config.sound)} :
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="grok-btn-sound" class="grok-widget-btn" style="padding: 4px 8px; font-size: 12px;" title="Вкл/Выкл звук (ScrollLock)">🔊</button>
+                </div>
+            </div>
         `;
 
         refreshHotkeyLabels = () => {
             const labelDl = container.querySelector('#grok-label-download-hotkey');
             const labelDel = container.querySelector('#grok-label-delete-hotkey');
+            const labelSound = container.querySelector('#grok-label-sound-hotkey');
             if (labelDl) labelDl.textContent = `${formatHotkey(config.download)} :`;
             if (labelDel) labelDel.textContent = `${formatHotkey(config.deleteVid)} :`;
+            if (labelSound) labelSound.textContent = `${formatHotkey(config.sound)} :`;
+        };
+
+        const btnSound = container.querySelector('#grok-btn-sound');
+        btnSound.onclick = (e) => {
+            e.stopPropagation();
+            toggleSound();
         };
 
         const btnInterval = container.querySelector('#grok-btn-interval');
@@ -1073,11 +1119,15 @@
         document.addEventListener('visibilitychange', () => {
             tabVisible = !document.hidden;
             checkPauseResume();
+            if (tabVisible) {
+                checkAndAutoUnmute();
+            }
         });
 
         window.addEventListener('focus', () => {
             windowFocused = true;
             checkPauseResume();
+            checkAndAutoUnmute();
         });
 
         window.addEventListener('blur', () => {
