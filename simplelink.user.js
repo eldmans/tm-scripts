@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         SimpleLink
 // @namespace    http://tampermonkey.net/
-// @version      1.1
-// @description  Открывает страницу истории сохраненных в новой вкладке по нажатию клавиши Home на любом сайте.
+// @version      1.2
+// @description  Открывает страницу истории сохраненных в фоновой вкладке по нажатию клавиши Home на любом сайте.
 // @author       eldmans
 // @match        *://*/*
-// @grant        none
+// @grant        GM_openInTab
 // ==/UserScript==
 
 (function() {
@@ -13,7 +13,7 @@
 
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Home') {
-            window.open('https://grok.com/imagine/saved', '_blank');
+            GM_openInTab('https://grok.com/imagine/saved', { active: false, insert: true, setParent: true });
         }
     });
 })();
