@@ -17,7 +17,7 @@
 
     console.log('%c[Grok Hotkeys + Slideshow v4.5] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
-    const isPostPage = location.pathname.includes('/imagine/post/');
+    function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
     // ============================================
     // КОНФИГУРАЦИЯ ГОРЯЧИХ КЛАВИШ
@@ -66,7 +66,15 @@
     // Синхронизация конфига между вкладками
     window.addEventListener('storage', (ev) => {
         if (ev.key !== STORAGE_KEY || capturingFor !== null) return;
-        try { const nc = JSON.parse(ev.newValue); if (nc) Object.assign(config, nc); } catch {}
+        try { 
+            const nc = JSON.parse(ev.newValue); 
+            if (nc) {
+                Object.assign(config, nc);
+                if (widgetState === 'panel' && refreshHotkeyLabels) {
+                    refreshHotkeyLabels();
+                }
+            } 
+        } catch {}
     });
 
     // Форматирует хоткей в читаемую строку: "Ctrl+PageDown"
@@ -140,7 +148,7 @@
         if (hotkeyMatches(e, config.download)) {
             e.preventDefault();
             triggerClick(findButton(['Download', 'Скачать']), 'Download');
-            if (isPostPage) {
+            if (checkIsPostPage()) {
                 if (pdAction === 'up') {
                     setTimeout(() => {
                         document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
@@ -176,7 +184,7 @@
             toggleHelpOverlay();
         }
 
-        if (hotkeyMatches(e, config.lagMonitor) && isPostPage) {
+        if (hotkeyMatches(e, config.lagMonitor) && checkIsPostPage()) {
             e.preventDefault();
             toggleLagMonitor();
         }
@@ -195,13 +203,13 @@
             cycleWidgetState();
         }
 
-        if (hotkeyMatches(e, config.slideshow) && isPostPage) {
+        if (hotkeyMatches(e, config.slideshow)) {
             e.preventDefault();
             if (slideshowInterval || slideshowPaused) { if (slideshowStop) slideshowStop(); }
             else { if (slideshowStart) slideshowStart(); }
         }
 
-        if (hotkeyMatches(e, config.focusWidget) && isPostPage) {
+        if (hotkeyMatches(e, config.focusWidget)) {
             e.preventDefault();
             if (widgetState !== 'panel') setWidgetState('panel');
             setTimeout(() => panelEl?.querySelector('button, input[type="radio"], input[type="checkbox"]')?.focus(), 50);
@@ -350,7 +358,7 @@
         grid.style.cssText = 'display:grid; grid-template-columns: 165px 1fr; gap: 6px 14px; align-items:center;';
 
         for (const [id, action] of Object.entries(ACTIONS)) {
-            if (action.postOnly && !isPostPage) continue;
+            if (action.postOnly && !checkIsPostPage()) continue;
 
             const keyCell = document.createElement('div');
             keyCell.dataset.actionId = id;
@@ -556,7 +564,7 @@
     let lagPrev    = 0;
 
     function toggleLagMonitor() {
-        if (!isPostPage) return;
+        if (!checkIsPostPage()) return;
         if (!lagPanel) createLagPanel();
         if (lagRunning) stopLagMonitor();
         else startLagMonitor();
@@ -625,16 +633,23 @@
     let panelEl      = null; // развёрнутая панель
     let numLockEl    = null; // индикатор NumLock
     let numLockState = null; // null=?, true=вкл, false=выкл
+    let refreshHotkeyLabels = null;
 
     function setWidgetState(state) {
         widgetState = state;
         localStorage.setItem(WIDGET_STATE_KEY, state);
         applyWidgetState();
+        if (state === 'panel' && refreshHotkeyLabels) {
+            refreshHotkeyLabels();
+        }
     }
 
     function cycleWidgetState() {
-        const states = isPostPage ? ['strip', 'panel', 'hidden'] : ['strip', 'hidden'];
+        const states = ['strip', 'panel', 'hidden'];
         setWidgetState(states[(states.indexOf(widgetState) + 1) % states.length]);
+        if (widgetState === 'panel' && refreshHotkeyLabels) {
+            refreshHotkeyLabels();
+        }
     }
 
     function applyWidgetState() {
@@ -655,8 +670,8 @@
         style.textContent = `
             #grok-widget-container {
                 position: fixed;
-                top: 20px;
-                right: 20px;
+                top: 50px;
+                right: 50px;
                 z-index: 999999;
                 background: rgba(20, 20, 20, 0.85);
                 backdrop-filter: blur(10px);
@@ -810,7 +825,7 @@
         let stripHtml = `
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 500; width: 100%;">
                 <span id="grok-numlock" style="color: #10b981;" title="Статус NumLock">?</span>
-                ${isPostPage ? `<span id="grok-gear-row">↓ ${formatHotkey(config.slideshowPanel)} ⚙ ↓</span>` : ''}
+                <span id="grok-gear-row">↓ ${formatHotkey(config.slideshowPanel)} ⚙ ↓</span>
                 <span id="grok-widget-close" title="Скрыть виджет">×</span>
             </div>
         `;
@@ -825,28 +840,26 @@
             setWidgetState('hidden');
         };
 
-        if (isPostPage) {
-            gearRowEl = widgetEl.querySelector('#grok-gear-row');
-            gearRowEl.onclick = (e) => {
-                e.stopPropagation();
-                setWidgetState(widgetState === 'panel' ? 'strip' : 'panel');
-            };
+        gearRowEl = widgetEl.querySelector('#grok-gear-row');
+        gearRowEl.onclick = (e) => {
+            e.stopPropagation();
+            setWidgetState(widgetState === 'panel' ? 'strip' : 'panel');
+        };
 
-            panelEl = document.createElement('div');
-            panelEl.id = 'grok-settings-panel';
-            panelEl.style.cssText = `
-                display: none;
-                flex-direction: column;
-                gap: 10px;
-                border-top: 1px solid #374151;
-                padding-top: 8px;
-                margin-top: 4px;
-                width: 100%;
-            `;
-            widgetEl.appendChild(panelEl);
+        panelEl = document.createElement('div');
+        panelEl.id = 'grok-settings-panel';
+        panelEl.style.cssText = `
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+            border-top: 1px solid #374151;
+            padding-top: 8px;
+            margin-top: 4px;
+            width: 100%;
+        `;
+        widgetEl.appendChild(panelEl);
 
-            initPanelContent(panelEl);
-        }
+        initPanelContent(panelEl);
 
         applyWidgetState();
     }
@@ -857,33 +870,32 @@
         const initBrsr     = localStorage.getItem('grok_slideshow_brsr') === 'true';
 
         container.innerHTML = `
-            <!-- Секция слайдшоу: пресеты, интервал, x2/÷2, ориентация, паузы -->
-            <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between; width: 100%;">
+            <!-- Верхняя строка слайдшоу: пресеты, интервал (+/-), x2/÷2 -->
+            <div style="display: flex; align-items: center; gap: 10px; justify-content: space-between; width: 100%;">
                 <!-- Пресеты слева в колонку -->
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: #9ca3af;">
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: #9ca3af;">
                     <div id="grok-preset-17" class="grok-preset-item" tabindex="0" title="Установить 17с">17</div>
                     <div id="grok-preset-12" class="grok-preset-item" tabindex="0" title="Установить 12с">12</div>
                     <div id="grok-preset-7"  class="grok-preset-item" tabindex="0" title="Установить 7с">7</div>
                 </div>
 
                 <!-- Главное управление интервалом (кнопка и +/-) -->
-                <div style="display: flex; flex-direction: column; align-items: center; position: relative;">
-                    <div id="grok-plus" class="grok-plus-minus" tabindex="0">+</div>
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative;">
+                    <div id="grok-plus" class="grok-plus-minus" tabindex="0" style="margin-bottom: 2px;">+</div>
                     <button id="grok-btn-interval">${currentInterval}</button>
-                    <div id="grok-minus" class="grok-plus-minus" tabindex="0">−</div>
+                    <div id="grok-minus" class="grok-plus-minus" tabindex="0" style="margin-top: 2px;">−</div>
                 </div>
 
                 <!-- Множители (x2 и ÷2) в колонку -->
                 <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <button id="grok-btn-x2" class="grok-widget-btn" title="Умножить на 2">x2</button>
-                    <button id="grok-btn-div2" class="grok-widget-btn" title="Разделить на 2 (округление вверх)">÷2</button>
+                    <button id="grok-btn-x2" class="grok-widget-btn" style="padding: 4px 8px; font-size: 12px;" title="Умножить на 2">x2</button>
+                    <button id="grok-btn-div2" class="grok-widget-btn" style="padding: 4px 8px; font-size: 12px;" title="Разделить на 2 (округление вверх)">÷2</button>
                 </div>
+            </div>
 
-                <!-- Ориентация ↕/↔ -->
-                <button id="grok-btn-orient" class="grok-widget-btn" style="font-size: 13px; padding: 4px 6px;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</button>
-
-                <!-- Чекбоксы: ↓, Tab, Brsr -->
-                <div class="grok-settings-row" style="display: flex; flex-direction: column; gap: 4px;">
+            <!-- Нижняя строка слайдшоу: чекбоксы и кнопка ориентации -->
+            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 4px; font-size: 11px; color: #9ca3af;">
+                <div class="grok-settings-row" style="display: flex; align-items: center; gap: 8px;">
                     <label title="Скачивать каждый слайд в слайдшоу">
                         <input type="checkbox" id="grok-cb-download" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDownload ? 'checked' : ''}>
                         <span>↓</span>
@@ -897,6 +909,7 @@
                         <span>Brsr</span>
                     </label>
                 </div>
+                <button id="grok-btn-orient" class="grok-widget-btn" style="font-size: 12px; padding: 3px 6px;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</button>
             </div>
 
             <!-- Разделитель -->
@@ -904,7 +917,7 @@
 
             <!-- Секция Скачивание: radio-кнопки -->
             <div class="grok-settings-row" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; width: 100%;">
-                <div style="color: #9ca3af; font-weight: 500;">
+                <div id="grok-label-download-hotkey" style="color: #9ca3af; font-weight: 500;">
                     ${formatHotkey(config.download)} :
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center;">
@@ -928,7 +941,7 @@
 
             <!-- Секция Del: чекбоксы -->
             <div class="grok-settings-row" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; width: 100%;">
-                <div style="color: #9ca3af; font-weight: 500;">
+                <div id="grok-label-delete-hotkey" style="color: #9ca3af; font-weight: 500;">
                     ${formatHotkey(config.deleteVid)} :
                 </div>
                 <div style="display: flex; gap: 12px; align-items: center;">
@@ -943,6 +956,13 @@
                 </div>
             </div>
         `;
+
+        refreshHotkeyLabels = () => {
+            const labelDl = container.querySelector('#grok-label-download-hotkey');
+            const labelDel = container.querySelector('#grok-label-delete-hotkey');
+            if (labelDl) labelDl.textContent = `${formatHotkey(config.download)} :`;
+            if (labelDel) labelDel.textContent = `${formatHotkey(config.deleteVid)} :`;
+        };
 
         const btnInterval = container.querySelector('#grok-btn-interval');
         const plus        = container.querySelector('#grok-plus');
@@ -1007,6 +1027,10 @@
         }
 
         function startSlideshow(seconds) {
+            if (!checkIsPostPage()) {
+                alert("Слайдшоу можно запустить только на странице поста (изображения)!");
+                return;
+            }
             stopSlideshow();
             setActive(true);
             currentInterval = seconds;
