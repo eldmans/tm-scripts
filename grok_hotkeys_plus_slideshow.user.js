@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      4.6
+// @version      5.0
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v4.6] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.0] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
@@ -233,6 +233,22 @@
 
         const delItemBtn = findButton(['Delete video', 'Удалить видео', 'Delete image', 'Удалить изображение']);
         if (delItemBtn) {
+            if (!holdPost) {
+                const firstUrl = location.href;
+                triggerDeleteWithConfirm(delItemBtn);
+                if (callback) {
+                    let checkCount = 0;
+                    const checkInterval = setInterval(() => {
+                        checkCount++;
+                        if (location.href !== firstUrl || checkCount > 30) {
+                            clearInterval(checkInterval);
+                            callback();
+                        }
+                    }, 100);
+                }
+                return;
+            }
+
             const firstUrl = location.href;
             const navKey = slideshowOrientation === 'h' ? 'ArrowLeft' : 'ArrowUp';
             
@@ -321,6 +337,52 @@
                 if (confirmBtn) confirmBtn.click();
             }, 500);
         }
+    }
+
+    let timerPill = null;
+    function createTimerPill() {
+        if (timerPill) return;
+        timerPill = document.createElement('div');
+        timerPill.id = 'grok-timer-pill';
+        timerPill.style.cssText = `
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(10, 10, 10, 0.85);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            padding: 6px 16px;
+            font-family: monospace;
+            font-size: 14px;
+            font-weight: 700;
+            z-index: 1000000;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.6);
+            pointer-events: none;
+            display: none;
+            transition: opacity 0.2s ease;
+        `;
+        document.body.appendChild(timerPill);
+    }
+
+    function showTimerPill(text, isRed) {
+        createTimerPill();
+        timerPill.textContent = text;
+        timerPill.style.color = isRed ? '#ef4444' : '#ffffff';
+        timerPill.style.display = 'block';
+    }
+
+    function hideTimerPill() {
+        if (timerPill) timerPill.style.display = 'none';
+    }
+
+    function formatTime(sec) {
+        if (isNaN(sec) || sec < 0) return '0:00';
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60);
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
     }
 
     function showToast(message) {
@@ -511,6 +573,26 @@
             grid.appendChild(descCell);
         }
         helpOverlay.appendChild(grid);
+
+        // Настройка секунд обратного отсчета (по умолчанию 3)
+        const settingsRow = document.createElement('div');
+        settingsRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; font-size:13px; color:#9ca3af; margin-top:10px; border-top:1px solid #1e2433; padding-top:8px;';
+        settingsRow.innerHTML = `
+            <span>Секунд обратного отсчета в плеере:</span>
+            <input type="number" id="grok-countdown-input" value="${countdownSeconds}" min="1" max="60" style="
+                width: 50px; background: #161b27; border: 1px solid #252d3d;
+                border-radius: 6px; color: #fff; text-align: center; padding: 2px 4px; font-weight: 600;
+            ">
+        `;
+        helpOverlay.appendChild(settingsRow);
+        
+        const cInput = settingsRow.querySelector('#grok-countdown-input');
+        cInput.addEventListener('change', () => {
+            let val = parseInt(cInput.value, 10);
+            if (isNaN(val) || val < 1) val = 3;
+            countdownSeconds = val;
+            localStorage.setItem(COUNTDOWN_SEC_KEY, countdownSeconds);
+        });
 
         // ── Зона конфликта ─────────────────────────────
         const conflictArea = document.createElement('div');
@@ -741,10 +823,15 @@
     const WIDGET_STATE_KEY = 'grok_widget_state';
     const PD_ACTION_KEY    = 'grok_pd_action';
     const AUTO_CONFIRM_KEY = 'grok_delete_autoconfirm';
+    const HOLD_POST_KEY    = 'grok_delete_holdpost';
+    const COUNTDOWN_SEC_KEY = 'grok_slideshow_countdown_sec';
 
     let widgetState  = localStorage.getItem(WIDGET_STATE_KEY) || 'strip';
     let pdAction     = localStorage.getItem(PD_ACTION_KEY)    || 'up';
     let autoConfirm  = localStorage.getItem(AUTO_CONFIRM_KEY) !== 'false';
+    let holdPost     = localStorage.getItem(HOLD_POST_KEY)    !== 'false'; // default true
+    let countdownSeconds = parseInt(localStorage.getItem(COUNTDOWN_SEC_KEY), 10);
+    if (isNaN(countdownSeconds)) countdownSeconds = 3;
 
     let widgetEl     = null; // весь виджет
     let gearRowEl    = null; // строка с шестерёнкой
@@ -1082,8 +1169,8 @@
                         <input type="checkbox" id="grok-cb-aconfirm" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${autoConfirm ? 'checked' : ''}>
                         <span>a.confirm</span>
                     </label>
-                    <label style="color: #6b7280;" title="Умный возврат к посту (заглушка)">
-                        <input type="checkbox" id="grok-cb-holdpost" style="width: 12px; height: 12px; accent-color: #3b82f6;" disabled>
+                    <label title="Умный возврат к посту (перелистывание)">
+                        <input type="checkbox" id="grok-cb-holdpost" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${holdPost ? 'checked' : ''}>
                         <span>hold post</span>
                     </label>
                 </div>
@@ -1114,6 +1201,7 @@
         const cbBrsr      = container.querySelector('#grok-cb-brsr');
         const radios      = container.querySelectorAll('input[name="grok-pd-action"]');
         const cbAConfirm  = container.querySelector('#grok-cb-aconfirm');
+        const cbHoldPost  = container.querySelector('#grok-cb-holdpost');
 
         cbDownload.addEventListener('change', () => localStorage.setItem('grok_slideshow_download', cbDownload.checked));
         cbDelete.addEventListener('change',   () => localStorage.setItem('grok_slideshow_delete',   cbDelete.checked));
@@ -1132,6 +1220,11 @@
             localStorage.setItem(AUTO_CONFIRM_KEY, autoConfirm);
         });
 
+        cbHoldPost.addEventListener('change', () => {
+            holdPost = cbHoldPost.checked;
+            localStorage.setItem(HOLD_POST_KEY, holdPost);
+        });
+
         function setActive(active) {
             if (active) {
                 btnInterval.style.background  = '#2563eb';
@@ -1143,6 +1236,9 @@
                 btnInterval.style.color       = '#e5e7eb';
             }
         }
+
+        let timerSilent = false;
+        let checkTimerSilentOnResume = false;
 
         function clearSlideshowTimers() {
             if (slideshowTimeoutId) {
@@ -1157,6 +1253,7 @@
 
         function stopSlideshow() {
             clearSlideshowTimers();
+            hideTimerPill();
             slideshowActive   = false;
             slideshowPaused   = false;
             setActive(false);
@@ -1174,28 +1271,148 @@
             }
         }
 
+        function executeSlideTransition(seconds) {
+            if (cbDownload && cbDownload.checked) {
+                downloadIfChecked();
+            }
+            if (cbDelete && cbDelete.checked) {
+                runSmartDelete(() => {
+                    scheduleNextSlideCycle(seconds);
+                });
+            } else {
+                nextSlide();
+                setTimeout(() => {
+                    scheduleNextSlideCycle(seconds);
+                }, 500);
+            }
+        }
+
         function scheduleNextSlideCycle(seconds) {
             clearSlideshowTimers();
+            hideTimerPill();
 
-            // 1. Schedule download
-            const dlDelay = Math.max((seconds - 2) * 1000, 0);
-            if (cbDownload && cbDownload.checked) {
-                downloadTimeoutId = setTimeout(() => {
-                    downloadIfChecked();
-                }, dlDelay);
+            if (!slideshowActive || slideshowPaused) return;
+
+            // Определяем timerSilent на старте
+            if (checkTimerSilentOnResume) {
+                checkTimerSilentOnResume = false;
+                const video = document.querySelector('video');
+                if (video && !isNaN(video.duration) && video.duration > 0) {
+                    let threshold = 5;
+                    if (video.duration <= 7) threshold = 1;
+                    else if (video.duration <= 12) threshold = 3;
+
+                    if (video.currentTime > threshold) {
+                        timerSilent = true;
+                        console.log('%c[Grok Slideshow] Возобновлено mid-play, таймер уходит в тихий режим', 'color:#f59e0b;');
+                    } else {
+                        timerSilent = false;
+                    }
+                } else {
+                    timerSilent = false;
+                }
+            } else {
+                timerSilent = false;
             }
 
-            // 2. Schedule next slide transition
-            slideshowTimeoutId = setTimeout(() => {
-                if (cbDelete && cbDelete.checked) {
-                    runSmartDelete(() => {
-                        scheduleNextSlideCycle(seconds);
-                    });
-                } else {
-                    nextSlide();
-                    scheduleNextSlideCycle(seconds);
+            const video = document.querySelector('video');
+            if (!video) {
+                // ==========================================
+                // PHOTO STATE MACHINE (Wait 5s + Countdown)
+                // ==========================================
+                let photoWaitTime = 5;
+                let elapsed = 0;
+                
+                function photoTick() {
+                    if (!slideshowActive || slideshowPaused) return;
+                    
+                    if (elapsed < photoWaitTime) {
+                        showTimerPill(`0:0${elapsed} / 0:0${photoWaitTime}`, false);
+                        elapsed++;
+                        slideshowTimeoutId = setTimeout(photoTick, 1000);
+                    } else {
+                        // Переход на красный таймер
+                        let countdownLeft = countdownSeconds;
+                        function countdownTick() {
+                            if (!slideshowActive || slideshowPaused) return;
+                            if (countdownLeft > 0) {
+                                showTimerPill(countdownLeft < 10 ? `0${countdownLeft}` : `${countdownLeft}`, true);
+                                countdownLeft--;
+                                slideshowTimeoutId = setTimeout(countdownTick, 1000);
+                            } else {
+                                showTimerPill('00', true);
+                                slideshowTimeoutId = setTimeout(() => {
+                                    executeSlideTransition(seconds);
+                                }, 500);
+                            }
+                        }
+                        countdownTick();
+                    }
                 }
-            }, seconds * 1000);
+                photoTick();
+            } else {
+                // ==========================================
+                // VIDEO STATE MACHINE
+                // ==========================================
+                let prevTime = video.currentTime;
+                
+                function videoPoll() {
+                    if (!slideshowActive || slideshowPaused) return;
+                    
+                    const videoCurrent = document.querySelector('video');
+                    if (!videoCurrent) {
+                        scheduleNextSlideCycle(seconds);
+                        return;
+                    }
+
+                    const cur = videoCurrent.currentTime;
+                    const dur = videoCurrent.duration;
+
+                    if (!isNaN(dur) && dur > 0) {
+                        let threshold = 5;
+                        if (dur <= 7) threshold = 1;
+                        else if (dur <= 12) threshold = 3;
+
+                        // Если таймер молчал, но видео пошло на второй круг (время сбросилось)
+                        if (timerSilent && (cur < prevTime - 0.5 || cur < 0.2)) {
+                            timerSilent = false;
+                            console.log('%c[Grok Slideshow] Видео пошло на второй круг, включаем таймер', 'color:#10b981;');
+                        }
+                        prevTime = cur;
+
+                        if (!timerSilent) {
+                            if (videoCurrent.ended || cur >= dur - 0.2) {
+                                videoCurrent.pause();
+                                let countdownLeft = countdownSeconds;
+                                function videoCountdownTick() {
+                                    if (!slideshowActive || slideshowPaused) return;
+                                    if (countdownLeft > 0) {
+                                        showTimerPill(countdownLeft < 10 ? `0${countdownLeft}` : `${countdownLeft}`, true);
+                                        countdownLeft--;
+                                        slideshowTimeoutId = setTimeout(videoCountdownTick, 1000);
+                                    } else {
+                                        showTimerPill('00', true);
+                                        slideshowTimeoutId = setTimeout(() => {
+                                            executeSlideTransition(seconds);
+                                        }, 500);
+                                    }
+                                }
+                                videoCountdownTick();
+                                return;
+                            } else {
+                                showTimerPill(`${formatTime(cur)} / ${formatTime(dur)}`, false);
+                            }
+                        } else {
+                            hideTimerPill();
+                        }
+                    } else {
+                        showTimerPill('0:00 / 0:00', false);
+                    }
+
+                    slideshowTimeoutId = setTimeout(videoPoll, 100);
+                }
+                videoPoll();
+            }
         }
 
         function startSlideshow(seconds) {
@@ -1231,6 +1448,7 @@
             } else {
                 if (slideshowPaused) {
                     slideshowPaused = false;
+                    checkTimerSilentOnResume = true;
                     startSlideshow(currentInterval);
                 }
             }
