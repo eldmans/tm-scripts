@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      4.5.3
+// @version      4.6
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v4.5.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v4.6] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
@@ -154,7 +154,7 @@
                         document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
                     }, 500);
                 } else if (pdAction === 'del') {
-                    setTimeout(() => runDeleteLogic(), 1000);
+                    setTimeout(() => runSmartDelete(), 1000);
                 }
             }
         }
@@ -166,7 +166,7 @@
 
         if (hotkeyMatches(e, config.deleteVid)) {
             e.preventDefault();
-            runDeleteLogic();
+            runSmartDelete();
         }
 
         if (hotkeyMatches(e, config.sound)) {
@@ -205,7 +205,7 @@
 
         if (hotkeyMatches(e, config.slideshow)) {
             e.preventDefault();
-            if (slideshowInterval || slideshowPaused) { if (slideshowStop) slideshowStop(); }
+            if (slideshowActive || slideshowPaused) { if (slideshowStop) slideshowStop(); }
             else { if (slideshowStart) slideshowStart(); }
         }
 
@@ -221,24 +221,137 @@
     // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
     // ============================================
 
-    function runDeleteLogic() {
-        const delVidBtn = findButton(['Delete video', 'Удалить видео']);
-        if (delVidBtn) {
-            triggerClick(delVidBtn, 'Delete video');
-            if (autoConfirm) {
-                setTimeout(() => {
-                    const confirmBtn = Array.from(document.querySelectorAll('button')).find(btn =>
-                        btn !== delVidBtn && btn.offsetParent !== null &&
-                        (btn.textContent || '').trim().includes('Удалить')
-                    );
-                    if (confirmBtn) confirmBtn.click();
-                }, 500);
-            }
-        } else {
-            // Кнопка удаления публикации (первый пост) — без автоподтверждения
-            const delPubBtn = findButton(['Delete post', 'Удалить публикацию']);
-            if (delPubBtn) triggerClick(delPubBtn, 'Delete post');
+    function runSmartDelete(callback) {
+        const delPubBtn = findButton(['Delete post', 'Удалить публикацию']);
+        if (delPubBtn) {
+            triggerClick(delPubBtn, 'Delete post');
+            setTimeout(() => {
+                window.close();
+            }, 300);
+            return;
         }
+
+        const delItemBtn = findButton(['Delete video', 'Удалить видео', 'Delete image', 'Удалить изображение']);
+        if (delItemBtn) {
+            const firstUrl = location.href;
+            const navKey = slideshowOrientation === 'h' ? 'ArrowLeft' : 'ArrowUp';
+            
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: navKey, bubbles: true }));
+            
+            setTimeout(() => {
+                if (location.href === firstUrl) {
+                    setTimeout(() => {
+                        if (location.href === firstUrl) {
+                            showToast('Ссылка не меняется, по умному не получится');
+                            triggerDeleteWithConfirm(delItemBtn);
+                            if (callback) callback();
+                        } else {
+                            const activeBtn = Array.from(document.querySelectorAll('button[data-filmstrip-item="true"]'))
+                                .find(btn => btn.classList.contains('ring-white') || btn.className.includes('ring-white'));
+                            const targetImgSrc = activeBtn ? activeBtn.querySelector('img')?.src : null;
+                            proceedSmartDelete(firstUrl, location.href, delItemBtn, targetImgSrc, callback);
+                        }
+                    }, 500);
+                } else {
+                    const activeBtn = Array.from(document.querySelectorAll('button[data-filmstrip-item="true"]'))
+                        .find(btn => btn.classList.contains('ring-white') || btn.className.includes('ring-white'));
+                    const targetImgSrc = activeBtn ? activeBtn.querySelector('img')?.src : null;
+                    proceedSmartDelete(firstUrl, location.href, delItemBtn, targetImgSrc, callback);
+                }
+            }, 200);
+        } else {
+            console.log('%c❌ Кнопка удаления не найдена', 'color:#ef4444');
+            if (callback) callback();
+        }
+    }
+
+    function proceedSmartDelete(firstUrl, secondUrl, delItemBtn, targetImgSrc, callback) {
+        const backKey = slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowDown';
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: backKey, bubbles: true }));
+        
+        setTimeout(() => {
+            triggerDeleteWithConfirm(delItemBtn);
+            
+            // Ждем смены URL (удаление завершено)
+            let deleteCheckCount = 0;
+            const deleteCheckInterval = setInterval(() => {
+                deleteCheckCount++;
+                if (location.href !== firstUrl || deleteCheckCount > 30) {
+                    clearInterval(deleteCheckInterval);
+                    
+                    // Пытаемся найти и кликнуть иконку в ленте в течение 1 секунды (10 попыток каждые 100мс)
+                    let searchCheckCount = 0;
+                    const searchInterval = setInterval(() => {
+                        searchCheckCount++;
+                        let clicked = false;
+                        if (targetImgSrc) {
+                            const btn = Array.from(document.querySelectorAll('button[data-filmstrip-item="true"]'))
+                                .find(b => b.querySelector('img')?.src === targetImgSrc);
+                            if (btn) {
+                                btn.click();
+                                clicked = true;
+                                console.log('%c[Grok Smart Delete] Успешный переход кликом по иконке превью', 'color:#10b981;');
+                            }
+                        }
+                        
+                        if (clicked || searchCheckCount >= 10) {
+                            clearInterval(searchInterval);
+                            if (!clicked) {
+                                console.log('%c[Grok Smart Delete] Иконка не появилась за 1с, жесткий переход по ссылке', 'color:#ef4444;');
+                                window.location.href = secondUrl;
+                            }
+                            if (callback) {
+                                setTimeout(() => callback(), 500);
+                            }
+                        }
+                    }, 100);
+                }
+            }, 100);
+        }, 200);
+    }
+
+    function triggerDeleteWithConfirm(delItemBtn) {
+        triggerClick(delItemBtn, 'Delete item');
+        if (autoConfirm) {
+            setTimeout(() => {
+                const confirmBtn = Array.from(document.querySelectorAll('button')).find(btn =>
+                    btn !== delItemBtn && btn.offsetParent !== null &&
+                    (btn.textContent || '').trim().includes('Удалить')
+                );
+                if (confirmBtn) confirmBtn.click();
+            }, 500);
+        }
+    }
+
+    function showToast(message) {
+        const toast = document.createElement('div');
+        toast.textContent = message;
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(31, 41, 55, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #f3f4f6;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 1000000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            font-family: system-ui, -apple-system, sans-serif;
+        `;
+        document.body.appendChild(toast);
+        toast.offsetHeight; // force reflow
+        toast.style.opacity = '1';
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
     }
 
     function findButton(labels) {
@@ -615,10 +728,13 @@
     // F7          = фокус на панель (Tab-навигация)
     // ============================================
 
-    let slideshowInterval    = null;
+    let slideshowActive      = false;
+    let slideshowTimeoutId   = null;
+    let downloadTimeoutId    = null;
     let slideshowPaused      = false;
     let slideshowStart       = null;
     let slideshowStop        = null;
+    let slideshowResetTimer   = null;
     let slideshowOrientation = localStorage.getItem('grok_slideshow_orientation') || 'v';
     let currentInterval      = 7;
 
@@ -872,8 +988,9 @@
 
     function initPanelContent(container) {
         const initDownload = localStorage.getItem('grok_slideshow_download') !== 'false';
-        const initTab      = localStorage.getItem('grok_slideshow_tab')  === 'true';
-        const initBrsr     = localStorage.getItem('grok_slideshow_brsr') === 'true';
+        const initDelete   = localStorage.getItem('grok_slideshow_delete')   === 'true';
+        const initTab      = localStorage.getItem('grok_slideshow_tab')      === 'true';
+        const initBrsr     = localStorage.getItem('grok_slideshow_brsr')     === 'true';
 
         container.innerHTML = `
             <!-- Верхняя строка слайдшоу: пресеты, интервал (+/-), x2/÷2 -->
@@ -901,19 +1018,29 @@
 
             <!-- Нижняя строка слайдшоу: чекбоксы и кнопка ориентации -->
             <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 4px; font-size: 11px; color: #9ca3af;">
-                <div class="grok-settings-row" style="display: flex; align-items: center; gap: 8px;">
-                    <label title="Скачивать каждый слайд в слайдшоу">
-                        <input type="checkbox" id="grok-cb-download" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDownload ? 'checked' : ''}>
-                        <span>↓</span>
-                    </label>
-                    <label title="Пауза при переключении вкладки">
-                        <input type="checkbox" id="grok-cb-tab" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initTab ? 'checked' : ''}>
-                        <span>Tab</span>
-                    </label>
-                    <label title="Пауза при потере фокуса браузера">
-                        <input type="checkbox" id="grok-cb-brsr" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initBrsr ? 'checked' : ''}>
-                        <span>Brsr</span>
-                    </label>
+                <div class="grok-settings-row" style="display: flex; gap: 12px; align-items: center;">
+                    <!-- Левый столбик: ↓ и del -->
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label title="Скачивать каждый слайд в слайдшоу">
+                            <input type="checkbox" id="grok-cb-download" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDownload ? 'checked' : ''}>
+                            <span>↓</span>
+                        </label>
+                        <label title="Удалять каждый слайд в слайдшоу">
+                            <input type="checkbox" id="grok-cb-delete" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDelete ? 'checked' : ''}>
+                            <span>del</span>
+                        </label>
+                    </div>
+                    <!-- Правый столбик: Tab и Brsr -->
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label title="Пауза при переключении вкладки">
+                            <input type="checkbox" id="grok-cb-tab" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initTab ? 'checked' : ''}>
+                            <span>Tab</span>
+                        </label>
+                        <label title="Пауза при потере фокуса браузера">
+                            <input type="checkbox" id="grok-cb-brsr" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initBrsr ? 'checked' : ''}>
+                            <span>Brsr</span>
+                        </label>
+                    </div>
                 </div>
                 <button id="grok-btn-orient" class="grok-widget-btn" style="font-size: 12px; padding: 3px 6px;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</button>
             </div>
@@ -982,12 +1109,14 @@
         const btnDiv2     = container.querySelector('#grok-btn-div2');
         const btnOrient   = container.querySelector('#grok-btn-orient');
         const cbDownload  = container.querySelector('#grok-cb-download');
+        const cbDelete    = container.querySelector('#grok-cb-delete');
         const cbTab       = container.querySelector('#grok-cb-tab');
         const cbBrsr      = container.querySelector('#grok-cb-brsr');
         const radios      = container.querySelectorAll('input[name="grok-pd-action"]');
         const cbAConfirm  = container.querySelector('#grok-cb-aconfirm');
 
         cbDownload.addEventListener('change', () => localStorage.setItem('grok_slideshow_download', cbDownload.checked));
+        cbDelete.addEventListener('change',   () => localStorage.setItem('grok_slideshow_delete',   cbDelete.checked));
         cbTab.addEventListener('change',      () => localStorage.setItem('grok_slideshow_tab',      cbTab.checked));
         cbBrsr.addEventListener('change',     () => localStorage.setItem('grok_slideshow_brsr',     cbBrsr.checked));
 
@@ -1015,9 +1144,20 @@
             }
         }
 
+        function clearSlideshowTimers() {
+            if (slideshowTimeoutId) {
+                clearTimeout(slideshowTimeoutId);
+                slideshowTimeoutId = null;
+            }
+            if (downloadTimeoutId) {
+                clearTimeout(downloadTimeoutId);
+                downloadTimeoutId = null;
+            }
+        }
+
         function stopSlideshow() {
-            if (slideshowInterval) clearInterval(slideshowInterval);
-            slideshowInterval = null;
+            clearSlideshowTimers();
+            slideshowActive   = false;
             slideshowPaused   = false;
             setActive(false);
         }
@@ -1034,29 +1174,48 @@
             }
         }
 
+        function scheduleNextSlideCycle(seconds) {
+            clearSlideshowTimers();
+
+            // 1. Schedule download
+            const dlDelay = Math.max((seconds - 2) * 1000, 0);
+            if (cbDownload && cbDownload.checked) {
+                downloadTimeoutId = setTimeout(() => {
+                    downloadIfChecked();
+                }, dlDelay);
+            }
+
+            // 2. Schedule next slide transition
+            slideshowTimeoutId = setTimeout(() => {
+                if (cbDelete && cbDelete.checked) {
+                    runSmartDelete(() => {
+                        scheduleNextSlideCycle(seconds);
+                    });
+                } else {
+                    nextSlide();
+                    scheduleNextSlideCycle(seconds);
+                }
+            }, seconds * 1000);
+        }
+
         function startSlideshow(seconds) {
             if (!checkIsPostPage()) {
                 alert("Слайдшоу можно запустить только на странице поста (изображения)!");
                 return;
             }
             stopSlideshow();
+            slideshowActive = true;
             setActive(true);
             currentInterval = seconds;
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
 
-            // Первый цикл сразу
-            setTimeout(() => downloadIfChecked(), (seconds - 2) * 1000);
-
-            // Основной цикл
-            slideshowInterval = setInterval(() => {
-                setTimeout(() => downloadIfChecked(), (seconds - 2) * 1000);
-                nextSlide();
-            }, seconds * 1000);
+            scheduleNextSlideCycle(seconds);
         }
 
         slideshowStart = () => startSlideshow(currentInterval);
         slideshowStop  = stopSlideshow;
+        slideshowResetTimer = () => scheduleNextSlideCycle(currentInterval);
 
         // Пауза/возобновление (Tab + Brsr)
         let tabVisible    = !document.hidden;
@@ -1065,10 +1224,9 @@
         function checkPauseResume() {
             const shouldPause = (cbTab.checked && !tabVisible) || (cbBrsr.checked && !windowFocused);
             if (shouldPause) {
-                if (slideshowInterval) {
-                    clearInterval(slideshowInterval);
-                    slideshowInterval = null;
-                    slideshowPaused   = true;
+                if (slideshowActive) {
+                    clearSlideshowTimers();
+                    slideshowPaused = true;
                 }
             } else {
                 if (slideshowPaused) {
@@ -1096,7 +1254,7 @@
         });
 
         btnInterval.onclick = () => {
-            if (slideshowInterval || slideshowPaused) stopSlideshow();
+            if (slideshowActive || slideshowPaused) stopSlideshow();
             else startSlideshow(currentInterval);
         };
 
@@ -1112,14 +1270,14 @@
             currentInterval = Math.min(currentInterval + 1, 100);
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
-            if (slideshowInterval) startSlideshow(currentInterval);
+            if (slideshowActive) startSlideshow(currentInterval);
         };
         minus.onclick = (e) => {
             e.stopImmediatePropagation();
             currentInterval = Math.max(currentInterval - 1, 3);
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
-            if (slideshowInterval) startSlideshow(currentInterval);
+            if (slideshowActive) startSlideshow(currentInterval);
         };
 
         btnX2.onclick = (e) => {
@@ -1127,7 +1285,7 @@
             currentInterval = Math.min(currentInterval * 2, 100);
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
-            if (slideshowInterval) startSlideshow(currentInterval);
+            if (slideshowActive) startSlideshow(currentInterval);
         };
 
         btnDiv2.onclick = (e) => {
@@ -1135,7 +1293,7 @@
             currentInterval = Math.max(Math.ceil(currentInterval / 2), 3);
             btnInterval.textContent = currentInterval;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
-            if (slideshowInterval) startSlideshow(currentInterval);
+            if (slideshowActive) startSlideshow(currentInterval);
         };
 
         preset17.onclick = (e) => {
@@ -1143,21 +1301,21 @@
             currentInterval = 17;
             btnInterval.textContent = 17;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
-            if (slideshowInterval) startSlideshow(17);
+            if (slideshowActive) startSlideshow(17);
         };
         preset12.onclick = (e) => {
             e.stopImmediatePropagation();
             currentInterval = 12;
             btnInterval.textContent = 12;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
-            if (slideshowInterval) startSlideshow(12);
+            if (slideshowActive) startSlideshow(12);
         };
         preset7.onclick = (e) => {
             e.stopImmediatePropagation();
             currentInterval = 7;
             btnInterval.textContent = 7;
             localStorage.setItem('grok_slideshow_interval', currentInterval);
-            if (slideshowInterval) startSlideshow(7);
+            if (slideshowActive) startSlideshow(7);
         };
 
         // Поддержка нажатия Enter / Space на элементах для клавиатурной навигации
@@ -1178,6 +1336,18 @@
 
     // Инициализация виджета
     initWidget();
+
+    // Отслеживание ручной смены URL во время слайдшоу для сброса счетчика
+    let lastUrl = location.href;
+    setInterval(() => {
+        if (location.href !== lastUrl) {
+            lastUrl = location.href;
+            if (slideshowActive && !slideshowPaused && slideshowResetTimer) {
+                console.log('%c[Grok Slideshow] URL сменился вручную, сбрасываем таймер', 'color:#3b82f6;');
+                slideshowResetTimer();
+            }
+        }
+    }, 200);
 
     console.log('%c[Grok Hotkeys + Slideshow] Все модули инициализированы', 'color:#10b981');
 
