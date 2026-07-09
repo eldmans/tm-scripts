@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.2
+// @version      5.2.1
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.2.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
@@ -1107,22 +1107,23 @@
                 SlideShow
             </div>
 
-            <!-- Режимы: Manual и AUTO -->
-            <div style="display: flex; justify-content: space-between; width: 100%; font-size: 11px; color: #9ca3af; font-weight: 600; text-align: center; margin-bottom: 2px;">
-                <div style="width: 50%;">Manual</div>
-                <div style="width: 50%;">AUTO</div>
+            <!-- Режимы: Manual, Кнопка Ориентации, AUTO -->
+            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; font-size: 11px; color: #9ca3af; font-weight: 600; text-align: center; margin-bottom: 2px;">
+                <div style="width: 40%; text-align: right; padding-right: 4px;">Manual</div>
+                <button id="grok-btn-orient" class="grok-widget-btn" style="font-size: 11px; padding: 2px 4px; line-height: 1; border-radius: 4px; min-width: 20px;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</button>
+                <div style="width: 40%; text-align: left; padding-left: 4px;">AUTO</div>
             </div>
 
             <!-- Строка управления -->
             <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 10px; margin-bottom: 4px;">
-                <!-- Слева: Manual контроллер -->
+                <!-- Manual контроллер -->
                 <div style="display: flex; align-items: center; justify-content: center; gap: 4px; width: 50%;">
                     <div id="grok-manual-minus" class="grok-plus-minus" tabindex="0" style="font-size: 16px; padding: 2px 4px;">−</div>
                     <button id="grok-btn-manual" class="grok-widget-btn" style="width: 44px; height: 32px; font-size: 14px; font-weight: bold; border-radius: 8px;">${currentInterval}</button>
                     <div id="grok-manual-plus" class="grok-plus-minus" tabindex="0" style="font-size: 16px; padding: 2px 4px;">+</div>
                 </div>
 
-                <!-- Справа: AUTO контроллер -->
+                <!-- AUTO контроллер -->
                 <div style="display: flex; align-items: center; justify-content: center; gap: 4px; width: 50%;">
                     <div id="grok-auto-minus" class="grok-plus-minus" tabindex="0" style="font-size: 16px; padding: 2px 4px;">−</div>
                     <button id="grok-btn-auto" class="grok-widget-btn" style="width: 44px; height: 32px; font-size: 14px; font-weight: bold; border-radius: 8px;">${countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds}</button>
@@ -1130,48 +1131,41 @@
                 </div>
             </div>
 
-            <!-- Нижняя строка режимов (пресеты и секундомер) -->
-            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; height: 20px; font-size: 11px; margin-bottom: 6px;">
+            <!-- Нижняя строка режимов (пресеты и постоянный секундомер) -->
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; height: 22px; font-size: 11px; margin-bottom: 6px;">
                 <!-- Пресеты под Manual -->
                 <div style="display: flex; gap: 4px; width: 50%; justify-content: center;">
-                    <div id="grok-preset-7" class="grok-preset-item" tabindex="0" style="padding: 2px 6px;">7</div>
-                    <div id="grok-preset-12" class="grok-preset-item" tabindex="0" style="padding: 2px 6px;">12</div>
-                    <div id="grok-preset-17" class="grok-preset-item" tabindex="0" style="padding: 2px 6px;">17</div>
+                    <div id="grok-preset-7" class="grok-preset-item" tabindex="0" style="padding: 2px 5px;">7</div>
+                    <div id="grok-preset-12" class="grok-preset-item" tabindex="0" style="padding: 2px 5px;">12</div>
+                    <div id="grok-preset-17" class="grok-preset-item" tabindex="0" style="padding: 2px 5px;">17</div>
                 </div>
 
-                <!-- Секундомер под AUTO -->
-                <div id="grok-auto-stopwatch" style="width: 50%; text-align: center; font-family: monospace; font-size: 12px; color: #fff; font-weight: bold; display: none;">
-                    0:00 / 0:00
+                <!-- Постоянный пустой контейнер секундомера под AUTO -->
+                <div style="width: 50%; display: flex; justify-content: center;">
+                    <div id="grok-auto-stopwatch" style="width: 68px; height: 18px; border: 1px solid #374151; border-radius: 4px; background: #111827; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 10px; color: #fff; font-weight: bold; line-height: 1;"></div>
                 </div>
             </div>
 
-            <!-- Нижняя строка слайдшоу: чекбоксы и кнопка ориентации -->
+            <!-- Нижняя строка слайдшоу: чекбоксы в ряд -->
             <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 4px; font-size: 11px; color: #9ca3af;">
-                <div class="grok-settings-row" style="display: flex; gap: 12px; align-items: center;">
-                    <!-- Левый столбик: ↓ и del -->
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <label title="Скачивать каждый слайд в слайдшоу">
-                            <input type="checkbox" id="grok-cb-download" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDownload ? 'checked' : ''}>
-                            <span>↓</span>
-                        </label>
-                        <label title="Удалять каждый слайд в слайдшоу">
-                            <input type="checkbox" id="grok-cb-delete" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDelete ? 'checked' : ''}>
-                            <span>del</span>
-                        </label>
-                    </div>
-                    <!-- Правый столбик: Tab и Brsr -->
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <label title="Пауза при переключении вкладки">
-                            <input type="checkbox" id="grok-cb-tab" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initTab ? 'checked' : ''}>
-                            <span>Tab</span>
-                        </label>
-                        <label title="Пауза при потере фокуса браузера">
-                            <input type="checkbox" id="grok-cb-brsr" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initBrsr ? 'checked' : ''}>
-                            <span>Brsr</span>
-                        </label>
-                    </div>
+                <div class="grok-settings-row" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <label title="Скачивать каждый слайд в слайдшоу">
+                        <input type="checkbox" id="grok-cb-download" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDownload ? 'checked' : ''}>
+                        <span>↓</span>
+                    </label>
+                    <label title="Удалять каждый слайд в слайдшоу">
+                        <input type="checkbox" id="grok-cb-delete" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDelete ? 'checked' : ''}>
+                        <span>del</span>
+                    </label>
+                    <label title="Пауза при переключении вкладки">
+                        <input type="checkbox" id="grok-cb-tab" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initTab ? 'checked' : ''}>
+                        <span>Tab</span>
+                    </label>
+                    <label title="Пауза при потере фокуса браузера">
+                        <input type="checkbox" id="grok-cb-brsr" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initBrsr ? 'checked' : ''}>
+                        <span>Brsr</span>
+                    </label>
                 </div>
-                <button id="grok-btn-orient" class="grok-widget-btn" style="font-size: 12px; padding: 3px 6px;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</button>
             </div>
 
             <!-- Разделитель -->
@@ -1326,7 +1320,7 @@
         function stopSlideshow() {
             clearSlideshowTimers();
             const stopwatchEl = container.querySelector('#grok-auto-stopwatch');
-            if (stopwatchEl) stopwatchEl.style.display = 'none';
+            if (stopwatchEl) stopwatchEl.textContent = '';
             slideshowActive   = false;
             slideshowPaused   = false;
             updateButtonStyles();
@@ -1364,7 +1358,7 @@
             clearSlideshowTimers();
             
             const stopwatchEl = container.querySelector('#grok-auto-stopwatch');
-            if (stopwatchEl) stopwatchEl.style.display = 'none';
+            if (stopwatchEl) stopwatchEl.textContent = '';
 
             if (!slideshowActive || slideshowPaused) {
                 updateButtonStyles();
@@ -1507,16 +1501,14 @@
                                 } else {
                                     if (stopwatchEl) {
                                         stopwatchEl.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
-                                        stopwatchEl.style.display = 'block';
                                     }
                                 }
                             } else {
-                                if (stopwatchEl) stopwatchEl.style.display = 'none';
+                                if (stopwatchEl) stopwatchEl.textContent = '';
                             }
                         } else {
                             if (stopwatchEl) {
                                 stopwatchEl.textContent = '0:00 / 0:00';
-                                stopwatchEl.style.display = 'block';
                             }
                         }
 
