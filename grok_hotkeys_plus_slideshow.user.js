@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.2.1
+// @version      5.3
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.2.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
@@ -153,10 +153,35 @@
                     setTimeout(() => {
                         document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
                     }, 500);
+                } else if (pdAction === 'note') {
+                    setTimeout(() => {
+                        addNotePrefix(true);
+                        setTimeout(() => {
+                            if (slideshowDirections.length > 0) {
+                                const key = getArrowKeyForDirection(slideshowDirections[0]);
+                                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                            } else {
+                                document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
+                            }
+                        }, 150);
+                    }, 500);
                 } else if (pdAction === 'del') {
                     setTimeout(() => runSmartDelete(), 1000);
                 }
             }
+        }
+
+        if (hotkeyMatches(e, config.noteAction)) {
+            e.preventDefault();
+            addNotePrefix(false);
+            setTimeout(() => {
+                if (slideshowDirections.length > 0) {
+                    const key = getArrowKeyForDirection(slideshowDirections[0]);
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                } else {
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
+                }
+            }, 150);
         }
 
         if (hotkeyMatches(e, config.upscale)) {
@@ -337,6 +362,38 @@
                 if (confirmBtn) confirmBtn.click();
             }, 500);
         }
+    }
+
+    function addNotePrefix(isDownloaded) {
+        const textarea = document.querySelector('textarea, input[type="text"]');
+        if (!textarea) return;
+
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const mo = String(now.getMonth() + 1).padStart(2, '0');
+        const timeStr = `${hh}:${mm} ${dd}.${mo}`;
+        
+        const actionWord = isDownloaded ? 'Скачано' : 'Просмотрено';
+        const prefix = `${actionWord} в ${timeStr}\n`;
+
+        textarea.focus();
+        
+        const oldValue = textarea.value || '';
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set
+            || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+            
+        if (setter) {
+            setter.call(textarea, prefix + oldValue);
+        } else {
+            textarea.value = prefix + oldValue;
+        }
+        
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        textarea.blur();
     }
 
     let timerPill = null;
@@ -844,6 +901,9 @@
     const COUNTDOWN_SEC_KEY = 'grok_slideshow_countdown_sec';
     const MODE_KEY          = 'grok_slideshow_mode';
     const PHOTO_BASE_KEY    = 'grok_slideshow_photo_base_sec';
+    const REPEAT_KEY         = 'grok_slideshow_repeat';
+    const DIRECTIONS_KEY     = 'grok_slideshow_directions';
+    const DL_TYPE_KEY        = 'grok_slideshow_download_type';
 
     let widgetState  = localStorage.getItem(WIDGET_STATE_KEY) || 'strip';
     let pdAction     = localStorage.getItem(PD_ACTION_KEY)    || 'up';
@@ -854,6 +914,16 @@
     if (isNaN(countdownSeconds)) countdownSeconds = 3;
     let photoBaseSeconds = parseInt(localStorage.getItem(PHOTO_BASE_KEY), 10);
     if (isNaN(photoBaseSeconds)) photoBaseSeconds = 5;
+
+    let slideshowRepeat  = localStorage.getItem(REPEAT_KEY) !== 'false'; // default true
+    let slideshowDirections = [];
+    try {
+        slideshowDirections = JSON.parse(localStorage.getItem(DIRECTIONS_KEY));
+    } catch(e) {}
+    if (!Array.isArray(slideshowDirections) || slideshowDirections.length === 0) {
+        slideshowDirections = ['left'];
+    }
+    let downloadType = localStorage.getItem(DL_TYPE_KEY) || 'all';
 
     let widgetEl     = null; // весь виджет
     let gearRowEl    = null; // строка с шестерёнкой
@@ -1096,7 +1166,6 @@
     }
 
     function initPanelContent(container) {
-        const initDownload = localStorage.getItem('grok_slideshow_download') !== 'false';
         const initDelete   = localStorage.getItem('grok_slideshow_delete')   === 'true';
         const initTab      = localStorage.getItem('grok_slideshow_tab')      === 'true';
         const initBrsr     = localStorage.getItem('grok_slideshow_brsr')     === 'true';
@@ -1109,9 +1178,9 @@
 
             <!-- Режимы: Manual, Кнопка Ориентации, AUTO -->
             <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; font-size: 11px; color: #9ca3af; font-weight: 600; text-align: center; margin-bottom: 2px;">
-                <div style="width: 40%; text-align: right; padding-right: 4px;">Manual</div>
+                <div id="grok-label-manual-header" style="width: 40%; text-align: right; padding-right: 4px; transition: color 0.2s ease;">Manual</div>
                 <button id="grok-btn-orient" class="grok-widget-btn" style="font-size: 11px; padding: 2px 4px; line-height: 1; border-radius: 4px; min-width: 20px;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</button>
-                <div style="width: 40%; text-align: left; padding-left: 4px;">AUTO</div>
+                <div id="grok-label-auto-header" style="width: 40%; text-align: left; padding-left: 4px; transition: color 0.2s ease;">AUTO</div>
             </div>
 
             <!-- Строка управления -->
@@ -1146,12 +1215,36 @@
                 </div>
             </div>
 
+            <!-- D-pad перекрестие 3x3 с кнопкой R по центру -->
+            <div style="display: flex; flex-direction: column; align-items: center; width: 100%; margin-bottom: 6px;">
+                <div style="display: grid; grid-template-columns: repeat(3, 26px); grid-template-rows: repeat(3, 26px); gap: 2px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 14px; padding: 4px; align-items: center; justify-content: center;">
+                    <!-- Строка 1 -->
+                    <div></div>
+                    <button id="grok-dpad-up" class="grok-widget-btn" style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 11px; padding: 0;" title="Вверх">▲</button>
+                    <div></div>
+                    
+                    <!-- Строка 2 -->
+                    <button id="grok-dpad-left" class="grok-widget-btn" style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 11px; padding: 0;" title="Влево">◀</button>
+                    <button id="grok-dpad-repeat" class="grok-widget-btn" style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; border-radius: 50%; padding: 0;" title="Повтор/Петля (R)">R</button>
+                    <button id="grok-dpad-right" class="grok-widget-btn" style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 11px; padding: 0;" title="Вправо">▶</button>
+                    
+                    <!-- Строка 3 -->
+                    <div></div>
+                    <button id="grok-dpad-down" class="grok-widget-btn" style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 11px; padding: 0;" title="Вниз">▼</button>
+                    <div></div>
+                </div>
+            </div>
+
             <!-- Нижняя строка слайдшоу: чекбоксы в ряд -->
             <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 4px; font-size: 11px; color: #9ca3af;">
                 <div class="grok-settings-row" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <label title="Скачивать каждый слайд в слайдшоу">
-                        <input type="checkbox" id="grok-cb-download" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDownload ? 'checked' : ''}>
-                        <span>↓</span>
+                    <label>
+                        <select id="grok-select-download-type" style="background: #1f2937; border: 1px solid #374151; border-radius: 4px; color: #fff; font-size: 11px; padding: 1px 2px; outline: none; cursor: pointer;">
+                            <option value="all" ${downloadType === 'all' ? 'selected' : ''}>↓ всё</option>
+                            <option value="photo" ${downloadType === 'photo' ? 'selected' : ''}>↓ фото</option>
+                            <option value="video" ${downloadType === 'video' ? 'selected' : ''}>↓ видео</option>
+                            <option value="none" ${downloadType === 'none' ? 'selected' : ''}>↓ выкл</option>
+                        </select>
                     </label>
                     <label title="Удалять каждый слайд в слайдшоу">
                         <input type="checkbox" id="grok-cb-delete" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${initDelete ? 'checked' : ''}>
@@ -1184,6 +1277,10 @@
                     <label title="Скачать + листать вверх/вправо">
                         <input type="radio" name="grok-pd-action" value="up" style="accent-color: #3b82f6;" ${pdAction === 'up' ? 'checked' : ''}>
                         <span>+↑</span>
+                    </label>
+                    <label title="Скачать + написать Заметку + Вверх">
+                        <input type="radio" name="grok-pd-action" value="note" style="accent-color: #3b82f6;" ${pdAction === 'note' ? 'checked' : ''}>
+                        <span>note</span>
                     </label>
                     <label title="Скачать + подождать 1с + Удалить">
                         <input type="radio" name="grok-pd-action" value="del" style="accent-color: #3b82f6;" ${pdAction === 'del' ? 'checked' : ''}>
@@ -1228,11 +1325,17 @@
         const autoMinus   = container.querySelector('#grok-auto-minus');
         const autoPlus    = container.querySelector('#grok-auto-plus');
 
+        const btnUp       = container.querySelector('#grok-dpad-up');
+        const btnDown     = container.querySelector('#grok-dpad-down');
+        const btnLeft     = container.querySelector('#grok-dpad-left');
+        const btnRight    = container.querySelector('#grok-dpad-right');
+        const btnRepeat   = container.querySelector('#grok-dpad-repeat');
+
         const preset17    = container.querySelector('#grok-preset-17');
         const preset12    = container.querySelector('#grok-preset-12');
         const preset7     = container.querySelector('#grok-preset-7');
         const btnOrient   = container.querySelector('#grok-btn-orient');
-        const cbDownload  = container.querySelector('#grok-cb-download');
+        const selectDl    = container.querySelector('#grok-select-download-type');
         const cbDelete    = container.querySelector('#grok-cb-delete');
         const cbTab       = container.querySelector('#grok-cb-tab');
         const cbBrsr      = container.querySelector('#grok-cb-brsr');
@@ -1240,10 +1343,68 @@
         const cbAConfirm  = container.querySelector('#grok-cb-aconfirm');
         const cbHoldPost  = container.querySelector('#grok-cb-holdpost');
 
-        cbDownload.addEventListener('change', () => localStorage.setItem('grok_slideshow_download', cbDownload.checked));
+        selectDl.addEventListener('change', () => {
+            downloadType = selectDl.value;
+            localStorage.setItem(DL_TYPE_KEY, downloadType);
+        });
         cbDelete.addEventListener('change',   () => localStorage.setItem('grok_slideshow_delete',   cbDelete.checked));
         cbTab.addEventListener('change',      () => localStorage.setItem('grok_slideshow_tab',      cbTab.checked));
         cbBrsr.addEventListener('change',     () => localStorage.setItem('grok_slideshow_brsr',     cbBrsr.checked));
+
+        function updateDpadStyles() {
+            if (!btnUp || !btnDown || !btnLeft || !btnRight || !btnRepeat) return;
+            const setGreen = (btn, active) => {
+                if (active) {
+                    btn.style.background = '#10b981';
+                    btn.style.borderColor = '#10b981';
+                    btn.style.color = '#ffffff';
+                } else {
+                    btn.style.background = '#1f2937';
+                    btn.style.borderColor = '#374151';
+                    btn.style.color = '#e5e7eb';
+                }
+            };
+            setGreen(btnUp, slideshowDirections.includes('up'));
+            setGreen(btnDown, slideshowDirections.includes('down'));
+            setGreen(btnLeft, slideshowDirections.includes('left'));
+            setGreen(btnRight, slideshowDirections.includes('right'));
+
+            if (slideshowRepeat) {
+                btnRepeat.style.background = '#3b82f6';
+                btnRepeat.style.borderColor = '#3b82f6';
+                btnRepeat.style.color = '#ffffff';
+            } else {
+                btnRepeat.style.background = '#1f2937';
+                btnRepeat.style.borderColor = '#374151';
+                btnRepeat.style.color = '#9ca3af';
+            }
+        }
+
+        const toggleDirection = (dir, opposite) => {
+            const idx = slideshowDirections.indexOf(dir);
+            if (idx > -1) {
+                slideshowDirections.splice(idx, 1);
+            } else {
+                slideshowDirections.push(dir);
+                const oppIdx = slideshowDirections.indexOf(opposite);
+                if (oppIdx > -1) slideshowDirections.splice(oppIdx, 1);
+            }
+            localStorage.setItem(DIRECTIONS_KEY, JSON.stringify(slideshowDirections));
+            updateDpadStyles();
+        };
+
+        btnUp.onclick = (e) => { e.stopPropagation(); toggleDirection('up', 'down'); };
+        btnDown.onclick = (e) => { e.stopPropagation(); toggleDirection('down', 'up'); };
+        btnLeft.onclick = (e) => { e.stopPropagation(); toggleDirection('left', 'right'); };
+        btnRight.onclick = (e) => { e.stopPropagation(); toggleDirection('right', 'left'); };
+        btnRepeat.onclick = (e) => {
+            e.stopPropagation();
+            slideshowRepeat = !slideshowRepeat;
+            localStorage.setItem(REPEAT_KEY, slideshowRepeat);
+            updateDpadStyles();
+        };
+
+        updateDpadStyles();
 
         radios.forEach(radio => {
             radio.addEventListener('change', () => {
@@ -1332,25 +1493,180 @@
         }
 
         function downloadIfChecked() {
-            if (cbDownload && cbDownload.checked) {
-                const btn = document.querySelector('button[aria-label*="Скачать"], button[aria-label="Скачать"]');
-                if (btn) btn.click();
+            if (downloadType === 'none') return;
+            const hasVideo = document.querySelector('video') !== null;
+            if (downloadType === 'photo' && hasVideo) return;
+            if (downloadType === 'video' && !hasVideo) return;
+            const btn = document.querySelector('button[aria-label*="Скачать"], button[aria-label="Скачать"]');
+            if (btn) btn.click();
+        }
+
+        function getArrowKeyForDirection(dir) {
+            if (dir === 'up') return 'ArrowUp';
+            if (dir === 'down') return 'ArrowDown';
+            if (dir === 'left') return 'ArrowLeft';
+            return 'ArrowRight';
+        }
+
+        function scrollToFarEnd(dir, callback) {
+            const key = getArrowKeyForDirection(dir);
+            let lastUrl = location.href;
+            let unchangedCount = 0;
+            const interval = setInterval(() => {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                setTimeout(() => {
+                    if (location.href === lastUrl) {
+                        unchangedCount++;
+                        if (unchangedCount >= 5) {
+                            clearInterval(interval);
+                            callback();
+                        }
+                    } else {
+                        lastUrl = location.href;
+                        unchangedCount = 0;
+                    }
+                }, 50);
+            }, 100);
+        }
+
+        function loopBackToBottom(callback) {
+            let lastUrl = location.href;
+            let unchangedCount = 0;
+            const vInterval = setInterval(() => {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+                setTimeout(() => {
+                    if (location.href === lastUrl) {
+                        unchangedCount++;
+                        if (unchangedCount >= 5) {
+                            clearInterval(vInterval);
+                            scrollToFarEnd('right', callback);
+                        }
+                    } else {
+                        lastUrl = location.href;
+                        unchangedCount = 0;
+                    }
+                }, 50);
+            }, 100);
+        }
+
+        function loopBackToOpposite(dir, callback) {
+            const oppDir = dir === 'left' ? 'right' : (dir === 'right' ? 'left' : (dir === 'up' ? 'down' : 'up'));
+            scrollToFarEnd(oppDir, callback);
+        }
+
+        function performDpadStep(seconds) {
+            if (slideshowDirections.length === 0) {
+                stopSlideshow();
+                return;
+            }
+
+            const delPubBtn = findButton(['Delete post', 'Удалить публикацию']);
+            if (delPubBtn) {
+                if (!slideshowRepeat) {
+                    console.log('%c[Grok Slideshow] Достигнут первый пост и повтор выключен, останавливаем слайдшоу', 'color:#ef4444;');
+                    stopSlideshow();
+                    return;
+                } else {
+                    console.log('%c[Grok Slideshow] Достигнут первый пост, петля включена. Мотаем в самый вниз...', 'color:#3b82f6;');
+                    loopBackToBottom(() => {
+                        scheduleNextSlideCycle(seconds);
+                    });
+                    return;
+                }
+            }
+
+            if (slideshowDirections.length === 1) {
+                const dir = slideshowDirections[0];
+                const key = getArrowKeyForDirection(dir);
+                const beforeUrl = location.href;
+                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                setTimeout(() => {
+                    if (location.href === beforeUrl) {
+                        if (!slideshowRepeat) {
+                            stopSlideshow();
+                        } else {
+                            loopBackToOpposite(dir, () => {
+                                scheduleNextSlideCycle(seconds);
+                            });
+                        }
+                    } else {
+                        scheduleNextSlideCycle(seconds);
+                    }
+                }, 500);
+            } else if (slideshowDirections.length === 2) {
+                const hDir = slideshowDirections.find(d => d === 'left' || d === 'right');
+                const vDir = slideshowDirections.find(d => d === 'up' || d === 'down');
+                if (!hDir || !vDir) {
+                    const dir = slideshowDirections[0];
+                    const key = getArrowKeyForDirection(dir);
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                    setTimeout(() => scheduleNextSlideCycle(seconds), 500);
+                    return;
+                }
+                const hKey = getArrowKeyForDirection(hDir);
+                const vKey = getArrowKeyForDirection(vDir);
+                const beforeUrl = location.href;
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: hKey, bubbles: true }));
+                setTimeout(() => {
+                    if (location.href === beforeUrl) {
+                        console.log('%c[Grok Slideshow] Уперлись по горизонтали, делаем шаг по вертикали', 'color:#3b82f6;');
+                        const delPubBtnCheck = findButton(['Delete post', 'Удалить публикацию']);
+                        if (delPubBtnCheck && vDir === 'up' && !slideshowRepeat) {
+                            stopSlideshow();
+                            return;
+                        }
+                        document.dispatchEvent(new KeyboardEvent('keydown', { key: vKey, bubbles: true }));
+                        setTimeout(() => {
+                            if (location.href === beforeUrl) {
+                                if (!slideshowRepeat) {
+                                    stopSlideshow();
+                                } else {
+                                    loopBackToBottom(() => {
+                                        scheduleNextSlideCycle(seconds);
+                                    });
+                                }
+                            } else {
+                                const oppHDir = hDir === 'left' ? 'right' : 'left';
+                                scrollToFarEnd(oppHDir, () => {
+                                    scheduleNextSlideCycle(seconds);
+                                });
+                            }
+                        }, 500);
+                    } else {
+                        scheduleNextSlideCycle(seconds);
+                    }
+                }, 500);
             }
         }
 
         function executeSlideTransition(seconds) {
-            if (cbDownload && cbDownload.checked) {
-                downloadIfChecked();
+            const hasVideo = document.querySelector('video') !== null;
+            let downloaded = false;
+            if (downloadType !== 'none') {
+                if (downloadType === 'all' || (downloadType === 'photo' && !hasVideo) || (downloadType === 'video' && hasVideo)) {
+                    downloadIfChecked();
+                    downloaded = true;
+                }
             }
-            if (cbDelete && cbDelete.checked) {
-                runSmartDelete(() => {
-                    scheduleNextSlideCycle(seconds);
-                });
-            } else {
-                nextSlide();
+            if (pdAction === 'note') {
+                addNotePrefix(downloaded);
                 setTimeout(() => {
-                    scheduleNextSlideCycle(seconds);
-                }, 500);
+                    if (cbDelete && cbDelete.checked) {
+                        runSmartDelete(() => {
+                            scheduleNextSlideCycle(seconds);
+                        });
+                    } else {
+                        performDpadStep(seconds);
+                    }
+                }, 150);
+            } else {
+                if (cbDelete && cbDelete.checked) {
+                    runSmartDelete(() => {
+                        scheduleNextSlideCycle(seconds);
+                    });
+                } else {
+                    performDpadStep(seconds);
+                }
             }
         }
 
@@ -1530,7 +1846,6 @@
             localStorage.setItem(MODE_KEY, slideshowMode);
 
             if (slideshowMode === 'auto') {
-                checkIsFirstStart = true;
                 currentInterval = countdownSeconds;
             } else {
                 currentInterval = seconds;
@@ -1559,7 +1874,6 @@
             } else {
                 if (slideshowPaused) {
                     slideshowPaused = false;
-                    checkTimerSilentOnResume = true;
                     startSlideshow(slideshowMode === 'manual' ? currentInterval : countdownSeconds, slideshowMode);
                 }
             }
