@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.3
+// @version      5.4
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.4] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
@@ -150,10 +150,13 @@
             triggerClick(findButton(['Download', 'Скачать']), 'Download');
             if (checkIsPostPage()) {
                 if (pdAction === 'up') {
+                    const firstUrl = location.href;
                     setTimeout(() => {
                         document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
+                        if (transRight) checkAndDispatchRight(firstUrl);
                     }, 500);
                 } else if (pdAction === 'note') {
+                    const firstUrl = location.href;
                     setTimeout(() => {
                         addNotePrefix(true);
                         setTimeout(() => {
@@ -163,6 +166,7 @@
                             } else {
                                 document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
                             }
+                            if (transRight) checkAndDispatchRight(firstUrl);
                         }, 150);
                     }, 500);
                 } else if (pdAction === 'del') {
@@ -173,6 +177,7 @@
 
         if (hotkeyMatches(e, config.noteAction)) {
             e.preventDefault();
+            const firstUrl = location.href;
             addNotePrefix(false);
             setTimeout(() => {
                 if (slideshowDirections.length > 0) {
@@ -181,6 +186,7 @@
                 } else {
                     document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
                 }
+                if (transRight) checkAndDispatchRight(firstUrl);
             }, 150);
         }
 
@@ -261,13 +267,18 @@
             if (!holdPost) {
                 const firstUrl = location.href;
                 triggerDeleteWithConfirm(delItemBtn);
-                if (callback) {
+                if (callback || transRight) {
                     let checkCount = 0;
                     const checkInterval = setInterval(() => {
                         checkCount++;
                         if (location.href !== firstUrl || checkCount > 30) {
                             clearInterval(checkInterval);
-                            callback();
+                            if (transRight && location.href !== firstUrl) {
+                                setTimeout(() => {
+                                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+                                }, 100);
+                            }
+                            if (callback) callback();
                         }
                     }, 100);
                 }
@@ -341,6 +352,11 @@
                                 console.log('%c[Grok Smart Delete] Иконка не появилась за 1с, жесткий переход по ссылке', 'color:#ef4444;');
                                 window.location.href = secondUrl;
                             }
+                            if (transRight) {
+                                setTimeout(() => {
+                                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+                                }, 100);
+                            }
                             if (callback) {
                                 setTimeout(() => callback(), 500);
                             }
@@ -394,6 +410,22 @@
         textarea.dispatchEvent(new Event('change', { bubbles: true }));
         
         textarea.blur();
+    }
+
+    function checkAndDispatchRight(firstUrl) {
+        let count = 0;
+        const interval = setInterval(() => {
+            count++;
+            if (location.href !== firstUrl || count > 30) {
+                clearInterval(interval);
+                if (location.href !== firstUrl) {
+                    setTimeout(() => {
+                        console.log('%c[Grok Transition] Переход выполнен, нажимаем стрелку Вправо (ArrowRight)', 'color:#10b981;');
+                        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+                    }, 100);
+                }
+            }
+        }, 100);
     }
 
     let timerPill = null;
@@ -904,6 +936,7 @@
     const REPEAT_KEY         = 'grok_slideshow_repeat';
     const DIRECTIONS_KEY     = 'grok_slideshow_directions';
     const DL_TYPE_KEY        = 'grok_slideshow_download_type';
+    const TRANS_RIGHT_KEY    = 'grok_transition_right';
 
     let widgetState  = localStorage.getItem(WIDGET_STATE_KEY) || 'strip';
     let pdAction     = localStorage.getItem(PD_ACTION_KEY)    || 'up';
@@ -924,6 +957,7 @@
         slideshowDirections = ['left'];
     }
     let downloadType = localStorage.getItem(DL_TYPE_KEY) || 'all';
+    let transRight   = localStorage.getItem(TRANS_RIGHT_KEY) === 'true'; // default false
 
     let widgetEl     = null; // весь виджет
     let gearRowEl    = null; // строка с шестерёнкой
@@ -1287,6 +1321,13 @@
                         <span>del</span>
                     </label>
                 </div>
+                <!-- Вторая строка для чекбокса "стрелка вправо" по центру -->
+                <div style="display: flex; justify-content: center; width: 100%; margin-top: 2px;">
+                    <label title="Нажать стрелку Вправо после перехода на новый пост">
+                        <input type="checkbox" id="grok-cb-transright" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${transRight ? 'checked' : ''}>
+                        <span style="font-weight: 600;">→</span>
+                    </label>
+                </div>
             </div>
 
             <!-- Разделитель -->
@@ -1342,6 +1383,7 @@
         const radios      = container.querySelectorAll('input[name="grok-pd-action"]');
         const cbAConfirm  = container.querySelector('#grok-cb-aconfirm');
         const cbHoldPost  = container.querySelector('#grok-cb-holdpost');
+        const cbTransRight = container.querySelector('#grok-cb-transright');
 
         selectDl.addEventListener('change', () => {
             downloadType = selectDl.value;
@@ -1421,6 +1463,11 @@
         cbHoldPost.addEventListener('change', () => {
             holdPost = cbHoldPost.checked;
             localStorage.setItem(HOLD_POST_KEY, holdPost);
+        });
+
+        cbTransRight.addEventListener('change', () => {
+            transRight = cbTransRight.checked;
+            localStorage.setItem(TRANS_RIGHT_KEY, transRight);
         });
 
         function updateButtonStyles() {
