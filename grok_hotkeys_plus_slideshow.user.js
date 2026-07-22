@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.5
+// @version      5.6
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.5] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.6] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
@@ -769,7 +769,7 @@
             let val = parseInt(pInput.value, 10);
             if (isNaN(val) || val < 1) val = 5;
             photoBaseSeconds = val;
-            localStorage.setItem(PHOTO_BASE_KEY, photoBaseSeconds);
+            setSiteStorageItem('slideshow_photo_base_sec', photoBaseSeconds);
         });
 
         const cInput = settingsContainer.querySelector('#grok-countdown-input');
@@ -777,7 +777,7 @@
             let val = parseInt(cInput.value, 10);
             if (isNaN(val) || val < 1) val = 3;
             countdownSeconds = val;
-            localStorage.setItem(COUNTDOWN_SEC_KEY, countdownSeconds);
+            setSiteStorageItem('slideshow_countdown_sec', countdownSeconds);
         });
 
         // ── Зона конфликта ─────────────────────────────
@@ -1009,35 +1009,52 @@
     const WIDGET_STATE_KEY = 'grok_widget_state';
     const PD_ACTION_KEY    = 'grok_pd_action';
     const AUTO_CONFIRM_KEY = 'grok_delete_autoconfirm';
-    const HOLD_POST_KEY    = 'grok_delete_holdpost';
-    const COUNTDOWN_SEC_KEY = 'grok_slideshow_countdown_sec';
-    const MODE_KEY          = 'grok_slideshow_mode';
-    const PHOTO_BASE_KEY    = 'grok_slideshow_photo_base_sec';
-    const REPEAT_KEY         = 'grok_slideshow_repeat';
-    const DIRECTIONS_KEY     = 'grok_slideshow_directions';
-    const DL_TYPE_KEY        = 'grok_slideshow_download_type';
-    const TRANS_RIGHT_KEY    = 'grok_transition_right';
+    function getSitePrefix() {
+        const host = location.hostname.toLowerCase();
+        if (host.includes('civitai')) return 'civitai_';
+        if (host.includes('vkvideo') || host.includes('vk.video')) return 'vkvideo_';
+        return 'grok_';
+    }
 
-    let widgetState  = localStorage.getItem(WIDGET_STATE_KEY) || 'strip';
-    let pdAction     = localStorage.getItem(PD_ACTION_KEY)    || 'up';
-    let autoConfirm  = localStorage.getItem(AUTO_CONFIRM_KEY) !== 'false';
-    let holdPost     = localStorage.getItem(HOLD_POST_KEY)    !== 'false'; // default true
-    let slideshowMode = localStorage.getItem(MODE_KEY)        || 'auto';
-    let countdownSeconds = parseInt(localStorage.getItem(COUNTDOWN_SEC_KEY), 10);
+    function getSiteStorageItem(key, defaultVal) {
+        const prefix = getSitePrefix();
+        const val = localStorage.getItem(prefix + key);
+        if (val !== null) return val;
+        // Fallback to legacy global key if present
+        const globalVal = localStorage.getItem('grok_' + key);
+        return globalVal !== null ? globalVal : defaultVal;
+    }
+
+    function setSiteStorageItem(key, val) {
+        const prefix = getSitePrefix();
+        localStorage.setItem(prefix + key, val);
+    }
+
+    const VIDEO_LOOPS_KEY = 'slideshow_video_loops';
+
+    let widgetState  = getSiteStorageItem('widget_state', 'strip');
+    let pdAction     = getSiteStorageItem('pd_action', 'up');
+    let autoConfirm  = getSiteStorageItem('delete_autoconfirm', 'true') !== 'false';
+    let holdPost     = getSiteStorageItem('delete_holdpost', 'true') !== 'false';
+    let slideshowMode = getSiteStorageItem('slideshow_mode', 'auto');
+    let countdownSeconds = parseInt(getSiteStorageItem('slideshow_countdown_sec', '3'), 10);
     if (isNaN(countdownSeconds)) countdownSeconds = 3;
-    let photoBaseSeconds = parseInt(localStorage.getItem(PHOTO_BASE_KEY), 10);
+    let photoBaseSeconds = parseInt(getSiteStorageItem('slideshow_photo_base_sec', '5'), 10);
     if (isNaN(photoBaseSeconds)) photoBaseSeconds = 5;
 
-    let slideshowRepeat  = localStorage.getItem(REPEAT_KEY) !== 'false'; // default true
+    let videoTargetLoops = parseInt(getSiteStorageItem('slideshow_video_loops', '1'), 10);
+    if (isNaN(videoTargetLoops) || videoTargetLoops < 1) videoTargetLoops = 1;
+
+    let slideshowRepeat  = getSiteStorageItem('slideshow_repeat', 'true') !== 'false';
     let slideshowDirections = [];
     try {
-        slideshowDirections = JSON.parse(localStorage.getItem(DIRECTIONS_KEY));
+        slideshowDirections = JSON.parse(getSiteStorageItem('slideshow_directions', '["left"]'));
     } catch(e) {}
     if (!Array.isArray(slideshowDirections) || slideshowDirections.length === 0) {
         slideshowDirections = ['left'];
     }
-    let downloadType = localStorage.getItem(DL_TYPE_KEY) || 'all';
-    let transRight   = localStorage.getItem(TRANS_RIGHT_KEY) === 'true'; // default false
+    let downloadType = getSiteStorageItem('slideshow_download_type', 'all');
+    let transRight   = getSiteStorageItem('transition_right', 'false') === 'true';
 
     let widgetEl     = null; // весь виджет
     let gearRowEl    = null; // строка с шестерёнкой
@@ -1306,11 +1323,20 @@
                     <div id="grok-manual-plus" class="grok-plus-minus" tabindex="0" style="font-size: 16px; padding: 2px 4px;">+</div>
                 </div>
 
-                <!-- AUTO контроллер -->
-                <div style="display: flex; align-items: center; justify-content: center; gap: 4px; width: 50%;">
-                    <div id="grok-auto-minus" class="grok-plus-minus" tabindex="0" style="font-size: 16px; padding: 2px 4px;">−</div>
-                    <button id="grok-btn-auto" class="grok-widget-btn" style="width: 44px; height: 32px; font-size: 14px; font-weight: bold; border-radius: 8px;">${countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds}</button>
-                    <div id="grok-auto-plus" class="grok-plus-minus" tabindex="0" style="font-size: 16px; padding: 2px 4px;">+</div>
+                <!-- AUTO контроллер с секцией секунд (верх) и кругов (низ) -->
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 50%;">
+                    <!-- Верхняя строка: секунды задержки -->
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 2px;">
+                        <div id="grok-auto-sec-minus" class="grok-plus-minus" tabindex="0" style="font-size: 14px; padding: 1px 3px;" title="Уменьшить секунды задержки">−</div>
+                        <button id="grok-btn-auto" class="grok-widget-btn" style="width: 42px; height: 22px; font-size: 12px; font-weight: bold; border-radius: 6px;" title="Запуск/стоп AUTO слайдшоу">${countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds}с</button>
+                        <div id="grok-auto-sec-plus" class="grok-plus-minus" tabindex="0" style="font-size: 14px; padding: 1px 3px;" title="Увеличить секунды задержки">+</div>
+                    </div>
+                    <!-- Нижняя строка: проигрывания видео -->
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 2px;">
+                        <div id="grok-auto-loop-div" class="grok-plus-minus" tabindex="0" style="font-size: 12px; padding: 1px 3px;" title="Уменьшить число кругов видео">÷</div>
+                        <button id="grok-btn-loops" class="grok-widget-btn" style="width: 42px; height: 18px; font-size: 11px; font-weight: bold; border-radius: 4px; background: #161b27; color: #60a5fa; border-color: #252d3d;" title="Число полных кругов проигрывания видео">${videoTargetLoops}х</button>
+                        <div id="grok-auto-loop-mul" class="grok-plus-minus" tabindex="0" style="font-size: 12px; padding: 1px 3px;" title="Увеличить число кругов видео">×</div>
+                    </div>
                 </div>
             </div>
 
@@ -1442,9 +1468,12 @@
         const manualMinus = container.querySelector('#grok-manual-minus');
         const manualPlus  = container.querySelector('#grok-manual-plus');
 
-        const btnAuto     = container.querySelector('#grok-btn-auto');
-        const autoMinus   = container.querySelector('#grok-auto-minus');
-        const autoPlus    = container.querySelector('#grok-auto-plus');
+        const btnAuto        = container.querySelector('#grok-btn-auto');
+        const autoSecMinus   = container.querySelector('#grok-auto-sec-minus');
+        const autoSecPlus    = container.querySelector('#grok-auto-sec-plus');
+        const btnLoops       = container.querySelector('#grok-btn-loops');
+        const autoLoopDiv    = container.querySelector('#grok-auto-loop-div');
+        const autoLoopMul    = container.querySelector('#grok-auto-loop-mul');
 
         const btnUp       = container.querySelector('#grok-dpad-up');
         const btnDown     = container.querySelector('#grok-dpad-down');
@@ -1467,7 +1496,7 @@
 
         selectDl.addEventListener('change', () => {
             downloadType = selectDl.value;
-            localStorage.setItem(DL_TYPE_KEY, downloadType);
+            setSiteStorageItem('slideshow_download_type', downloadType);
         });
         cbDelete.addEventListener('change',   () => localStorage.setItem('grok_slideshow_delete',   cbDelete.checked));
         cbTab.addEventListener('change',      () => localStorage.setItem('grok_slideshow_tab',      cbTab.checked));
@@ -1511,7 +1540,7 @@
                 const oppIdx = slideshowDirections.indexOf(opposite);
                 if (oppIdx > -1) slideshowDirections.splice(oppIdx, 1);
             }
-            localStorage.setItem(DIRECTIONS_KEY, JSON.stringify(slideshowDirections));
+            setSiteStorageItem('slideshow_directions', JSON.stringify(slideshowDirections));
             updateDpadStyles();
         };
 
@@ -1522,7 +1551,7 @@
         btnRepeat.onclick = (e) => {
             e.stopPropagation();
             slideshowRepeat = !slideshowRepeat;
-            localStorage.setItem(REPEAT_KEY, slideshowRepeat);
+            setSiteStorageItem('slideshow_repeat', slideshowRepeat);
             updateDpadStyles();
         };
 
@@ -1531,23 +1560,23 @@
         radios.forEach(radio => {
             radio.addEventListener('change', () => {
                 pdAction = radio.value;
-                localStorage.setItem(PD_ACTION_KEY, pdAction);
+                setSiteStorageItem('pd_action', pdAction);
             });
         });
 
         cbAConfirm.addEventListener('change', () => {
             autoConfirm = cbAConfirm.checked;
-            localStorage.setItem(AUTO_CONFIRM_KEY, autoConfirm);
+            setSiteStorageItem('delete_autoconfirm', autoConfirm);
         });
 
         cbHoldPost.addEventListener('change', () => {
             holdPost = cbHoldPost.checked;
-            localStorage.setItem(HOLD_POST_KEY, holdPost);
+            setSiteStorageItem('delete_holdpost', holdPost);
         });
 
         cbTransRight.addEventListener('change', () => {
             transRight = cbTransRight.checked;
-            localStorage.setItem(TRANS_RIGHT_KEY, transRight);
+            setSiteStorageItem('transition_right', transRight);
         });
 
         function updateButtonStyles() {
@@ -1564,7 +1593,7 @@
                     btnAuto.style.borderColor   = '#374151';
                     btnAuto.style.color         = '#e5e7eb';
                     btnAuto.style.boxShadow     = 'none';
-                    btnAuto.textContent         = countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds;
+                    btnAuto.textContent         = (countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds) + 'с';
                 } else {
                     btnManual.style.background  = '#1f2937';
                     btnManual.style.borderColor = '#374151';
@@ -1586,7 +1615,7 @@
                 btnAuto.style.borderColor   = '#374151';
                 btnAuto.style.color         = '#e5e7eb';
                 btnAuto.style.boxShadow     = 'none';
-                btnAuto.textContent         = countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds;
+                btnAuto.textContent         = (countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds) + 'с';
             }
         }
 
@@ -1894,8 +1923,10 @@
                     }
                     photoTick();
                 } else {
-                    // Видео: воспроизведение до конца + обратный отсчет (countdownSeconds)
+                    // Видео: поддержка n-полных кругов (videoTargetLoops) + обратный отсчет
+                    let currentLoop = 1;
                     let prevTime = video.currentTime;
+
                     function videoPoll() {
                         if (!slideshowActive || slideshowPaused || slideshowMode !== 'auto') return;
 
@@ -1909,19 +1940,18 @@
                         const dur = videoCurrent.duration;
 
                         if (!isNaN(dur) && dur > 0) {
-                            let threshold = 5;
-                            if (dur <= 7) threshold = 1;
-                            else if (dur <= 12) threshold = 3;
-
-                            // Сброс тихого режима при начале второго круга видео
-                            if (timerSilent && (cur < prevTime - 0.5 || cur < 0.2)) {
-                                timerSilent = false;
-                                console.log('%c[Grok Slideshow] Видео пошло на второй круг, включаем таймер', 'color:#10b981;');
+                            // Если произошел перезапуск круга
+                            if (cur < prevTime - 0.5 && prevTime > dur - 1.5) {
+                                currentLoop++;
                             }
                             prevTime = cur;
 
-                            if (!timerSilent) {
-                                if (videoCurrent.ended || cur >= dur - 0.2) {
+                            if (videoCurrent.ended || cur >= dur - 0.2) {
+                                if (currentLoop < videoTargetLoops) {
+                                    currentLoop++;
+                                    videoCurrent.currentTime = 0;
+                                    videoCurrent.play().catch(() => {});
+                                } else {
                                     videoCurrent.pause();
                                     let countdownLeft = countdownSeconds;
                                     function videoCountdownTick() {
@@ -1941,13 +1971,12 @@
                                     }
                                     videoCountdownTick();
                                     return;
-                                } else {
-                                    if (stopwatchEl) {
-                                        stopwatchEl.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
-                                    }
                                 }
                             } else {
-                                if (stopwatchEl) stopwatchEl.textContent = '';
+                                if (stopwatchEl) {
+                                    const loopStr = videoTargetLoops > 1 ? `${currentLoop}/${videoTargetLoops} ` : '';
+                                    stopwatchEl.textContent = `${loopStr}${formatTime(cur)} / ${formatTime(dur)}`;
+                                }
                             }
                         } else {
                             if (stopwatchEl) {
@@ -1970,7 +1999,7 @@
             stopSlideshow();
             slideshowActive = true;
             slideshowMode   = mode || 'auto';
-            localStorage.setItem(MODE_KEY, slideshowMode);
+            setSiteStorageItem('slideshow_mode', slideshowMode);
 
             if (slideshowMode === 'auto') {
                 currentInterval = countdownSeconds;
@@ -2036,7 +2065,7 @@
         btnOrient.onclick = (e) => {
             e.stopImmediatePropagation();
             slideshowOrientation = slideshowOrientation === 'v' ? 'h' : 'v';
-            localStorage.setItem('grok_slideshow_orientation', slideshowOrientation);
+            setSiteStorageItem('slideshow_orientation', slideshowOrientation);
             btnOrient.textContent = slideshowOrientation === 'h' ? '↔' : '↕';
         };
 
@@ -2044,7 +2073,7 @@
             e.stopImmediatePropagation();
             currentInterval = Math.min(currentInterval + 1, 100);
             btnManual.textContent = currentInterval;
-            localStorage.setItem('grok_slideshow_interval', currentInterval);
+            setSiteStorageItem('slideshow_interval', currentInterval);
             if (slideshowActive && slideshowMode === 'manual') startSlideshow(currentInterval, 'manual');
         };
 
@@ -2052,7 +2081,7 @@
             e.stopImmediatePropagation();
             currentInterval = Math.max(currentInterval - 1, 3);
             btnManual.textContent = currentInterval;
-            localStorage.setItem('grok_slideshow_interval', currentInterval);
+            setSiteStorageItem('slideshow_interval', currentInterval);
             if (slideshowActive && slideshowMode === 'manual') startSlideshow(currentInterval, 'manual');
         };
 
@@ -2060,7 +2089,7 @@
             e.stopImmediatePropagation();
             countdownSeconds = Math.min(countdownSeconds + 1, 60);
             btnAuto.textContent = countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds;
-            localStorage.setItem(COUNTDOWN_SEC_KEY, countdownSeconds);
+            setSiteStorageItem('slideshow_countdown_sec', countdownSeconds);
             if (slideshowActive && slideshowMode === 'auto') startSlideshow(countdownSeconds, 'auto');
         };
 
@@ -2068,7 +2097,7 @@
             e.stopImmediatePropagation();
             countdownSeconds = Math.max(countdownSeconds - 1, 1);
             btnAuto.textContent = countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds;
-            localStorage.setItem(COUNTDOWN_SEC_KEY, countdownSeconds);
+            setSiteStorageItem('slideshow_countdown_sec', countdownSeconds);
             if (slideshowActive && slideshowMode === 'auto') startSlideshow(countdownSeconds, 'auto');
         };
 
@@ -2076,7 +2105,7 @@
             e.stopImmediatePropagation();
             currentInterval = 17;
             btnManual.textContent = 17;
-            localStorage.setItem('grok_slideshow_interval', currentInterval);
+            setSiteStorageItem('slideshow_interval', currentInterval);
             if (slideshowActive && slideshowMode === 'manual') startSlideshow(17, 'manual');
         };
 
@@ -2084,7 +2113,7 @@
             e.stopImmediatePropagation();
             currentInterval = 12;
             btnManual.textContent = 12;
-            localStorage.setItem('grok_slideshow_interval', currentInterval);
+            setSiteStorageItem('slideshow_interval', currentInterval);
             if (slideshowActive && slideshowMode === 'manual') startSlideshow(12, 'manual');
         };
 
@@ -2092,7 +2121,7 @@
             e.stopImmediatePropagation();
             currentInterval = 7;
             btnManual.textContent = 7;
-            localStorage.setItem('grok_slideshow_interval', currentInterval);
+            setSiteStorageItem('slideshow_interval', currentInterval);
             if (slideshowActive && slideshowMode === 'manual') startSlideshow(7, 'manual');
         };
 
@@ -2110,8 +2139,10 @@
         handleDivKey(preset7);
         handleDivKey(manualPlus);
         handleDivKey(manualMinus);
-        handleDivKey(autoPlus);
-        handleDivKey(autoMinus);
+        handleDivKey(autoSecPlus);
+        handleDivKey(autoSecMinus);
+        handleDivKey(autoLoopMul);
+        handleDivKey(autoLoopDiv);
     }
 
     // Инициализация виджета
