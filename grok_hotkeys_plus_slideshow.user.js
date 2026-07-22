@@ -1,12 +1,18 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.4
+// @version      5.5
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
 // @match        *://*.grok.com/*
-// @grant        none
+// @match        *://civitai.red/*
+// @match        *://*.civitai.red/*
+// @match        *://vkvideo.ru/*
+// @match        *://*.vkvideo.ru/*
+// @match        *://vk.video/*
+// @match        *://*.vk.video/*
+// @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok_hotkeys_plus_slideshow.user.js
 // @downloadURL  https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok_hotkeys_plus_slideshow.user.js
 // @supportURL   https://github.com/eldmans/tm-scripts
@@ -15,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.4] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.5] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
@@ -147,7 +153,7 @@
 
         if (hotkeyMatches(e, config.download)) {
             e.preventDefault();
-            triggerClick(findButton(['Download', 'Скачать']), 'Download');
+            triggerDownloadForCurrentSite();
             if (checkIsPostPage()) {
                 if (pdAction === 'up') {
                     const firstUrl = location.href;
@@ -503,6 +509,80 @@
             toast.style.opacity = '0';
             setTimeout(() => toast.remove(), 300);
         }, 3000);
+    }
+
+    function triggerDownloadForCurrentSite() {
+        const host = location.hostname.toLowerCase();
+
+        // 1. CIVITAI.RED
+        if (host.includes('civitai.red')) {
+            const btn = document.querySelector('button:has(svg.tabler-icon-download), button:has(svg[class*="tabler-icon-download"])') ||
+                        Array.from(document.querySelectorAll('button')).find(b => b.querySelector('svg.tabler-icon-download, svg[class*="tabler-icon-download"]'));
+            if (btn) {
+                triggerClick(btn, 'Civitai Download');
+                return true;
+            }
+        }
+
+        // 2. VKVIDEO.RU / VK.VIDEO
+        if (host.includes('vkvideo.ru') || host.includes('vk.video')) {
+            // Ищем кнопку три точки / Ещё
+            const moreBtn = document.querySelector('button[aria-label*="Ещё"], button[aria-label*="Еще"], button[aria-label*="еще"], button[aria-label*="ещё"]') ||
+                            document.querySelector('.VideoPageInfoRow__more button, .VideoCard__more button') ||
+                            Array.from(document.querySelectorAll('button')).find(b => {
+                                const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                                const text = (b.textContent || '').toLowerCase();
+                                return aria.includes('еще') || aria.includes('ещё') || text.includes('еще') || text.includes('ещё');
+                            });
+
+            if (moreBtn) {
+                // Вызываем события наведения и клик
+                moreBtn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+                moreBtn.click();
+
+                // Ждем 150мс появления выпадающего меню
+                setTimeout(() => {
+                    const dlItem = Array.from(document.querySelectorAll('button, a, div[role="button"], div[class*="MenuItem"], div[class*="Action"]')).find(el => {
+                        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                        const text = (el.textContent || '').toLowerCase();
+                        return aria.includes('скачать') || text.includes('скачать') || aria.includes('download') || text.includes('download');
+                    });
+
+                    if (dlItem) {
+                        // Перехватываем window.open чтобы открыть вкладку фоном
+                        const originalOpen = window.open;
+                        window.open = function (url, target, features) {
+                            if (typeof GM_openInTab === 'function' && url) {
+                                GM_openInTab(url, { active: false });
+                                window.open = originalOpen;
+                                return null;
+                            }
+                            const res = originalOpen.call(window, url, target, features);
+                            if (res) {
+                                try { window.focus(); } catch (e) {}
+                            }
+                            window.open = originalOpen;
+                            return res;
+                        };
+
+                        triggerClick(dlItem, 'VKVideo Download');
+                        setTimeout(() => { window.open = originalOpen; }, 2000);
+                    } else {
+                        console.log('%c❌ Пункт "Скачать" не найден в меню VKVideo', 'color:#ef4444');
+                    }
+                }, 150);
+                return true;
+            }
+        }
+
+        // 3. GROK.COM или дефолтный поиск
+        const grokBtn = findButton(['Download', 'Скачать']);
+        if (grokBtn) {
+            triggerClick(grokBtn, 'Download');
+            return true;
+        }
+
+        return false;
     }
 
     function findButton(labels) {
