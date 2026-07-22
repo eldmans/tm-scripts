@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.6
+// @version      5.6.1
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.6] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.6.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
 
@@ -525,52 +525,63 @@
         }
 
         // 2. VKVIDEO.RU / VK.VIDEO
-        if (host.includes('vkvideo.ru') || host.includes('vk.video')) {
-            // Ищем кнопку три точки / Ещё
+        if (host.includes('vkvideo.ru') || host.includes('vk.video') || host.includes('vk.com')) {
+            const doClickDownloadItem = (dlItem) => {
+                const originalOpen = window.open;
+                window.open = function (url, target, features) {
+                    if (typeof GM_openInTab === 'function' && url) {
+                        GM_openInTab(url, { active: false });
+                        window.open = originalOpen;
+                        return null;
+                    }
+                    const res = originalOpen.call(window, url, target, features);
+                    if (res) { try { window.focus(); } catch (e) {} }
+                    window.open = originalOpen;
+                    return res;
+                };
+                triggerClick(dlItem, 'VKVideo Download');
+                setTimeout(() => { window.open = originalOpen; }, 2000);
+            };
+
+            // Если меню "Скачать" уже отрендерено или открыто пользователем вручную
+            const existingDl = Array.from(document.querySelectorAll('button, a, div[role="button"], span, div[class*="MenuItem"], div[class*="Action"], div[class*="item"]')).find(el => {
+                const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                const text = (el.textContent || '').toLowerCase();
+                return (aria.includes('скачать') || text.includes('скачать')) && el.offsetParent !== null;
+            });
+            if (existingDl) {
+                doClickDownloadItem(existingDl);
+                return true;
+            }
+
+            // Ищем круговые три точки или кнопку "Ещё" (включая оверлей клипов/шортсов)
             const moreBtn = document.querySelector('button[aria-label*="Ещё"], button[aria-label*="Еще"], button[aria-label*="еще"], button[aria-label*="ещё"]') ||
-                            document.querySelector('.VideoPageInfoRow__more button, .VideoCard__more button') ||
-                            Array.from(document.querySelectorAll('button')).find(b => {
+                            document.querySelector('.VideoPageInfoRow__more button, .VideoCard__more button, [class*="more"], [class*="More"]') ||
+                            Array.from(document.querySelectorAll('button, div[role="button"], svg')).find(b => {
                                 const aria = (b.getAttribute('aria-label') || '').toLowerCase();
                                 const text = (b.textContent || '').toLowerCase();
-                                return aria.includes('еще') || aria.includes('ещё') || text.includes('еще') || text.includes('ещё');
+                                return aria.includes('еще') || aria.includes('ещё') || text.includes('еще') || text.includes('ещё') ||
+                                       (b.tagName === 'DIV' && b.childElementCount === 1 && b.firstElementChild?.tagName === 'SVG');
                             });
 
             if (moreBtn) {
-                // Вызываем события наведения и клик
-                moreBtn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-                moreBtn.click();
+                const targetBtn = moreBtn.tagName === 'SVG' ? moreBtn.parentElement : moreBtn;
+                targetBtn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+                targetBtn.click();
 
-                // Ждем 150мс появления выпадающего меню
                 setTimeout(() => {
-                    const dlItem = Array.from(document.querySelectorAll('button, a, div[role="button"], div[class*="MenuItem"], div[class*="Action"]')).find(el => {
+                    const dlItem = Array.from(document.querySelectorAll('button, a, div[role="button"], span, div[class*="MenuItem"], div[class*="Action"], div[class*="item"]')).find(el => {
                         const aria = (el.getAttribute('aria-label') || '').toLowerCase();
                         const text = (el.textContent || '').toLowerCase();
-                        return aria.includes('скачать') || text.includes('скачать') || aria.includes('download') || text.includes('download');
+                        return (aria.includes('скачать') || text.includes('скачать') || aria.includes('download') || text.includes('download')) && el.offsetParent !== null;
                     });
 
                     if (dlItem) {
-                        // Перехватываем window.open чтобы открыть вкладку фоном
-                        const originalOpen = window.open;
-                        window.open = function (url, target, features) {
-                            if (typeof GM_openInTab === 'function' && url) {
-                                GM_openInTab(url, { active: false });
-                                window.open = originalOpen;
-                                return null;
-                            }
-                            const res = originalOpen.call(window, url, target, features);
-                            if (res) {
-                                try { window.focus(); } catch (e) {}
-                            }
-                            window.open = originalOpen;
-                            return res;
-                        };
-
-                        triggerClick(dlItem, 'VKVideo Download');
-                        setTimeout(() => { window.open = originalOpen; }, 2000);
+                        doClickDownloadItem(dlItem);
                     } else {
                         console.log('%c❌ Пункт "Скачать" не найден в меню VKVideo', 'color:#ef4444');
                     }
-                }, 150);
+                }, 200);
                 return true;
             }
         }
