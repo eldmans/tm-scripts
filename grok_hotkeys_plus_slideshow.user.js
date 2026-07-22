@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.6.1
+// @version      5.6.2
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,9 +21,15 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.6.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.6.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
-    function checkIsPostPage() { return location.pathname.includes('/imagine/post/'); }
+    function checkIsPostPage() {
+        const host = location.hostname.toLowerCase();
+        if (host.includes('civitai.red') || host.includes('vkvideo.ru') || host.includes('vk.video') || host.includes('vk.com')) {
+            return true; // На этих сайтах разрешаем запуск слайдшоу со страницы просмотра медиа
+        }
+        return location.pathname.includes('/imagine/post/');
+    }
 
     // ============================================
     // КОНФИГУРАЦИЯ ГОРЯЧИХ КЛАВИШ
