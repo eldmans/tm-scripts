@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.6.2
+// @version      5.6.3
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.6.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.6.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -2102,21 +2102,45 @@
             if (slideshowActive && slideshowMode === 'manual') startSlideshow(currentInterval, 'manual');
         };
 
-        autoPlus.onclick = (e) => {
-            e.stopImmediatePropagation();
-            countdownSeconds = Math.min(countdownSeconds + 1, 60);
-            btnAuto.textContent = countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds;
-            setSiteStorageItem('slideshow_countdown_sec', countdownSeconds);
-            if (slideshowActive && slideshowMode === 'auto') startSlideshow(countdownSeconds, 'auto');
-        };
+        if (autoSecPlus) {
+            autoSecPlus.onclick = (e) => {
+                e.stopImmediatePropagation();
+                countdownSeconds = Math.min(countdownSeconds + 1, 60);
+                if (btnAuto) btnAuto.textContent = (countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds) + 'с';
+                setSiteStorageItem('slideshow_countdown_sec', countdownSeconds);
+                if (slideshowActive && slideshowMode === 'auto') startSlideshow(countdownSeconds, 'auto');
+            };
+        }
 
-        autoMinus.onclick = (e) => {
-            e.stopImmediatePropagation();
-            countdownSeconds = Math.max(countdownSeconds - 1, 1);
-            btnAuto.textContent = countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds;
-            setSiteStorageItem('slideshow_countdown_sec', countdownSeconds);
-            if (slideshowActive && slideshowMode === 'auto') startSlideshow(countdownSeconds, 'auto');
-        };
+        if (autoSecMinus) {
+            autoSecMinus.onclick = (e) => {
+                e.stopImmediatePropagation();
+                countdownSeconds = Math.max(countdownSeconds - 1, 1);
+                if (btnAuto) btnAuto.textContent = (countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds) + 'с';
+                setSiteStorageItem('slideshow_countdown_sec', countdownSeconds);
+                if (slideshowActive && slideshowMode === 'auto') startSlideshow(countdownSeconds, 'auto');
+            };
+        }
+
+        if (autoLoopMul) {
+            autoLoopMul.onclick = (e) => {
+                e.stopImmediatePropagation();
+                videoTargetLoops = Math.min(videoTargetLoops + 1, 10);
+                if (btnLoops) btnLoops.textContent = videoTargetLoops + 'х';
+                setSiteStorageItem('slideshow_video_loops', videoTargetLoops);
+                if (slideshowActive && slideshowMode === 'auto') startSlideshow(countdownSeconds, 'auto');
+            };
+        }
+
+        if (autoLoopDiv) {
+            autoLoopDiv.onclick = (e) => {
+                e.stopImmediatePropagation();
+                videoTargetLoops = Math.max(videoTargetLoops - 1, 1);
+                if (btnLoops) btnLoops.textContent = videoTargetLoops + 'х';
+                setSiteStorageItem('slideshow_video_loops', videoTargetLoops);
+                if (slideshowActive && slideshowMode === 'auto') startSlideshow(countdownSeconds, 'auto');
+            };
+        }
 
         preset17.onclick = (e) => {
             e.stopImmediatePropagation();
