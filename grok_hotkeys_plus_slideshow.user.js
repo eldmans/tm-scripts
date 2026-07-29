@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.7.1
+// @version      5.7.2
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.7.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.7.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -623,22 +623,36 @@
                 });
 
                 const closeMenu = () => {
-                    // 1. Имитируем события pointerdown/mousedown/click вне меню (для Radix UI / React onClickOutside)
-                    const opts = { bubbles: true, cancelable: true, clientX: 10, clientY: 10 };
-                    try {
-                        document.dispatchEvent(new PointerEvent('pointerdown', opts));
-                        document.dispatchEvent(new MouseEvent('mousedown', opts));
-                        document.dispatchEvent(new MouseEvent('mouseup', opts));
-                        document.dispatchEvent(new MouseEvent('click', opts));
-                    } catch(e) {}
+                    // 1. Повторный клик по кнопке открытия "Действия с постом" (toggle)
+                    try { postActionsBtn.click(); } catch(e) {}
 
-                    // 2. Повторный клик по кнопке "Действия с постом", если панель всё ещё осталась открытой
+                    // 2. Симуляция событий клика на изображении поста или фоновом контейнере
+                    const targetImg = document.querySelector('main img, article img, img[src*="grok"], img');
+                    const opts = { bubbles: true, cancelable: true, view: window };
+                    if (targetImg) {
+                        try {
+                            targetImg.dispatchEvent(new PointerEvent('pointerdown', opts));
+                            targetImg.dispatchEvent(new MouseEvent('mousedown', opts));
+                            targetImg.dispatchEvent(new MouseEvent('mouseup', opts));
+                            targetImg.dispatchEvent(new MouseEvent('click', opts));
+                        } catch(e) {}
+                    } else {
+                        try {
+                            document.body.dispatchEvent(new PointerEvent('pointerdown', opts));
+                            document.body.dispatchEvent(new MouseEvent('mousedown', opts));
+                            document.body.dispatchEvent(new MouseEvent('mouseup', opts));
+                            document.body.dispatchEvent(new MouseEvent('click', opts));
+                        } catch(e) {}
+                    }
+
+                    // 3. Зачистка из DOM оставшихся оверлейных контейнеров меню (Radix/Mantine), если меню застряло
                     setTimeout(() => {
-                        if (postActionsBtn && (postActionsBtn.getAttribute('aria-expanded') === 'true' || postActionsBtn.getAttribute('data-state') === 'open')) {
-                            postActionsBtn.click();
-                        } else if (postActionsBtn) {
-                            postActionsBtn.click();
-                        }
+                        const openMenus = document.querySelectorAll('div[role="menu"], [data-radix-popper-content-wrapper], [data-state="open"]');
+                        openMenus.forEach(menu => {
+                            if (menu !== postActionsBtn && !menu.contains(postActionsBtn)) {
+                                try { menu.remove(); } catch(e) {}
+                            }
+                        });
                     }, 100);
                 };
 
