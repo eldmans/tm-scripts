@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.6.3
+// @version      5.7
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.6.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.7] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -593,6 +593,54 @@
         }
 
         // 3. GROK.COM или дефолтный поиск
+        // Сначала ищем прямо доступную и видимую кнопку Скачать/Download
+        const visibleDlBtn = Array.from(document.querySelectorAll('button, a')).find(b => {
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const text = (b.textContent || '').toLowerCase();
+            const isMatch = aria.includes('download') || aria.includes('скачать') || text.includes('download') || text.includes('скачать');
+            return isMatch && b.offsetParent !== null;
+        });
+
+        if (visibleDlBtn) {
+            triggerClick(visibleDlBtn, 'Download');
+            return true;
+        }
+
+        // Если видимой кнопки нет, ищем кнопку меню "Действия с постом"
+        const postActionsBtn = document.querySelector('button[aria-label*="Действия с постом"], button[aria-label*="Post actions"]') ||
+                               Array.from(document.querySelectorAll('button, div[role="button"]')).find(b => {
+                                   const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                                   return aria.includes('действия с постом') || aria.includes('post actions');
+                               });
+
+        if (postActionsBtn) {
+            triggerClick(postActionsBtn, 'Post actions');
+            setTimeout(() => {
+                const innerDlBtn = Array.from(document.querySelectorAll('button, a, div[role="button"], span')).find(b => {
+                    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                    const text = (b.textContent || '').toLowerCase();
+                    return (aria.includes('download') || aria.includes('скачать') || text.includes('download') || text.includes('скачать')) && b.offsetParent !== null;
+                });
+
+                if (innerDlBtn) {
+                    triggerClick(innerDlBtn, 'Download');
+                    // После клика скачивания имитируем клик по полю страницы для закрытия меню без нажатия Escape
+                    setTimeout(() => {
+                        document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+                        try { document.body.click(); } catch(e) {}
+                    }, 200);
+                } else {
+                    console.log('%c❌ Пункт "Скачать" не найден в меню действий поста', 'color:#ef4444');
+                    setTimeout(() => {
+                        document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+                        try { document.body.click(); } catch(e) {}
+                    }, 200);
+                }
+            }, 200);
+            return true;
+        }
+
+        // Фоллбек на любой найденный элемент Download
         const grokBtn = findButton(['Download', 'Скачать']);
         if (grokBtn) {
             triggerClick(grokBtn, 'Download');
@@ -1670,8 +1718,7 @@
             const hasVideo = document.querySelector('video') !== null;
             if (downloadType === 'photo' && hasVideo) return;
             if (downloadType === 'video' && !hasVideo) return;
-            const btn = document.querySelector('button[aria-label*="Скачать"], button[aria-label="Скачать"]');
-            if (btn) btn.click();
+            triggerDownloadForCurrentSite();
         }
 
         function getArrowKeyForDirection(dir) {
