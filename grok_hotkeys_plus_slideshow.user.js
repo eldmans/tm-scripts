@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.7.2
+// @version      5.7.3
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.7.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.7.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -593,20 +593,14 @@
         }
 
         // 3. GROK.COM или дефолтный поиск
-        // Сначала ищем прямо доступную и видимую кнопку Скачать/Download
-        const visibleDlBtn = Array.from(document.querySelectorAll('button, a')).find(b => {
-            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-            const text = (b.textContent || '').toLowerCase();
-            const isMatch = aria.includes('download') || aria.includes('скачать') || text.includes('download') || text.includes('скачать');
-            return isMatch && b.offsetParent !== null;
-        });
-
-        if (visibleDlBtn) {
-            triggerClick(visibleDlBtn, 'Download');
+        // Ищем кнопку Скачать непосредственно на панели (включая иконку ↓ рядом с три точки)
+        const directDlBtn = findGrokDownloadButton();
+        if (directDlBtn) {
+            triggerClick(directDlBtn, 'Download');
             return true;
         }
 
-        // Если видимой кнопки нет, ищем кнопку меню "Действия с постом"
+        // Если прямой кнопки скачивания нет, открываем шторку "Действия с постом"
         const postActionsBtn = document.querySelector('button[aria-label*="Действия с постом"], button[aria-label*="Post actions"]') ||
                                Array.from(document.querySelectorAll('button, div[role="button"]')).find(b => {
                                    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
@@ -617,57 +611,23 @@
             triggerClick(postActionsBtn, 'Post actions');
             setTimeout(() => {
                 const innerDlBtn = Array.from(document.querySelectorAll('button, a, div[role="button"], span')).find(b => {
+                    if (b === postActionsBtn || b.contains(postActionsBtn)) return false;
                     const aria = (b.getAttribute('aria-label') || '').toLowerCase();
                     const text = (b.textContent || '').toLowerCase();
                     return (aria.includes('download') || aria.includes('скачать') || text.includes('download') || text.includes('скачать')) && b.offsetParent !== null;
                 });
 
-                const closeMenu = () => {
-                    // 1. Повторный клик по кнопке открытия "Действия с постом" (toggle)
-                    try { postActionsBtn.click(); } catch(e) {}
-
-                    // 2. Симуляция событий клика на изображении поста или фоновом контейнере
-                    const targetImg = document.querySelector('main img, article img, img[src*="grok"], img');
-                    const opts = { bubbles: true, cancelable: true, view: window };
-                    if (targetImg) {
-                        try {
-                            targetImg.dispatchEvent(new PointerEvent('pointerdown', opts));
-                            targetImg.dispatchEvent(new MouseEvent('mousedown', opts));
-                            targetImg.dispatchEvent(new MouseEvent('mouseup', opts));
-                            targetImg.dispatchEvent(new MouseEvent('click', opts));
-                        } catch(e) {}
-                    } else {
-                        try {
-                            document.body.dispatchEvent(new PointerEvent('pointerdown', opts));
-                            document.body.dispatchEvent(new MouseEvent('mousedown', opts));
-                            document.body.dispatchEvent(new MouseEvent('mouseup', opts));
-                            document.body.dispatchEvent(new MouseEvent('click', opts));
-                        } catch(e) {}
-                    }
-
-                    // 3. Зачистка из DOM оставшихся оверлейных контейнеров меню (Radix/Mantine), если меню застряло
-                    setTimeout(() => {
-                        const openMenus = document.querySelectorAll('div[role="menu"], [data-radix-popper-content-wrapper], [data-state="open"]');
-                        openMenus.forEach(menu => {
-                            if (menu !== postActionsBtn && !menu.contains(postActionsBtn)) {
-                                try { menu.remove(); } catch(e) {}
-                            }
-                        });
-                    }, 100);
-                };
-
                 if (innerDlBtn) {
                     triggerClick(innerDlBtn, 'Download');
-                    setTimeout(closeMenu, 200);
+                    setTimeout(() => closeGrokDrawer(postActionsBtn), 300);
                 } else {
-                    console.log('%c❌ Пункт "Скачать" не найден в меню действий поста', 'color:#ef4444');
-                    setTimeout(closeMenu, 200);
+                    console.log('%c❌ Пункт "Скачать" не найден внутри шторки', 'color:#ef4444');
+                    setTimeout(() => closeGrokDrawer(postActionsBtn), 300);
                 }
-            }, 200);
+            }, 250);
             return true;
         }
 
-        // Фоллбек на любой найденный элемент Download
         const grokBtn = findButton(['Download', 'Скачать']);
         if (grokBtn) {
             triggerClick(grokBtn, 'Download');
@@ -675,6 +635,58 @@
         }
 
         return false;
+    }
+
+    function findGrokDownloadButton() {
+        // 1. Поиск по текстам/aria-label "Скачать" / "Download"
+        let btn = Array.from(document.querySelectorAll('button, a')).find(b => {
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const text = (b.textContent || '').toLowerCase();
+            return (aria.includes('download') || aria.includes('скачать') || text.includes('download') || text.includes('скачать')) && b.offsetParent !== null;
+        });
+        if (btn) return btn;
+
+        // 2. Ищем кнопку скачивания в том же ряду под постом, где стоят три точки ("Действия с постом")
+        const postActionsBtn = document.querySelector('button[aria-label*="Действия с постом"], button[aria-label*="Post actions"]') ||
+                               Array.from(document.querySelectorAll('button, div[role="button"]')).find(b => {
+                                   const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                                   return aria.includes('действия с постом') || aria.includes('post actions');
+                               });
+
+        if (postActionsBtn && postActionsBtn.parentElement) {
+            const rowButtons = Array.from(postActionsBtn.parentElement.querySelectorAll('button'));
+            const dlBtn = rowButtons.find(b => {
+                if (b === postActionsBtn) return false;
+                const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                const path = b.querySelector('path');
+                const d = path ? (path.getAttribute('d') || '') : '';
+                return aria.includes('скачать') || aria.includes('download') || d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
+            }) || (rowButtons.length >= 2 ? rowButtons[rowButtons.length - 2] : null);
+
+            if (dlBtn && dlBtn !== postActionsBtn && dlBtn.offsetParent !== null) return dlBtn;
+        }
+
+        // 3. Поиск по характерным SVG path иконки скачивания внизу поста
+        btn = Array.from(document.querySelectorAll('button')).find(b => {
+            const path = b.querySelector('path');
+            const d = path ? (path.getAttribute('d') || '') : '';
+            return d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
+        });
+        if (btn && btn.offsetParent !== null) return btn;
+
+        return null;
+    }
+
+    function closeGrokDrawer(postActionsBtn) {
+        // Клик по оверлею/темному фону шторки если висит
+        const overlay = document.querySelector('div[class*="backdrop"], div[class*="overlay"], div[data-state="open"]');
+        if (overlay && overlay !== postActionsBtn && !overlay.contains(postActionsBtn)) {
+            try { overlay.click(); return; } catch(e) {}
+        }
+        // Либо один раз переключаем три точки
+        if (postActionsBtn) {
+            try { postActionsBtn.click(); } catch(e) {}
+        }
     }
 
     function findButton(labels) {
