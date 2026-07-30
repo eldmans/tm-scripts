@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.9.1
+// @version      5.9.2
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.9.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.9.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -627,35 +627,49 @@
 
         // Если мы находимся на странице галереи Saved
         if (location.pathname.includes('/imagine/saved')) {
-            setTimeout(() => {
-                const postLinks = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
-                if (postLinks.length === 0) return;
+            let attempts = 0;
+            const maxAttempts = 60; // До 9 секунд опроса появления постов в DOM
 
-                let currentIndex = -1;
-                if (lastPostUrl) {
-                    const lastId = lastPostUrl.split('/imagine/post/')[1]?.split('?')[0];
-                    if (lastId) {
-                        currentIndex = postLinks.findIndex(a => a.href.includes(lastId));
+            const pollTimer = setInterval(() => {
+                attempts++;
+                const postLinks = Array.from(document.querySelectorAll('a[href*="/imagine/post/"], div[role="button"][data-post-id]'));
+
+                if (postLinks.length > 0) {
+                    let currentIndex = -1;
+                    if (lastPostUrl) {
+                        const lastId = lastPostUrl.split('/imagine/post/')[1]?.split('?')[0];
+                        if (lastId) {
+                            currentIndex = postLinks.findIndex(a => ((a.href || '') + (a.getAttribute('data-post-id') || '')).includes(lastId));
+                        }
+                    }
+
+                    if (currentIndex !== -1 || attempts >= 15) {
+                        clearInterval(pollTimer);
+
+                        let targetIndex = 0;
+                        if (currentIndex !== -1) {
+                            if (pendingDir === 'up' || pendingDir === 'left') {
+                                targetIndex = Math.max(currentIndex - 1, 0);
+                            } else {
+                                targetIndex = Math.min(currentIndex + 1, postLinks.length - 1);
+                            }
+                        } else {
+                            targetIndex = 0;
+                        }
+
+                        const targetLink = postLinks[targetIndex];
+                        if (targetLink) {
+                            console.log(`%c[Grok Slideshow] Найдено постов: ${postLinks.length}. Переход к посту №${targetIndex + 1}`, 'color:#10b981; font-weight:bold');
+                            triggerClick(targetLink, 'Open Post');
+                        }
                     }
                 }
 
-                let targetIndex = 0;
-                if (currentIndex !== -1) {
-                    if (pendingDir === 'up' || pendingDir === 'left') {
-                        targetIndex = Math.max(currentIndex - 1, 0);
-                    } else {
-                        targetIndex = Math.min(currentIndex + 1, postLinks.length - 1);
-                    }
-                } else {
-                    targetIndex = 0;
+                if (attempts >= maxAttempts) {
+                    clearInterval(pollTimer);
+                    console.log('%c❌ Не удалось дождаться появления постов в раздела Saved', 'color:#ef4444');
                 }
-
-                const targetLink = postLinks[targetIndex];
-                if (targetLink) {
-                    console.log(`%c[Grok Slideshow] Переход к посту ${targetIndex + 1} из ${postLinks.length}`, 'color:#10b981; font-weight:bold');
-                    targetLink.click();
-                }
-            }, 300);
+            }, 150);
             return;
         }
 
