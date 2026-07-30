@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.8
+// @version      5.8.1
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.8] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.8.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -1118,7 +1118,10 @@
     const VIDEO_LOOPS_KEY = 'slideshow_video_loops';
 
     let widgetState  = getSiteStorageItem('widget_state', 'panel');
-    if (widgetState !== 'panel' && widgetState !== 'hidden') widgetState = 'panel';
+    if (widgetState !== 'panel' && widgetState !== 'hidden') {
+        widgetState = 'panel';
+        setSiteStorageItem('widget_state', 'panel');
+    }
 
     let pdAction     = getSiteSessionItem('pd_action', 'up');
     let autoConfirm  = getSiteSessionItem('delete_autoconfirm', 'true') !== 'false';
@@ -1341,44 +1344,21 @@
         widgetEl = document.createElement('div');
         widgetEl.id = 'grok-widget-container';
         
-        let stripHtml = `
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 500; width: 100%;">
-                <span id="grok-numlock" style="color: #10b981;" title="Статус NumLock">?</span>
-                <span id="grok-gear-row">↓ ${formatHotkey(config.slideshowPanel)} ⚙ ↓</span>
-                <span id="grok-widget-close" title="Скрыть виджет">×</span>
-            </div>
-        `;
-        widgetEl.innerHTML = stripHtml;
         document.body.appendChild(widgetEl);
-
-        numLockEl = widgetEl.querySelector('#grok-numlock');
-        const closeBtn = widgetEl.querySelector('#grok-widget-close');
-
-        closeBtn.onclick = (e) => {
-            e.stopPropagation();
-            setWidgetState('hidden');
-        };
-
-        gearRowEl = widgetEl.querySelector('#grok-gear-row');
-        gearRowEl.onclick = (e) => {
-            e.stopPropagation();
-            setWidgetState(widgetState === 'panel' ? 'hidden' : 'panel');
-        };
 
         panelEl = document.createElement('div');
         panelEl.id = 'grok-settings-panel';
         panelEl.style.cssText = `
-            display: none;
+            display: flex;
             flex-direction: column;
             gap: 10px;
-            border-top: 1px solid #374151;
-            padding-top: 8px;
-            margin-top: 4px;
             width: 100%;
         `;
         widgetEl.appendChild(panelEl);
 
         initPanelContent(panelEl);
+
+        numLockEl = widgetEl.querySelector('#grok-numlock');
 
         applyWidgetState();
     }
@@ -1389,15 +1369,17 @@
         const initBrsr     = getSiteSessionItem('slideshow_brsr', 'false') === 'true';
 
         container.innerHTML = `
-            <!-- Заголовок Слайдшоу -->
-            <div style="font-weight: bold; font-size: 13px; color: #fff; margin-bottom: 4px; text-align: center; width: 100%;">
-                SlideShow
+            <!-- Заголовок Слайдшоу с кнопкой закрытия и статусом NumLock -->
+            <div style="display: flex; align-items: center; justify-content: space-between; font-weight: bold; font-size: 13px; color: #fff; margin-bottom: 4px; width: 100%;">
+                <span id="grok-numlock" style="color: #10b981; font-size: 12px;" title="Статус NumLock">?</span>
+                <span>SlideShow</span>
+                <span id="grok-widget-close" style="cursor: pointer; color: #9ca3af; font-size: 16px; font-weight: bold;" title="Скрыть панель (${formatHotkey(config.slideshowPanel)})">×</span>
             </div>
 
-            <!-- Режимы: Manual, Кнопка Ориентации, AUTO -->
+            <!-- Режимы: Manual, Кнопка Сброса в начало (↺), AUTO -->
             <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; font-size: 11px; color: #9ca3af; font-weight: 600; text-align: center; margin-bottom: 2px;">
                 <div id="grok-label-manual-header" style="width: 40%; text-align: right; padding-right: 4px; transition: color 0.2s ease;">Manual</div>
-                <button id="grok-btn-orient" class="grok-widget-btn" style="font-size: 11px; padding: 2px 4px; line-height: 1; border-radius: 4px; min-width: 20px;" title="Переключить ориентацию">${slideshowOrientation === 'h' ? '↔' : '↕'}</button>
+                <button id="grok-btn-reset-start" class="grok-widget-btn" style="font-size: 13px; padding: 2px 5px; line-height: 1; border-radius: 4px; min-width: 22px;" title="Листать в начало (Ctrl+Enter / R)">↺</button>
                 <div id="grok-label-auto-header" style="width: 40%; text-align: left; padding-left: 4px; transition: color 0.2s ease;">AUTO</div>
             </div>
 
