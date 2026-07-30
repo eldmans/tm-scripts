@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      6.0
+// @version      6.0.1
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v6.0] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v6.0.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -702,17 +702,22 @@
             sessionStorage.removeItem('grok_pending_autorun_sec');
             sessionStorage.removeItem('grok_last_post_url');
 
-            slideshowActive = true;
-            slideshowPaused = false;
-
-            console.log(`%c[Grok Slideshow] Зашли в новый пост, делаем разгон в противоположном направлении для: ${pendingDir}`, 'color:#10b981; font-weight:bold');
+            console.log(`%c[Grok Slideshow] Зашли в новую пачку поста. 2 секунды паузы перед разгоном и запуском СШ (режим: ${slideshowMode})`, 'color:#10b981; font-weight:bold');
             
+            // 2 секунды полноценной паузы после входа в новую пачку
             setTimeout(() => {
+                slideshowActive = true;
+                slideshowPaused = false;
+                
                 executeResetToStart();
                 setTimeout(() => {
-                    startSlideshow(sec, slideshowMode);
+                    if (slideshowMode === 'auto') {
+                        startSlideshow(countdownSeconds, 'auto');
+                    } else {
+                        startSlideshow(currentInterval, 'manual');
+                    }
                 }, 1000);
-            }, 500);
+            }, 2000);
         }
     }
 
