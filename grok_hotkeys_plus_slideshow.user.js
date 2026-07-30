@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.8.1
+// @version      5.8.2
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.8.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.8.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -1163,8 +1163,7 @@
     }
 
     function cycleWidgetState() {
-        const states = ['strip', 'panel', 'hidden'];
-        setWidgetState(states[(states.indexOf(widgetState) + 1) % states.length]);
+        setWidgetState(widgetState === 'panel' ? 'hidden' : 'panel');
         if (widgetState === 'panel' && refreshHotkeyLabels) {
             refreshHotkeyLabels();
         }
@@ -1539,18 +1538,17 @@
         const btnRight    = container.querySelector('#grok-dpad-right');
         const btnRepeat   = container.querySelector('#grok-dpad-repeat');
 
-        const preset17    = container.querySelector('#grok-preset-17');
-        const preset12    = container.querySelector('#grok-preset-12');
-        const preset7     = container.querySelector('#grok-preset-7');
-        const btnOrient   = container.querySelector('#grok-btn-orient');
-        const selectDl    = container.querySelector('#grok-select-download-type');
-        const cbDelete    = container.querySelector('#grok-cb-delete');
-        const cbTab       = container.querySelector('#grok-cb-tab');
-        const cbBrsr      = container.querySelector('#grok-cb-brsr');
-        const radios      = container.querySelectorAll('input[name="grok-pd-action"]');
-        const cbAConfirm  = container.querySelector('#grok-cb-aconfirm');
-        const cbHoldPost  = container.querySelector('#grok-cb-holdpost');
-        const cbTransRight = container.querySelector('#grok-cb-transright');
+        const preset17       = container.querySelector('#grok-preset-17');
+        const preset12       = container.querySelector('#grok-preset-12');
+        const preset7        = container.querySelector('#grok-preset-7');
+        const btnResetStart  = container.querySelector('#grok-btn-reset-start');
+        const selectDl       = container.querySelector('#grok-select-download-type');
+        const cbDelete       = container.querySelector('#grok-cb-delete');
+        const cbTab          = container.querySelector('#grok-cb-tab');
+        const cbBrsr         = container.querySelector('#grok-cb-brsr');
+        const radios         = container.querySelectorAll('input[name="grok-pd-action"]');
+        const cbAConfirm     = container.querySelector('#grok-cb-aconfirm');
+        const cbHoldPost     = container.querySelector('#grok-cb-holdpost');
 
         selectDl.addEventListener('change', () => {
             downloadType = selectDl.value;
@@ -1626,13 +1624,18 @@
 
         cbHoldPost.addEventListener('change', () => {
             holdPost = cbHoldPost.checked;
-            setSiteStorageItem('delete_holdpost', holdPost);
+            setSiteSessionItem('delete_holdpost', holdPost);
         });
 
-        cbTransRight.addEventListener('change', () => {
-            transRight = cbTransRight.checked;
-            setSiteStorageItem('transition_right', transRight);
-        });
+        if (btnResetStart) {
+            btnResetStart.onclick = (e) => {
+                e.stopPropagation();
+                const key = slideshowDirections.includes('up') ? 'ArrowDown' :
+                            slideshowDirections.includes('down') ? 'ArrowUp' :
+                            slideshowDirections.includes('left') ? 'ArrowRight' : 'ArrowLeft';
+                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+            };
+        }
 
         function updateButtonStyles() {
             if (!btnManual || !btnAuto) return;
