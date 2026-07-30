@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.8.4
+// @version      5.9
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.8.4] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.9] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -608,6 +608,83 @@
         return false;
     }
 
+        function triggerCrossPostNavigation(dir, seconds) {
+        console.log(`%c[Grok Slideshow] Уперлись в край поста. Запуск перехода в Saved (направление: ${dir})`, 'color:#10b981; font-weight:bold');
+        sessionStorage.setItem('grok_pending_autorun_dir', dir);
+        sessionStorage.setItem('grok_pending_autorun_sec', seconds || 3);
+        sessionStorage.setItem('grok_last_post_url', location.href);
+
+        // Ищем кнопку Назад (←) на странице поста
+        const backBtn = document.querySelector('button[aria-label*="Назад"], button[aria-label*="Back"], a[href*="/imagine/saved"]') ||
+                        Array.from(document.querySelectorAll('button')).find(b => b.querySelector('svg') && (b.getAttribute('aria-label') || '').toLowerCase().includes('назад'));
+
+        if (backBtn) {
+            triggerClick(backBtn, 'Back to Saved');
+        } else {
+            location.href = 'https://grok.com/imagine/saved';
+        }
+    }
+
+    function checkAndRunPendingCrossPost() {
+        const pendingDir = sessionStorage.getItem('grok_pending_autorun_dir');
+        if (!pendingDir) return;
+
+        const sec = parseInt(sessionStorage.getItem('grok_pending_autorun_sec') || '3', 10);
+        const lastPostUrl = sessionStorage.getItem('grok_last_post_url') || '';
+
+        // Если мы находимся на странице галереи Saved
+        if (location.pathname.includes('/imagine/saved')) {
+            setTimeout(() => {
+                const postLinks = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
+                if (postLinks.length === 0) return;
+
+                let currentIndex = -1;
+                if (lastPostUrl) {
+                    const lastId = lastPostUrl.split('/imagine/post/')[1]?.split('?')[0];
+                    if (lastId) {
+                        currentIndex = postLinks.findIndex(a => a.href.includes(lastId));
+                    }
+                }
+
+                let targetIndex = 0;
+                if (currentIndex !== -1) {
+                    if (pendingDir === 'up' || pendingDir === 'left') {
+                        targetIndex = Math.max(currentIndex - 1, 0);
+                    } else {
+                        targetIndex = Math.min(currentIndex + 1, postLinks.length - 1);
+                    }
+                } else {
+                    targetIndex = 0;
+                }
+
+                const targetLink = postLinks[targetIndex];
+                if (targetLink) {
+                    console.log(`%c[Grok Slideshow] Переход к посту ${targetIndex + 1} из ${postLinks.length}`, 'color:#10b981; font-weight:bold');
+                    targetLink.click();
+                }
+            }, 300);
+            return;
+        }
+
+        // Если мы зашли в новый пост
+        if (checkIsPostPage()) {
+            sessionStorage.removeItem('grok_pending_autorun_dir');
+            sessionStorage.removeItem('grok_pending_autorun_sec');
+            sessionStorage.removeItem('grok_last_post_url');
+
+            console.log(`%c[Grok Slideshow] Зашли в новый пост, делаем разгон в противоположном направлении для: ${pendingDir}`, 'color:#10b981; font-weight:bold');
+            
+            setTimeout(() => {
+                executeResetToStart();
+                setTimeout(() => {
+                    if (typeof startSlideshow === 'function') {
+                        startSlideshow(sec, slideshowMode);
+                    }
+                }, 1000);
+            }, 500);
+        }
+    }
+
     function findGrokDownloadButton() {
         // 1. Поиск по текстам/aria-label "Скачать" / "Download"
         let btn = Array.from(document.querySelectorAll('button, a')).find(b => {
@@ -1134,7 +1211,9 @@
     let videoTargetLoops = parseInt(getSiteStorageItem('slideshow_video_loops', '1'), 10);
     if (isNaN(videoTargetLoops) || videoTargetLoops < 1) videoTargetLoops = 1;
 
-    let slideshowRepeat  = getSiteStorageItem('slideshow_repeat', 'true') !== 'false';
+    let slideshowLoopMode = getSiteStorageItem('slideshow_loop_mode', 'repeat');
+if (!['off', 'repeat', 'auto_post'].includes(slideshowLoopMode)) slideshowLoopMode = 'repeat';
+let slideshowRepeat = slideshowLoopMode !== 'off';
     let slideshowDirections = [];
     try {
         slideshowDirections = JSON.parse(getSiteStorageItem('slideshow_directions', '["left"]'));
@@ -1574,14 +1653,24 @@
             setGreen(btnLeft, slideshowDirections.includes('left'));
             setGreen(btnRight, slideshowDirections.includes('right'));
 
-            if (slideshowRepeat) {
+            if (slideshowLoopMode === 'repeat') {
                 btnRepeat.style.background = '#3b82f6';
                 btnRepeat.style.borderColor = '#3b82f6';
                 btnRepeat.style.color = '#ffffff';
+                btnRepeat.textContent = 'R';
+                btnRepeat.title = 'Повтор текущего поста (R)';
+            } else if (slideshowLoopMode === 'auto_post') {
+                btnRepeat.style.background = '#10b981';
+                btnRepeat.style.borderColor = '#10b981';
+                btnRepeat.style.color = '#ffffff';
+                btnRepeat.textContent = 'A';
+                btnRepeat.title = 'Авто-переход к соседнему посту в Saved (A)';
             } else {
                 btnRepeat.style.background = '#1f2937';
                 btnRepeat.style.borderColor = '#374151';
                 btnRepeat.style.color = '#9ca3af';
+                btnRepeat.textContent = '—';
+                btnRepeat.title = 'Остановка в конце поста (—)';
             }
         }
 
@@ -1601,8 +1690,11 @@
         btnRight.onclick = (e) => { e.stopPropagation(); setDirection('right'); };
         btnRepeat.onclick = (e) => {
             e.stopPropagation();
-            slideshowRepeat = !slideshowRepeat;
-            setSiteStorageItem('slideshow_repeat', slideshowRepeat);
+            if (slideshowLoopMode === 'off') slideshowLoopMode = 'repeat';
+            else if (slideshowLoopMode === 'repeat') slideshowLoopMode = 'auto_post';
+            else slideshowLoopMode = 'off';
+            slideshowRepeat = slideshowLoopMode !== 'off';
+            setSiteStorageItem('slideshow_loop_mode', slideshowLoopMode);
             updateDpadStyles();
         };
 
@@ -1804,12 +1896,14 @@
                 document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
                 setTimeout(() => {
                     if (location.href === beforeUrl) {
-                        if (!slideshowRepeat) {
+                        if (slideshowLoopMode === 'off') {
                             stopSlideshow();
-                        } else {
+                        } else if (slideshowLoopMode === 'repeat') {
                             loopBackToOpposite(dir, () => {
                                 scheduleNextSlideCycle(seconds);
                             });
+                        } else if (slideshowLoopMode === 'auto_post') {
+                            triggerCrossPostNavigation(dir, seconds);
                         }
                     } else {
                         scheduleNextSlideCycle(seconds);
@@ -2257,8 +2351,9 @@
         handleDivKey(autoLoopDiv);
     }
 
-    // Инициализация виджета
+    // Инициализация виджета и авто-перехода Saved
     initWidget();
+    checkAndRunPendingCrossPost();
 
     // Отслеживание ручной смены URL во время слайдшоу для сброса счетчика
     let lastUrl = location.href;
