@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      6.0.3
+// @version      6.1
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v6.0.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v6.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -1524,10 +1524,10 @@ let slideshowRepeat = slideshowLoopMode !== 'off';
 
         container.innerHTML = `
             <!-- Заголовок Слайдшоу с кнопкой закрытия и статусом NumLock -->
-            <div style="display: flex; align-items: center; justify-content: space-between; font-weight: bold; font-size: 13px; color: #fff; margin-bottom: 4px; width: 100%;">
+            <div id="grok-header-bar" style="display: flex; align-items: center; justify-content: space-between; font-weight: bold; font-size: 13px; color: #fff; margin-bottom: 4px; width: 100%; cursor: pointer;" title="Скрыть панель (${formatHotkey(config.slideshowPanel)})">
                 <span id="grok-numlock" style="color: #10b981; font-size: 12px;" title="Статус NumLock">?</span>
-                <span>SlideShow</span>
-                <span id="grok-widget-close" style="cursor: pointer; color: #9ca3af; font-size: 16px; font-weight: bold;" title="Скрыть панель (${formatHotkey(config.slideshowPanel)})">×</span>
+                <span style="user-select: none;">SlideShow</span>
+                <span id="grok-widget-close" style="cursor: pointer; color: #9ca3af; font-size: 16px; font-weight: bold;">×</span>
             </div>
 
             <!-- Режимы: Manual, Кнопка Сброса в начало (↺), AUTO -->
@@ -2211,6 +2211,8 @@ let slideshowRepeat = slideshowLoopMode !== 'off';
                                     currentLoop++;
                                     videoCurrent.currentTime = 0;
                                     videoCurrent.play().catch(() => {});
+                                    slideshowTimeoutId = setTimeout(videoPoll, 400);
+                                    return;
                                 } else {
                                     videoCurrent.pause();
                                     if (countdownSeconds === 0) {
