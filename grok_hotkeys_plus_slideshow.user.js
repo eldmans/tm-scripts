@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.9
+// @version      5.9.1
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.9] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.9.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -609,20 +609,13 @@
     }
 
         function triggerCrossPostNavigation(dir, seconds) {
-        console.log(`%c[Grok Slideshow] Уперлись в край поста. Запуск перехода в Saved (направление: ${dir})`, 'color:#10b981; font-weight:bold');
+        console.log(`%c[Grok Slideshow] Уперлись в край поста. Переход в раздел Saved (Home) (направление: ${dir})`, 'color:#10b981; font-weight:bold');
         sessionStorage.setItem('grok_pending_autorun_dir', dir);
         sessionStorage.setItem('grok_pending_autorun_sec', seconds || 3);
         sessionStorage.setItem('grok_last_post_url', location.href);
 
-        // Ищем кнопку Назад (←) на странице поста
-        const backBtn = document.querySelector('button[aria-label*="Назад"], button[aria-label*="Back"], a[href*="/imagine/saved"]') ||
-                        Array.from(document.querySelectorAll('button')).find(b => b.querySelector('svg') && (b.getAttribute('aria-label') || '').toLowerCase().includes('назад'));
-
-        if (backBtn) {
-            triggerClick(backBtn, 'Back to Saved');
-        } else {
-            location.href = 'https://grok.com/imagine/saved';
-        }
+        // Прямой переход в раздел https://grok.com/imagine/saved (аналог кнопки Home)
+        location.href = 'https://grok.com/imagine/saved';
     }
 
     function checkAndRunPendingCrossPost() {
