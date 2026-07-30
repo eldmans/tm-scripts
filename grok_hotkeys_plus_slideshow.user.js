@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      6.0.1
+// @version      6.0.2
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v6.0.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v6.0.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -155,7 +155,13 @@
             activeEl.tagName === 'TEXTAREA' ||
             activeEl.isContentEditable
         );
-        if (isEditing && !/^F\d+$/.test(e.key)) return;
+        if (isEditing) {
+            if (slideshowActive && activeEl && typeof activeEl.blur === 'function') {
+                activeEl.blur();
+            } else if (!/^F\d+$/.test(e.key)) {
+                return;
+            }
+        }
 
         if (hotkeyMatches(e, config.download)) {
             e.preventDefault();
@@ -702,10 +708,23 @@
             sessionStorage.removeItem('grok_pending_autorun_sec');
             sessionStorage.removeItem('grok_last_post_url');
 
-            console.log(`%c[Grok Slideshow] Зашли в новую пачку поста. 2 секунды паузы перед разгоном и запуском СШ (режим: ${slideshowMode})`, 'color:#10b981; font-weight:bold');
+            console.log(`%c[Grok Slideshow v6.0.2] Зашли в новую пачку поста. Снимаем фокус с ввода, 2с паузы перед разгоном и запуском СШ`, 'color:#10b981; font-weight:bold');
             
+            // Снимаем фокус с текстового поля ввода, если React сфокусировал его
+            setTimeout(() => {
+                const active = document.activeElement;
+                if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+                    active.blur();
+                }
+            }, 100);
+
             // 2 секунды полноценной паузы после входа в новую пачку
             setTimeout(() => {
+                const active = document.activeElement;
+                if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+                    active.blur();
+                }
+
                 slideshowActive = true;
                 slideshowPaused = false;
                 
