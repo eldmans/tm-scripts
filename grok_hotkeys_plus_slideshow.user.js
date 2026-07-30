@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.9.3
+// @version      6.0
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.9.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v6.0] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -628,15 +628,24 @@
         // Если мы находимся на странице галереи Saved
         if (location.pathname.includes('/imagine/saved')) {
             let attempts = 0;
-            const maxAttempts = 60; // До 9 секунд опроса появления постов в DOM
+            const maxAttempts = 60;
 
             const pollTimer = setInterval(() => {
                 attempts++;
                 const postLinks = Array.from(document.querySelectorAll('a[href*="/imagine/post/"], div[role="button"][data-post-id]'));
 
                 if (postLinks.length > 0) {
+                    const lastConv = getConversationId(lastPostUrl);
+                    
                     let currentIndex = -1;
-                    if (lastPostUrl) {
+                    if (lastConv) {
+                        currentIndex = postLinks.findIndex(a => {
+                            const href = a.href || a.getAttribute('data-href') || '';
+                            return getConversationId(href) === lastConv;
+                        });
+                    }
+
+                    if (currentIndex === -1 && lastPostUrl) {
                         const lastId = lastPostUrl.split('/imagine/post/')[1]?.split('?')[0];
                         if (lastId) {
                             currentIndex = postLinks.findIndex(a => ((a.href || '') + (a.getAttribute('data-post-id') || '')).includes(lastId));
@@ -646,28 +655,42 @@
                     if (currentIndex !== -1 || attempts >= 15) {
                         clearInterval(pollTimer);
 
-                        let targetIndex = 0;
+                        let targetIndex = -1;
                         if (currentIndex !== -1) {
                             if (pendingDir === 'up' || pendingDir === 'left') {
-                                targetIndex = Math.max(currentIndex - 1, 0);
+                                for (let i = currentIndex - 1; i >= 0; i--) {
+                                    const conv = getConversationId(postLinks[i].href || postLinks[i].getAttribute('data-href') || '');
+                                    if (!lastConv || (conv && conv !== lastConv)) {
+                                        targetIndex = i;
+                                        break;
+                                    }
+                                }
+                                if (targetIndex === -1 && currentIndex > 0) targetIndex = currentIndex - 1;
                             } else {
-                                targetIndex = Math.min(currentIndex + 1, postLinks.length - 1);
+                                for (let i = currentIndex + 1; i < postLinks.length; i++) {
+                                    const conv = getConversationId(postLinks[i].href || postLinks[i].getAttribute('data-href') || '');
+                                    if (!lastConv || (conv && conv !== lastConv)) {
+                                        targetIndex = i;
+                                        break;
+                                    }
+                                }
+                                if (targetIndex === -1 && currentIndex < postLinks.length - 1) targetIndex = currentIndex + 1;
                             }
-                        } else {
-                            targetIndex = 0;
                         }
+
+                        if (targetIndex === -1) targetIndex = 0;
 
                         const targetLink = postLinks[targetIndex];
                         if (targetLink) {
-                            console.log(`%c[Grok Slideshow] Найдено постов: ${postLinks.length}. Переход к посту №${targetIndex + 1}`, 'color:#10b981; font-weight:bold');
-                            triggerClick(targetLink, 'Open Post');
+                            console.log(`%c[Grok Slideshow] Найдено карточек: ${postLinks.length}. Переход к ДРУГОЙ пачке №${targetIndex + 1}`, 'color:#10b981; font-weight:bold');
+                            triggerClick(targetLink, 'Open Next Batch');
                         }
                     }
                 }
 
                 if (attempts >= maxAttempts) {
                     clearInterval(pollTimer);
-                    console.log('%c❌ Не удалось дождаться появления постов в раздела Saved', 'color:#ef4444');
+                    console.log('%c❌ Не удалось дождаться появления постов в разделе Saved', 'color:#ef4444');
                 }
             }, 150);
             return;
@@ -690,6 +713,17 @@
                     startSlideshow(sec, slideshowMode);
                 }, 1000);
             }, 500);
+        }
+    }
+
+    function getConversationId(urlStr) {
+        if (!urlStr) return null;
+        try {
+            const u = new URL(urlStr, location.origin);
+            return u.searchParams.get('conversation');
+        } catch(e) {
+            const match = (urlStr || '').match(/conversation=([^&]+)/);
+            return match ? match[1] : null;
         }
     }
 
