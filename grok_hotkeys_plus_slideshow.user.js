@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.8.2
+// @version      5.8.3
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.8.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.8.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -1118,10 +1118,8 @@
     const VIDEO_LOOPS_KEY = 'slideshow_video_loops';
 
     let widgetState  = getSiteStorageItem('widget_state', 'panel');
-    if (widgetState !== 'panel' && widgetState !== 'hidden') {
-        widgetState = 'panel';
-        setSiteStorageItem('widget_state', 'panel');
-    }
+    if (widgetState !== 'hidden') widgetState = 'panel';
+    setSiteStorageItem('widget_state', widgetState);
 
     let pdAction     = getSiteSessionItem('pd_action', 'up');
     let autoConfirm  = getSiteSessionItem('delete_autoconfirm', 'true') !== 'false';
@@ -1603,9 +1601,7 @@
         btnRight.onclick = (e) => { e.stopPropagation(); setDirection('right'); };
         btnRepeat.onclick = (e) => {
             e.stopPropagation();
-            slideshowRepeat = !slideshowRepeat;
-            setSiteStorageItem('slideshow_repeat', slideshowRepeat);
-            updateDpadStyles();
+            executeResetToStart();
         };
 
         updateDpadStyles();
@@ -1630,10 +1626,7 @@
         if (btnResetStart) {
             btnResetStart.onclick = (e) => {
                 e.stopPropagation();
-                const key = slideshowDirections.includes('up') ? 'ArrowDown' :
-                            slideshowDirections.includes('down') ? 'ArrowUp' :
-                            slideshowDirections.includes('left') ? 'ArrowRight' : 'ArrowLeft';
-                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                executeResetToStart();
             };
         }
 
@@ -1730,16 +1723,30 @@
                 setTimeout(() => {
                     if (location.href === lastUrl) {
                         unchangedCount++;
-                        if (unchangedCount >= 5) {
+                        if (unchangedCount >= 4) {
                             clearInterval(interval);
-                            callback();
+                            if (typeof callback === 'function') callback();
                         }
                     } else {
                         lastUrl = location.href;
                         unchangedCount = 0;
                     }
-                }, 50);
-            }, 100);
+                }, 60);
+            }, 120);
+        }
+
+        function executeResetToStart() {
+            const currentDir = (slideshowDirections && slideshowDirections.length > 0) ? slideshowDirections[0] : 'up';
+            let oppDir = 'down';
+            if (currentDir === 'up') oppDir = 'down';
+            else if (currentDir === 'down') oppDir = 'up';
+            else if (currentDir === 'left') oppDir = 'right';
+            else if (currentDir === 'right') oppDir = 'left';
+
+            console.log(`%c[Grok Slideshow] Перемотка до упора в направлении: ${oppDir}`, 'color:#3b82f6; font-weight:bold');
+            scrollToFarEnd(oppDir, () => {
+                console.log('%c[Grok Slideshow] Достигнут крайний пост!', 'color:#10b981; font-weight:bold');
+            });
         }
 
         function loopBackToBottom(callback) {
