@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      6.1.1
+// @version      6.2
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v6.1.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v6.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -730,24 +730,21 @@
                 }
             }, 100);
 
-            // 2 секунды полноценной паузы после входа в новую пачку
+            // 2 секунды полноценной паузы после входа в новую пачку перед разгоном и запуском
             setTimeout(() => {
                 const active = document.activeElement;
                 if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
                     active.blur();
                 }
 
-                slideshowActive = true;
-                slideshowPaused = false;
-                
-                executeResetToStart();
-                setTimeout(() => {
+                executeResetToStart(() => {
+                    console.log(`%c[Grok Slideshow v6.2] Разгон завершен! Запуск СШ (режим: ${slideshowMode})`, 'color:#10b981; font-weight:bold');
                     if (slideshowMode === 'auto') {
                         startSlideshow(countdownSeconds, 'auto');
                     } else {
                         startSlideshow(currentInterval, 'manual');
                     }
-                }, 1000);
+                });
             }, 2000);
         }
     }
@@ -1907,7 +1904,7 @@ let slideshowRepeat = slideshowLoopMode !== 'off';
             }, 120);
         }
 
-        function executeResetToStart() {
+        function executeResetToStart(callback) {
             const currentDir = (slideshowDirections && slideshowDirections.length > 0) ? slideshowDirections[0] : 'up';
             let oppDir = 'down';
             if (currentDir === 'up') oppDir = 'down';
@@ -1918,6 +1915,7 @@ let slideshowRepeat = slideshowLoopMode !== 'off';
             console.log(`%c[Grok Slideshow] Перемотка до упора в направлении: ${oppDir}`, 'color:#3b82f6; font-weight:bold');
             scrollToFarEnd(oppDir, () => {
                 console.log('%c[Grok Slideshow] Достигнут крайний пост!', 'color:#10b981; font-weight:bold');
+                if (typeof callback === 'function') callback();
             });
         }
 
