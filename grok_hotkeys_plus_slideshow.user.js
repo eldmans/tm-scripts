@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.8.3
+// @version      5.8.4
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.8.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.8.4] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -1142,7 +1142,7 @@
     if (!Array.isArray(slideshowDirections) || slideshowDirections.length === 0) {
         slideshowDirections = ['left'];
     }
-    let downloadType = getSiteSessionItem('slideshow_download_type', 'all');
+    let downloadType = getSiteSessionItem('slideshow_download_type', 'none');
 
     let widgetEl     = null; // весь виджет
     let gearRowEl    = null; // строка с шестерёнкой
@@ -1601,7 +1601,9 @@
         btnRight.onclick = (e) => { e.stopPropagation(); setDirection('right'); };
         btnRepeat.onclick = (e) => {
             e.stopPropagation();
-            executeResetToStart();
+            slideshowRepeat = !slideshowRepeat;
+            setSiteStorageItem('slideshow_repeat', slideshowRepeat);
+            updateDpadStyles();
         };
 
         updateDpadStyles();
@@ -1965,9 +1967,15 @@
                             return;
                         }
 
+                        if (currentLoop > videoTargetLoops) {
+                            executeSlideTransition(countdownSeconds);
+                            return;
+                        }
+
                         if (elapsed < photoBaseSeconds) {
                             if (stopwatchEl) {
-                                const loopStr = videoTargetLoops > 1 ? `${currentLoop}/${videoTargetLoops} ` : '';
+                                const displayLoop = Math.min(currentLoop, videoTargetLoops);
+                                const loopStr = videoTargetLoops > 1 ? `${displayLoop}/${videoTargetLoops} ` : '';
                                 stopwatchEl.textContent = `${loopStr}0:0${elapsed} / 0:0${photoBaseSeconds}`;
                             }
                             elapsed++;
@@ -2147,12 +2155,7 @@
             else startSlideshow(countdownSeconds, 'auto');
         };
 
-        btnOrient.onclick = (e) => {
-            e.stopImmediatePropagation();
-            slideshowOrientation = slideshowOrientation === 'v' ? 'h' : 'v';
-            setSiteStorageItem('slideshow_orientation', slideshowOrientation);
-            btnOrient.textContent = slideshowOrientation === 'h' ? '↔' : '↕';
-        };
+
 
         manualPlus.onclick = (e) => {
             e.stopImmediatePropagation();
@@ -2164,7 +2167,7 @@
 
         manualMinus.onclick = (e) => {
             e.stopImmediatePropagation();
-            currentInterval = Math.max(currentInterval - 1, 3);
+            currentInterval = Math.max(currentInterval - 1, 0);
             btnManual.textContent = currentInterval;
             setSiteStorageItem('slideshow_interval', currentInterval);
             if (slideshowActive && slideshowMode === 'manual') startSlideshow(currentInterval, 'manual');
@@ -2183,7 +2186,7 @@
         if (autoSecMinus) {
             autoSecMinus.onclick = (e) => {
                 e.stopImmediatePropagation();
-                countdownSeconds = Math.max(countdownSeconds - 1, 1);
+                countdownSeconds = Math.max(countdownSeconds - 1, 0);
                 if (btnAuto) btnAuto.textContent = (countdownSeconds < 10 ? '0' + countdownSeconds : countdownSeconds) + 'с';
                 setSiteStorageItem('slideshow_countdown_sec', countdownSeconds);
                 if (slideshowActive && slideshowMode === 'auto') startSlideshow(countdownSeconds, 'auto');
