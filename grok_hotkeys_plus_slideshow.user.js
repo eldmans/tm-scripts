@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      6.0.2
+// @version      6.0.3
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v6.0.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v6.0.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -638,7 +638,13 @@
 
             const pollTimer = setInterval(() => {
                 attempts++;
-                const postLinks = Array.from(document.querySelectorAll('a[href*="/imagine/post/"], div[role="button"][data-post-id]'));
+
+                // Снимаем фокус с текстового ввода промпта на странице Saved
+                if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.isContentEditable)) {
+                    try { document.activeElement.blur(); } catch(e) {}
+                }
+
+                const postLinks = Array.from(document.querySelectorAll('a[href*="/imagine/post/"], [data-post-id]'));
 
                 if (postLinks.length > 0) {
                     const lastConv = getConversationId(lastPostUrl);
@@ -646,7 +652,7 @@
                     let currentIndex = -1;
                     if (lastConv) {
                         currentIndex = postLinks.findIndex(a => {
-                            const href = a.href || a.getAttribute('data-href') || '';
+                            const href = a.href || a.getAttribute('href') || a.getAttribute('data-href') || '';
                             return getConversationId(href) === lastConv;
                         });
                     }
@@ -654,7 +660,7 @@
                     if (currentIndex === -1 && lastPostUrl) {
                         const lastId = lastPostUrl.split('/imagine/post/')[1]?.split('?')[0];
                         if (lastId) {
-                            currentIndex = postLinks.findIndex(a => ((a.href || '') + (a.getAttribute('data-post-id') || '')).includes(lastId));
+                            currentIndex = postLinks.findIndex(a => ((a.href || a.getAttribute('href') || '') + (a.getAttribute('data-post-id') || '')).includes(lastId));
                         }
                     }
 
@@ -665,7 +671,8 @@
                         if (currentIndex !== -1) {
                             if (pendingDir === 'up' || pendingDir === 'left') {
                                 for (let i = currentIndex - 1; i >= 0; i--) {
-                                    const conv = getConversationId(postLinks[i].href || postLinks[i].getAttribute('data-href') || '');
+                                    const href = postLinks[i].href || postLinks[i].getAttribute('href') || '';
+                                    const conv = getConversationId(href);
                                     if (!lastConv || (conv && conv !== lastConv)) {
                                         targetIndex = i;
                                         break;
@@ -674,7 +681,8 @@
                                 if (targetIndex === -1 && currentIndex > 0) targetIndex = currentIndex - 1;
                             } else {
                                 for (let i = currentIndex + 1; i < postLinks.length; i++) {
-                                    const conv = getConversationId(postLinks[i].href || postLinks[i].getAttribute('data-href') || '');
+                                    const href = postLinks[i].href || postLinks[i].getAttribute('href') || '';
+                                    const conv = getConversationId(href);
                                     if (!lastConv || (conv && conv !== lastConv)) {
                                         targetIndex = i;
                                         break;
@@ -686,10 +694,14 @@
 
                         if (targetIndex === -1) targetIndex = 0;
 
-                        const targetLink = postLinks[targetIndex];
-                        if (targetLink) {
-                            console.log(`%c[Grok Slideshow] Найдено карточек: ${postLinks.length}. Переход к ДРУГОЙ пачке №${targetIndex + 1}`, 'color:#10b981; font-weight:bold');
-                            triggerClick(targetLink, 'Open Next Batch');
+                        const targetEl = postLinks[targetIndex];
+                        const targetUrl = targetEl ? (targetEl.href || targetEl.getAttribute('href') || '') : '';
+
+                        if (targetUrl) {
+                            console.log(`%c[Grok Slideshow v6.0.3] Прямой переход по URL к новой пачке: ${targetUrl}`, 'color:#10b981; font-weight:bold');
+                            location.href = targetUrl;
+                        } else if (targetEl) {
+                            try { targetEl.click(); } catch(e) {}
                         }
                     }
                 }
