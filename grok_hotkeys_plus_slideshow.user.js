@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.9.2
+// @version      5.9.3
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.9.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.9.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -679,14 +679,15 @@
             sessionStorage.removeItem('grok_pending_autorun_sec');
             sessionStorage.removeItem('grok_last_post_url');
 
+            slideshowActive = true;
+            slideshowPaused = false;
+
             console.log(`%c[Grok Slideshow] Зашли в новый пост, делаем разгон в противоположном направлении для: ${pendingDir}`, 'color:#10b981; font-weight:bold');
             
             setTimeout(() => {
                 executeResetToStart();
                 setTimeout(() => {
-                    if (typeof startSlideshow === 'function') {
-                        startSlideshow(sec, slideshowMode);
-                    }
+                    startSlideshow(sec, slideshowMode);
                 }, 1000);
             }, 500);
         }
