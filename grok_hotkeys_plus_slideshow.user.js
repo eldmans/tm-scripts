@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow
 // @namespace    http://tampermonkey.net/
-// @version      5.7.3
+// @version      5.8
 // @description  Полный набор горячих клавиш + автолистание слайдов + Lag Monitor + Help/Settings (F1) + Play/Pause (Pause) + ScrollLock (звук). Клавиши можно переназначить через F1.
 // @author       Grok + eldmans
 // @match        *://grok.com/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[Grok Hotkeys + Slideshow v5.7.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[Grok Hotkeys + Slideshow v5.8] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     function checkIsPostPage() {
         const host = location.hostname.toLowerCase();
@@ -49,7 +49,7 @@
         help:           { label: 'Справка / Настройки',                            defaultKey: { key: 'F1',         ctrl: false, alt: false, shift: false }, onlyF1F4: true },
         lagMonitor:     { label: 'Lag Monitor (страница поста)',                    defaultKey: { key: 'F8',         ctrl: false, alt: false, shift: false }, postOnly: true },
         history:        { label: 'История сохранённых',                             defaultKey: { key: 'Home',       ctrl: false, alt: false, shift: false } },
-        slideshowPanel: { label: 'Виджет: нажать = полоска → настройки → скрыт', defaultKey: { key: 'Insert', ctrl: true, alt: false, shift: false } },
+        slideshowPanel: { label: 'Виджет: нажать = показать / скрыть панель', defaultKey: { key: 'Insert', ctrl: true, alt: false, shift: false } },
         slideshow:      { label: 'Запуск/остановка слайдшоу',                       defaultKey: { key: 'Insert',     ctrl: false, alt: false, shift: false }, postOnly: true },
         focusWidget:    { label: 'Фокус на панель управления',                          defaultKey: { key: 'F7',         ctrl: false, alt: false, shift: false }, postOnly: true },
     };
@@ -162,24 +162,8 @@
             triggerDownloadForCurrentSite();
             if (checkIsPostPage()) {
                 if (pdAction === 'up') {
-                    const firstUrl = location.href;
                     setTimeout(() => {
                         document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
-                        if (transRight) checkAndDispatchRight(firstUrl);
-                    }, 500);
-                } else if (pdAction === 'note') {
-                    const firstUrl = location.href;
-                    setTimeout(() => {
-                        addNotePrefix(true);
-                        setTimeout(() => {
-                            if (slideshowDirections.length > 0) {
-                                const key = getArrowKeyForDirection(slideshowDirections[0]);
-                                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                            } else {
-                                document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
-                            }
-                            if (transRight) checkAndDispatchRight(firstUrl);
-                        }, 150);
                     }, 500);
                 } else if (pdAction === 'del') {
                     setTimeout(() => runSmartDelete(), 1000);
@@ -187,20 +171,7 @@
             }
         }
 
-        if (hotkeyMatches(e, config.noteAction)) {
-            e.preventDefault();
-            const firstUrl = location.href;
-            addNotePrefix(false);
-            setTimeout(() => {
-                if (slideshowDirections.length > 0) {
-                    const key = getArrowKeyForDirection(slideshowDirections[0]);
-                    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                } else {
-                    document.dispatchEvent(new KeyboardEvent('keydown', { key: slideshowOrientation === 'h' ? 'ArrowRight' : 'ArrowUp', bubbles: true }));
-                }
-                if (transRight) checkAndDispatchRight(firstUrl);
-            }, 150);
-        }
+
 
         if (hotkeyMatches(e, config.upscale)) {
             e.preventDefault();
@@ -1124,7 +1095,6 @@
         const prefix = getSitePrefix();
         const val = localStorage.getItem(prefix + key);
         if (val !== null) return val;
-        // Fallback to legacy global key if present
         const globalVal = localStorage.getItem('grok_' + key);
         return globalVal !== null ? globalVal : defaultVal;
     }
@@ -1134,15 +1104,29 @@
         localStorage.setItem(prefix + key, val);
     }
 
+    function getSiteSessionItem(key, defaultVal) {
+        const prefix = getSitePrefix();
+        const val = sessionStorage.getItem(prefix + key);
+        return val !== null ? val : defaultVal;
+    }
+
+    function setSiteSessionItem(key, val) {
+        const prefix = getSitePrefix();
+        sessionStorage.setItem(prefix + key, val);
+    }
+
     const VIDEO_LOOPS_KEY = 'slideshow_video_loops';
 
-    let widgetState  = getSiteStorageItem('widget_state', 'strip');
-    let pdAction     = getSiteStorageItem('pd_action', 'up');
-    let autoConfirm  = getSiteStorageItem('delete_autoconfirm', 'true') !== 'false';
-    let holdPost     = getSiteStorageItem('delete_holdpost', 'true') !== 'false';
+    let widgetState  = getSiteStorageItem('widget_state', 'panel');
+    if (widgetState !== 'panel' && widgetState !== 'hidden') widgetState = 'panel';
+
+    let pdAction     = getSiteSessionItem('pd_action', 'up');
+    let autoConfirm  = getSiteSessionItem('delete_autoconfirm', 'true') !== 'false';
+    let holdPost     = getSiteSessionItem('delete_holdpost', 'true') !== 'false';
     let slideshowMode = getSiteStorageItem('slideshow_mode', 'auto');
+
     let countdownSeconds = parseInt(getSiteStorageItem('slideshow_countdown_sec', '3'), 10);
-    if (isNaN(countdownSeconds)) countdownSeconds = 3;
+    if (isNaN(countdownSeconds) || countdownSeconds < 0) countdownSeconds = 3;
     let photoBaseSeconds = parseInt(getSiteStorageItem('slideshow_photo_base_sec', '5'), 10);
     if (isNaN(photoBaseSeconds)) photoBaseSeconds = 5;
 
@@ -1157,8 +1141,7 @@
     if (!Array.isArray(slideshowDirections) || slideshowDirections.length === 0) {
         slideshowDirections = ['left'];
     }
-    let downloadType = getSiteStorageItem('slideshow_download_type', 'all');
-    let transRight   = getSiteStorageItem('transition_right', 'false') === 'true';
+    let downloadType = getSiteSessionItem('slideshow_download_type', 'all');
 
     let widgetEl     = null; // весь виджет
     let gearRowEl    = null; // строка с шестерёнкой
@@ -1379,7 +1362,7 @@
         gearRowEl = widgetEl.querySelector('#grok-gear-row');
         gearRowEl.onclick = (e) => {
             e.stopPropagation();
-            setWidgetState(widgetState === 'panel' ? 'strip' : 'panel');
+            setWidgetState(widgetState === 'panel' ? 'hidden' : 'panel');
         };
 
         panelEl = document.createElement('div');
@@ -1401,9 +1384,9 @@
     }
 
     function initPanelContent(container) {
-        const initDelete   = localStorage.getItem('grok_slideshow_delete')   === 'true';
-        const initTab      = localStorage.getItem('grok_slideshow_tab')      === 'true';
-        const initBrsr     = localStorage.getItem('grok_slideshow_brsr')     === 'true';
+        const initDelete   = getSiteSessionItem('slideshow_delete', 'false') === 'true';
+        const initTab      = getSiteSessionItem('slideshow_tab', 'true') === 'true';
+        const initBrsr     = getSiteSessionItem('slideshow_brsr', 'false') === 'true';
 
         container.innerHTML = `
             <!-- Заголовок Слайдшоу -->
@@ -1513,29 +1496,18 @@
                 <div id="grok-label-download-hotkey" style="color: #9ca3af; font-weight: 500;">
                     ${formatHotkey(config.download)} :
                 </div>
-                <div style="display: flex; gap: 10px; align-items: center;">
+                <div style="display: flex; gap: 14px; align-items: center;">
                     <label>
                         <input type="radio" name="grok-pd-action" value="none" style="accent-color: #3b82f6;" ${pdAction === 'none' ? 'checked' : ''}>
                         <span>—</span>
                     </label>
-                    <label title="Скачать + листать вверх/вправо">
+                    <label title="Скачать + перелистнуть дальше">
                         <input type="radio" name="grok-pd-action" value="up" style="accent-color: #3b82f6;" ${pdAction === 'up' ? 'checked' : ''}>
                         <span>+↑</span>
                     </label>
-                    <label title="Скачать + написать Заметку + Вверх">
-                        <input type="radio" name="grok-pd-action" value="note" style="accent-color: #3b82f6;" ${pdAction === 'note' ? 'checked' : ''}>
-                        <span>note</span>
-                    </label>
-                    <label title="Скачать + подождать 1с + Удалить">
+                    <label title="Скачать + подождать + Удалить">
                         <input type="radio" name="grok-pd-action" value="del" style="accent-color: #3b82f6;" ${pdAction === 'del' ? 'checked' : ''}>
                         <span>del</span>
-                    </label>
-                </div>
-                <!-- Вторая строка для чекбокса "стрелка вправо" по центру -->
-                <div style="display: flex; justify-content: center; width: 100%; margin-top: 2px;">
-                    <label title="Нажать стрелку Вправо после перехода на новый пост">
-                        <input type="checkbox" id="grok-cb-transright" style="width: 12px; height: 12px; accent-color: #3b82f6;" ${transRight ? 'checked' : ''}>
-                        <span style="font-weight: 600;">→</span>
                     </label>
                 </div>
             </div>
@@ -1600,11 +1572,11 @@
 
         selectDl.addEventListener('change', () => {
             downloadType = selectDl.value;
-            setSiteStorageItem('slideshow_download_type', downloadType);
+            setSiteSessionItem('slideshow_download_type', downloadType);
         });
-        cbDelete.addEventListener('change',   () => localStorage.setItem('grok_slideshow_delete',   cbDelete.checked));
-        cbTab.addEventListener('change',      () => localStorage.setItem('grok_slideshow_tab',      cbTab.checked));
-        cbBrsr.addEventListener('change',     () => localStorage.setItem('grok_slideshow_brsr',     cbBrsr.checked));
+        cbDelete.addEventListener('change',   () => setSiteSessionItem('slideshow_delete',   cbDelete.checked));
+        cbTab.addEventListener('change',      () => setSiteSessionItem('slideshow_tab',      cbTab.checked));
+        cbBrsr.addEventListener('change',     () => setSiteSessionItem('slideshow_brsr',     cbBrsr.checked));
 
         function updateDpadStyles() {
             if (!btnUp || !btnDown || !btnLeft || !btnRight || !btnRepeat) return;
@@ -1635,23 +1607,20 @@
             }
         }
 
-        const toggleDirection = (dir, opposite) => {
-            const idx = slideshowDirections.indexOf(dir);
-            if (idx > -1) {
-                slideshowDirections.splice(idx, 1);
+        const setDirection = (dir) => {
+            if (slideshowDirections.includes(dir)) {
+                slideshowDirections = [];
             } else {
-                slideshowDirections.push(dir);
-                const oppIdx = slideshowDirections.indexOf(opposite);
-                if (oppIdx > -1) slideshowDirections.splice(oppIdx, 1);
+                slideshowDirections = [dir];
             }
             setSiteStorageItem('slideshow_directions', JSON.stringify(slideshowDirections));
             updateDpadStyles();
         };
 
-        btnUp.onclick = (e) => { e.stopPropagation(); toggleDirection('up', 'down'); };
-        btnDown.onclick = (e) => { e.stopPropagation(); toggleDirection('down', 'up'); };
-        btnLeft.onclick = (e) => { e.stopPropagation(); toggleDirection('left', 'right'); };
-        btnRight.onclick = (e) => { e.stopPropagation(); toggleDirection('right', 'left'); };
+        btnUp.onclick = (e) => { e.stopPropagation(); setDirection('up'); };
+        btnDown.onclick = (e) => { e.stopPropagation(); setDirection('down'); };
+        btnLeft.onclick = (e) => { e.stopPropagation(); setDirection('left'); };
+        btnRight.onclick = (e) => { e.stopPropagation(); setDirection('right'); };
         btnRepeat.onclick = (e) => {
             e.stopPropagation();
             slideshowRepeat = !slideshowRepeat;
@@ -1992,41 +1961,58 @@
                 }
 
                 if (!video) {
-                    // Фото: Ожидание (photoBaseSeconds) + обратный отсчет (countdownSeconds)
+                    // Фото: Поддержка циклов (videoTargetLoops) и мгновенный переход при countdownSeconds = 0
+                    let currentLoop = 1;
                     let elapsed = 0;
+
                     function photoTick() {
                         if (!slideshowActive || slideshowPaused || slideshowMode !== 'auto') return;
 
+                        if (countdownSeconds === 0 && videoTargetLoops === 1) {
+                            executeSlideTransition(0);
+                            return;
+                        }
+
                         if (elapsed < photoBaseSeconds) {
                             if (stopwatchEl) {
-                                stopwatchEl.textContent = `0:0${elapsed} / 0:0${photoBaseSeconds}`;
-                                stopwatchEl.style.display = 'block';
+                                const loopStr = videoTargetLoops > 1 ? `${currentLoop}/${videoTargetLoops} ` : '';
+                                stopwatchEl.textContent = `${loopStr}0:0${elapsed} / 0:0${photoBaseSeconds}`;
                             }
                             elapsed++;
                             slideshowTimeoutId = setTimeout(photoTick, 1000);
                         } else {
-                            let countdownLeft = countdownSeconds;
-                            function countdownTick() {
-                                if (!slideshowActive || slideshowPaused || slideshowMode !== 'auto') return;
-                                if (countdownLeft > 0) {
-                                    if (btnAuto) {
-                                        btnAuto.textContent = countdownLeft < 10 ? `0${countdownLeft}` : `${countdownLeft}`;
-                                    }
-                                    countdownLeft--;
-                                    slideshowTimeoutId = setTimeout(countdownTick, 1000);
+                            if (currentLoop < videoTargetLoops) {
+                                currentLoop++;
+                                elapsed = 0;
+                                slideshowTimeoutId = setTimeout(photoTick, 1000);
+                            } else {
+                                if (countdownSeconds === 0) {
+                                    executeSlideTransition(0);
                                 } else {
-                                    if (btnAuto) btnAuto.textContent = '00';
-                                    slideshowTimeoutId = setTimeout(() => {
-                                        executeSlideTransition(countdownSeconds);
-                                    }, 500);
+                                    let countdownLeft = countdownSeconds;
+                                    function countdownTick() {
+                                        if (!slideshowActive || slideshowPaused || slideshowMode !== 'auto') return;
+                                        if (countdownLeft > 0) {
+                                            if (btnAuto) {
+                                                btnAuto.textContent = (countdownLeft < 10 ? `0${countdownLeft}` : `${countdownLeft}`) + 'с';
+                                            }
+                                            countdownLeft--;
+                                            slideshowTimeoutId = setTimeout(countdownTick, 1000);
+                                        } else {
+                                            if (btnAuto) btnAuto.textContent = '00с';
+                                            slideshowTimeoutId = setTimeout(() => {
+                                                executeSlideTransition(countdownSeconds);
+                                            }, 300);
+                                        }
+                                    }
+                                    countdownTick();
                                 }
                             }
-                            countdownTick();
                         }
                     }
                     photoTick();
                 } else {
-                    // Видео: поддержка n-полных кругов (videoTargetLoops) + обратный отсчет
+                    // Видео: поддержка n-полных кругов (videoTargetLoops) + 0s задержка
                     let currentLoop = 1;
                     let prevTime = video.currentTime;
 
@@ -2043,7 +2029,6 @@
                         const dur = videoCurrent.duration;
 
                         if (!isNaN(dur) && dur > 0) {
-                            // Если произошел перезапуск круга
                             if (cur < prevTime - 0.5 && prevTime > dur - 1.5) {
                                 currentLoop++;
                             }
@@ -2056,24 +2041,29 @@
                                     videoCurrent.play().catch(() => {});
                                 } else {
                                     videoCurrent.pause();
-                                    let countdownLeft = countdownSeconds;
-                                    function videoCountdownTick() {
-                                        if (!slideshowActive || slideshowPaused || slideshowMode !== 'auto') return;
-                                        if (countdownLeft > 0) {
-                                            if (btnAuto) {
-                                                btnAuto.textContent = countdownLeft < 10 ? `0${countdownLeft}` : `${countdownLeft}`;
+                                    if (countdownSeconds === 0) {
+                                        executeSlideTransition(0);
+                                        return;
+                                    } else {
+                                        let countdownLeft = countdownSeconds;
+                                        function videoCountdownTick() {
+                                            if (!slideshowActive || slideshowPaused || slideshowMode !== 'auto') return;
+                                            if (countdownLeft > 0) {
+                                                if (btnAuto) {
+                                                    btnAuto.textContent = (countdownLeft < 10 ? `0${countdownLeft}` : `${countdownLeft}`) + 'с';
+                                                }
+                                                countdownLeft--;
+                                                slideshowTimeoutId = setTimeout(videoCountdownTick, 1000);
+                                            } else {
+                                                if (btnAuto) btnAuto.textContent = '00с';
+                                                slideshowTimeoutId = setTimeout(() => {
+                                                    executeSlideTransition(countdownSeconds);
+                                                }, 300);
                                             }
-                                            countdownLeft--;
-                                            slideshowTimeoutId = setTimeout(videoCountdownTick, 1000);
-                                        } else {
-                                            if (btnAuto) btnAuto.textContent = '00';
-                                            slideshowTimeoutId = setTimeout(() => {
-                                                executeSlideTransition(countdownSeconds);
-                                            }, 500);
                                         }
+                                        videoCountdownTick();
+                                        return;
                                     }
-                                    videoCountdownTick();
-                                    return;
                                 }
                             } else {
                                 if (stopwatchEl) {
