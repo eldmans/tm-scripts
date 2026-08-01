@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.0.0-stage1
+// @version      2.0.1-stage2
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine
 // @author       eldmans
 // @match        https://grok.com/*
@@ -25,6 +25,45 @@
   const WIDGET_ID      = 'grok-ss-widget';
   const MODAL_ID       = 'grok-ss-modal';
   const STORAGE_KEY    = 'grokSS_settings';
+
+  // ─────────────────────────────────────────────
+  //  DOM SELECTORS (single source of truth)
+  //  Update these when Grok changes its UI.
+  // ─────────────────────────────────────────────
+
+  const SEL = {
+    // Prompt input field (text box)
+    promptInput:   'textarea, div[contenteditable="true"]',
+
+    // Media on /imagine/post/... page
+    video:         'video[src]',
+    videoAny:      'main video, div[role="dialog"] video, video',
+    imageMain:     'main img, div[role="dialog"] img',
+    imageFilmstrip:'button[data-filmstrip-item="true"] img',
+
+    // Trusted media CDN patterns (use .includes() checks)
+    mediaCDN: ['imagine-public.x.ai', 'assets.grok.com/users/', 'assets.grok.com/videos/'],
+
+    // Post cards on /imagine/saved
+    savedCards:    'a[href*="/imagine/post/"]',
+
+    // Buttons (aria-label based — most reliable on Grok)
+    btnDownload:   'button[aria-label*="Download"], button[aria-label*="Скачать"]',
+    btnDelete:     'button[aria-label*="Delete"], button[aria-label*="Удалить"]',
+    btnUpscale:    'button[aria-label*="Upscale"], button[aria-label*="Увеличить"], button[aria-label*="Enhance"]',
+    btnPostMenu:   'button[aria-label*="Post actions"], button[aria-label*="More"], button[aria-label*="Ещё"]',
+    btnMakeVideo:  'button[aria-label="Make video"]',
+    btnSubmit:     'button[aria-label="Submit"]',
+
+    // Modals / overlays
+    confirmDelete: 'button',   // filter by textContent 'Delete'|'Удалить' inside modal
+    modalDialog:   '[role="dialog"]',
+
+    // Loading / moderation detectors
+    loadingSpinner:'[class*="spin"], [class*="loading"], [class*="skeleton"]',
+    moderationImg: 'img[src*="moderation"]',
+    errorEl:       '[data-testid*="moderation"], [data-testid*="error"]',
+  };
 
   const DEFAULTS = {
     // Panel visibility
@@ -1154,7 +1193,163 @@
   }
 
   // ─────────────────────────────────────────────
-  //  KEYBOARD LISTENER (F1 + Ctrl+Insert stubs)
+  //  BLUR GUARD — Защита фокуса
+  // ─────────────────────────────────────────────
+
+  /**
+   * Снимает фокус с поля ввода (промпт Grok).
+   * Вызывается перед КАЖДЫМ хоткей-действием и при навигации.
+   */
+  function blurActiveInput() {
+    const ae = document.activeElement;
+    if (!ae) return;
+    const tag = ae.tagName;
+    if (
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      ae.getAttribute('contenteditable') === 'true' ||
+      ae.isContentEditable
+    ) {
+      ae.blur();
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  //  DOM HELPERS (Grok UI actions — stubs for
+  //  later stages; safe to call at any time)
+  // ─────────────────────────────────────────────
+
+  /** Найти кнопку в DOM по SEL-строке. */
+  function findBtn(sel) {
+    return document.querySelector(sel) || null;
+  }
+
+  /** Кликнуть кнопку если она найдена. */
+  function clickBtn(sel) {
+    const btn = findBtn(sel);
+    if (btn) { btn.click(); return true; }
+    return false;
+  }
+
+  /**
+   * Скачать текущее медиа.
+   * Этап 5 заменит этот stub полной реализацией.
+   */
+  function actionDownload() {
+    blurActiveInput();
+    // Stage 5: findGrokDownloadButton() + GM_download
+    clickBtn(SEL.btnDownload);
+  }
+
+  /**
+   * Upscale текущего медиа.
+   */
+  function actionUpscale() {
+    blurActiveInput();
+    clickBtn(SEL.btnUpscale);
+  }
+
+  /**
+   * Удалить публикацию.
+   * Этап 5 добавит hold post + a.confirm логику.
+   */
+  function actionDeletePub() {
+    blurActiveInput();
+    // Stage 5: holdPost pre-save neighbour, then click
+    clickBtn(SEL.btnDelete);
+  }
+
+  /** Вкл/выкл звук текущего видео. */
+  function actionToggleMute() {
+    blurActiveInput();
+    const v = document.querySelector(SEL.video);
+    if (v) v.muted = !v.muted;
+  }
+
+  /** Play / Pause текущего видео. */
+  function actionPlayPause() {
+    blurActiveInput();
+    const v = document.querySelector(SEL.video);
+    if (!v) return;
+    if (v.paused) v.play().catch(() => {});
+    else          v.pause();
+  }
+
+  /** Перейти на /imagine/saved. */
+  function actionGoSaved() {
+    blurActiveInput();
+    location.href = 'https://grok.com/imagine/saved';
+  }
+
+  /** Запуск / остановка слайдшоу (stub — Этап 3). */
+  function actionToggleSlideshow() {
+    blurActiveInput();
+    // Stage 3: startSlideshow() / stopSlideshow()
+    State.slideshowRunning = !State.slideshowRunning;
+    // TODO: reflect state in UI
+  }
+
+  /** Фокус на виджет панели. */
+  function actionFocusPanel() {
+    const w = document.getElementById(WIDGET_ID);
+    if (w) w.focus();
+  }
+
+  // ─────────────────────────────────────────────
+  //  PAGE DOWN INTERCEPT
+  // ─────────────────────────────────────────────
+
+  function handlePageDown(e) {
+    const mode = Settings.get().pgDownMode;
+    if (mode === 'off') return;
+    e.preventDefault();
+    blurActiveInput();
+    if (mode === 'next') {
+      actionDownload();
+      // Stage 3: also advance slide
+    } else if (mode === 'del') {
+      actionDeletePub();
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  //  TAB / BROWSER FOCUS LISTENERS
+  // ─────────────────────────────────────────────
+
+  /**
+   * Auto-pause slideshow when tab becomes hidden (autoTab)
+   * or browser loses focus (autoBrsr).
+   * Stage 3 will call actual pause; here we store the flag.
+   */
+  document.addEventListener('visibilitychange', () => {
+    if (!Settings.get().autoTab) return;
+    if (document.hidden) {
+      State._pausedByTab = true;
+      // Stage 3: stopSlideshow()
+    } else {
+      if (State._pausedByTab) {
+        State._pausedByTab = false;
+        // Stage 3: resumeSlideshow()
+      }
+    }
+  });
+
+  window.addEventListener('blur', () => {
+    if (!Settings.get().autoBrsr) return;
+    State._pausedByBrsr = true;
+    // Stage 3: stopSlideshow()
+  });
+
+  window.addEventListener('focus', () => {
+    if (!Settings.get().autoBrsr) return;
+    if (State._pausedByBrsr) {
+      State._pausedByBrsr = false;
+      // Stage 3: resumeSlideshow()
+    }
+  });
+
+  // ─────────────────────────────────────────────
+  //  KEYBOARD LISTENER — полный набор хоткеев
   // ─────────────────────────────────────────────
 
   function matchHotkey(e, combo) {
@@ -1164,7 +1359,7 @@
     const alt   = parts.includes('Alt');
     const shift = parts.includes('Shift');
     return (
-      e.key    === key   &&
+      e.key      === key   &&
       e.ctrlKey  === ctrl  &&
       e.altKey   === alt   &&
       e.shiftKey === shift
@@ -1172,28 +1367,111 @@
   }
 
   document.addEventListener('keydown', e => {
-    // Update NumLock status on any keydown
+    // Всегда обновляем NumLock
     detectNumLock(e);
 
-    // Don't fire if recording
+    // Не стреляем если сейчас идёт запись хоткея
     if (State.recordingHotkey) return;
+
+    // Не стреляем если фокус в промпт-инпуте
+    // (кроме специальных системных клавиш)
+    const ae = document.activeElement;
+    const inInput = ae && (
+      ae.tagName === 'INPUT' ||
+      ae.tagName === 'TEXTAREA' ||
+      ae.getAttribute('contenteditable') === 'true' ||
+      ae.isContentEditable
+    );
 
     const hk = Settings.get().hk;
 
+    // ── F1: Справка/Настройки ──────────────────
     if (matchHotkey(e, hk.help)) {
       e.preventDefault();
       openModal();
       return;
     }
 
+    // ── Ctrl+Insert: Toggle Panel ──────────────
     if (matchHotkey(e, 'Ctrl+Insert')) {
       e.preventDefault();
       togglePanel();
       return;
     }
 
-    // Additional hotkeys wired in later stages:
-    // startStop, download, deletePub, etc.
+    // ── F7: Фокус на панель ───────────────────
+    if (matchHotkey(e, hk.focusPanel)) {
+      e.preventDefault();
+      actionFocusPanel();
+      return;
+    }
+
+    // ── Ниже — не работаем если фокус в инпуте
+    if (inInput) return;
+
+    // ── Insert: Запуск/Стоп слайдшоу ──────────
+    if (matchHotkey(e, hk.startStop) && !e.ctrlKey) {
+      e.preventDefault();
+      actionToggleSlideshow();
+      return;
+    }
+
+    // ── PageDown: Скачать (или intercept-режим)
+    if (e.key === 'PageDown') {
+      const pgMode = Settings.get().pgDownMode;
+      if (pgMode !== 'off') {
+        handlePageDown(e);
+        return;
+      }
+      if (matchHotkey(e, hk.download)) {
+        e.preventDefault();
+        actionDownload();
+        return;
+      }
+    }
+
+    // ── PageUp: Upscale ────────────────────────
+    if (matchHotkey(e, hk.upscale)) {
+      e.preventDefault();
+      actionUpscale();
+      return;
+    }
+
+    // ── Delete: Удалить публикацию ─────────────
+    if (matchHotkey(e, hk.deletePub)) {
+      e.preventDefault();
+      actionDeletePub();
+      return;
+    }
+
+    // ── ScrollLock: Вкл/Выкл звук ─────────────
+    if (matchHotkey(e, hk.toggleMute)) {
+      e.preventDefault();
+      actionToggleMute();
+      return;
+    }
+
+    // ── Pause: Play/Pause видео ────────────────
+    if (matchHotkey(e, hk.playPause)) {
+      e.preventDefault();
+      actionPlayPause();
+      return;
+    }
+
+    // ── Home: Перейти в /imagine/saved ─────────
+    if (matchHotkey(e, hk.goSaved)) {
+      e.preventDefault();
+      actionGoSaved();
+      return;
+    }
+
+    // ── F8: Lag Monitor (stub) ─────────────────
+    if (matchHotkey(e, hk.lagMonitor)) {
+      e.preventDefault();
+      // Stage 3+: lag monitor overlay
+      console.log('[GrokSS] Lag Monitor — TODO');
+      return;
+    }
   }, true);
 
   // ─────────────────────────────────────────────
