@@ -1,0 +1,1216 @@
+// ==UserScript==
+// @name         Grok Hotkeys + Slideshow 2.0
+// @namespace    https://grok.com/
+// @version      2.0.0-stage1
+// @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine
+// @author       eldmans
+// @match        https://grok.com/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_addStyle
+// @grant        GM_download
+// @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok-hotkeys-slideshow.user.js
+// @downloadURL  https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok-hotkeys-slideshow.user.js
+// @supportURL   https://github.com/eldmans/tm-scripts/tree/grok
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  // ─────────────────────────────────────────────
+  //  CONSTANTS & DEFAULTS
+  // ─────────────────────────────────────────────
+
+  const WIDGET_ID      = 'grok-ss-widget';
+  const MODAL_ID       = 'grok-ss-modal';
+  const STORAGE_KEY    = 'grokSS_settings';
+
+  const DEFAULTS = {
+    // Panel visibility
+    panelVisible: true,
+
+    // Slideshow mode: 'manual' | 'auto'
+    slideshowMode: 'manual',
+
+    // Manual interval seconds
+    manualInterval: 7,
+
+    // AUTO countdown seconds after media ends
+    autoCountdown: 1,
+
+    // AUTO loops count
+    autoLoops: 1,
+
+    // D-pad direction: 'up' | 'down' | 'left' | 'right'
+    dpadDir: 'right',
+
+    // D-pad center mode: 'stop' | 'repeat' | 'auto'
+    dpadCenter: 'stop',
+
+    // Download mode: 'none' | 'photo' | 'video' | 'all'
+    downloadMode: 'none',
+
+    // Checkboxes
+    autoDel:  false,
+    autoTab:  false,
+    autoBrsr: false,
+
+    // PageDown intercept mode: 'off' | 'next' | 'del'
+    pgDownMode: 'off',
+
+    // Delete options
+    autoConfirm: false,
+    holdPost:    false,
+
+    // Hotkeys (key codes)
+    hk: {
+      download:   'PageDown',
+      upscale:    'PageUp',
+      deletePub:  'Delete',
+      toggleMute: 'ScrollLock',
+      playPause:  'Pause',
+      help:       'F1',
+      lagMonitor: 'F8',
+      goSaved:    'Home',
+      togglePanel:'Insert',       // Ctrl+Insert
+      startStop:  'Insert',
+      focusPanel: 'F7',
+    },
+  };
+
+  // ─────────────────────────────────────────────
+  //  SETTINGS MANAGER
+  // ─────────────────────────────────────────────
+
+  const Settings = (() => {
+    let _cache = null;
+
+    function _load() {
+      try {
+        const raw = GM_getValue(STORAGE_KEY, null);
+        if (raw) return Object.assign({}, DEFAULTS, JSON.parse(raw));
+      } catch (_) {}
+      return Object.assign({}, DEFAULTS);
+    }
+
+    function get() {
+      if (!_cache) _cache = _load();
+      return _cache;
+    }
+
+    function save() {
+      GM_setValue(STORAGE_KEY, JSON.stringify(_cache));
+    }
+
+    function set(key, value) {
+      get()[key] = value;
+      save();
+    }
+
+    function setNested(parentKey, childKey, value) {
+      get()[parentKey][childKey] = value;
+      save();
+    }
+
+    // Download mode is session-only — always reset to 'none'
+    function initSession() {
+      get().downloadMode = 'none';
+      // Do NOT persist this reset so it stays 'none' on reload
+    }
+
+    return { get, save, set, setNested, initSession };
+  })();
+
+  // ─────────────────────────────────────────────
+  //  CSS — GLASSMORPHIC DESIGN SYSTEM
+  // ─────────────────────────────────────────────
+
+  GM_addStyle(/* css */`
+    /* ── Google Font ── */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    /* ── CSS Variables ── */
+    #${WIDGET_ID}, #${MODAL_ID} {
+      --font:       'Inter', system-ui, sans-serif;
+      --clr-bg:     rgba(14, 17, 23, 0.82);
+      --clr-glass:  rgba(255, 255, 255, 0.04);
+      --clr-border: rgba(255, 255, 255, 0.10);
+      --clr-text:   #e2e8f0;
+      --clr-muted:  #64748b;
+      --clr-green:  #22c55e;
+      --clr-blue:   #3b82f6;
+      --clr-red:    #ef4444;
+      --clr-amber:  #f59e0b;
+      --clr-btn:    rgba(255, 255, 255, 0.07);
+      --clr-btn-h:  rgba(255, 255, 255, 0.14);
+      --radius:     8px;
+      --radius-sm:  5px;
+      --gap:        6px;
+      --transition: 0.18s ease;
+    }
+
+    /* ── Widget Container ── */
+    #${WIDGET_ID} {
+      position: fixed;
+      top: 50px;
+      right: 50px;
+      z-index: 999999;
+      width: 280px;
+      font-family: var(--font);
+      font-size: 12px;
+      color: var(--clr-text);
+      background: var(--clr-bg);
+      border: 1px solid var(--clr-border);
+      border-radius: 12px;
+      backdrop-filter: blur(24px) saturate(1.6);
+      -webkit-backdrop-filter: blur(24px) saturate(1.6);
+      box-shadow:
+        0 8px 32px rgba(0,0,0,0.55),
+        0 0 0 1px rgba(255,255,255,0.03) inset,
+        0 1px 0 rgba(255,255,255,0.08) inset;
+      overflow: hidden;
+      transition: opacity var(--transition), transform var(--transition);
+      user-select: none;
+    }
+
+    #${WIDGET_ID}.ss-hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-8px) scale(0.97);
+    }
+
+    /* ── Header Bar ── */
+    #grok-header-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      cursor: pointer;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid var(--clr-border);
+      transition: background var(--transition);
+    }
+    #grok-header-bar:hover { background: rgba(255,255,255,0.07); }
+
+    #grok-numpad-indicator {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--clr-green);
+      letter-spacing: 0.04em;
+      min-width: 36px;
+    }
+
+    #grok-header-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--clr-text);
+      text-transform: uppercase;
+    }
+
+    #grok-header-close {
+      font-size: 16px;
+      color: var(--clr-muted);
+      line-height: 1;
+      transition: color var(--transition);
+    }
+    #grok-header-bar:hover #grok-header-close { color: var(--clr-text); }
+
+    /* ── Widget Body ── */
+    #grok-widget-body {
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap);
+    }
+
+    /* ── Generic Row ── */
+    .ss-row {
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+    }
+    .ss-row-label {
+      font-size: 10px;
+      color: var(--clr-muted);
+      min-width: 38px;
+    }
+
+    /* ── Buttons (generic) ── */
+    .ss-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--clr-btn);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--radius-sm);
+      color: var(--clr-text);
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      min-width: 26px;
+      height: 24px;
+      cursor: pointer;
+      transition: background var(--transition), border-color var(--transition), color var(--transition);
+      white-space: nowrap;
+    }
+    .ss-btn:hover  { background: var(--clr-btn-h); }
+    .ss-btn.active { background: rgba(34,197,94,0.18); border-color: var(--clr-green); color: var(--clr-green); }
+    .ss-btn.active-blue { background: rgba(59,130,246,0.18); border-color: var(--clr-blue); color: var(--clr-blue); }
+
+    /* ── Mode Toggle Row ── */
+    #grok-mode-row {
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+    }
+    #grok-mode-manual, #grok-mode-auto {
+      flex: 1;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      justify-content: center;
+    }
+    #grok-mode-manual.active { background: rgba(34,197,94,0.15); border-color: var(--clr-green); color: var(--clr-green); }
+    #grok-mode-auto.active   { background: rgba(59,130,246,0.15); border-color: var(--clr-blue);  color: var(--clr-blue);  }
+    #grok-btn-rewind {
+      font-size: 14px;
+      width: 28px;
+      height: 24px;
+      padding: 0;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* ── Manual / Auto Sections ── */
+    #grok-timing-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .ss-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: var(--clr-glass);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--radius);
+      padding: 6px 8px;
+    }
+    .ss-section-title {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      color: var(--clr-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    /* Manual section */
+    #grok-manual-section .ss-row { justify-content: space-between; }
+    #grok-manual-interval-display {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--clr-text);
+      min-width: 28px;
+      text-align: center;
+    }
+    .ss-preset-row {
+      display: flex;
+      gap: 4px;
+      margin-top: 2px;
+    }
+    .ss-preset-row .ss-btn {
+      flex: 1;
+      font-size: 10px;
+      padding: 2px 4px;
+      height: 20px;
+    }
+
+    /* AUTO section */
+    #grok-auto-section .ss-row { justify-content: space-between; font-size: 11px; }
+    #grok-auto-countdown-display,
+    #grok-auto-loops-display {
+      font-weight: 700;
+      color: var(--clr-text);
+      min-width: 28px;
+      text-align: center;
+    }
+    #grok-auto-timer {
+      font-size: 10px;
+      color: var(--clr-muted);
+      text-align: center;
+      margin-top: 2px;
+      min-height: 14px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── D-Pad ── */
+    #grok-dpad-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 4px 0;
+    }
+    .dpad-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .dpad-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      padding: 0;
+    }
+    .dpad-btn.active {
+      background: rgba(34,197,94,0.20);
+      border-color: var(--clr-green);
+      color: var(--clr-green);
+    }
+    #grok-dpad-center {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 0;
+      letter-spacing: 0;
+    }
+    /* Center mode colors */
+    #grok-dpad-center.mode-stop   { color: var(--clr-muted);  border-color: var(--clr-muted);  background: transparent; }
+    #grok-dpad-center.mode-repeat { color: var(--clr-blue);   border-color: var(--clr-blue);   background: rgba(59,130,246,0.15); }
+    #grok-dpad-center.mode-auto   { color: var(--clr-green);  border-color: var(--clr-green);  background: rgba(34,197,94,0.15); }
+
+    /* ── Options Section ── */
+    #grok-options-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .ss-options-row {
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+      flex-wrap: wrap;
+    }
+
+    /* Select */
+    .ss-select {
+      background: var(--clr-btn);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--radius-sm);
+      color: var(--clr-text);
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 6px;
+      height: 24px;
+      cursor: pointer;
+      outline: none;
+      flex: 1;
+      min-width: 80px;
+    }
+    .ss-select option { background: #0f172a; color: var(--clr-text); }
+
+    /* Checkbox styled */
+    .ss-check-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--clr-text);
+      padding: 2px 6px;
+      border: 1px solid var(--clr-border);
+      border-radius: var(--radius-sm);
+      background: var(--clr-btn);
+      transition: background var(--transition), border-color var(--transition);
+    }
+    .ss-check-label:hover { background: var(--clr-btn-h); }
+    .ss-check-label input[type="checkbox"] { display: none; }
+    .ss-check-label.checked {
+      background: rgba(34,197,94,0.15);
+      border-color: var(--clr-green);
+      color: var(--clr-green);
+    }
+    .ss-check-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      border: 1.5px solid currentColor;
+      flex-shrink: 0;
+    }
+    .ss-check-label.checked .ss-check-dot { background: var(--clr-green); }
+
+    /* Radio buttons */
+    .ss-radio-group {
+      display: flex;
+      gap: 4px;
+    }
+    .ss-radio-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--clr-text);
+      padding: 2px 8px;
+      height: 24px;
+      border: 1px solid var(--clr-border);
+      border-radius: var(--radius-sm);
+      background: var(--clr-btn);
+      transition: background var(--transition), border-color var(--transition);
+    }
+    .ss-radio-label:hover { background: var(--clr-btn-h); }
+    .ss-radio-label input[type="radio"] { display: none; }
+    .ss-radio-label.checked {
+      background: rgba(34,197,94,0.15);
+      border-color: var(--clr-green);
+      color: var(--clr-green);
+    }
+
+    /* ── Divider ── */
+    .ss-divider {
+      height: 1px;
+      background: var(--clr-border);
+      margin: 2px 0;
+    }
+
+    /* ── Section heading ── */
+    .ss-sub-label {
+      font-size: 9px;
+      color: var(--clr-muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    /* ════════════════════════════════════════════
+       F1 MODAL
+    ════════════════════════════════════════════ */
+    #${MODAL_ID}-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000000;
+      background: rgba(0,0,0,0.72);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      align-items: center;
+      justify-content: center;
+    }
+    #${MODAL_ID}-overlay.open { display: flex; }
+
+    #${MODAL_ID} {
+      font-family: var(--font);
+      font-size: 12px;
+      color: var(--clr-text);
+      background: rgba(14, 17, 23, 0.95);
+      border: 1px solid var(--clr-border);
+      border-radius: 14px;
+      backdrop-filter: blur(32px) saturate(1.8);
+      -webkit-backdrop-filter: blur(32px) saturate(1.8);
+      box-shadow: 0 24px 64px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04) inset;
+      width: 520px;
+      max-width: 95vw;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: modalIn 0.2s cubic-bezier(0.34,1.2,0.64,1);
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.93) translateY(12px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    #grok-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--clr-border);
+      background: rgba(255,255,255,0.02);
+    }
+    #grok-modal-header h2 {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0;
+      letter-spacing: 0.04em;
+    }
+    #grok-modal-close {
+      cursor: pointer;
+      font-size: 20px;
+      color: var(--clr-muted);
+      line-height: 1;
+      transition: color var(--transition);
+      background: none;
+      border: none;
+      padding: 0 2px;
+    }
+    #grok-modal-close:hover { color: var(--clr-text); }
+
+    #grok-modal-body {
+      overflow-y: auto;
+      padding: 16px 20px;
+      flex: 1;
+      scrollbar-width: thin;
+      scrollbar-color: var(--clr-border) transparent;
+    }
+
+    .hk-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .hk-table th {
+      font-size: 9px;
+      color: var(--clr-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 600;
+      text-align: left;
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--clr-border);
+    }
+    .hk-table td {
+      padding: 8px 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      vertical-align: middle;
+    }
+    .hk-table tr:last-child td { border-bottom: none; }
+    .hk-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+    .hk-key {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--clr-text);
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-bottom: 2px solid rgba(255,255,255,0.08);
+      border-radius: 4px;
+      padding: 2px 8px;
+      min-width: 64px;
+      text-align: center;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      transition: background var(--transition), border-color var(--transition);
+    }
+    .hk-key:hover { background: rgba(255,255,255,0.14); border-color: var(--clr-green); }
+    .hk-key.recording {
+      background: rgba(239,68,68,0.2);
+      border-color: var(--clr-red);
+      color: var(--clr-red);
+      animation: pulse 0.8s ease infinite alternate;
+    }
+    @keyframes pulse {
+      from { opacity: 1; }
+      to   { opacity: 0.5; }
+    }
+
+    .hk-desc { color: var(--clr-muted); font-size: 11px; }
+
+    #grok-modal-footer {
+      padding: 12px 20px;
+      border-top: 1px solid var(--clr-border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .ss-btn-primary {
+      background: rgba(34,197,94,0.20);
+      border-color: var(--clr-green);
+      color: var(--clr-green);
+      font-weight: 600;
+    }
+    .ss-btn-primary:hover { background: rgba(34,197,94,0.32); }
+  `);
+
+  // ─────────────────────────────────────────────
+  //  STATE
+  // ─────────────────────────────────────────────
+
+  const State = {
+    numLock: null,          // null = unknown, true, false
+    slideshowRunning: false,
+    recordingHotkey: null,  // key name being recorded in F1 modal
+  };
+
+  // ─────────────────────────────────────────────
+  //  HELPERS
+  // ─────────────────────────────────────────────
+
+  function el(tag, attrs = {}, ...children) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'class') e.className = v;
+      else if (k === 'style') Object.assign(e.style, v);
+      else e.setAttribute(k, v);
+    }
+    for (const c of children) {
+      if (c == null) continue;
+      e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+    return e;
+  }
+
+  function makeCheckLabel(text, storageKey, onChange) {
+    const s = Settings.get();
+    const label = el('label', { class: `ss-check-label${s[storageKey] ? ' checked' : ''}` });
+    const inp   = el('input', { type: 'checkbox' });
+    const dot   = el('span', { class: 'ss-check-dot' });
+    if (s[storageKey]) inp.checked = true;
+    label.appendChild(inp);
+    label.appendChild(dot);
+    label.appendChild(document.createTextNode(' ' + text));
+    label.addEventListener('click', () => {
+      const val = !Settings.get()[storageKey];
+      Settings.set(storageKey, val);
+      inp.checked = val;
+      label.classList.toggle('checked', val);
+      if (onChange) onChange(val);
+    });
+    return label;
+  }
+
+  function makeRadioGroup(name, options, storageKey, onChange) {
+    const wrap = el('div', { class: 'ss-radio-group' });
+    options.forEach(({ label: lText, value }) => {
+      const lbl = el('label', { class: `ss-radio-label${Settings.get()[storageKey] === value ? ' checked' : ''}` });
+      const inp = el('input', { type: 'radio', name });
+      if (Settings.get()[storageKey] === value) inp.checked = true;
+      lbl.appendChild(inp);
+      lbl.appendChild(document.createTextNode(lText));
+      lbl.addEventListener('click', () => {
+        Settings.set(storageKey, value);
+        wrap.querySelectorAll('.ss-radio-label').forEach(l => l.classList.remove('checked'));
+        lbl.classList.add('checked');
+        if (onChange) onChange(value);
+      });
+      wrap.appendChild(lbl);
+    });
+    return wrap;
+  }
+
+  // ─────────────────────────────────────────────
+  //  NUMLOCK DETECTOR
+  // ─────────────────────────────────────────────
+
+  function detectNumLock(e) {
+    if (e.getModifierState) {
+      State.numLock = e.getModifierState('NumLock');
+      updateNumLockUI();
+    }
+  }
+
+  function updateNumLockUI() {
+    const ind = document.getElementById('grok-numpad-indicator');
+    if (!ind) return;
+    if (State.numLock === null) { ind.textContent = 'Num ?'; ind.style.color = 'var(--clr-amber)'; }
+    else if (State.numLock)    { ind.textContent = 'Num ВКЛ'; ind.style.color = 'var(--clr-green)'; }
+    else                       { ind.textContent = 'Num ВЫКЛ'; ind.style.color = 'var(--clr-red)'; }
+  }
+
+  // ─────────────────────────────────────────────
+  //  WIDGET BUILD
+  // ─────────────────────────────────────────────
+
+  function buildWidget() {
+    const s = Settings.get();
+
+    // ── Root ──
+    const widget = el('div', { id: WIDGET_ID });
+    if (!s.panelVisible) widget.classList.add('ss-hidden');
+
+    // ── 1. Header Bar ──
+    const header = el('div', { id: 'grok-header-bar' });
+    const numInd = el('span', { id: 'grok-numpad-indicator' });
+    const title  = el('span', { id: 'grok-header-title' }, 'SlideShow');
+    const closeX = el('span', { id: 'grok-header-close' }, '×');
+    header.appendChild(numInd);
+    header.appendChild(title);
+    header.appendChild(closeX);
+    header.addEventListener('click', togglePanel);
+    widget.appendChild(header);
+
+    // Update numlock text immediately
+    updateNumLockUI();
+
+    // ── Body ──
+    const body = el('div', { id: 'grok-widget-body' });
+
+    // ── 2. Mode Toggle Row ──
+    const modeRow = el('div', { id: 'grok-mode-row' });
+
+    const btnManual = el('button', { id: 'grok-mode-manual', class: 'ss-btn' }, 'Manual');
+    const btnRewind = el('button', { id: 'grok-btn-rewind',  class: 'ss-btn' }, '↺');
+    const btnAuto   = el('button', { id: 'grok-mode-auto',   class: 'ss-btn' }, 'AUTO');
+
+    if (s.slideshowMode === 'manual') btnManual.classList.add('active');
+    else                               btnAuto.classList.add('active');
+
+    btnManual.addEventListener('click', () => setSlideshowMode('manual'));
+    btnAuto.addEventListener('click',   () => setSlideshowMode('auto'));
+    btnRewind.addEventListener('click', () => rewindToStart());
+
+    modeRow.appendChild(btnManual);
+    modeRow.appendChild(btnRewind);
+    modeRow.appendChild(btnAuto);
+    body.appendChild(modeRow);
+
+    // ── 3. Timing Row (Manual + AUTO) ──
+    const timingRow = el('div', { id: 'grok-timing-row' });
+
+    // Manual Section
+    const manualSec = el('div', { id: 'grok-manual-section', class: 'ss-section' });
+    const manualTitle = el('div', { class: 'ss-section-title' }, 'Manual');
+
+    const manualCtrl = el('div', { class: 'ss-row' });
+    const btnMinus  = el('button', { class: 'ss-btn', id: 'grok-manual-minus' }, '−');
+    const manualNum = el('span',   { id: 'grok-manual-interval-display' }, String(s.manualInterval) + 'с');
+    const btnPlus   = el('button', { class: 'ss-btn', id: 'grok-manual-plus' }, '+');
+
+    btnMinus.addEventListener('click', () => adjustManualInterval(-1));
+    btnPlus.addEventListener('click',  () => adjustManualInterval(+1));
+    manualCtrl.appendChild(btnMinus);
+    manualCtrl.appendChild(manualNum);
+    manualCtrl.appendChild(btnPlus);
+
+    const presetRow = el('div', { class: 'ss-preset-row' });
+    [7, 12, 17].forEach(sec => {
+      const pb = el('button', { class: 'ss-btn ss-preset', 'data-sec': String(sec) }, `[${sec}]`);
+      pb.addEventListener('click', () => setManualInterval(sec));
+      presetRow.appendChild(pb);
+    });
+
+    manualSec.appendChild(manualTitle);
+    manualSec.appendChild(manualCtrl);
+    manualSec.appendChild(presetRow);
+
+    // AUTO Section
+    const autoSec = el('div', { id: 'grok-auto-section', class: 'ss-section' });
+    const autoTitle = el('div', { class: 'ss-section-title' }, 'AUTO');
+
+    // Countdown row
+    const cdRow = el('div', { class: 'ss-row' });
+    const cdMinus = el('button', { class: 'ss-btn', id: 'grok-auto-cd-minus' }, '−');
+    const cdNum   = el('span',   { id: 'grok-auto-countdown-display' }, `${String(s.autoCountdown).padStart(2,'0')}с`);
+    const cdPlus  = el('button', { class: 'ss-btn', id: 'grok-auto-cd-plus' }, '+');
+    cdMinus.addEventListener('click', () => adjustAutoCountdown(-1));
+    cdPlus.addEventListener('click',  () => adjustAutoCountdown(+1));
+    cdRow.appendChild(cdMinus);
+    cdRow.appendChild(cdNum);
+    cdRow.appendChild(cdPlus);
+
+    // Loops row
+    const loopRow = el('div', { class: 'ss-row' });
+    const lpMinus = el('button', { class: 'ss-btn', id: 'grok-auto-lp-minus' }, '÷');
+    const lpNum   = el('span',   { id: 'grok-auto-loops-display' }, `${s.autoLoops}x`);
+    const lpPlus  = el('button', { class: 'ss-btn', id: 'grok-auto-lp-plus' }, '×');
+    lpMinus.addEventListener('click', () => adjustAutoLoops(-1));
+    lpPlus.addEventListener('click',  () => adjustAutoLoops(+1));
+    loopRow.appendChild(lpMinus);
+    loopRow.appendChild(lpNum);
+    loopRow.appendChild(lpPlus);
+
+    // Timer display
+    const timerDisp = el('div', { id: 'grok-auto-timer' }, '—');
+
+    autoSec.appendChild(autoTitle);
+    autoSec.appendChild(cdRow);
+    autoSec.appendChild(loopRow);
+    autoSec.appendChild(timerDisp);
+
+    timingRow.appendChild(manualSec);
+    timingRow.appendChild(autoSec);
+    body.appendChild(timingRow);
+
+    // ── 4. D-Pad ──
+    const dpadWrap = el('div', { id: 'grok-dpad-wrap' });
+
+    const dpadUp  = makeDpadBtn('up',    '▲', 'grok-dpad-up');
+    const dpadDn  = makeDpadBtn('down',  '▼', 'grok-dpad-down');
+    const dpadL   = makeDpadBtn('left',  '◄', 'grok-dpad-left');
+    const dpadR   = makeDpadBtn('right', '►', 'grok-dpad-right');
+    const dpadC   = makeDpadCenterBtn();
+
+    const topRow  = el('div', { class: 'dpad-row' }, dpadUp);
+    const midRow  = el('div', { class: 'dpad-row' });
+    midRow.appendChild(dpadL);
+    midRow.appendChild(dpadC);
+    midRow.appendChild(dpadR);
+    const botRow  = el('div', { class: 'dpad-row' }, dpadDn);
+
+    dpadWrap.appendChild(topRow);
+    dpadWrap.appendChild(midRow);
+    dpadWrap.appendChild(botRow);
+    body.appendChild(dpadWrap);
+
+    // ── 5. Options ──
+    body.appendChild(el('div', { class: 'ss-divider' }));
+
+    const optSec = el('div', { id: 'grok-options-section' });
+
+    // Download + del/Tab/Brsr row
+    const opt1 = el('div', { class: 'ss-options-row' });
+    const dlSelect = el('select', { class: 'ss-select', id: 'grok-dl-select' });
+    [
+      { v: 'none',  t: '↓ выкл' },
+      { v: 'photo', t: '↓ фото' },
+      { v: 'video', t: '↓ видео' },
+      { v: 'all',   t: '↓ всё'  },
+    ].forEach(({ v, t }) => {
+      const opt = el('option', { value: v }, t);
+      if (v === 'none') opt.selected = true; // session default always none
+      dlSelect.appendChild(opt);
+    });
+    dlSelect.addEventListener('change', () => {
+      Settings.get().downloadMode = dlSelect.value;
+    });
+    opt1.appendChild(dlSelect);
+
+    const chkDel  = makeCheckLabel('del',  'autoDel',  null);
+    const chkTab  = makeCheckLabel('Tab',  'autoTab',  null);
+    const chkBrsr = makeCheckLabel('Brsr', 'autoBrsr', null);
+    opt1.appendChild(chkDel);
+    opt1.appendChild(chkTab);
+    opt1.appendChild(chkBrsr);
+    optSec.appendChild(opt1);
+
+    // ── 6. PageDown intercept ──
+    const opt2 = el('div', { class: 'ss-options-row' });
+    opt2.appendChild(el('span', { class: 'ss-sub-label' }, 'PageDown:'));
+    opt2.appendChild(makeRadioGroup('pgdown', [
+      { label: '—',   value: 'off'  },
+      { label: '+1',  value: 'next' },
+      { label: 'del', value: 'del'  },
+    ], 'pgDownMode', null));
+    optSec.appendChild(opt2);
+
+    // ── 7. Delete options ──
+    body.appendChild(el('div', { class: 'ss-divider' }));
+    const opt3 = el('div', { class: 'ss-options-row' });
+    opt3.appendChild(el('span', { class: 'ss-sub-label' }, 'Delete:'));
+    const chkConfirm   = makeCheckLabel('a.confirm', 'autoConfirm', null);
+    const chkHoldPost  = makeCheckLabel('hold post', 'holdPost',    null);
+    opt3.appendChild(chkConfirm);
+    opt3.appendChild(chkHoldPost);
+    optSec.appendChild(opt3);
+
+    body.appendChild(optSec);
+
+    widget.appendChild(body);
+    document.body.appendChild(widget);
+  }
+
+  function makeDpadBtn(dir, symbol, id) {
+    const s = Settings.get();
+    const btn = el('button', { class: `ss-btn dpad-btn${s.dpadDir === dir ? ' active' : ''}`, id });
+    btn.textContent = symbol;
+    btn.addEventListener('click', () => setDpadDir(dir));
+    return btn;
+  }
+
+  function makeDpadCenterBtn() {
+    const s = Settings.get();
+    const modeMap = { stop: { text: '—', cls: 'mode-stop' }, repeat: { text: 'R', cls: 'mode-repeat' }, auto: { text: 'A', cls: 'mode-auto' } };
+    const m = modeMap[s.dpadCenter] || modeMap.stop;
+    const btn = el('button', { id: 'grok-dpad-center', class: `ss-btn dpad-btn ${m.cls}` });
+    btn.textContent = m.text;
+    btn.addEventListener('click', cycleDpadCenter);
+    return btn;
+  }
+
+  // ─────────────────────────────────────────────
+  //  F1 MODAL BUILD
+  // ─────────────────────────────────────────────
+
+  const HOTKEY_DEFS = [
+    { key: 'download',   label: 'PageDown',       desc: 'Скачать медиа' },
+    { key: 'upscale',    label: 'PageUp',          desc: 'Улучшить качество (Upscale)' },
+    { key: 'deletePub',  label: 'Delete',          desc: 'Удалить публикацию' },
+    { key: 'toggleMute', label: 'ScrollLock',      desc: 'Вкл / Выкл звук' },
+    { key: 'playPause',  label: 'Pause',           desc: 'Play / Pause видео' },
+    { key: 'help',       label: 'F1',              desc: 'Справка / Настройки' },
+    { key: 'lagMonitor', label: 'F8',              desc: 'Lag Monitor' },
+    { key: 'goSaved',    label: 'Home',            desc: 'Перейти в /imagine/saved' },
+    { key: 'togglePanel',label: 'Ctrl+Insert',     desc: 'Скрыть / Показать панель' },
+    { key: 'startStop',  label: 'Insert',          desc: 'Запуск / Остановка слайд-шоу' },
+    { key: 'focusPanel', label: 'F7',              desc: 'Фокус на панель управления' },
+  ];
+
+  function buildModal() {
+    const overlay = el('div', { id: `${MODAL_ID}-overlay` });
+    const modal   = el('div', { id: MODAL_ID });
+
+    // Header
+    const mHeader = el('div', { id: 'grok-modal-header' });
+    const mTitle  = el('h2', {}, '⌨️  Настройки хоткеев — Grok Hotkeys 2.0');
+    const mClose  = el('button', { id: 'grok-modal-close' }, '×');
+    mClose.addEventListener('click', closeModal);
+    mHeader.appendChild(mTitle);
+    mHeader.appendChild(mClose);
+
+    // Body
+    const mBody = el('div', { id: 'grok-modal-body' });
+    const table = el('table', { class: 'hk-table' });
+    const thead = el('thead');
+    const hRow  = el('tr');
+    hRow.appendChild(el('th', {}, 'Клавиша'));
+    hRow.appendChild(el('th', {}, 'Действие'));
+    hRow.appendChild(el('th', {}, ''));
+    thead.appendChild(hRow);
+    table.appendChild(thead);
+
+    const tbody = el('tbody', { id: 'grok-modal-tbody' });
+    renderHotkeyRows(tbody);
+    table.appendChild(tbody);
+    mBody.appendChild(table);
+
+    // Footer
+    const mFooter = el('div', { id: 'grok-modal-footer' });
+    const btnReset = el('button', { class: 'ss-btn', id: 'grok-modal-reset' }, 'Сбросить');
+    const btnClose = el('button', { class: 'ss-btn ss-btn-primary', id: 'grok-modal-ok' }, 'Готово');
+    btnReset.addEventListener('click', resetHotkeys);
+    btnClose.addEventListener('click', closeModal);
+    mFooter.appendChild(btnReset);
+    mFooter.appendChild(btnClose);
+
+    modal.appendChild(mHeader);
+    modal.appendChild(mBody);
+    modal.appendChild(mFooter);
+    overlay.appendChild(modal);
+
+    // Close on backdrop click
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+
+    document.body.appendChild(overlay);
+  }
+
+  function renderHotkeyRows(tbody) {
+    const hk = Settings.get().hk;
+    tbody.innerHTML = '';
+    HOTKEY_DEFS.forEach(def => {
+      const tr = el('tr');
+      // Key cell
+      const tdKey  = el('td');
+      const keyBtn = el('span', { class: 'hk-key', 'data-hkname': def.key }, hk[def.key] || def.label);
+      keyBtn.addEventListener('click', () => startRecording(def.key, keyBtn));
+      tdKey.appendChild(keyBtn);
+      // Description
+      const tdDesc = el('td', { class: 'hk-desc' }, def.desc);
+      // Reset single key
+      const tdReset = el('td');
+      const rsBtn  = el('button', { class: 'ss-btn', style: { fontSize: '10px', padding: '1px 6px', height: '20px' } }, '↺');
+      rsBtn.addEventListener('click', () => resetSingleHotkey(def.key));
+      tdReset.appendChild(rsBtn);
+
+      tr.appendChild(tdKey);
+      tr.appendChild(tdDesc);
+      tr.appendChild(tdReset);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function startRecording(hkName, keyBtn) {
+    if (State.recordingHotkey) return; // already recording
+    State.recordingHotkey = hkName;
+    keyBtn.classList.add('recording');
+    keyBtn.textContent = '…жди нажатия';
+
+    function onKey(e) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const parts = [];
+      if (e.ctrlKey)  parts.push('Ctrl');
+      if (e.altKey)   parts.push('Alt');
+      if (e.shiftKey) parts.push('Shift');
+      // Ignore modifier-only presses
+      if (['Control','Alt','Shift','Meta'].includes(e.key)) return;
+      parts.push(e.key);
+      const combo = parts.join('+');
+
+      Settings.setNested('hk', hkName, combo);
+      keyBtn.textContent = combo;
+      keyBtn.classList.remove('recording');
+      State.recordingHotkey = null;
+      document.removeEventListener('keydown', onKey, true);
+    }
+    document.addEventListener('keydown', onKey, true);
+  }
+
+  function resetSingleHotkey(hkName) {
+    const def = HOTKEY_DEFS.find(d => d.key === hkName);
+    if (!def) return;
+    Settings.setNested('hk', hkName, def.label);
+    const btn = document.querySelector(`.hk-key[data-hkname="${hkName}"]`);
+    if (btn) { btn.textContent = def.label; btn.classList.remove('recording'); }
+    State.recordingHotkey = null;
+  }
+
+  function resetHotkeys() {
+    HOTKEY_DEFS.forEach(def => Settings.setNested('hk', def.key, def.label));
+    renderHotkeyRows(document.getElementById('grok-modal-tbody'));
+    State.recordingHotkey = null;
+  }
+
+  function openModal()  { document.getElementById(`${MODAL_ID}-overlay`).classList.add('open'); }
+  function closeModal() {
+    document.getElementById(`${MODAL_ID}-overlay`).classList.remove('open');
+    State.recordingHotkey = null;
+  }
+
+  // ─────────────────────────────────────────────
+  //  PANEL TOGGLE
+  // ─────────────────────────────────────────────
+
+  function togglePanel() {
+    const widget = document.getElementById(WIDGET_ID);
+    if (!widget) return;
+    const isHidden = widget.classList.toggle('ss-hidden');
+    Settings.set('panelVisible', !isHidden);
+  }
+
+  // ─────────────────────────────────────────────
+  //  UI ACTIONS (STUBS — filled in later stages)
+  // ─────────────────────────────────────────────
+
+  function setSlideshowMode(mode) {
+    Settings.set('slideshowMode', mode);
+    const btnManual = document.getElementById('grok-mode-manual');
+    const btnAuto   = document.getElementById('grok-mode-auto');
+    if (!btnManual || !btnAuto) return;
+    btnManual.classList.toggle('active', mode === 'manual');
+    btnAuto.classList.toggle('active',   mode === 'auto');
+  }
+
+  function rewindToStart() {
+    // Stage 3: executeResetToStart()
+  }
+
+  function adjustManualInterval(delta) {
+    const s = Settings.get();
+    const val = Math.max(0, s.manualInterval + delta);
+    Settings.set('manualInterval', val);
+    const disp = document.getElementById('grok-manual-interval-display');
+    if (disp) disp.textContent = `${val}с`;
+  }
+
+  function setManualInterval(sec) {
+    Settings.set('manualInterval', sec);
+    const disp = document.getElementById('grok-manual-interval-display');
+    if (disp) disp.textContent = `${sec}с`;
+    setSlideshowMode('manual');
+  }
+
+  function adjustAutoCountdown(delta) {
+    const s = Settings.get();
+    const val = Math.max(0, s.autoCountdown + delta);
+    Settings.set('autoCountdown', val);
+    const disp = document.getElementById('grok-auto-countdown-display');
+    if (disp) disp.textContent = `${String(val).padStart(2, '0')}с`;
+  }
+
+  function adjustAutoLoops(delta) {
+    const s = Settings.get();
+    const val = Math.max(1, s.autoLoops + delta);
+    Settings.set('autoLoops', val);
+    const disp = document.getElementById('grok-auto-loops-display');
+    if (disp) disp.textContent = `${val}x`;
+  }
+
+  function setDpadDir(dir) {
+    Settings.set('dpadDir', dir);
+    document.querySelectorAll('.dpad-btn').forEach(b => {
+      if (b.id === 'grok-dpad-center') return;
+      b.classList.remove('active');
+    });
+    const btn = document.getElementById(`grok-dpad-${dir}`);
+    if (btn) btn.classList.add('active');
+  }
+
+  function cycleDpadCenter() {
+    const cycle = { stop: 'repeat', repeat: 'auto', auto: 'stop' };
+    const labels = { stop: '—', repeat: 'R', auto: 'A' };
+    const clsMap = { stop: 'mode-stop', repeat: 'mode-repeat', auto: 'mode-auto' };
+    const cur = Settings.get().dpadCenter;
+    const next = cycle[cur] || 'stop';
+    Settings.set('dpadCenter', next);
+    const btn = document.getElementById('grok-dpad-center');
+    if (!btn) return;
+    btn.textContent = labels[next];
+    btn.classList.remove('mode-stop', 'mode-repeat', 'mode-auto');
+    btn.classList.add(clsMap[next]);
+  }
+
+  // ─────────────────────────────────────────────
+  //  KEYBOARD LISTENER (F1 + Ctrl+Insert stubs)
+  // ─────────────────────────────────────────────
+
+  function matchHotkey(e, combo) {
+    const parts = combo.split('+');
+    const key   = parts[parts.length - 1];
+    const ctrl  = parts.includes('Ctrl');
+    const alt   = parts.includes('Alt');
+    const shift = parts.includes('Shift');
+    return (
+      e.key    === key   &&
+      e.ctrlKey  === ctrl  &&
+      e.altKey   === alt   &&
+      e.shiftKey === shift
+    );
+  }
+
+  document.addEventListener('keydown', e => {
+    // Update NumLock status on any keydown
+    detectNumLock(e);
+
+    // Don't fire if recording
+    if (State.recordingHotkey) return;
+
+    const hk = Settings.get().hk;
+
+    if (matchHotkey(e, hk.help)) {
+      e.preventDefault();
+      openModal();
+      return;
+    }
+
+    if (matchHotkey(e, 'Ctrl+Insert')) {
+      e.preventDefault();
+      togglePanel();
+      return;
+    }
+
+    // Additional hotkeys wired in later stages:
+    // startStop, download, deletePub, etc.
+  }, true);
+
+  // ─────────────────────────────────────────────
+  //  INIT
+  // ─────────────────────────────────────────────
+
+  function init() {
+    Settings.initSession(); // reset downloadMode to 'none'
+    buildWidget();
+    buildModal();
+  }
+
+  // Wait for body
+  if (document.body) {
+    init();
+  } else {
+    document.addEventListener('DOMContentLoaded', init);
+  }
+
+})();
