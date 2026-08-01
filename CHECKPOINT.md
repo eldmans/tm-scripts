@@ -41,7 +41,7 @@
 | Этап | Статус | Описание |
 |------|--------|----------|
 | **Этап 1** | ЗАВЕРШЁН | UI-каркас виджета, модалка F1, система хранения настроек |
-| **Этап 2** | НЕ НАЧАТ | Менеджер горячих клавиш + защита фокуса blurActiveInput() |
+| **Этап 2** | ЗАВЕРШЁН | SEL-блок, blurActiveInput, хоткей-менеджер, PageDown, Tab/Brsr listeners |
 | **Этап 3** | НЕ НАЧАТ | Движок слайдшоу (Manual и AUTO с видео) |
 | **Этап 4** | НЕ НАЧАТ | Межпостовая навигация (режимы R и A через /imagine/saved) |
 | **Этап 5** | НЕ НАЧАТ | Скачивание и удаление с хитростью hold post |
@@ -123,3 +123,5 @@
 | 2026-08-01 07:07 | Claude Sonnet 4.6 (Antigravity) | Создан grok-hotkeys-slideshow.user.js — Этап 1 полностью |
 | 2026-08-01 07:11 | Claude Sonnet 4.6 (Antigravity) | Добавлены @updateURL/@downloadURL для Tampermonkey, создан CHECKPOINT.md |
 | 2026-08-01 07:12 | Claude Sonnet 4.6 (Antigravity) | git add + commit + push на ветку grok |
+| 2026-08-01 15:22 | Claude Sonnet 4.6 (Antigravity) | Изучены исходники grok-powertools/content.js и grok-auto-retry через subagent (flash) |
+| 2026-08-01 15:29 | Claude Sonnet 4.6 (Antigravity) | Этап 2: SEL-блок, blurActiveInput(), все хоткеи, PageDown intercept, Tab/Brsr listeners — v2.0.1-stage2 запушен |
