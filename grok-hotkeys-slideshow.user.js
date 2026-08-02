@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.0.2-stage3
+// @version      2.0.3-stage4
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine
 // @author       eldmans
 // @match        https://grok.com/*
@@ -1775,11 +1775,15 @@
       });
       return;
     } else if (center === 'auto') {
-      // A : межпостовая навигация (Этап 4 заменит stub)
+      // A : межпостовая навигация через /imagine/saved
       const moved = navigateSlide();
       if (!moved) {
-        // Этап 4: перейти на /imagine/saved и найти соседний пост
-        stopSlideshow('need-inter-post');
+        // Упёрлись в край пачки — переходим на соседний пост
+        stopSlideshow('inter-post-nav');
+        interPostNavigate(() => {
+          // После входа в новый пост — запускаем слайдшоу
+          if (!State.slideshowRunning) startSlideshow();
+        });
         return;
       }
     }
@@ -1806,7 +1810,229 @@
     updateTimerDisplay('—');
   }
 
-  // ── Авто-скачивание ───────────────────────────
+  // ─────────────────────────────────────────────
+  //  INTER-POST NAVIGATION — Этап 4
+  //  Навигация между постами через /imagine/saved
+  // ─────────────────────────────────────────────
+
+  /**
+   * Извлечь conversation ID из текущего URL.
+   * Варианты:
+   *   - /imagine/post/<convId>?...
+   *   - /imagine/post/<convId>/<mediaId>
+   *   - ?conversation=<convId>
+   */
+  function getConversationId() {
+    // Сначала пробуем параметр conversation=...
+    const params = new URLSearchParams(location.search);
+    if (params.has('conversation')) return params.get('conversation');
+
+    // Тогда извлекаем из pathname: /imagine/post/<ID>[/<mediaId>]
+    const match = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Получить массив карточек постов с /imagine/saved.
+   * Опрос DOM каждые 150мс, максимум 9 сек.
+   * Возвращает массив href-строк через callback(urls) или callback(null) при timeout.
+   */
+  function pollSavedCards(callback) {
+    const INTERVAL  = 150;  // мс
+    const TIMEOUT   = 9000; // мс
+    const started   = Date.now();
+
+    function poll() {
+      const cards = Array.from(document.querySelectorAll(SEL.savedCards));
+      if (cards.length > 0) {
+        callback(cards.map(c => c.href || c.getAttribute('href') || '').filter(Boolean));
+        return;
+      }
+      if (Date.now() - started >= TIMEOUT) {
+        console.warn('[GrokSS] pollSavedCards: timeout — no cards found');
+        callback(null);
+        return;
+      }
+      setTimeout(poll, INTERVAL);
+    }
+
+    poll();
+  }
+
+  /**
+   * Найти соседний пост в списке cards.
+   * currentId — conversation ID текущего поста.
+   * dir — направление (right/down = следующий, иначе предыдущий).
+   * Возвращает href-строку или null если не найден.
+   */
+  function findNeighborPost(cards, currentId, dir) {
+    // Извлекаем conversation ID из каждого href
+    function idFromUrl(url) {
+      const m = url.match(/\/imagine\/post\/([^/?#]+)/);
+      return m ? m[1] : null;
+    }
+
+    // Дедуплицируем: берём только уникальные и сохраняем первый url каждого ID
+    const seen = new Map();
+    for (const url of cards) {
+      const id = idFromUrl(url);
+      if (id && !seen.has(id)) seen.set(id, url);
+    }
+    const unique = Array.from(seen.keys());
+
+    // Находим текущий индекс
+    const idx = unique.indexOf(currentId);
+
+    let targetId = null;
+    if (dir === 'right' || dir === 'down') {
+      // Следующий post (indexOf + 1)
+      if (idx >= 0 && idx < unique.length - 1) {
+        targetId = unique[idx + 1];
+      } else if (idx < 0 && unique.length > 0) {
+        // Текущего нет в списке — берём первый
+        targetId = unique[0];
+      }
+    } else {
+      // Предыдущий post
+      if (idx > 0) {
+        targetId = unique[idx - 1];
+      } else if (idx < 0 && unique.length > 0) {
+        targetId = unique[unique.length - 1];
+      }
+    }
+
+    return targetId ? seen.get(targetId) : null;
+  }
+
+  /**
+   * Действия после входа в новый пост (режим A и режим R):
+   * 1. blurActiveInput()
+   * 2. Пауза 2 сек (DOM должен отрендерить)
+   * 3. executeResetToStart(разгон в начало пачки)
+   * 4. В callback: callback() (запуск слайдшоу)
+   */
+  function onNewPostEntry(callback) {
+    blurActiveInput();
+    updateTimerDisplay('⏳');
+
+    // Пауза 2 сек пока DOM отрендерится
+    setTimeout(() => {
+      executeResetToStart(() => {
+        if (callback) callback();
+      });
+    }, 2000);
+  }
+
+  /**
+   * Основная функция межпостовой навигации.
+   *
+   * 1. Запоминаем текущий conversation ID
+   * 2. Переходим на /imagine/saved через location.href
+   * 3. Поллинг карточек (150мс, макс 9с)
+   * 4. Находим соседний пост с ДРУГИМ conversation ID
+   * 5. Переход через location.href (НЕ .click())
+   * 6. onNewPostEntry() → разгон → callback()
+   */
+  function interPostNavigate(callback) {
+    const currentId = getConversationId();
+    const dir = Settings.get().dpadDir;
+
+    console.log(`[GrokSS] interPostNavigate: currentId=${currentId} dir=${dir}`);
+
+    // Переходим на /imagine/saved
+    location.href = 'https://grok.com/imagine/saved';
+
+    // Ждём загрузки страницы и поллинга карточек
+    pollSavedCards((urls) => {
+      if (!urls) {
+        console.warn('[GrokSS] interPostNavigate: no cards, stopping');
+        return;
+      }
+
+      const targetUrl = findNeighborPost(urls, currentId, dir);
+
+      if (!targetUrl) {
+        console.warn('[GrokSS] interPostNavigate: no neighbor found, stopping');
+        return;
+      }
+
+      console.log(`[GrokSS] interPostNavigate: navigating to ${targetUrl}`);
+
+      // Переход через location.href (не через .click()!)
+      location.href = targetUrl.startsWith('http')
+        ? targetUrl
+        : `https://grok.com${targetUrl.startsWith('/') ? '' : '/'}${targetUrl}`;
+
+      // После перехода — onNewPostEntry вызовется через visibilitychange/load
+      // запускаем через setTimeout (страница уже начнёт загружаться)
+      setTimeout(() => onNewPostEntry(callback), 500);
+    });
+  }
+
+  /**
+   * Ручная межпостовая навигация D-pad (клавиши влево/вправо).
+   * Запускается из keydown-обработчика (Этап 4).
+   * Сначала пробуем navigateSlide(), при неудаче — interPostNavigate().
+   */
+  function manualInterPostStep(dir) {
+    blurActiveInput();
+    // Переопределяем направление D-pad временно
+    const origDir = Settings.get().dpadDir;
+    // Читаем режим центра
+    const center = Settings.get().dpadCenter;
+    if (center !== 'auto') {
+      // В режиме — или R — просто переключаем слайд
+      navigateSlide();
+      return;
+    }
+    const moved = navigateSlide();
+    if (!moved) {
+      interPostNavigate(() => {});
+    }
+  }
+
+  // ── Подключаем стрелки D-pad к межпостовой навигации
+
+  /**
+   * NumPad/стрелки: ручная навигация без запущенного слайдшоу.
+   * Если слайдшоу запущен — стрелки игнорируются (слайдшоу управляет навигацией).
+   * Обрабатывает ArrowКлавиши и Numpad (хоткей hk.dpad* из Settings).
+   */
+  document.addEventListener('keydown', (e) => {
+    if (State.slideshowRunning) return;    // слайдшоу сам управляет
+    if (State.recordingHotkey) return;
+    const ae = document.activeElement;
+    const inInput = ae && (
+      ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' ||
+      ae.getAttribute('contenteditable') === 'true' || ae.isContentEditable
+    );
+    if (inInput) return;
+
+    const hk = Settings.get().hk;
+
+    // D-pad навигация: NumPad8/2/4/6 и ArrowKeys
+    const navMap = {
+      'ArrowRight': 'right', 'Numpad6': 'right', '6': 'right',
+      'ArrowLeft':  'left',  'Numpad4': 'left',  '4': 'left',
+      'ArrowDown':  'down',  'Numpad2': 'down',  '2': 'down',
+      'ArrowUp':    'up',    'Numpad8': 'up',    '8': 'up',
+    };
+    const mappedDir = navMap[e.key];
+    if (mappedDir) {
+      e.preventDefault();
+      manualInterPostStep(mappedDir);
+      return;
+    }
+
+    // Rewind: NumPad5 или '5'
+    if (e.key === '5' || e.key === 'Numpad5') {
+      e.preventDefault();
+      rewindToStart();
+      return;
+    }
+  }, true);
+
+  // ── Авто─скачивание ───────────────────────────
 
   function autoDownloadIfNeeded() {
     const mode = Settings.get().downloadMode;
