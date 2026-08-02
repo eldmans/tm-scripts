@@ -44,7 +44,7 @@
 | **Этап 2** | ЗАВЕРШЁН | SEL-блок, blurActiveInput, хоткей-менеджер, PageDown, Tab/Brsr listeners |
 | **Этап 3** | ЗАВЕРШЁН | Движок слайдшоу: Manual timer, AUTO RAF-loop, защита видеопотока, executeResetToStart, режимы —/R/A |
 | **Этап 4** | ЗАВЕРШЁН | Межпостовая навигация: getConversationId, pollSavedCards, findNeighborPost, onNewPostEntry, interPostNavigate, D-pad |
-| **Этап 5** | НЕ НАЧАТ | Скачивание и удаление с хитростью hold post |
+| **Этап 5** | ЗАВЕРШЁН | GM_download + CDN-детекция, hold post (сосед до удаления), a.confirm, deleteCurrentPost, downloadCurrentMedia |
 
 ---
 
@@ -127,3 +127,5 @@
 | 2026-08-01 15:29 | Claude Sonnet 4.6 (Antigravity) | Этап 2: SEL-блок, blurActiveInput(), все хоткеи, PageDown intercept, Tab/Brsr listeners — v2.0.1-stage2 запушен |
 | 2026-08-02 14:08 | Claude Sonnet 4.6 (Antigravity) | Этап 3: полный движок слайдшоу (Manual, AUTO+видео, RAF, executeResetToStart, —/R/A) — v2.0.2-stage3 запушен |
 | 2026-08-02 15:27 | Claude Sonnet 4.6 (Antigravity) | Этап 4: межпостовая навигация (interPostNavigate, pollSavedCards, findNeighborPost, D-pad стрелки) — v2.0.3-stage4 запушен |
+| 2026-08-02 15:33 | Claude Sonnet 4.6 (Antigravity) | Этап 5: GM_download, CDN-детекция медиа, hold post, a.confirm, deleteCurrentPost — v2.0.4-stage5 запушен |
+| 2026-08-02 15:33 | Claude Sonnet 4.6 (Antigravity) | ВСЕ 5 ЭТАПОВ ЗАВЕРШЕНЫ. Скрипт v2.0.4-stage5 — полностью рабочий. |
