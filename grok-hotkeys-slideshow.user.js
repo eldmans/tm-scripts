@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.0.1-stage2
+// @version      2.0.2-stage3
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine
 // @author       eldmans
 // @match        https://grok.com/*
@@ -1281,12 +1281,14 @@
     location.href = 'https://grok.com/imagine/saved';
   }
 
-  /** Запуск / остановка слайдшоу (stub — Этап 3). */
+  /** Запуск / остановка слайдшоу (реализация — Этап 3). */
   function actionToggleSlideshow() {
     blurActiveInput();
-    // Stage 3: startSlideshow() / stopSlideshow()
-    State.slideshowRunning = !State.slideshowRunning;
-    // TODO: reflect state in UI
+    if (State.slideshowRunning) {
+      stopSlideshow('manual');
+    } else {
+      startSlideshow();
+    }
   }
 
   /** Фокус на виджет панели. */
@@ -1325,11 +1327,11 @@
     if (!Settings.get().autoTab) return;
     if (document.hidden) {
       State._pausedByTab = true;
-      // Stage 3: stopSlideshow()
+      if (State.slideshowRunning) stopSlideshow('tab');
     } else {
       if (State._pausedByTab) {
         State._pausedByTab = false;
-        // Stage 3: resumeSlideshow()
+        startSlideshow();
       }
     }
   });
@@ -1337,14 +1339,14 @@
   window.addEventListener('blur', () => {
     if (!Settings.get().autoBrsr) return;
     State._pausedByBrsr = true;
-    // Stage 3: stopSlideshow()
+    if (State.slideshowRunning) stopSlideshow('brsr');
   });
 
   window.addEventListener('focus', () => {
     if (!Settings.get().autoBrsr) return;
     if (State._pausedByBrsr) {
       State._pausedByBrsr = false;
-      // Stage 3: resumeSlideshow()
+      startSlideshow();
     }
   });
 
@@ -1475,8 +1477,434 @@
   }, true);
 
   // ─────────────────────────────────────────────
-  //  INIT
+  //  SLIDESHOW ENGINE — Этап 3
   // ─────────────────────────────────────────────
+
+  // ── Внутреннее состояние движка ──────────────
+  const SS = {
+    // Таймер ручного режима
+    manualTimer:   null,
+
+    // AUTO-режим
+    autoTimer:     null,      // requestAnimationFrame handle
+    autoRAF:       null,      // alias
+    currentLoop:   0,         // текущий круг повтора видео
+    timerStart:    0,         // timestamp начала отсчёта
+    timerTarget:   0,         // timestamp когда истекает
+    countdownStart:0,         // timestamp начала countdown после медиа
+
+    // Флаги состояния
+    inCountdown:   false,     // идёт отсчёт после медиа
+    lastVideoSrc:  '',        // для отслеживания смены видео
+    _rafId:        null,
+  };
+
+  // ── Утилиты ───────────────────────────────────
+
+  /** Форматирует секунды в M:SS */
+  function fmtTime(sec) {
+    const s = Math.max(0, Math.floor(sec));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  /** Обновить табло секундомера в AUTO-секции */
+  function updateTimerDisplay(text) {
+    const el = document.getElementById('grok-auto-timer');
+    if (el) el.textContent = text;
+  }
+
+  /**
+   * Найти текущее видео на странице.
+   * Возвращает video-элемент или null.
+   */
+  function getCurrentVideo() {
+    // Сначала ищем в main, потом везде
+    return document.querySelector('main video[src]')
+        || document.querySelector('video[src]')
+        || null;
+  }
+
+  /**
+   * Проверить: видео полностью загружено и готово
+   * (нет loading/moderation).
+   */
+  function isVideoReady() {
+    const v = getCurrentVideo();
+    if (!v || !v.src) return false;
+    if (document.querySelector(SEL.moderationImg)) return false;
+    if (document.querySelector(SEL.loadingSpinner)) return false;
+    return true;
+  }
+
+  /**
+   * Проверить: текущая страница — пост с медиа.
+   * URL вида /imagine/post/...
+   */
+  function isOnPostPage() {
+    return location.pathname.includes('/imagine/post/');
+  }
+
+  // ── Навигация слайдов ─────────────────────────
+
+  /**
+   * Переключить слайд в направлении D-pad.
+   * Stub: в Этапе 4 будет межпостовая навигация.
+   * Здесь: клик по стрелкам в filmstrip Grok.
+   */
+  function navigateSlide() {
+    const dir = Settings.get().dpadDir;
+    blurActiveInput();
+
+    // Ищем кнопки листания в filmstrip / carousel Grok
+    let btn = null;
+    if (dir === 'right' || dir === 'down') {
+      btn = document.querySelector(
+        'button[aria-label*="Next"], button[aria-label*="Следующ"], ' +
+        'button[aria-label*="forward"], [data-testid*="next"]'
+      );
+    } else {
+      btn = document.querySelector(
+        'button[aria-label*="Prev"], button[aria-label*="Предыд"], ' +
+        'button[aria-label*="back"], [data-testid*="prev"]'
+      );
+    }
+
+    if (btn) {
+      btn.click();
+      return true;
+    }
+
+    // Fallback: Этап 4 заменит это межпостовой навигацией
+    return false;
+  }
+
+  // ── executeResetToStart ───────────────────────
+
+  /**
+   * Разгон в противоположный конец пачки.
+   * Жмёт стрелку в обратном направлении пока URL не перестаёт меняться.
+   * callback() вызывается когда упёрлись в край.
+   * Используется при входе в новый пост (режим A) и петле (режим R).
+   */
+  function executeResetToStart(callback) {
+    const dir = Settings.get().dpadDir;
+    // Противоположное направление
+    const reverseDir = { right: 'left', left: 'right', down: 'up', up: 'down' }[dir] || 'left';
+
+    let lastUrl = location.href;
+    let stuckCount = 0;
+    const MAX_STUCK = 5;
+    const INTERVAL = 300; // мс между нажатиями
+
+    function step() {
+      const currentUrl = location.href;
+      if (currentUrl === lastUrl) {
+        stuckCount++;
+      } else {
+        stuckCount = 0;
+        lastUrl = currentUrl;
+      }
+
+      if (stuckCount >= MAX_STUCK) {
+        // Упёрлись в край — готово
+        if (callback) callback();
+        return;
+      }
+
+      // Эмулируем нажатие стрелки в обратном направлении
+      const arrowKey = { right: 'ArrowRight', left: 'ArrowLeft', up: 'ArrowUp', down: 'ArrowDown' }[reverseDir];
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: arrowKey, code: arrowKey, bubbles: true, cancelable: true
+      }));
+
+      setTimeout(step, INTERVAL);
+    }
+
+    setTimeout(step, 100);
+  }
+
+  // ── Manual Mode ───────────────────────────────
+
+  /**
+   * Запускает шаг Manual-режима.
+   * Если interval === 0 — переключает немедленно.
+   */
+  function manualStep() {
+    const s = Settings.get();
+    const interval = s.manualInterval * 1000;
+
+    navigateSlide();
+
+    // Авто-скачивание (если включено)
+    if (s.downloadMode !== 'none') {
+      setTimeout(() => autoDownloadIfNeeded(), 300);
+    }
+
+    // Авто-удаление
+    if (s.autoDel) {
+      setTimeout(() => actionDeletePub(), 500);
+    }
+
+    if (!State.slideshowRunning) return;
+    SS.manualTimer = setTimeout(manualStep, interval);
+  }
+
+  function startManual() {
+    clearTimeout(SS.manualTimer);
+    const interval = Settings.get().manualInterval * 1000;
+    if (interval === 0) {
+      // 0 секунд — немедленно крутим
+      SS.manualTimer = setTimeout(manualStep, 0);
+    } else {
+      SS.manualTimer = setTimeout(manualStep, interval);
+    }
+  }
+
+  function stopManual() {
+    clearTimeout(SS.manualTimer);
+    SS.manualTimer = null;
+  }
+
+  // ── AUTO Mode ────────────────────────────────
+
+  /**
+   * Основной тик AUTO-режима (requestAnimationFrame loop).
+   * Логика разделена на: видео-трекинг и фото-таймер.
+   */
+  function autoTick(ts) {
+    if (!State.slideshowRunning) return;
+
+    const s = Settings.get();
+    const v = getCurrentVideo();
+
+    if (v && isVideoReady()) {
+      // ── ВИДЕО-режим ──────────────────────────
+      const cur = v.currentTime;
+      const dur = v.duration || 0;
+
+      // Обновить табло: «круг/всего  текущее/длительность»
+      const loopStr = s.autoLoops > 1 ? `${SS.currentLoop + 1}/${s.autoLoops} ` : '';
+      updateTimerDisplay(`${loopStr}${fmtTime(cur)} / ${fmtTime(dur)}`);
+
+      // Защита видеопотока (Хитрость 3 из ТЗ):
+      // за 0.2с до конца — засчитываем круг
+      if (dur > 0 && cur >= dur - 0.2) {
+        SS.currentLoop++;
+
+        if (SS.currentLoop < s.autoLoops) {
+          // Ещё не все круги — перемотать и продолжить
+          v.currentTime = 0;
+          v.play().catch(() => {});
+          SS._rafId = requestAnimationFrame(autoTick);
+          return; // ← обязательный return (Хитрость 3)
+        }
+
+        // Все круги пройдены — начать countdown
+        SS.currentLoop = 0;
+        SS.inCountdown = true;
+        SS.countdownStart = performance.now();
+        SS._rafId = requestAnimationFrame(autoTick);
+        return;
+      }
+
+      // Пауза 400мс защита: если cur близко к 0 — дать время
+      if (cur < 0.1 && dur > 0) {
+        setTimeout(() => {
+          if (State.slideshowRunning)
+            SS._rafId = requestAnimationFrame(autoTick);
+        }, 400);
+        return;
+      }
+
+    } else {
+      // ── ФОТО-режим ───────────────────────────
+      // Если не видео — считаем время как photoBaseSeconds * loops
+      // По умолчанию: autoCountdown секунд на фото
+      if (!SS.inCountdown) {
+        SS.inCountdown = true;
+        SS.countdownStart = performance.now();
+      }
+    }
+
+    // ── Countdown после медиа ─────────────────
+    if (SS.inCountdown) {
+      const elapsed = (performance.now() - SS.countdownStart) / 1000;
+      const target  = s.autoCountdown;
+      const remain  = Math.max(0, target - elapsed);
+      updateTimerDisplay(`⏱ ${fmtTime(remain)}`);
+
+      if (elapsed >= target) {
+        // Время вышло — переключить слайд
+        SS.inCountdown = false;
+        SS.currentLoop = 0;
+        onAutoSlideEnd();
+        return;
+      }
+    }
+
+    SS._rafId = requestAnimationFrame(autoTick);
+  }
+
+  /**
+   * Вызывается когда AUTO-режим решил переключить слайд.
+   * Учитывает режим D-pad центра (—, R, A).
+   */
+  function onAutoSlideEnd() {
+    const s = Settings.get();
+
+    // Авто-скачивание
+    if (s.downloadMode !== 'none') autoDownloadIfNeeded();
+    // Авто-удаление
+    if (s.autoDel) setTimeout(() => actionDeletePub(), 300);
+
+    const center = s.dpadCenter;
+
+    if (center === 'stop') {
+      // — : остановка в конце пачки
+      const moved = navigateSlide();
+      if (!moved) {
+        stopSlideshow('edge');
+        return;
+      }
+    } else if (center === 'repeat') {
+      // R : петля внутри поста — разгон в обратную сторону
+      executeResetToStart(() => {
+        if (State.slideshowRunning) {
+          SS._rafId = requestAnimationFrame(autoTick);
+        }
+      });
+      return;
+    } else if (center === 'auto') {
+      // A : межпостовая навигация (Этап 4 заменит stub)
+      const moved = navigateSlide();
+      if (!moved) {
+        // Этап 4: перейти на /imagine/saved и найти соседний пост
+        stopSlideshow('need-inter-post');
+        return;
+      }
+    }
+
+    if (State.slideshowRunning) {
+      // Небольшая пауза после смены слайда
+      setTimeout(() => {
+        SS.inCountdown = false;
+        SS.currentLoop = 0;
+        SS._rafId = requestAnimationFrame(autoTick);
+      }, 600);
+    }
+  }
+
+  function startAuto() {
+    if (SS._rafId) cancelAnimationFrame(SS._rafId);
+    SS.inCountdown = false;
+    SS.currentLoop = 0;
+    SS._rafId = requestAnimationFrame(autoTick);
+  }
+
+  function stopAuto() {
+    if (SS._rafId) { cancelAnimationFrame(SS._rafId); SS._rafId = null; }
+    updateTimerDisplay('—');
+  }
+
+  // ── Авто-скачивание ───────────────────────────
+
+  function autoDownloadIfNeeded() {
+    const mode = Settings.get().downloadMode;
+    if (mode === 'none') return;
+    const v = getCurrentVideo();
+    const hasVideo = !!(v && v.src);
+    if (mode === 'video' && !hasVideo) return;
+    if (mode === 'photo' && hasVideo) return;
+    // mode === 'all' || (mode === 'video' && hasVideo) || (mode === 'photo' && !hasVideo)
+    actionDownload();
+  }
+
+  // ── Публичное API слайдшоу ───────────────────
+
+  /**
+   * Запустить слайдшоу в текущем режиме (manual/auto).
+   */
+  function startSlideshow() {
+    if (State.slideshowRunning) return;
+    State.slideshowRunning = true;
+    updateSlideshowUI(true);
+
+    const mode = Settings.get().slideshowMode;
+    if (mode === 'auto') {
+      startAuto();
+    } else {
+      startManual();
+    }
+  }
+
+  /**
+   * Остановить слайдшоу.
+   * @param {string} reason — причина остановки (для отладки)
+   */
+  function stopSlideshow(reason = 'user') {
+    State.slideshowRunning = false;
+    stopManual();
+    stopAuto();
+    updateSlideshowUI(false);
+    updateTimerDisplay('—');
+    console.log(`[GrokSS] Slideshow stopped: ${reason}`);
+  }
+
+  /**
+   * Обновить визуальные индикаторы запущенного слайдшоу в виджете.
+   */
+  function updateSlideshowUI(running) {
+    // Кнопки Manual/AUTO светятся ярче когда запущено
+    const btnManual = document.getElementById('grok-mode-manual');
+    const btnAuto   = document.getElementById('grok-mode-auto');
+    const mode = Settings.get().slideshowMode;
+
+    if (btnManual) btnManual.classList.toggle('active', mode === 'manual');
+    if (btnAuto)   btnAuto.classList.toggle('active',   mode === 'auto');
+
+    // Добавляем пульсирующую рамку виджету пока запущено
+    const widget = document.getElementById(WIDGET_ID);
+    if (widget) widget.classList.toggle('ss-running', running);
+  }
+
+  // ── CSS для состояния running ─────────────────
+  GM_addStyle(`
+    #${WIDGET_ID}.ss-running {
+      box-shadow:
+        0 8px 32px rgba(0,0,0,0.55),
+        0 0 0 2px rgba(34,197,94,0.6),
+        0 0 12px rgba(34,197,94,0.25);
+    }
+    #${WIDGET_ID}.ss-running #grok-header-title::after {
+      content: ' ●';
+      color: #22c55e;
+      font-size: 8px;
+      vertical-align: super;
+      animation: ss-blink 1s ease infinite alternate;
+    }
+    @keyframes ss-blink {
+      from { opacity: 1; }
+      to   { opacity: 0.3; }
+    }
+  `);
+
+  // ── ↺ Кнопка ручной отмотки ──────────────────
+
+  /**
+   * Мгновенная ручная отмотка в начало пачки текущего поста.
+   * Реализация executeResetToStart без callback.
+   */
+  function rewindToStart() {
+    blurActiveInput();
+    const wasRunning = State.slideshowRunning;
+    if (wasRunning) stopSlideshow('rewind');
+
+    executeResetToStart(() => {
+      if (wasRunning) startSlideshow();
+    });
+  }
+
+
 
   function init() {
     Settings.initSession(); // reset downloadMode to 'none'
