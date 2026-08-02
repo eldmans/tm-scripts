@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.0.3-stage4
+// @version      2.0.4-stage5
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine
 // @author       eldmans
 // @match        https://grok.com/*
@@ -1232,13 +1232,12 @@
   }
 
   /**
-   * Скачать текущее медиа.
-   * Этап 5 заменит этот stub полной реализацией.
+   * Скачать текущее медиа через GM_download.
+   * Порядок: поиск video[src] → поиск img[src] → клик кнопки Download как fallback.
    */
   function actionDownload() {
     blurActiveInput();
-    // Stage 5: findGrokDownloadButton() + GM_download
-    clickBtn(SEL.btnDownload);
+    downloadCurrentMedia();
   }
 
   /**
@@ -1251,12 +1250,11 @@
 
   /**
    * Удалить публикацию.
-   * Этап 5 добавит hold post + a.confirm логику.
+   * Алгоритм hold post + a.confirm из ТЗ.
    */
   function actionDeletePub() {
     blurActiveInput();
-    // Stage 5: holdPost pre-save neighbour, then click
-    clickBtn(SEL.btnDelete);
+    deleteCurrentPost();
   }
 
   /** Вкл/выкл звук текущего видео. */
@@ -2128,6 +2126,174 @@
     executeResetToStart(() => {
       if (wasRunning) startSlideshow();
     });
+  }
+
+  // ─────────────────────────────────────────────
+  //  DOWNLOAD ENGINE — Этап 5
+  // ─────────────────────────────────────────────
+
+  /**
+   * Проверить: url относится к доверенному CDN Grok.
+   */
+  function isGrokCDN(src) {
+    if (!src) return false;
+    return SEL.mediaCDN.some(host => src.includes(host));
+  }
+
+  /**
+   * Получить URL для скачивания текущего медиа.
+   * Приоритет: video[src] → main img[src] → любой img[src] с CDN.
+   */
+  function getMediaDownloadUrl() {
+    // 1. Видео
+    const v = document.querySelector('main video[src]') || document.querySelector('video[src]');
+    if (v && v.src && isGrokCDN(v.src)) return { url: v.src, type: 'video' };
+
+    // 2. Основное фото в main (biggest by area)
+    const imgs = Array.from(document.querySelectorAll('main img[src], div[role="dialog"] img[src]'));
+    const cdnImgs = imgs
+      .filter(img => isGrokCDN(img.src || img.currentSrc))
+      .filter(img => {
+        const alt = (img.alt || '').toLowerCase();
+        return alt !== 'pfp' && !alt.includes('profile') && !alt.includes('most recent');
+      })
+      .map(img => ({ img, area: img.naturalWidth * img.naturalHeight || img.width * img.height }))
+      .sort((a, b) => b.area - a.area);
+
+    if (cdnImgs.length > 0) return { url: cdnImgs[0].img.src, type: 'photo' };
+
+    return null;
+  }
+
+  /**
+   * Сборка имени файла для скачивания.
+   * Формат: grok_<timestamp>_<id>.<ext>
+   */
+  function buildDownloadFilename(url, type) {
+    const ext = type === 'video' ? 'mp4' : 'jpg';
+    const ts  = Date.now();
+    // Извлекаем conversation ID если есть
+    const convId = getConversationId() || 'unknown';
+    return `grok_${convId}_${ts}.${ext}`;
+  }
+
+  /**
+   * Скачать текущее медиа:
+   * 1. Ищем URL через getMediaDownloadUrl()
+   * 2. Если нашли — GM_download
+   * 3. Fallback: клик кнопки Download при нажатии на 3ю кнопку мыши (если GM_download не работает)
+   */
+  function downloadCurrentMedia() {
+    const media = getMediaDownloadUrl();
+
+    if (media) {
+      const filename = buildDownloadFilename(media.url, media.type);
+      console.log(`[GrokSS] Downloading: ${filename}`);
+      try {
+        GM_download({
+          url:      media.url,
+          name:     filename,
+          saveAs:   false,
+          onerror:  (err) => {
+            console.warn('[GrokSS] GM_download failed, fallback click:', err);
+            clickBtn(SEL.btnDownload);
+          }
+        });
+      } catch (e) {
+        console.warn('[GrokSS] GM_download exception, fallback:', e);
+        clickBtn(SEL.btnDownload);
+      }
+      return;
+    }
+
+    // Fallback: нет URL через DOM — кликаем кнопку
+    clickBtn(SEL.btnDownload);
+  }
+
+  // ─────────────────────────────────────────────
+  //  DELETE ENGINE — Этап 5
+  //  hold post + a.confirm
+  // ─────────────────────────────────────────────
+
+  /**
+   * Найти URL соседнего поста для hold post.
+   * Ищем карточки в SEL.savedCards — если не на /saved —
+   * запоминаем URL соседа через history API Grok.
+   */
+  function getNeighborPostUrl() {
+    const currentId = getConversationId();
+    if (!currentId) return null;
+
+    // Ищем ссылки на соседние посты в текущем DOM
+    const cards = Array.from(document.querySelectorAll(SEL.savedCards));
+    if (cards.length === 0) return null;
+
+    const urls  = cards.map(c => c.href || c.getAttribute('href') || '').filter(Boolean);
+    const dir   = Settings.get().dpadDir;
+
+    // Используем findNeighborPost — он уже умеет дедуплицировать
+    return findNeighborPost(urls, currentId, dir);
+  }
+
+  /**
+   * Найти кнопку подтверждения удаления в модалом.
+   * Ищем button с текстом Delete / Удалить / OK внутри [role="dialog"].
+   */
+  function findConfirmDeleteBtn() {
+    const dialog = document.querySelector(SEL.modalDialog);
+    if (!dialog) return null;
+
+    const btns = Array.from(dialog.querySelectorAll('button'));
+    const keywords = ['delete', 'удалить', 'confirm', 'ok', 'yes', 'да'];
+    return btns.find(btn => {
+      const txt = (btn.textContent || '').trim().toLowerCase();
+      return keywords.some(k => txt.includes(k));
+    }) || null;
+  }
+
+  /**
+   * Полный флоу удаления с hold post + a.confirm:
+   *
+   * 0. Если hold post включён — запоминаем URL соседа
+   * 1. Клик кнопки Delete
+   * 2. Ждём появления модала (300мс)
+   * 3. Если a.confirm — кликаем подтверждение
+   * 4. Если hold post — ждём 800мс и переходим на сохранённый URL
+   */
+  function deleteCurrentPost() {
+    const s = Settings.get();
+    blurActiveInput();
+
+    // Шаг 0: запоминаем соседа ДО клика
+    const neighborUrl = s.holdPost ? getNeighborPostUrl() : null;
+
+    // Шаг 1: клик Delete
+    const deleted = clickBtn(SEL.btnDelete);
+    if (!deleted) {
+      console.warn('[GrokSS] deleteCurrentPost: Delete button not found');
+      return;
+    }
+
+    // Шаг 2-3: ждём модал и кликаем a.confirm
+    setTimeout(() => {
+      if (s.autoConfirm) {
+        const confirmBtn = findConfirmDeleteBtn();
+        if (confirmBtn) {
+          confirmBtn.click();
+          console.log('[GrokSS] deleteCurrentPost: confirmed');
+        }
+      }
+
+      // Шаг 4: hold post — переходим на сохранённый URL
+      if (neighborUrl) {
+        setTimeout(() => {
+          console.log(`[GrokSS] hold post: navigating to ${neighborUrl}`);
+          location.href = neighborUrl.startsWith('http')
+            ? neighborUrl
+            : `https://grok.com${neighborUrl.startsWith('/') ? '' : '/'}${neighborUrl}`;
+        }, 800);
+      }
+    }, 300);
   }
 
 
