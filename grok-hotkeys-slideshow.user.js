@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.0.4-stage5
+// @version      2.0.5-fix-ui
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine
 // @author       eldmans
 // @match        https://grok.com/*
@@ -797,8 +797,24 @@
     if (s.slideshowMode === 'manual') btnManual.classList.add('active');
     else                               btnAuto.classList.add('active');
 
-    btnManual.addEventListener('click', () => setSlideshowMode('manual'));
-    btnAuto.addEventListener('click',   () => setSlideshowMode('auto'));
+    // Клик Manual: если уже Manual + запущен — стоп; если не запущен / был AUTO — запуск
+    btnManual.addEventListener('click', () => {
+      if (Settings.get().slideshowMode === 'manual' && State.slideshowRunning) {
+        stopSlideshow('manual-btn');
+      } else {
+        setSlideshowMode('manual');
+        startSlideshow();
+      }
+    });
+    // Клик AUTO: аналогично
+    btnAuto.addEventListener('click', () => {
+      if (Settings.get().slideshowMode === 'auto' && State.slideshowRunning) {
+        stopSlideshow('auto-btn');
+      } else {
+        setSlideshowMode('auto');
+        startSlideshow();
+      }
+    });
     btnRewind.addEventListener('click', () => rewindToStart());
 
     modeRow.appendChild(btnManual);
@@ -1133,9 +1149,7 @@
     btnAuto.classList.toggle('active',   mode === 'auto');
   }
 
-  function rewindToStart() {
-    // Stage 3: executeResetToStart()
-  }
+  // rewindToStart() определена в блоке SLIDESHOW ENGINE (Этап 3)
 
   function adjustManualInterval(delta) {
     const s = Settings.get();
