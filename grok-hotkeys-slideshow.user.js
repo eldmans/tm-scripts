@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.0.5-fix-ui
+// @version      2.0.7-fix-panel
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine
 // @author       eldmans
 // @match        https://grok.com/*
@@ -778,7 +778,10 @@
     header.appendChild(numInd);
     header.appendChild(title);
     header.appendChild(closeX);
-    header.addEventListener('click', togglePanel);
+    // Клик по тексту SlideShow = сворачивает body (full ↔ mini)
+    title.addEventListener('click', (e) => { e.stopPropagation(); collapseToMini(); });
+    // Клик по крестику = скрыть полностью
+    closeX.addEventListener('click', (e) => { e.stopPropagation(); hidePanel(); });
     widget.appendChild(header);
 
     // Update numlock text immediately
@@ -1129,11 +1132,40 @@
   //  PANEL TOGGLE
   // ─────────────────────────────────────────────
 
-  function togglePanel() {
+  // ── 3-состояниевый виджет: full / mini / hidden ─────────────────
+  // full    = шапка + всё содержимое
+  // mini    = только полоска-шапка
+  // hidden  = полностью невидимо
+
+  let _panelState = 'full'; // текущее состояние
+
+  function applyPanelState(state) {
+    _panelState = state;
+    Settings.set('panelState', state);
     const widget = document.getElementById(WIDGET_ID);
+    const body   = document.getElementById('grok-widget-body');
     if (!widget) return;
-    const isHidden = widget.classList.toggle('ss-hidden');
-    Settings.set('panelVisible', !isHidden);
+    if (state === 'hidden') {
+      widget.style.display = 'none';
+    } else {
+      widget.style.display = '';
+      if (body) body.style.display = state === 'full' ? '' : 'none';
+    }
+  }
+
+  /** Ctrl+Insert: переключает full ↔ hidden */
+  function togglePanel() {
+    applyPanelState(_panelState === 'hidden' ? 'full' : 'hidden');
+  }
+
+  /** Клик по SlideShow: сворачивает full ↔ mini */
+  function collapseToMini() {
+    applyPanelState(_panelState === 'full' ? 'mini' : 'full');
+  }
+
+  /** Клик по крестику: скрыть полностью */
+  function hidePanel() {
+    applyPanelState('hidden');
   }
 
   // ─────────────────────────────────────────────
@@ -1601,29 +1633,12 @@
   function executeResetToStart(callback) {
     const dir = Settings.get().dpadDir;
     const reverseDir = { right: 'left', left: 'right', down: 'up', up: 'down' }[dir] || 'left';
+    const arrowKey = { right: 'ArrowRight', left: 'ArrowLeft', up: 'ArrowUp', down: 'ArrowDown' }[reverseDir];
 
     let lastUrl = location.href;
     let stuckCount = 0;
     const MAX_STUCK = 5;
     const INTERVAL = 300;
-
-    // Найти и кликнуть кнопку навигации в ОБРАТНОМ направлении
-    function clickReverseBtn() {
-      let btn = null;
-      if (reverseDir === 'right' || reverseDir === 'down') {
-        btn = document.querySelector(
-          'button[aria-label*="Next"], button[aria-label*="Следующ"], ' +
-          'button[aria-label*="forward"], [data-testid*="next"]'
-        );
-      } else {
-        btn = document.querySelector(
-          'button[aria-label*="Prev"], button[aria-label*="Предыд"], ' +
-          'button[aria-label*="back"], [data-testid*="prev"]'
-        );
-      }
-      if (btn) { btn.click(); return true; }
-      return false;
-    }
 
     function step() {
       const currentUrl = location.href;
@@ -1639,9 +1654,10 @@
         return;
       }
 
-      // Кликаем реальную кнопку — Grok реагирует на клики, не на синтетические события
-      const clicked = clickReverseBtn();
-      if (!clicked) stuckCount++; // кнопки нет — считаем как край
+      // Клавишные события работают в Grok (v6.x проверено)
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: arrowKey, code: arrowKey, bubbles: true, cancelable: true
+      }));
 
       setTimeout(step, INTERVAL);
     }
@@ -2330,6 +2346,10 @@
     Settings.initSession(); // reset downloadMode to 'none'
     buildWidget();
     buildModal();
+    // Восстановить состояние панели из Storage
+    const saved = Settings.get().panelState || 'full';
+    _panelState = saved;
+    applyPanelState(saved);
   }
 
   // Wait for body
