@@ -1600,13 +1600,30 @@
    */
   function executeResetToStart(callback) {
     const dir = Settings.get().dpadDir;
-    // Противоположное направление
     const reverseDir = { right: 'left', left: 'right', down: 'up', up: 'down' }[dir] || 'left';
 
     let lastUrl = location.href;
     let stuckCount = 0;
     const MAX_STUCK = 5;
-    const INTERVAL = 300; // мс между нажатиями
+    const INTERVAL = 300;
+
+    // Найти и кликнуть кнопку навигации в ОБРАТНОМ направлении
+    function clickReverseBtn() {
+      let btn = null;
+      if (reverseDir === 'right' || reverseDir === 'down') {
+        btn = document.querySelector(
+          'button[aria-label*="Next"], button[aria-label*="Следующ"], ' +
+          'button[aria-label*="forward"], [data-testid*="next"]'
+        );
+      } else {
+        btn = document.querySelector(
+          'button[aria-label*="Prev"], button[aria-label*="Предыд"], ' +
+          'button[aria-label*="back"], [data-testid*="prev"]'
+        );
+      }
+      if (btn) { btn.click(); return true; }
+      return false;
+    }
 
     function step() {
       const currentUrl = location.href;
@@ -1618,16 +1635,13 @@
       }
 
       if (stuckCount >= MAX_STUCK) {
-        // Упёрлись в край — готово
         if (callback) callback();
         return;
       }
 
-      // Эмулируем нажатие стрелки в обратном направлении
-      const arrowKey = { right: 'ArrowRight', left: 'ArrowLeft', up: 'ArrowUp', down: 'ArrowDown' }[reverseDir];
-      document.dispatchEvent(new KeyboardEvent('keydown', {
-        key: arrowKey, code: arrowKey, bubbles: true, cancelable: true
-      }));
+      // Кликаем реальную кнопку — Grok реагирует на клики, не на синтетические события
+      const clicked = clickReverseBtn();
+      if (!clicked) stuckCount++; // кнопки нет — считаем как край
 
       setTimeout(step, INTERVAL);
     }
