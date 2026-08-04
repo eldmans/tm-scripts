@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.1.2-redgifs-dom
+// @version      2.1.3-redgifs-title
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine & RedGifs
 // @author       eldmans
 // @match        https://grok.com/*
@@ -2559,6 +2559,25 @@
     return { itemId: itemId || 'video', urls: Array.from(new Set(urls.filter(Boolean))) };
   }
 
+  function getRedGifsTitleFilename(itemId) {
+    let rawTitle = (document.title || '').trim();
+
+    // Очистим кавычки по краям
+    if (rawTitle.startsWith('"') && rawTitle.endsWith('"')) {
+      rawTitle = rawTitle.slice(1, -1).trim();
+    }
+
+    if (rawTitle) {
+      // Заменяем запрещённые символы файловой системы Windows/OS (\ / : * ? " < > |) на безопасные
+      const safeTitle = rawTitle.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+      if (safeTitle.length > 0) {
+        return `${safeTitle}.mp4`;
+      }
+    }
+
+    return `redgifs_${itemId}_${Date.now()}.mp4`;
+  }
+
   function downloadRedGifsVideo() {
     const { itemId, urls } = getRedGifsDownloadUrls();
 
@@ -2567,7 +2586,7 @@
       return;
     }
 
-    const filename = `redgifs_${itemId}_${Date.now()}.mp4`;
+    const filename = getRedGifsTitleFilename(itemId);
     let attemptedIndex = 0;
 
     function tryNext() {
@@ -2578,12 +2597,12 @@
       }
 
       const targetUrl = urls[attemptedIndex++];
-      console.log(`[RedGifsSS] Trying to download (${attemptedIndex}/${urls.length}): ${targetUrl}`);
+      console.log(`[RedGifsSS] Downloading (${attemptedIndex}/${urls.length}) as "${filename}": ${targetUrl}`);
 
       try {
         GM_download({
           url: targetUrl,
-          name: targetUrl.endsWith('.m3u8') ? filename.replace('.mp4', '.m3u8') : filename,
+          name: targetUrl.endsWith('.m3u8') ? filename.replace(/\.mp4$/i, '.m3u8') : filename,
           saveAs: false,
           onerror: (err) => {
             console.warn('[RedGifsSS] Download failed for:', targetUrl, err);
