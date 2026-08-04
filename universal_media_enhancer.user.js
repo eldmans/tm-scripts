@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Universal Web & Media Enhancer
 // @namespace    https://github.com/eldmans/tm-scripts
-// @version      1.0.0
-// @description  Авто-очистка NoodleMagazine (скрытие Join Now, разворачивание плеера на 100%) + Pinterest FullScale Auto-Clicker & Hotkeys
+// @version      1.1.0
+// @description  Авто-очистка NoodleMagazine (скрытие Join Now, 100% плеер) + Pinterest FullScale Auto-Clicker & Video Downloader (RedGifs-style widget, PageDown)
 // @author       eldmans
 // @match        *://*.noodlemagazine.com/*
 // @match        *://noodlemagazine.com/*
@@ -10,7 +10,7 @@
 // @match        *://*.pinterest.ru/*
 // @match        *://*.pinterest.*/*
 // @run-at       document-start
-// @grant        none
+// @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/eldmans/tm-scripts/grok/universal_media_enhancer.user.js
 // @downloadURL  https://raw.githubusercontent.com/eldmans/tm-scripts/grok/universal_media_enhancer.user.js
 // @supportURL   https://github.com/eldmans/tm-scripts
@@ -20,6 +20,46 @@
     'use strict';
 
     const hostname = location.hostname.toLowerCase();
+
+    // =========================================================================
+    // HELPER: Toast notifications
+    // =========================================================================
+    function showToast(message, isError = false) {
+        let toast = document.getElementById('uni-enhancer-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'uni-enhancer-toast';
+            toast.style.cssText = `
+                position: fixed;
+                bottom: 24px;
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 9999999;
+                padding: 10px 18px;
+                background: rgba(20, 20, 20, 0.9);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 10px;
+                color: #ffffff;
+                font-family: system-ui, -apple-system, sans-serif;
+                font-size: 13px;
+                font-weight: 600;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                pointer-events: none;
+                transition: opacity 0.2s ease, transform 0.2s ease;
+                opacity: 0;
+            `;
+            (document.body || document.documentElement).appendChild(toast);
+        }
+        toast.textContent = message;
+        toast.style.borderColor = isError ? '#ef4444' : '#10b981';
+        toast.style.color = isError ? '#fca5a5' : '#6ee7b7';
+        toast.style.opacity = '1';
+
+        setTimeout(() => {
+            toast.style.opacity = '0';
+        }, 3000);
+    }
 
     // =========================================================================
     // MODULE 1: NOODLE MAGAZINE (Hide "Join Now" & Expand Video Player 100%)
@@ -91,7 +131,6 @@
             }
         }
 
-        // Нейтрализация динамически появляющихся кнопок Join Now
         function cleanupJoinNow() {
             const targets = document.querySelectorAll('.fh-button, a[href*="faphouse.com"], .c_video > div[data-noscript]');
             targets.forEach(el => {
@@ -112,14 +151,13 @@
             cleanupJoinNow();
         }
 
-        // Постоянная проверка и отслеживание DOM (MutationObserver + interval)
         const observer = new MutationObserver(() => cleanupJoinNow());
         observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
         setInterval(cleanupJoinNow, 500);
     }
 
     // =========================================================================
-    // MODULE 2: PINTEREST (FullScale Auto-Clicker & Hotkeys)
+    // MODULE 2: PINTEREST (FullScale Auto-Clicker, Video Downloader & Hotkeys)
     // =========================================================================
     if (hostname.includes('pinterest.')) {
         console.log('%c[Universal Enhancer] Pinterest module active', 'color:#3b82f6; font-weight:bold;');
@@ -129,15 +167,14 @@
         const DELAY_KEY = 'pinterest_fs_delay';
         const HOTKEYS_KEY = 'pinterest_fs_hotkeys';
 
-        // Load state
         let isEnabled = localStorage.getItem(ENABLED_KEY) !== 'false';
         let delayVal = parseInt(localStorage.getItem(DELAY_KEY), 10);
         if (isNaN(delayVal)) delayVal = 10;
 
-        // Load hotkeys config
         let hotkeys = {
             toggleFS: { key: 'ArrowUp', ctrl: false, alt: false, shift: true },
-            settings: { key: 'F2', ctrl: false, alt: false, shift: false }
+            settings: { key: 'F2', ctrl: false, alt: false, shift: false },
+            download: { key: 'PageDown', ctrl: false, alt: false, shift: false }
         };
         try {
             const stored = localStorage.getItem(HOTKEYS_KEY);
@@ -146,6 +183,99 @@
             }
         } catch (e) { }
 
+        // =========================================================================
+        // PINTEREST MEDIA EXTRACTION LOGIC
+        // =========================================================================
+        function findPinterestMedia() {
+            // 1. Прямой <video> или <source> элемент
+            const videos = Array.from(document.querySelectorAll('video'));
+            for (const v of videos) {
+                const src = v.currentSrc || v.src || v.querySelector('source')?.src;
+                if (src && !src.startsWith('blob:')) {
+                    return { url: src, type: 'video' };
+                }
+            }
+
+            // 2. Из атрибута data-video-signature (как в DevTools пользователя)
+            const sigEl = document.querySelector('[data-video-signature]');
+            if (sigEl) {
+                const sig = sigEl.getAttribute('data-video-signature');
+                if (sig && sig.length >= 6) {
+                    const p1 = sig.slice(0, 2);
+                    const p2 = sig.slice(2, 4);
+                    const p3 = sig.slice(4, 6);
+                    // Формируем прямой 720w URL видео с cdn pinimg
+                    const candidateUrl = `https://v1.pinimg.com/videos/iht/hls/${p1}/${p2}/${p3}/${sig}_720w.cmfv`;
+                    return { url: candidateUrl, type: 'video', signature: sig };
+                }
+            }
+
+            // 3. Сканирование JSON в script тегах (Pins initial data)
+            const scripts = Array.from(document.querySelectorAll('script'));
+            for (const s of scripts) {
+                const txt = s.textContent || '';
+                if (txt.includes('video_list') || txt.includes('pinimg.com/videos')) {
+                    const matches = txt.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+\.(?:mp4|cmfv|m3u8)/g);
+                    if (matches && matches.length > 0) {
+                        const cleanUrl = matches[0].replace(/\\/g, '');
+                        return { url: cleanUrl, type: 'video' };
+                    }
+                }
+            }
+
+            // 4. Метатеги og:video
+            const metaVid = document.querySelector('meta[property="og:video"], meta[property="og:video:secure_url"]');
+            if (metaVid && metaVid.content) {
+                return { url: metaVid.content, type: 'video' };
+            }
+
+            // 5. Изображение в высоком качестве (Original HQ Image fallback)
+            const img = document.querySelector('img[src*="pinimg.com/originals/"]') ||
+                        document.querySelector('img[src*="pinimg.com/736x/"]') ||
+                        document.querySelector('[data-test-id="pin-closeup-image"] img');
+            if (img && img.src) {
+                const fullImg = img.src.replace(/\/736x\//, '/originals/').replace(/\/474x\//, '/originals/');
+                return { url: fullImg, type: 'image' };
+            }
+
+            return null;
+        }
+
+        function triggerPinterestDownload() {
+            const media = findPinterestMedia();
+            if (!media || !media.url) {
+                showToast('❌ Медиафайл для скачивания не найден на странице', true);
+                return;
+            }
+
+            const pageTitle = (document.title || 'pinterest_media').replace(/[\\/:*?"<>|]/g, '_').trim();
+            const ext = media.type === 'video' ? 'mp4' : 'jpg';
+            const filename = `${pageTitle}.${ext}`;
+
+            showToast(`📥 Скачивание ${media.type === 'video' ? 'видео' : 'изображения'}...`);
+
+            // Скачивание через direct link / new tab / blob
+            try {
+                const a = document.createElement('a');
+                a.href = media.url;
+                a.download = filename;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => a.remove(), 1000);
+            } catch (err) {
+                if (typeof GM_openInTab === 'function') {
+                    GM_openInTab(media.url, { active: true });
+                } else {
+                    window.open(media.url, '_blank');
+                }
+            }
+        }
+
+        // =========================================================================
+        // REDGIFS-STYLE COMPACT WIDGET UI
+        // =========================================================================
         function initPinterestUI() {
             if (document.getElementById('pinterest-fs-widget')) return;
 
@@ -157,11 +287,11 @@
                 right: 50px;
                 z-index: 999999;
                 background: rgba(20, 20, 20, 0.85);
-                backdrop-filter: blur(8px);
-                -webkit-backdrop-filter: blur(8px);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 10px;
-                box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 12px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.6);
                 padding: 6px 10px;
                 display: flex;
                 align-items: center;
@@ -172,13 +302,15 @@
                 user-select: none;
             `;
 
+            // FS Button
             const btnFS = document.createElement('button');
             btnFS.textContent = 'FS';
+            btnFS.title = 'Переключить авто-масштаб (Shift+Up)';
             btnFS.style.cssText = `
                 cursor: pointer;
                 border: none;
                 border-radius: 6px;
-                padding: 4px 10px;
+                padding: 5px 10px;
                 font-weight: 700;
                 font-size: 12px;
                 transition: all 0.2s ease;
@@ -206,13 +338,37 @@
                 }
             };
 
+            // Download Button (RedGifs secondary style)
+            const btnDL = document.createElement('button');
+            btnDL.innerHTML = '💾 Скачать';
+            btnDL.title = 'Скачать видео/медиа (PageDown)';
+            btnDL.style.cssText = `
+                cursor: pointer;
+                border: none;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-weight: 700;
+                font-size: 12px;
+                background: #10b981;
+                color: #ffffff;
+                box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+                transition: all 0.2s ease;
+            `;
+            btnDL.onmouseover = () => { btnDL.style.background = '#059669'; };
+            btnDL.onmouseout = () => { btnDL.style.background = '#10b981'; };
+            btnDL.onclick = () => {
+                triggerPinterestDownload();
+            };
+
+            // Delay Input
             const inputDelay = document.createElement('input');
             inputDelay.type = 'number';
             inputDelay.value = delayVal;
             inputDelay.min = '0';
             inputDelay.max = '100';
+            inputDelay.title = 'Задержка клика (в 0.1 сек)';
             inputDelay.style.cssText = `
-                width: 42px;
+                width: 40px;
                 background: #1f2937;
                 border: 1px solid #374151;
                 border-radius: 4px;
@@ -229,10 +385,11 @@
             };
 
             const suffix = document.createElement('span');
-            suffix.textContent = '*0.1sec';
+            suffix.textContent = '*0.1s';
             suffix.style.color = '#9ca3af';
 
             container.appendChild(btnFS);
+            container.appendChild(btnDL);
             container.appendChild(inputDelay);
             container.appendChild(suffix);
             (document.body || document.documentElement).appendChild(container);
@@ -343,7 +500,7 @@
 
             modal.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: 700; font-size: 15px;">FS Auto-Clicker Настройки</span>
+                    <span style="font-weight: 700; font-size: 15px;">FS & Downloader Настройки</span>
                     <span id="pinter-fs-close-modal" style="cursor: pointer; color: #9ca3af; font-size: 18px; font-weight: bold;">×</span>
                 </div>
                 <div style="border-top: 1px solid #374151;"></div>
@@ -454,6 +611,13 @@
                 activeEl.isContentEditable
             );
             if (isEditing) return;
+
+            // Хоткей на скачивание (PageDown)
+            if (hotkeyMatches(e, hotkeys.download) || e.key === 'PageDown') {
+                e.preventDefault();
+                triggerPinterestDownload();
+                return;
+            }
 
             if (hotkeyMatches(e, hotkeys.toggleFS)) {
                 e.preventDefault();
