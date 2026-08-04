@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.1.1-redgifs-download
+// @version      2.1.2-redgifs-dom
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine & RedGifs
 // @author       eldmans
 // @match        https://grok.com/*
@@ -2382,7 +2382,18 @@
     _panelState: 'full'
   };
 
+  function getActiveRedGifsItem() {
+    return document.querySelector('.GifPreview_isActive')
+        || document.querySelector('.GifPreview')
+        || document.querySelector('[data-feed-item-id]');
+  }
+
   function getRedGifsVideo() {
+    const active = getActiveRedGifsItem();
+    if (active) {
+      const v = active.querySelector('video');
+      if (v) return v;
+    }
     const videos = Array.from(document.querySelectorAll('video'));
     if (videos.length === 0) return null;
 
@@ -2402,10 +2413,20 @@
   }
 
   function redGifsNavigate(dir) {
+    const active = getActiveRedGifsItem();
+    if (active) {
+      const target = dir === 'up' ? active.previousElementSibling : active.nextElementSibling;
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const clickTarget = target.querySelector('.TapTracker, video, img') || target;
+        clickTarget.click();
+        return;
+      }
+    }
+
     const key = dir === 'up' ? 'ArrowUp' : 'ArrowDown';
     const keyCode = dir === 'up' ? 38 : 40;
 
-    // Диспатч ключевых событий для RedGifs
     document.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, keyCode, bubbles: true, cancelable: true }));
     window.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, keyCode, bubbles: true, cancelable: true }));
 
@@ -2414,7 +2435,6 @@
       window.dispatchEvent(new KeyboardEvent('keyup', { key, code: key, keyCode, bubbles: true, cancelable: true }));
     }, 50);
 
-    // Smooth-scroll fallback
     const scrollAmount = dir === 'up' ? -window.innerHeight * 0.85 : window.innerHeight * 0.85;
     window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
   }
@@ -2506,46 +2526,77 @@
     }
   }
 
-  function downloadRedGifsVideo() {
+  function getRedGifsDownloadUrls() {
+    const active = getActiveRedGifsItem();
+    const urls = [];
+    const itemId = active ? active.getAttribute('data-feed-item-id') : null;
+
+    // 1. Из картинки poster в DOM (media.redgifs.com -> MP4)
+    if (active) {
+      const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]');
+      if (poster && poster.src) {
+        const mp4Hd = poster.src.replace(/-mobile\.(jpg|png|jpeg)/i, '.mp4').replace(/\.(jpg|png|jpeg)/i, '.mp4');
+        const mp4Sd = poster.src.replace(/\.(jpg|png|jpeg)/i, '-mobile.mp4');
+        urls.push(mp4Hd, mp4Sd);
+      }
+    }
+
+    // 2. Из тэга video src
     const v = getRedGifsVideo();
-    if (!v) {
-      console.warn('[RedGifsSS] No video element found to download.');
+    if (v) {
+      const src = v.currentSrc || v.src || v.querySelector('source')?.src;
+      if (src && !urls.includes(src)) urls.push(src);
+    }
+
+    // 3. Из data-feed-item-id
+    if (itemId) {
+      const capId = itemId.charAt(0).toUpperCase() + itemId.slice(1);
+      urls.push(`https://media.redgifs.com/${capId}.mp4`);
+      urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/hd.m3u8`);
+      urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/sd.m3u8`);
+    }
+
+    return { itemId: itemId || 'video', urls: Array.from(new Set(urls.filter(Boolean))) };
+  }
+
+  function downloadRedGifsVideo() {
+    const { itemId, urls } = getRedGifsDownloadUrls();
+
+    if (urls.length === 0) {
+      console.warn('[RedGifsSS] No download URL found.');
       return;
     }
 
-    let src = v.currentSrc || v.src;
-    if (!src) {
-      const source = v.querySelector('source[src]');
-      if (source) src = source.src;
+    const filename = `redgifs_${itemId}_${Date.now()}.mp4`;
+    let attemptedIndex = 0;
+
+    function tryNext() {
+      if (attemptedIndex >= urls.length) {
+        console.warn('[RedGifsSS] All download URLs failed.');
+        window.open(urls[0], '_blank');
+        return;
+      }
+
+      const targetUrl = urls[attemptedIndex++];
+      console.log(`[RedGifsSS] Trying to download (${attemptedIndex}/${urls.length}): ${targetUrl}`);
+
+      try {
+        GM_download({
+          url: targetUrl,
+          name: targetUrl.endsWith('.m3u8') ? filename.replace('.mp4', '.m3u8') : filename,
+          saveAs: false,
+          onerror: (err) => {
+            console.warn('[RedGifsSS] Download failed for:', targetUrl, err);
+            tryNext();
+          }
+        });
+      } catch (e) {
+        console.warn('[RedGifsSS] GM_download exception:', e);
+        tryNext();
+      }
     }
 
-    if (!src) {
-      console.warn('[RedGifsSS] Video src not found.');
-      return;
-    }
-
-    let filename = `redgifs_${Date.now()}.mp4`;
-    const matchId = location.pathname.match(/\/watch\/([a-zA-Z0-9]+)/) || location.pathname.match(/\/ifr\/([a-zA-Z0-9]+)/);
-    if (matchId && matchId[1]) {
-      filename = `redgifs_${matchId[1]}_${Date.now()}.mp4`;
-    }
-
-    console.log(`[RedGifsSS] Downloading video: ${src} as ${filename}`);
-
-    try {
-      GM_download({
-        url: src,
-        name: filename,
-        saveAs: false,
-        onerror: (err) => {
-          console.warn('[RedGifsSS] GM_download failed, opening direct link:', err);
-          window.open(src, '_blank');
-        }
-      });
-    } catch (e) {
-      console.warn('[RedGifsSS] GM_download exception, opening direct link:', e);
-      window.open(src, '_blank');
-    }
+    tryNext();
   }
 
   function updateRedGifsTimerDisplay(text) {
