@@ -129,3 +129,4 @@
 | 2026-08-02 15:27 | Claude Sonnet 4.6 (Antigravity) | Этап 4: межпостовая навигация (interPostNavigate, pollSavedCards, findNeighborPost, D-pad стрелки) — v2.0.3-stage4 запушен |
 | 2026-08-02 15:33 | Claude Sonnet 4.6 (Antigravity) | Этап 5: GM_download, CDN-детекция медиа, hold post, a.confirm, deleteCurrentPost — v2.0.4-stage5 запушен |
 | 2026-08-02 15:33 | Claude Sonnet 4.6 (Antigravity) | ВСЕ 5 ЭТАПОВ ЗАВЕРШЕНЫ. Скрипт v2.0.4-stage5 — полностью рабочий. |
+| 2026-08-04 16:26 | Gemini 3.6 Flash (Antigravity) | Добавлен отдельный компактный виджет и модуль AUTO-слайдшоу для redgifs.com (v2.1.0-redgifs) |
