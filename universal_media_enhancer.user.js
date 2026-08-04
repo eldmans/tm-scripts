@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Universal Web & Media Enhancer
 // @namespace    https://github.com/eldmans/tm-scripts
-// @version      1.2.0
-// @description  Авто-очистка NoodleMagazine (скрытие Join Now, 100% плеер) + Pinterest FullScale Auto-Clicker & Direct Video Downloader (Blob/GM_xmlhttpRequest, MP4, PageDown)
+// @version      1.3.0
+// @description  Авто-очистка NoodleMagazine (100% плеер) + Pinterest FullScale Auto-Clicker & Audio/Video MP4 Downloader (expMp4 со звуком, Blob/GM_xmlhttpRequest, PageDown)
 // @author       eldmans
 // @match        *://*.noodlemagazine.com/*
 // @match        *://noodlemagazine.com/*
@@ -70,7 +70,7 @@
     // HELPER: Direct Blob / GM_download Engine (bypasses cross-origin new tab)
     // =========================================================================
     function downloadBlobMedia(url, filename) {
-        showToast('📥 Загрузка файла видео...');
+        showToast('📥 Загрузка видео со звуком...');
 
         // 1. Попытка через GM_download (нативно скачивает сразу в папку загрузок)
         if (typeof GM_download === 'function') {
@@ -78,7 +78,7 @@
                 GM_download({
                     url: url,
                     name: filename,
-                    onload: () => showToast('✅ Видео успешно сохранено!'),
+                    onload: () => showToast('✅ Видео со звуком успешно сохранено!'),
                     onerror: (err) => {
                         console.warn('GM_download error, switching to blob fetch...', err);
                         fetchAndDownloadBlob(url, filename);
@@ -94,7 +94,6 @@
     }
 
     function fetchAndDownloadBlob(url, filename) {
-        // 2. GM_xmlhttpRequest для обхода CORS и загрузки массива байт Blob
         if (typeof GM_xmlhttpRequest === 'function') {
             GM_xmlhttpRequest({
                 method: 'GET',
@@ -117,7 +116,6 @@
     }
 
     function fetchBlobFallback(url, filename) {
-        // 3. Стандартный fetch с преобразованием в Blob URL
         fetch(url)
             .then(res => {
                 if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -126,7 +124,7 @@
             .then(blob => saveBlobToDisk(blob, filename))
             .catch(err => {
                 console.warn('Fetch fallback failed:', err);
-                showToast('⚠️ Скачивание открыто в режиме прямого потока', true);
+                showToast('⚠️ Прямое скачивание недоступно, открыто в новой вкладке', true);
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = filename;
@@ -148,7 +146,7 @@
             a.remove();
             URL.revokeObjectURL(blobUrl);
         }, 2000);
-        showToast('✅ Видео успешно сохранено!');
+        showToast('✅ Видео со звуком успешно сохранено!');
     }
 
     // =========================================================================
@@ -252,7 +250,6 @@
     if (hostname.includes('pinterest.')) {
         console.log('%c[Universal Enhancer] Pinterest module active', 'color:#3b82f6; font-weight:bold;');
 
-        // State keys
         const ENABLED_KEY = 'pinterest_fs_enabled';
         const DELAY_KEY = 'pinterest_fs_delay';
         const HOTKEYS_KEY = 'pinterest_fs_hotkeys';
@@ -274,19 +271,32 @@
         } catch (e) { }
 
         // =========================================================================
-        // PINTEREST MEDIA EXTRACTION LOGIC
+        // PINTEREST AUDIO+VIDEO MP4 EXTRACTION LOGIC (expMp4 priority)
         // =========================================================================
         function findPinterestMedia() {
-            // 1. Прямой <video> или <source> элемент
-            const videos = Array.from(document.querySelectorAll('video'));
-            for (const v of videos) {
-                const src = v.currentSrc || v.src || v.querySelector('source')?.src;
-                if (src && !src.startsWith('blob:')) {
-                    return { url: src, type: 'video' };
+            // 1. Поиск в JSON script тегах (приоритет expMp4 — содержит И видео, И звук!)
+            const scripts = Array.from(document.querySelectorAll('script'));
+            for (const s of scripts) {
+                const txt = s.textContent || '';
+                if (txt.includes('video_list') || txt.includes('expMp4') || txt.includes('pinimg.com/videos')) {
+                    // А. Приоритет №1: expMp4 (полноценный MP4 файл со звуковой дорожкой)
+                    const expMp4Match = txt.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+\/expMp4\/[^\s"',]+\.mp4/g);
+                    if (expMp4Match && expMp4Match.length > 0) {
+                        const cleanUrl = expMp4Match[0].replace(/\\/g, '');
+                        console.log('%c[Pinterest Downloader] Found expMp4 (with audio): ' + cleanUrl, 'color:#10b981;');
+                        return { url: cleanUrl, type: 'video' };
+                    }
+
+                    // Б. Любой прямой mp4 из video_list
+                    const anyMp4Match = txt.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+\.mp4/g);
+                    if (anyMp4Match && anyMp4Match.length > 0) {
+                        const cleanUrl = anyMp4Match[0].replace(/\\/g, '');
+                        return { url: cleanUrl, type: 'video' };
+                    }
                 }
             }
 
-            // 2. Из атрибута data-video-signature (как в DevTools пользователя)
+            // 2. Из атрибута data-video-signature (Генерация expMp4 URL со звуком)
             const sigEl = document.querySelector('[data-video-signature]');
             if (sigEl) {
                 const sig = sigEl.getAttribute('data-video-signature');
@@ -294,22 +304,19 @@
                     const p1 = sig.slice(0, 2);
                     const p2 = sig.slice(2, 4);
                     const p3 = sig.slice(4, 6);
-                    // Формируем прямой URL видео с cdn pinimg (.cmfv качается и переименовывается в .mp4)
-                    const candidateUrl = `https://v1.pinimg.com/videos/iht/hls/${p1}/${p2}/${p3}/${sig}_720w.cmfv`;
-                    return { url: candidateUrl, type: 'video', signature: sig };
+                    // Важно: путь expMp4 в отличие от cmfv/hls содержит звуковую дорожку!
+                    const expUrl = `https://v1.pinimg.com/videos/iht/expMp4/${p1}/${p2}/${p3}/${sig}_720w.mp4`;
+                    console.log('%c[Pinterest Downloader] Generated expMp4 URL from signature: ' + expUrl, 'color:#10b981;');
+                    return { url: expUrl, type: 'video', signature: sig };
                 }
             }
 
-            // 3. Сканирование JSON в script тегах (Pins initial data)
-            const scripts = Array.from(document.querySelectorAll('script'));
-            for (const s of scripts) {
-                const txt = s.textContent || '';
-                if (txt.includes('video_list') || txt.includes('pinimg.com/videos')) {
-                    const matches = txt.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+\.(?:mp4|cmfv|m3u8)/g);
-                    if (matches && matches.length > 0) {
-                        const cleanUrl = matches[0].replace(/\\/g, '');
-                        return { url: cleanUrl, type: 'video' };
-                    }
+            // 3. Прямой <video> или <source> элемент на странице (исключаем беззвучные blob/cmfv фрагменты)
+            const videos = Array.from(document.querySelectorAll('video'));
+            for (const v of videos) {
+                const src = v.currentSrc || v.src || v.querySelector('source')?.src;
+                if (src && !src.startsWith('blob:') && !src.includes('.cmfv')) {
+                    return { url: src, type: 'video' };
                 }
             }
 
@@ -343,7 +350,6 @@
             const ext = media.type === 'video' ? 'mp4' : 'jpg';
             const filename = `${pageTitle}.${ext}`;
 
-            // Запуск скачивания без открытия новой вкладки
             downloadBlobMedia(media.url, filename);
         }
 
@@ -415,7 +421,7 @@
             // Download Button (RedGifs secondary style)
             const btnDL = document.createElement('button');
             btnDL.innerHTML = '💾 Скачать';
-            btnDL.title = 'Скачать видео/медиа (PageDown)';
+            btnDL.title = 'Скачать видео со звуком (PageDown)';
             btnDL.style.cssText = `
                 cursor: pointer;
                 border: none;
@@ -686,7 +692,6 @@
             );
             if (isEditing) return;
 
-            // Хоткей на скачивание (PageDown)
             if (hotkeyMatches(e, hotkeys.download) || e.key === 'PageDown') {
                 e.preventDefault();
                 triggerPinterestDownload();
