@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.1.4-redgifs-title
+// @version      2.1.5-redgifs-fix
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine & RedGifs
 // @author       eldmans
 // @match        https://grok.com/*
@@ -1416,6 +1416,7 @@
   }
 
   document.addEventListener('keydown', e => {
+    if (IS_REDGIFS) return;
     // Всегда обновляем NumLock
     detectNumLock(e);
 
@@ -2044,6 +2045,7 @@
    * Обрабатывает ArrowКлавиши и Numpad (хоткей hk.dpad* из Settings).
    */
   document.addEventListener('keydown', (e) => {
+    if (IS_REDGIFS) return;
     if (State.slideshowRunning) return;    // слайдшоу сам управляет
     if (State.recordingHotkey) return;
     const ae = document.activeElement;
@@ -2356,6 +2358,7 @@
     defaults: {
       autoCountdown: 1,  // секунд после завершения медиа (выдержка)
       autoLoops: 1,      // кругов повтора видео
+      autoDownload: false,// авто-скачивание за пару секунд до конца
       direction: 'down', // 'down' (вниз) или 'up' (вверх)
       panelState: 'full' // 'full', 'mini', 'hidden'
     },
@@ -2379,6 +2382,8 @@
     currentLoop: 0,
     inCountdown: false,
     countdownStart: 0,
+    lastVideoSrc: '',
+    lastDownloadedId: '',
     _rafId: null,
     _panelState: 'full'
   };
@@ -2446,13 +2451,44 @@
     const s = RedGifsSettings.get();
     const v = getRedGifsVideo();
 
-    if (v && v.src && !v.paused && v.duration > 0) {
-      const cur = v.currentTime;
-      const dur = v.duration;
+    // Сброс состояния при смене видеоисточника
+    const currentVideoSrc = v ? (v.currentSrc || v.src || '') : '';
+    if (currentVideoSrc && currentVideoSrc !== RedGifsState.lastVideoSrc) {
+      RedGifsState.lastVideoSrc = currentVideoSrc;
+      RedGifsState.currentLoop = 0;
+      RedGifsState.inCountdown = false;
+    }
 
+    if (v) {
+      const dur = v.duration;
+      // Защита: если видео подгружается (seeking, NaN, readyState < 2 или duration == 0)
+      const isLoading = !dur || isNaN(dur) || dur === 0 || v.readyState < 2 || v.seeking;
+
+      if (isLoading) {
+        updateRedGifsTimerDisplay('⏳ Loading...');
+        RedGifsState.inCountdown = false; // НЕ переключать слайд пока подгружается!
+        RedGifsState._rafId = requestAnimationFrame(redGifsAutoTick);
+        return;
+      }
+
+      // Видео действительно готово и проигрывается
+      const cur = v.currentTime;
       const loopStr = s.autoLoops > 1 ? `${RedGifsState.currentLoop + 1}/${s.autoLoops} ` : '';
       updateRedGifsTimerDisplay(`${loopStr}${fmtTime(cur)} / ${fmtTime(dur)}`);
 
+      // Авто-скачивание за пару секунд до завершения видео на последнем круге
+      if (s.autoDownload) {
+        const isLastLoop = RedGifsState.currentLoop >= (s.autoLoops - 1);
+        if (isLastLoop && (dur - cur <= 2.5)) {
+          const { itemId } = getRedGifsDownloadUrls();
+          if (itemId && itemId !== RedGifsState.lastDownloadedId) {
+            RedGifsState.lastDownloadedId = itemId;
+            downloadRedGifsVideo();
+          }
+        }
+      }
+
+      // За 0.2с до конца видео засчитываем круг
       if (cur >= dur - 0.2) {
         RedGifsState.currentLoop++;
 
@@ -2774,7 +2810,7 @@
 
     // Header
     const header = el('div', { id: 'redgifs-header-bar' });
-    const title  = el('span', {}, 'RedGifs Auto v2.1.4');
+    const title  = el('span', {}, 'RedGifs Auto v2.1.5');
     const controls = el('div', { style: { display: 'flex', gap: '6px' } });
     const btnMini  = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '_');
     const btnClose = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '×');
@@ -2870,19 +2906,34 @@
     // Timer display
     const timerDisp = el('div', { id: 'redgifs-auto-timer' }, '—');
 
-    // Start/Stop & Download buttons
+    // Start/Stop button
     const btnStart = el('button', { id: 'redgifs-btn-start', class: 'rg-btn' }, '▶ Start');
     btnStart.addEventListener('click', () => toggleRedGifsSlideshow());
 
-    const btnDl = el('button', { id: 'redgifs-btn-dl', class: 'rg-btn' }, '⬇ Скачать (PgDown)');
+    // Download Row (Checkbox + Button)
+    const dlRow = el('div', { class: 'rg-row', style: { gap: '6px' } });
+    const dlCheckLabel = el('label', { style: { display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '11px', whiteSpace: 'nowrap' } });
+    const dlInp = el('input', { type: 'checkbox' });
+    if (s.autoDownload) dlInp.checked = true;
+    dlCheckLabel.appendChild(dlInp);
+    dlCheckLabel.appendChild(document.createTextNode('↓ авто'));
+
+    dlInp.addEventListener('change', () => {
+      RedGifsSettings.set('autoDownload', dlInp.checked);
+    });
+
+    const btnDl = el('button', { id: 'redgifs-btn-dl', class: 'rg-btn', style: { flex: 1 } }, '⬇ Скачать (End)');
     btnDl.addEventListener('click', () => downloadRedGifsVideo());
+
+    dlRow.appendChild(dlCheckLabel);
+    dlRow.appendChild(btnDl);
 
     body.appendChild(cdRow);
     body.appendChild(lpRow);
     body.appendChild(dirRow);
     body.appendChild(timerDisp);
     body.appendChild(btnStart);
-    body.appendChild(btnDl);
+    body.appendChild(dlRow);
 
     widget.appendChild(body);
     document.body.appendChild(widget);
@@ -2902,7 +2953,7 @@
       } else if (e.key === 'Insert' && e.ctrlKey) {
         e.preventDefault();
         applyRedGifsPanelState(RedGifsState._panelState === 'hidden' ? 'full' : 'hidden');
-      } else if (e.key === 'PageDown') {
+      } else if (e.key === 'End') {
         e.preventDefault();
         downloadRedGifsVideo();
       }
