@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.0.7-fix-panel
-// @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine
+// @version      2.1.0-redgifs
+// @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine & RedGifs
 // @author       eldmans
 // @match        https://grok.com/*
+// @match        https://*.redgifs.com/*
+// @match        https://redgifs.com/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
@@ -2342,7 +2344,427 @@
 
 
 
+  // ─────────────────────────────────────────────
+  //  REDGIFS MODULE (Дополнительный модуль для redgifs.com)
+  // ─────────────────────────────────────────────
+
+  const REDGIFS_STORAGE_KEY = 'redgifsSS_settings';
+  const REDGIFS_WIDGET_ID   = 'redgifs-ss-widget';
+
+  const RedGifsSettings = {
+    defaults: {
+      autoCountdown: 1,  // секунд после завершения медиа (выдержка)
+      autoLoops: 1,      // кругов повтора видео
+      direction: 'down', // 'down' (вниз) или 'up' (вверх)
+      panelState: 'full' // 'full', 'mini', 'hidden'
+    },
+    get() {
+      try {
+        const raw = GM_getValue(REDGIFS_STORAGE_KEY);
+        return raw ? { ...this.defaults, ...JSON.parse(raw) } : { ...this.defaults };
+      } catch (e) {
+        return { ...this.defaults };
+      }
+    },
+    set(key, val) {
+      const curr = this.get();
+      curr[key] = val;
+      GM_setValue(REDGIFS_STORAGE_KEY, JSON.stringify(curr));
+    }
+  };
+
+  const RedGifsState = {
+    slideshowRunning: false,
+    currentLoop: 0,
+    inCountdown: false,
+    countdownStart: 0,
+    _rafId: null,
+    _panelState: 'full'
+  };
+
+  function getRedGifsVideo() {
+    const videos = Array.from(document.querySelectorAll('video'));
+    if (videos.length === 0) return null;
+
+    let bestVideo = null;
+    let maxVisibleHeight = 0;
+    const vh = window.innerHeight;
+
+    for (const v of videos) {
+      const rect = v.getBoundingClientRect();
+      const visibleHeight = Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0));
+      if (visibleHeight > maxVisibleHeight) {
+        maxVisibleHeight = visibleHeight;
+        bestVideo = v;
+      }
+    }
+    return bestVideo || videos[0];
+  }
+
+  function redGifsNavigate(dir) {
+    const key = dir === 'up' ? 'ArrowUp' : 'ArrowDown';
+    const keyCode = dir === 'up' ? 38 : 40;
+
+    // Диспатч ключевых событий для RedGifs
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, keyCode, bubbles: true, cancelable: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, keyCode, bubbles: true, cancelable: true }));
+
+    setTimeout(() => {
+      document.dispatchEvent(new KeyboardEvent('keyup', { key, code: key, keyCode, bubbles: true, cancelable: true }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { key, code: key, keyCode, bubbles: true, cancelable: true }));
+    }, 50);
+
+    // Smooth-scroll fallback
+    const scrollAmount = dir === 'up' ? -window.innerHeight * 0.85 : window.innerHeight * 0.85;
+    window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+  }
+
+  function redGifsAutoTick() {
+    if (!RedGifsState.slideshowRunning) return;
+
+    const s = RedGifsSettings.get();
+    const v = getRedGifsVideo();
+
+    if (v && v.src && !v.paused && v.duration > 0) {
+      const cur = v.currentTime;
+      const dur = v.duration;
+
+      const loopStr = s.autoLoops > 1 ? `${RedGifsState.currentLoop + 1}/${s.autoLoops} ` : '';
+      updateRedGifsTimerDisplay(`${loopStr}${fmtTime(cur)} / ${fmtTime(dur)}`);
+
+      if (cur >= dur - 0.2) {
+        RedGifsState.currentLoop++;
+
+        if (RedGifsState.currentLoop < s.autoLoops) {
+          v.currentTime = 0;
+          v.play().catch(() => {});
+          RedGifsState._rafId = requestAnimationFrame(redGifsAutoTick);
+          return;
+        }
+
+        RedGifsState.currentLoop = 0;
+        RedGifsState.inCountdown = true;
+        RedGifsState.countdownStart = performance.now();
+        RedGifsState._rafId = requestAnimationFrame(redGifsAutoTick);
+        return;
+      }
+    } else {
+      if (!RedGifsState.inCountdown) {
+        RedGifsState.inCountdown = true;
+        RedGifsState.countdownStart = performance.now();
+      }
+    }
+
+    if (RedGifsState.inCountdown) {
+      const elapsed = (performance.now() - RedGifsState.countdownStart) / 1000;
+      const target  = s.autoCountdown;
+      const remain  = Math.max(0, target - elapsed);
+      updateRedGifsTimerDisplay(`⏱ ${fmtTime(remain)}`);
+
+      if (elapsed >= target) {
+        RedGifsState.inCountdown = false;
+        RedGifsState.currentLoop = 0;
+
+        redGifsNavigate(s.direction);
+
+        setTimeout(() => {
+          if (RedGifsState.slideshowRunning) {
+            RedGifsState._rafId = requestAnimationFrame(redGifsAutoTick);
+          }
+        }, 1000);
+        return;
+      }
+    }
+
+    RedGifsState._rafId = requestAnimationFrame(redGifsAutoTick);
+  }
+
+  function startRedGifsSlideshow() {
+    if (RedGifsState.slideshowRunning) return;
+    RedGifsState.slideshowRunning = true;
+    RedGifsState.inCountdown = false;
+    RedGifsState.currentLoop = 0;
+    updateRedGifsUI(true);
+    RedGifsState._rafId = requestAnimationFrame(redGifsAutoTick);
+  }
+
+  function stopRedGifsSlideshow() {
+    RedGifsState.slideshowRunning = false;
+    if (RedGifsState._rafId) {
+      cancelAnimationFrame(RedGifsState._rafId);
+      RedGifsState._rafId = null;
+    }
+    updateRedGifsUI(false);
+    updateRedGifsTimerDisplay('—');
+  }
+
+  function toggleRedGifsSlideshow() {
+    if (RedGifsState.slideshowRunning) {
+      stopRedGifsSlideshow();
+    } else {
+      startRedGifsSlideshow();
+    }
+  }
+
+  function updateRedGifsTimerDisplay(text) {
+    const el = document.getElementById('redgifs-auto-timer');
+    if (el) el.textContent = text;
+  }
+
+  function updateRedGifsUI(running) {
+    const widget = document.getElementById(REDGIFS_WIDGET_ID);
+    const startBtn = document.getElementById('redgifs-btn-start');
+    if (widget) widget.classList.toggle('ss-running', running);
+    if (startBtn) {
+      startBtn.textContent = running ? '⏸ Stop' : '▶ Start';
+      startBtn.classList.toggle('active', running);
+    }
+  }
+
+  function applyRedGifsPanelState(state) {
+    RedGifsState._panelState = state;
+    RedGifsSettings.set('panelState', state);
+    const widget = document.getElementById(REDGIFS_WIDGET_ID);
+    const body   = document.getElementById('redgifs-widget-body');
+    if (!widget) return;
+    if (state === 'hidden') {
+      widget.style.display = 'none';
+    } else {
+      widget.style.display = '';
+      if (body) body.style.display = state === 'full' ? '' : 'none';
+    }
+  }
+
+  function buildRedGifsWidget() {
+    const s = RedGifsSettings.get();
+
+    GM_addStyle(`
+      #${REDGIFS_WIDGET_ID} {
+        position: fixed;
+        top: 50px;
+        right: 20px;
+        z-index: 999999;
+        width: 210px;
+        background: rgba(15, 23, 42, 0.88);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 12px;
+        padding: 10px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #f3f4f6;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+        user-select: none;
+      }
+      #${REDGIFS_WIDGET_ID}.ss-running {
+        box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 2px rgba(34,197,94,0.6);
+      }
+      #redgifs-header-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-weight: 700;
+        font-size: 13px;
+        margin-bottom: 8px;
+        cursor: pointer;
+      }
+      #redgifs-widget-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .rg-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+      }
+      .rg-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #e5e7eb;
+        border-radius: 6px;
+        padding: 3px 8px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        transition: all 0.15s ease;
+      }
+      .rg-btn:hover {
+        background: rgba(255, 255, 255, 0.18);
+      }
+      .rg-btn.active {
+        background: rgba(34, 197, 94, 0.2);
+        border-color: #22c55e;
+        color: #22c55e;
+      }
+      .rg-dir-btn {
+        flex: 1;
+        text-align: center;
+        margin: 0 2px;
+      }
+      #redgifs-auto-timer {
+        text-align: center;
+        font-family: monospace;
+        font-size: 13px;
+        color: #38bdf8;
+        background: rgba(0,0,0,0.3);
+        padding: 4px;
+        border-radius: 6px;
+        margin-top: 2px;
+      }
+      #redgifs-btn-start {
+        width: 100%;
+        padding: 6px;
+        font-size: 13px;
+        margin-top: 4px;
+      }
+    `);
+
+    const widget = el('div', { id: REDGIFS_WIDGET_ID });
+
+    // Header
+    const header = el('div', { id: 'redgifs-header-bar' });
+    const title  = el('span', {}, 'RedGifs Auto');
+    const controls = el('div', { style: { display: 'flex', gap: '6px' } });
+    const btnMini  = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '_');
+    const btnClose = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '×');
+
+    controls.appendChild(btnMini);
+    controls.appendChild(btnClose);
+    header.appendChild(title);
+    header.appendChild(controls);
+    widget.appendChild(header);
+
+    btnMini.addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyRedGifsPanelState(RedGifsState._panelState === 'full' ? 'mini' : 'full');
+    });
+    title.addEventListener('click', () => {
+      applyRedGifsPanelState(RedGifsState._panelState === 'full' ? 'mini' : 'full');
+    });
+    btnClose.addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyRedGifsPanelState('hidden');
+    });
+
+    // Body
+    const body = el('div', { id: 'redgifs-widget-body' });
+
+    // Countdown row: - 01c +
+    const cdRow = el('div', { class: 'rg-row' });
+    const cdLabel = el('span', {}, 'Задержка:');
+    const cdCtrl  = el('div', { style: { display: 'flex', alignItems: 'center', gap: '4px' } });
+    const cdMinus = el('button', { class: 'rg-btn' }, '−');
+    const cdDisp  = el('span', { id: 'redgifs-cd-disp', style: { width: '28px', textAlign: 'center', fontWeight: 'bold' } }, `${String(s.autoCountdown).padStart(2,'0')}с`);
+    const cdPlus  = el('button', { class: 'rg-btn' }, '+');
+    cdCtrl.appendChild(cdMinus);
+    cdCtrl.appendChild(cdDisp);
+    cdCtrl.appendChild(cdPlus);
+    cdRow.appendChild(cdLabel);
+    cdRow.appendChild(cdCtrl);
+
+    cdMinus.addEventListener('click', () => {
+      const val = Math.max(0, RedGifsSettings.get().autoCountdown - 1);
+      RedGifsSettings.set('autoCountdown', val);
+      cdDisp.textContent = `${String(val).padStart(2,'0')}с`;
+    });
+    cdPlus.addEventListener('click', () => {
+      const val = RedGifsSettings.get().autoCountdown + 1;
+      RedGifsSettings.set('autoCountdown', val);
+      cdDisp.textContent = `${String(val).padStart(2,'0')}с`;
+    });
+
+    // Loops row: ÷ 1x ×
+    const lpRow = el('div', { class: 'rg-row' });
+    const lpLabel = el('span', {}, 'Кругов:');
+    const lpCtrl  = el('div', { style: { display: 'flex', alignItems: 'center', gap: '4px' } });
+    const lpMinus = el('button', { class: 'rg-btn' }, '÷');
+    const lpDisp  = el('span', { id: 'redgifs-lp-disp', style: { width: '28px', textAlign: 'center', fontWeight: 'bold' } }, `${s.autoLoops}x`);
+    const lpPlus  = el('button', { class: 'rg-btn' }, '×');
+    lpCtrl.appendChild(lpMinus);
+    lpCtrl.appendChild(lpDisp);
+    lpCtrl.appendChild(lpPlus);
+    lpRow.appendChild(lpLabel);
+    lpRow.appendChild(lpCtrl);
+
+    lpMinus.addEventListener('click', () => {
+      const val = Math.max(1, RedGifsSettings.get().autoLoops - 1);
+      RedGifsSettings.set('autoLoops', val);
+      lpDisp.textContent = `${val}x`;
+    });
+    lpPlus.addEventListener('click', () => {
+      const val = RedGifsSettings.get().autoLoops + 1;
+      RedGifsSettings.set('autoLoops', val);
+      lpDisp.textContent = `${val}x`;
+    });
+
+    // Direction row: ▲ Up | ▼ Down
+    const dirRow = el('div', { class: 'rg-row', style: { marginTop: '2px' } });
+    const btnUp   = el('button', { class: `rg-btn rg-dir-btn${s.direction === 'up' ? ' active' : ''}` }, '▲ Up');
+    const btnDown = el('button', { class: `rg-btn rg-dir-btn${s.direction === 'down' ? ' active' : ''}` }, '▼ Down');
+
+    btnUp.addEventListener('click', () => {
+      RedGifsSettings.set('direction', 'up');
+      btnUp.classList.add('active');
+      btnDown.classList.remove('active');
+    });
+    btnDown.addEventListener('click', () => {
+      RedGifsSettings.set('direction', 'down');
+      btnDown.classList.add('active');
+      btnUp.classList.remove('active');
+    });
+
+    dirRow.appendChild(btnUp);
+    dirRow.appendChild(btnDown);
+
+    // Timer display
+    const timerDisp = el('div', { id: 'redgifs-auto-timer' }, '—');
+
+    // Start/Stop button
+    const btnStart = el('button', { id: 'redgifs-btn-start', class: 'rg-btn' }, '▶ Start');
+    btnStart.addEventListener('click', () => toggleRedGifsSlideshow());
+
+    body.appendChild(cdRow);
+    body.appendChild(lpRow);
+    body.appendChild(dirRow);
+    body.appendChild(timerDisp);
+    body.appendChild(btnStart);
+
+    widget.appendChild(body);
+    document.body.appendChild(widget);
+
+    applyRedGifsPanelState(s.panelState || 'full');
+  }
+
+  function bindRedGifsHotkeys() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Insert' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        const ae = document.activeElement;
+        const inInput = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+        if (!inInput) {
+          e.preventDefault();
+          toggleRedGifsSlideshow();
+        }
+      } else if (e.key === 'Insert' && e.ctrlKey) {
+        e.preventDefault();
+        applyRedGifsPanelState(RedGifsState._panelState === 'hidden' ? 'full' : 'hidden');
+      }
+    }, true);
+  }
+
+  function initRedGifs() {
+    buildRedGifsWidget();
+    bindRedGifsHotkeys();
+    console.log('[RedGifsSS] Initialized on redgifs.com');
+  }
+
+  const IS_REDGIFS = location.hostname.includes('redgifs.com');
+
   function init() {
+    if (IS_REDGIFS) {
+      initRedGifs();
+      return;
+    }
     Settings.initSession(); // reset downloadMode to 'none'
     buildWidget();
     buildModal();
