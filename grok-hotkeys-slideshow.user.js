@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.1.5-redgifs-fix
+// @version      2.1.6-redgifs-timer
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine & RedGifs
 // @author       eldmans
 // @match        https://grok.com/*
@@ -2810,7 +2810,7 @@
 
     // Header
     const header = el('div', { id: 'redgifs-header-bar' });
-    const title  = el('span', {}, 'RedGifs Auto v2.1.5');
+    const title  = el('span', {}, 'RedGifs Auto v2.1.6');
     const controls = el('div', { style: { display: 'flex', gap: '6px' } });
     const btnMini  = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '_');
     const btnClose = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '×');
@@ -2963,6 +2963,7 @@
   function initRedGifs() {
     buildRedGifsWidget();
     bindRedGifsHotkeys();
+    startRedGifsTickLoop();
     console.log('[RedGifsSS] Initialized on redgifs.com');
   }
 
