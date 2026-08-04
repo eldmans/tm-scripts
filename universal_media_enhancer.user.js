@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Universal Web & Media Enhancer
 // @namespace    https://github.com/eldmans/tm-scripts
-// @version      1.1.0
-// @description  Авто-очистка NoodleMagazine (скрытие Join Now, 100% плеер) + Pinterest FullScale Auto-Clicker & Video Downloader (RedGifs-style widget, PageDown)
+// @version      1.2.0
+// @description  Авто-очистка NoodleMagazine (скрытие Join Now, 100% плеер) + Pinterest FullScale Auto-Clicker & Direct Video Downloader (Blob/GM_xmlhttpRequest, MP4, PageDown)
 // @author       eldmans
 // @match        *://*.noodlemagazine.com/*
 // @match        *://noodlemagazine.com/*
@@ -11,6 +11,11 @@
 // @match        *://*.pinterest.*/*
 // @run-at       document-start
 // @grant        GM_openInTab
+// @grant        GM_xmlhttpRequest
+// @grant        GM_download
+// @connect      pinimg.com
+// @connect      *.pinimg.com
+// @connect      *
 // @updateURL    https://raw.githubusercontent.com/eldmans/tm-scripts/grok/universal_media_enhancer.user.js
 // @downloadURL  https://raw.githubusercontent.com/eldmans/tm-scripts/grok/universal_media_enhancer.user.js
 // @supportURL   https://github.com/eldmans/tm-scripts
@@ -36,7 +41,7 @@
                 transform: translateX(-50%);
                 z-index: 9999999;
                 padding: 10px 18px;
-                background: rgba(20, 20, 20, 0.9);
+                background: rgba(20, 20, 20, 0.92);
                 backdrop-filter: blur(10px);
                 border: 1px solid rgba(255, 255, 255, 0.15);
                 border-radius: 10px;
@@ -58,7 +63,92 @@
 
         setTimeout(() => {
             toast.style.opacity = '0';
-        }, 3000);
+        }, 3500);
+    }
+
+    // =========================================================================
+    // HELPER: Direct Blob / GM_download Engine (bypasses cross-origin new tab)
+    // =========================================================================
+    function downloadBlobMedia(url, filename) {
+        showToast('📥 Загрузка файла видео...');
+
+        // 1. Попытка через GM_download (нативно скачивает сразу в папку загрузок)
+        if (typeof GM_download === 'function') {
+            try {
+                GM_download({
+                    url: url,
+                    name: filename,
+                    onload: () => showToast('✅ Видео успешно сохранено!'),
+                    onerror: (err) => {
+                        console.warn('GM_download error, switching to blob fetch...', err);
+                        fetchAndDownloadBlob(url, filename);
+                    }
+                });
+                return;
+            } catch (e) {
+                console.warn('GM_download exception, falling back...', e);
+            }
+        }
+
+        fetchAndDownloadBlob(url, filename);
+    }
+
+    function fetchAndDownloadBlob(url, filename) {
+        // 2. GM_xmlhttpRequest для обхода CORS и загрузки массива байт Blob
+        if (typeof GM_xmlhttpRequest === 'function') {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: url,
+                responseType: 'blob',
+                onload: function (response) {
+                    if (response.status === 200 && response.response) {
+                        saveBlobToDisk(response.response, filename);
+                    } else {
+                        fetchBlobFallback(url, filename);
+                    }
+                },
+                onerror: function () {
+                    fetchBlobFallback(url, filename);
+                }
+            });
+        } else {
+            fetchBlobFallback(url, filename);
+        }
+    }
+
+    function fetchBlobFallback(url, filename) {
+        // 3. Стандартный fetch с преобразованием в Blob URL
+        fetch(url)
+            .then(res => {
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res.blob();
+            })
+            .then(blob => saveBlobToDisk(blob, filename))
+            .catch(err => {
+                console.warn('Fetch fallback failed:', err);
+                showToast('⚠️ Скачивание открыто в режиме прямого потока', true);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.target = '_blank';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => a.remove(), 1000);
+            });
+    }
+
+    function saveBlobToDisk(blob, filename) {
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+            a.remove();
+            URL.revokeObjectURL(blobUrl);
+        }, 2000);
+        showToast('✅ Видео успешно сохранено!');
     }
 
     // =========================================================================
@@ -204,7 +294,7 @@
                     const p1 = sig.slice(0, 2);
                     const p2 = sig.slice(2, 4);
                     const p3 = sig.slice(4, 6);
-                    // Формируем прямой 720w URL видео с cdn pinimg
+                    // Формируем прямой URL видео с cdn pinimg (.cmfv качается и переименовывается в .mp4)
                     const candidateUrl = `https://v1.pinimg.com/videos/iht/hls/${p1}/${p2}/${p3}/${sig}_720w.cmfv`;
                     return { url: candidateUrl, type: 'video', signature: sig };
                 }
@@ -248,29 +338,13 @@
                 return;
             }
 
-            const pageTitle = (document.title || 'pinterest_media').replace(/[\\/:*?"<>|]/g, '_').trim();
+            const rawTitle = document.title || 'pinterest_media';
+            const pageTitle = rawTitle.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').trim();
             const ext = media.type === 'video' ? 'mp4' : 'jpg';
             const filename = `${pageTitle}.${ext}`;
 
-            showToast(`📥 Скачивание ${media.type === 'video' ? 'видео' : 'изображения'}...`);
-
-            // Скачивание через direct link / new tab / blob
-            try {
-                const a = document.createElement('a');
-                a.href = media.url;
-                a.download = filename;
-                a.target = '_blank';
-                a.rel = 'noopener noreferrer';
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => a.remove(), 1000);
-            } catch (err) {
-                if (typeof GM_openInTab === 'function') {
-                    GM_openInTab(media.url, { active: true });
-                } else {
-                    window.open(media.url, '_blank');
-                }
-            }
+            // Запуск скачивания без открытия новой вкладки
+            downloadBlobMedia(media.url, filename);
         }
 
         // =========================================================================
