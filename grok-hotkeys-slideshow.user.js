@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.1.3-redgifs-title
+// @version      2.1.4-redgifs-title
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine & RedGifs
 // @author       eldmans
 // @match        https://grok.com/*
@@ -11,6 +11,7 @@
 // @grant        GM_getValue
 // @grant        GM_addStyle
 // @grant        GM_download
+// @grant        GM_xmlhttpRequest
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok-hotkeys-slideshow.user.js
 // @downloadURL  https://raw.githubusercontent.com/eldmans/tm-scripts/grok/grok-hotkeys-slideshow.user.js
@@ -2578,6 +2579,40 @@
     return `redgifs_${itemId}_${Date.now()}.mp4`;
   }
 
+  function triggerDirectBlobDownload(targetUrl, filename) {
+    console.log(`[RedGifsSS] Fetching blob for "${filename}": ${targetUrl}`);
+
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: targetUrl,
+      responseType: 'blob',
+      onload: function(res) {
+        if ((res.status === 200 || res.status === 0) && res.response) {
+          const blob = res.response;
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = blobUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
+          }, 10000);
+          console.log(`[RedGifsSS] Blob download triggered successfully as "${filename}"`);
+        } else {
+          console.warn('[RedGifsSS] GM_xmlhttpRequest failed, fallback GM_download:', res.status);
+          GM_download({ url: targetUrl, name: filename, saveAs: false });
+        }
+      },
+      onerror: function(err) {
+        console.warn('[RedGifsSS] GM_xmlhttpRequest error, fallback GM_download:', err);
+        GM_download({ url: targetUrl, name: filename, saveAs: false });
+      }
+    });
+  }
+
   function downloadRedGifsVideo() {
     const { itemId, urls } = getRedGifsDownloadUrls();
 
@@ -2599,19 +2634,15 @@
       const targetUrl = urls[attemptedIndex++];
       console.log(`[RedGifsSS] Downloading (${attemptedIndex}/${urls.length}) as "${filename}": ${targetUrl}`);
 
-      try {
+      if (targetUrl.endsWith('.m3u8')) {
         GM_download({
           url: targetUrl,
-          name: targetUrl.endsWith('.m3u8') ? filename.replace(/\.mp4$/i, '.m3u8') : filename,
+          name: filename.replace(/\.mp4$/i, '.m3u8'),
           saveAs: false,
-          onerror: (err) => {
-            console.warn('[RedGifsSS] Download failed for:', targetUrl, err);
-            tryNext();
-          }
+          onerror: () => tryNext()
         });
-      } catch (e) {
-        console.warn('[RedGifsSS] GM_download exception:', e);
-        tryNext();
+      } else {
+        triggerDirectBlobDownload(targetUrl, filename);
       }
     }
 
@@ -2743,7 +2774,7 @@
 
     // Header
     const header = el('div', { id: 'redgifs-header-bar' });
-    const title  = el('span', {}, 'RedGifs Auto');
+    const title  = el('span', {}, 'RedGifs Auto v2.1.4');
     const controls = el('div', { style: { display: 'flex', gap: '6px' } });
     const btnMini  = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '_');
     const btnClose = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '×');
