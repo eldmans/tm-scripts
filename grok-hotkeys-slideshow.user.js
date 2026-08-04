@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.1.0-redgifs
+// @version      2.1.1-redgifs-download
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine & RedGifs
 // @author       eldmans
 // @match        https://grok.com/*
@@ -2506,6 +2506,48 @@
     }
   }
 
+  function downloadRedGifsVideo() {
+    const v = getRedGifsVideo();
+    if (!v) {
+      console.warn('[RedGifsSS] No video element found to download.');
+      return;
+    }
+
+    let src = v.currentSrc || v.src;
+    if (!src) {
+      const source = v.querySelector('source[src]');
+      if (source) src = source.src;
+    }
+
+    if (!src) {
+      console.warn('[RedGifsSS] Video src not found.');
+      return;
+    }
+
+    let filename = `redgifs_${Date.now()}.mp4`;
+    const matchId = location.pathname.match(/\/watch\/([a-zA-Z0-9]+)/) || location.pathname.match(/\/ifr\/([a-zA-Z0-9]+)/);
+    if (matchId && matchId[1]) {
+      filename = `redgifs_${matchId[1]}_${Date.now()}.mp4`;
+    }
+
+    console.log(`[RedGifsSS] Downloading video: ${src} as ${filename}`);
+
+    try {
+      GM_download({
+        url: src,
+        name: filename,
+        saveAs: false,
+        onerror: (err) => {
+          console.warn('[RedGifsSS] GM_download failed, opening direct link:', err);
+          window.open(src, '_blank');
+        }
+      });
+    } catch (e) {
+      console.warn('[RedGifsSS] GM_download exception, opening direct link:', e);
+      window.open(src, '_blank');
+    }
+  }
+
   function updateRedGifsTimerDisplay(text) {
     const el = document.getElementById('redgifs-auto-timer');
     if (el) el.textContent = text;
@@ -2612,11 +2654,18 @@
         border-radius: 6px;
         margin-top: 2px;
       }
-      #redgifs-btn-start {
+      #redgifs-btn-start, #redgifs-btn-dl {
         width: 100%;
         padding: 6px;
-        font-size: 13px;
-        margin-top: 4px;
+        font-size: 12px;
+      }
+      #redgifs-btn-dl {
+        background: rgba(59, 130, 246, 0.15);
+        border-color: rgba(59, 130, 246, 0.4);
+        color: #60a5fa;
+      }
+      #redgifs-btn-dl:hover {
+        background: rgba(59, 130, 246, 0.3);
       }
     `);
 
@@ -2720,15 +2769,19 @@
     // Timer display
     const timerDisp = el('div', { id: 'redgifs-auto-timer' }, '—');
 
-    // Start/Stop button
+    // Start/Stop & Download buttons
     const btnStart = el('button', { id: 'redgifs-btn-start', class: 'rg-btn' }, '▶ Start');
     btnStart.addEventListener('click', () => toggleRedGifsSlideshow());
+
+    const btnDl = el('button', { id: 'redgifs-btn-dl', class: 'rg-btn' }, '⬇ Скачать (PgDown)');
+    btnDl.addEventListener('click', () => downloadRedGifsVideo());
 
     body.appendChild(cdRow);
     body.appendChild(lpRow);
     body.appendChild(dirRow);
     body.appendChild(timerDisp);
     body.appendChild(btnStart);
+    body.appendChild(btnDl);
 
     widget.appendChild(body);
     document.body.appendChild(widget);
@@ -2738,16 +2791,19 @@
 
   function bindRedGifsHotkeys() {
     document.addEventListener('keydown', (e) => {
+      const ae = document.activeElement;
+      const inInput = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+      if (inInput) return;
+
       if (e.key === 'Insert' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        const ae = document.activeElement;
-        const inInput = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
-        if (!inInput) {
-          e.preventDefault();
-          toggleRedGifsSlideshow();
-        }
+        e.preventDefault();
+        toggleRedGifsSlideshow();
       } else if (e.key === 'Insert' && e.ctrlKey) {
         e.preventDefault();
         applyRedGifsPanelState(RedGifsState._panelState === 'hidden' ? 'full' : 'hidden');
+      } else if (e.key === 'PageDown') {
+        e.preventDefault();
+        downloadRedGifsVideo();
       }
     }, true);
   }
