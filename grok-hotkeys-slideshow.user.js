@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grok Hotkeys + Slideshow 2.0
 // @namespace    https://grok.com/
-// @version      2.1.6-redgifs-timer
+// @version      2.1.7-redgifs-drag
 // @description  Advanced hotkeys, slideshow engine and auto-navigation for Grok /imagine & RedGifs
 // @author       eldmans
 // @match        https://grok.com/*
@@ -2714,6 +2714,72 @@
     }
   }
 
+  function makeWidgetDraggable(widget, header) {
+    let isDragging = false;
+    let startX = 0, startY = 0;
+    let initialLeft = 0, initialTop = 0;
+
+    header.addEventListener('mousedown', (e) => {
+      if (e.target.tagName === 'BUTTON' || e.target.textContent === '×' || e.target.textContent === '_') return;
+
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+
+      const rect = widget.getBoundingClientRect();
+      initialLeft = rect.left;
+      initialTop = rect.top;
+
+      widget.style.right = 'auto';
+      widget.style.left = `${initialLeft}px`;
+      widget.style.top = `${initialTop}px`;
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+
+    function onMouseMove(e) {
+      if (!isDragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+
+      let newLeft = initialLeft + dx;
+      let newTop  = initialTop + dy;
+
+      const maxLeft = window.innerWidth - widget.offsetWidth;
+      const maxTop  = window.innerHeight - widget.offsetHeight;
+
+      newLeft = Math.max(0, Math.min(newLeft, maxLeft));
+      newTop  = Math.max(0, Math.min(newTop, maxTop));
+
+      widget.style.left = `${newLeft}px`;
+      widget.style.top  = `${newTop}px`;
+    }
+
+    function onMouseUp() {
+      isDragging = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      validatePosition();
+    }
+
+    // Двойной клик по шапке = возврат в исходное правое верхнее положение
+    header.addEventListener('dblclick', resetPosition);
+
+    function resetPosition() {
+      widget.style.left = 'auto';
+      widget.style.right = '20px';
+      widget.style.top = '50px';
+    }
+
+    function validatePosition() {
+      const rect = widget.getBoundingClientRect();
+      if (rect.top < 0 || rect.left < 0 || rect.right > window.innerWidth || rect.bottom > window.innerHeight) {
+        resetPosition();
+      }
+    }
+  }
+
   function buildRedGifsWidget() {
     const s = RedGifsSettings.get();
 
@@ -2744,7 +2810,7 @@
         font-weight: 700;
         font-size: 13px;
         margin-bottom: 8px;
-        cursor: pointer;
+        cursor: move;
       }
       #redgifs-widget-body {
         display: flex;
@@ -2809,8 +2875,8 @@
     const widget = el('div', { id: REDGIFS_WIDGET_ID });
 
     // Header
-    const header = el('div', { id: 'redgifs-header-bar' });
-    const title  = el('span', {}, 'RedGifs Auto v2.1.6');
+    const header = el('div', { id: 'redgifs-header-bar', title: 'Зажмите мышь для перетаскивания (Двойной клик — сброс позиции)' });
+    const title  = el('span', {}, 'RedGifs Auto v2.1.7');
     const controls = el('div', { style: { display: 'flex', gap: '6px' } });
     const btnMini  = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '_');
     const btnClose = el('span', { style: { cursor: 'pointer', opacity: 0.7 } }, '×');
@@ -2820,6 +2886,9 @@
     header.appendChild(title);
     header.appendChild(controls);
     widget.appendChild(header);
+
+    // Подключаем перетаскивание
+    makeWidgetDraggable(widget, header);
 
     btnMini.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2943,6 +3012,13 @@
 
   function bindRedGifsHotkeys() {
     document.addEventListener('keydown', (e) => {
+      // Полный блок клавиши Home на RedGifs
+      if (e.key === 'Home') {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
       const ae = document.activeElement;
       const inInput = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
       if (inInput) return;
