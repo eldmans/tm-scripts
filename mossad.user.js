@@ -295,14 +295,19 @@
             lastUrlForSlideshow = location.href;
             if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
             if (rafId) cancelAnimationFrame(rafId);
-            // Даем странице прогрузиться перед запуском нового цикла
+            
+            // Сбрасываем таймер в интерфейсе немедленно!
+            isCountingDown = false;
+            countdownSeconds = 0;
+            
+            // Ждем чуть-чуть, чтобы SPA успело обновить DOM
             setTimeout(() => {
                 if (slideshowActive) scheduleNextSlideCycle(0);
-            }, 300);
+            }, 100);
         } else {
             lastUrlForSlideshow = location.href;
         }
-    }, 500);
+    }, 100);
 
     function stopSlideshow() {
         slideshowActive = false;
@@ -382,6 +387,13 @@
             lastRAFTime = performance.now();
             rafId = requestAnimationFrame(checkVideoLoops);
         } else {
+            // Если видео тега нет, возможно SPA страница еще не отрендерила контент.
+            // Подождем до 1 секунды (10 попыток по 100мс), вдруг видео появится.
+            if (retryCount < 10) {
+                slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 100);
+                return;
+            }
+
             // Режим Фото
             countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
             isCountingDown = true;
