@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.2
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
