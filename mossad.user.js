@@ -357,13 +357,21 @@
         }, 500);
     }
 
-    function scheduleNextSlideCycle(initSec) {
+    function scheduleNextSlideCycle(initSec, retryCount = 0) {
         if (!slideshowActive || slideshowPaused) return;
         if (rafId) cancelAnimationFrame(rafId);
         if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         const video = document.querySelector('video');
         
-        if (video && !isNaN(video.duration)) {
+        if (video) {
+            if (isNaN(video.duration) || video.duration === 0) {
+                if (retryCount > 25) { // После 5 секунд ожидания листаем дальше
+                     triggerNextSlide();
+                     return;
+                }
+                slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 200);
+                return;
+            }
             // Режим Видео
             isCountingDown = false;
             currentVideoNode = video;
