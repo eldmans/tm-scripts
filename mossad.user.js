@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.2
+// @version      1.0.3
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -249,7 +249,7 @@
                 if (sig && sig.length >= 6) return { url: `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`, type: 'video' };
             }
         }
-        const video = document.querySelector('video');
+        const video = getActiveVideo();
         if (video) {
             const src = video.currentSrc || video.src || (video.querySelector('source') && video.querySelector('source').src);
             if (src && !src.startsWith('blob:')) return { url: src, type: 'video' };
@@ -288,11 +288,42 @@
     let lastTime = 0;
     let lastRAFTime = 0;
     let rafId = null;
+    function getActiveVideo() {
+        const videos = Array.from(document.querySelectorAll('video'));
+        if (videos.length === 0) return null;
+        if (videos.length === 1) return videos[0];
+        
+        let maxVisible = 0;
+        let bestVideo = videos[0];
+        for (const v of videos) {
+            const rect = v.getBoundingClientRect();
+            const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+            const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+            const visibleArea = visibleHeight * visibleWidth;
+            if (visibleArea > maxVisible) {
+                maxVisible = visibleArea;
+                bestVideo = v;
+            }
+        }
+        return bestVideo;
+    }
+
     let lastUrlForSlideshow = location.href;
+    let lastActiveVideo = null;
 
     setInterval(() => {
-        if (slideshowActive && location.href !== lastUrlForSlideshow) {
-            lastUrlForSlideshow = location.href;
+        if (!slideshowActive) return;
+        
+        const currentUrl = location.href;
+        const currentVideo = getActiveVideo();
+        
+        const urlChanged = currentUrl !== lastUrlForSlideshow;
+        const videoChanged = currentVideo !== lastActiveVideo && (currentVideo !== null || lastActiveVideo !== null);
+        
+        if (urlChanged || videoChanged) {
+            lastUrlForSlideshow = currentUrl;
+            lastActiveVideo = currentVideo;
+            
             if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
             if (rafId) cancelAnimationFrame(rafId);
             
@@ -305,7 +336,8 @@
                 if (slideshowActive) scheduleNextSlideCycle(0);
             }, 100);
         } else {
-            lastUrlForSlideshow = location.href;
+            lastUrlForSlideshow = currentUrl;
+            lastActiveVideo = currentVideo;
         }
     }, 100);
 
@@ -344,7 +376,7 @@
         
         // Скачивание перед перелистыванием
         if (config.downloadType !== 'none') {
-            const hasVideo = document.querySelector('video') !== null;
+            const hasVideo = getActiveVideo() !== null;
             if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
                 triggerDownload();
                 if (config.pdAction === 'del' && rootDomain === 'grok.com') {
@@ -366,7 +398,7 @@
         if (!slideshowActive || slideshowPaused) return;
         if (rafId) cancelAnimationFrame(rafId);
         if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
-        const video = document.querySelector('video');
+        const video = getActiveVideo();
         
         if (video) {
             if (isNaN(video.duration) || video.duration === 0) {
@@ -653,7 +685,7 @@
                 timerEl.textContent = countdownSeconds + 'с';
                 timerEl.style.color = '#3b82f6';
             } else {
-                const video = document.querySelector('video');
+                const video = getActiveVideo();
                 if (video && !isNaN(video.duration)) {
                     timerEl.textContent = `${formatTime(video.currentTime)}/${formatTime(video.duration)}`;
                 } else {
