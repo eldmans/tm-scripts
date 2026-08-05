@@ -288,6 +288,21 @@
     let lastTime = 0;
     let lastRAFTime = 0;
     let rafId = null;
+    let lastUrlForSlideshow = location.href;
+
+    setInterval(() => {
+        if (slideshowActive && location.href !== lastUrlForSlideshow) {
+            lastUrlForSlideshow = location.href;
+            if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
+            if (rafId) cancelAnimationFrame(rafId);
+            // Даем странице прогрузиться перед запуском нового цикла
+            setTimeout(() => {
+                if (slideshowActive) scheduleNextSlideCycle(0);
+            }, 300);
+        } else {
+            lastUrlForSlideshow = location.href;
+        }
+    }, 500);
 
     function stopSlideshow() {
         slideshowActive = false;
@@ -345,6 +360,7 @@
     function scheduleNextSlideCycle(initSec) {
         if (!slideshowActive || slideshowPaused) return;
         if (rafId) cancelAnimationFrame(rafId);
+        if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         const video = document.querySelector('video');
         
         if (video && !isNaN(video.duration)) {
