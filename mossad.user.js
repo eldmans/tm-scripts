@@ -302,7 +302,7 @@
         if (!slideshowActive) {
             slideshowActive = true;
             slideshowPaused = false;
-            window.widgetState = 'panel'; // Разворачиваем, если скрыт
+            if (window.widgetState === 'hidden') window.widgetState = 'bar';
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleNextSlideCycle(0);
         } else {
@@ -421,7 +421,7 @@
         const h = Math.floor(secs / 3600);
         const m = Math.floor((secs % 3600) / 60);
         const s = Math.floor(secs % 60);
-        if (h > 0) return `${h}:${m.toString().padStart(2, '0')}`;
+        if (h > 0) return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
         return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
 
@@ -521,6 +521,15 @@
                         ${rootDomain === 'grok.com' ? `<option value="del" ${config.pdAction === 'del' ? 'selected' : ''}>После DL: del</option>` : ''}
                     </select>
                 </div>
+                <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
+                    <label title="Пауза при переключении вкладки"><input id="mossad-cb-tab" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnTabSwitch ? 'checked' : ''}> Tab</label>
+                    <label title="Пауза при потере фокуса браузера"><input id="mossad-cb-brsr" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnBrsrSwitch ? 'checked' : ''}> Brsr</label>
+                    ${rootDomain === 'grok.com' ? `
+                    <label title="Автоподтверждение удаления"><input id="mossad-cb-aconfirm" type="checkbox" style="accent-color:#3b82f6;" ${config.deleteAutoconfirm ? 'checked' : ''}> a.confirm</label>
+                    <label title="Умный возврат к посту"><input id="mossad-cb-holdpost" type="checkbox" style="accent-color:#3b82f6;" ${config.deleteHoldpost ? 'checked' : ''}> hold post</label>
+                    ` : ''}
+                </div>
             `;
             
             // Listeners for panel
@@ -532,6 +541,12 @@
             panel.querySelector('#mossad-in-vdelay').onchange = (e) => Settings.set('delayAfterVideo', parseInt(e.target.value) || 2);
             panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
+            panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
+            panel.querySelector('#mossad-cb-brsr').onchange = (e) => Settings.set('stopOnBrsrSwitch', e.target.checked);
+            if (rootDomain === 'grok.com') {
+                panel.querySelector('#mossad-cb-aconfirm').onchange = (e) => Settings.set('deleteAutoconfirm', e.target.checked);
+                panel.querySelector('#mossad-cb-holdpost').onchange = (e) => Settings.set('deleteHoldpost', e.target.checked);
+            }
         };
 
         container.append(topBar, panel);
