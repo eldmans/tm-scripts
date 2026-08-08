@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.5
+// @version      1.0.6
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -260,16 +260,41 @@
                 if (sig && sig.length >= 6) return { url: `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`, type: 'video' };
             }
         }
+
         const video = getActiveVideo();
         if (video) {
-            const src = video.currentSrc || video.src || (video.querySelector('source') && video.querySelector('source').src);
-            if (src && !src.startsWith('blob:')) return { url: src, type: 'video' };
+            let src = '';
+            const sources = Array.from(video.querySelectorAll('source'));
+            for (const s of sources) {
+                if (s.src && !s.src.startsWith('blob:')) { src = s.src; break; }
+            }
+            if (!src && video.src && !video.src.startsWith('blob:')) src = video.src;
+            if (!src && video.currentSrc && !video.currentSrc.startsWith('blob:')) src = video.currentSrc;
+            
+            // RedGifs Blob fallback (extract from poster)
+            if (!src && rootDomain.includes('redgifs.com') && video.poster) {
+                if (video.poster.includes('-poster.jpg')) {
+                    src = video.poster.replace('-poster.jpg', '.mp4');
+                } else {
+                    src = video.poster.replace('.jpg', '.mp4');
+                }
+            }
+            
+            if (src) return { url: src, type: 'video' };
         }
-        const img = document.querySelector('img[src*="pinimg.com/originals/"]') || document.querySelector('img[src*="pinimg.com/736x/"]') || document.querySelector('img');
+
+        const img = document.querySelector('img[src*="pinimg.com/originals/"]') || document.querySelector('img[src*="pinimg.com/736x/"]');
         if (img && img.src) {
             const fullImg = img.src.replace(/\/736x\//, '/originals/').replace(/\/474x\//, '/originals/');
             return { url: fullImg, type: 'image' };
         }
+        
+        // Generic fallback for images (avoid 1x1 pixels)
+        const allImgs = Array.from(document.querySelectorAll('img')).filter(i => i.width > 200 && i.height > 200);
+        if (allImgs.length > 0 && !rootDomain.includes('redgifs.com') && !rootDomain.includes('vk')) {
+            return { url: allImgs[0].src, type: 'image' };
+        }
+        
         return null;
     }
 
