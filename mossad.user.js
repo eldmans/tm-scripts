@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.7
+// @version      1.0.8
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -654,6 +654,8 @@
                     <label title="Умный возврат к посту"><input id="mossad-cb-holdpost" type="checkbox" style="accent-color:#3b82f6;" ${config.deleteHoldpost ? 'checked' : ''}> hold post</label>
                     ` : ''}
                 </div>
+                <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                <button id="mossad-btn-hk" style="width:100%; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⌨ Настройки горячих клавиш</button>
             `;
             
             // Listeners for panel
@@ -671,6 +673,10 @@
                 panel.querySelector('#mossad-cb-aconfirm').onchange = (e) => Settings.set('deleteAutoconfirm', e.target.checked);
                 panel.querySelector('#mossad-cb-holdpost').onchange = (e) => Settings.set('deleteHoldpost', e.target.checked);
             }
+            panel.querySelector('#mossad-btn-hk').onclick = () => {
+                if (document.getElementById('mossad-hk-modal')) return;
+                openHotkeySettings();
+            };
         };
 
         container.append(topBar, panel);
@@ -758,6 +764,85 @@
         initWidget();
     }
 
+    function openHotkeySettings() {
+        const modal = document.createElement('div');
+        modal.id = 'mossad-hk-modal';
+        modal.style.cssText = `
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(20, 20, 20, 0.95); backdrop-filter: blur(10px);
+            border: 1px solid #374151; border-radius: 12px; padding: 20px; z-index: 9999999;
+            color: #e5e7eb; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; gap: 10px;
+            min-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+        `;
+        
+        modal.innerHTML = `
+            <h3 style="margin:0 0 10px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
+            <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
+            <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+                <button id="mossad-hk-close" style="background:#ef4444; border:none; padding:6px 16px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold;">Закрыть</button>
+            </div>
+        `;
+        
+        const list = modal.querySelector('#mossad-hk-list');
+        const keysMap = {
+            download: 'Скачать (DL)', upscale: 'Улучшить', deleteVid: 'Удалить видео', sound: 'Звук (вкл/выкл)',
+            playPause: 'Пауза/Плей', help: 'Настройки клавиш', history: 'История (Grok)', 
+            slideshowPanel: 'Меню слайдшоу', slideshowStart: 'Старт слайдшоу'
+        };
+        
+        Object.keys(keysMap).forEach(k => {
+            const row = document.createElement('div');
+            row.style.cssText = `display:flex; justify-content:space-between; align-items:center; background:#1f2937; padding:8px 12px; border-radius:6px; border:1px solid #374151;`;
+            
+            const label = document.createElement('span');
+            label.textContent = keysMap[k];
+            label.style.fontSize = '13px';
+            
+            const btn = document.createElement('button');
+            btn.style.cssText = `background:#374151; border:none; color:#3b82f6; padding:4px 10px; border-radius:4px; cursor:pointer; min-width:80px; font-weight:bold; font-size:12px;`;
+            
+            let currentHk = config.hk[k];
+            if (Array.isArray(currentHk)) currentHk = currentHk[0]; // Показываем первую комбинацию
+            btn.textContent = formatHotkey(currentHk);
+            
+            btn.onclick = () => {
+                btn.textContent = 'Нажмите клавишу...';
+                btn.style.color = '#ef4444';
+                
+                window.capturingFor = k;
+                const handler = (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    document.removeEventListener('keydown', handler, true);
+                    window.capturingFor = null;
+                    
+                    if (e.key === 'Escape') {
+                        btn.textContent = formatHotkey(currentHk);
+                        btn.style.color = '#3b82f6';
+                        return;
+                    }
+                    
+                    const newHk = { key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
+                    if (Array.isArray(config.hk[k])) {
+                        config.hk[k] = [newHk]; // Заменяем массив одной новой кнопкой
+                    } else {
+                        config.hk[k] = newHk;
+                    }
+                    Settings.save();
+                    
+                    btn.textContent = formatHotkey(newHk);
+                    btn.style.color = '#3b82f6';
+                };
+                document.addEventListener('keydown', handler, true);
+            };
+            
+            row.append(label, btn);
+            list.append(row);
+        });
+        
+        document.body.appendChild(modal);
+        modal.querySelector('#mossad-hk-close').onclick = () => modal.remove();
+    }
+
     // ============================================
     // GLOBAL HOTKEYS & LISTENERS
     // ============================================
@@ -767,6 +852,12 @@
         const activeEl = document.activeElement;
         const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
         if (isEditing) { if (!/^F\d+$/.test(e.key)) return; }
+
+        if (hotkeyMatches(e, config.hk.help)) {
+            e.preventDefault();
+            if (document.getElementById('mossad-hk-modal')) return;
+            openHotkeySettings();
+        }
 
         if (hotkeyMatches(e, config.hk.slideshowPanel)) {
             e.preventDefault();
