@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.3
+// @version      1.0.4
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -65,12 +65,15 @@
         deleteHoldpost: false,
         
         hk: {
-            download:       { key: 'PageDown',   ctrl: false, alt: false, shift: false },
+            download:       [
+                { key: 'PageDown',   ctrl: false, alt: false, shift: false },
+                { key: 'PageDown',   ctrl: false, alt: false, shift: true }
+            ],
             upscale:        { key: 'PageUp',     ctrl: false, alt: false, shift: false },
             deleteVid:      { key: 'Delete',     ctrl: false, alt: false, shift: false },
             sound:          { key: 'ScrollLock', ctrl: false, alt: false, shift: false },
             playPause:      { key: 'Pause',      ctrl: false, alt: false, shift: false },
-            help:           { key: 'F1',         ctrl: false, alt: false, shift: false },
+            help:           { key: 'F1',         ctrl: true,  alt: false, shift: false },
             history:        { key: 'Home',       ctrl: false, alt: false, shift: false },
             slideshowPanel: { key: 'Insert',     ctrl: true,  alt: false, shift: false },
             slideshowStart: { key: 'Insert',     ctrl: false, alt: false, shift: false },
@@ -96,6 +99,11 @@
     config = mergeDeep({...DEFAULT_CONFIG}, config);
     // Сброс при рефреше страницы
     config.downloadType = 'none';
+
+    // Миграция старых настроек скачивания (если там был объект)
+    if (!Array.isArray(config.hk.download)) {
+        config.hk.download = [...DEFAULT_CONFIG.hk.download];
+    }
 
     const Settings = {
         get: () => config,
@@ -130,7 +138,9 @@
         return parts.join('+');
     }
     function hotkeyMatches(e, hk) {
-        if (!hk || !hk.key) return false;
+        if (!hk) return false;
+        if (Array.isArray(hk)) return hk.some(k => hotkeyMatches(e, k));
+        if (!hk.key) return false;
         return e.key === hk.key && !!e.ctrlKey === !!hk.ctrl && !!e.altKey === !!hk.alt && !!e.shiftKey === !!hk.shift;
     }
 
