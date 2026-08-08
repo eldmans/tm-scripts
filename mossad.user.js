@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.8
+// @version      1.0.9
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -244,7 +244,7 @@
         showToast('✅ Сохранено!');
     }
 
-    function findMediaForDownload() {
+    async function findMediaForDownloadAsync() {
         if (rootDomain.includes('pinterest.')) {
             const scripts = Array.from(document.querySelectorAll('script'));
             for (const s of scripts) {
@@ -264,40 +264,41 @@
         const video = getActiveVideo();
         if (video) {
             let src = '';
-            const sources = Array.from(video.querySelectorAll('source'));
-            for (const s of sources) {
-                if (s.src && !s.src.startsWith('blob:')) { src = s.src; break; }
-            }
-            if (!src && video.src && !video.src.startsWith('blob:')) src = video.src;
-            if (!src && video.currentSrc && !video.currentSrc.startsWith('blob:')) src = video.currentSrc;
             
-            // RedGifs Blob fallback (extract from poster)
-            if (!src && rootDomain.includes('redgifs.com') && video.poster) {
-                if (video.poster.includes('-poster.jpg')) {
-                    src = video.poster.replace('-poster.jpg', '.mp4');
-                } else {
-                    src = video.poster.replace('.jpg', '.mp4');
-                }
-            }
-            
-            // Если все еще нет, попробуем достать из ID
-            if (!src && rootDomain.includes('redgifs.com')) {
+            // Если это RedGifs, бьем прямо в их API для 100% надежности
+            if (rootDomain.includes('redgifs.com')) {
+                let id = null;
                 const wrapper = video.closest('.VideoPlayer') || video.closest('div');
                 if (wrapper) {
                     const a = wrapper.querySelector('a[href*="/watch/"]');
-                    if (a) {
-                        const id = a.href.split('/').pop();
-                        if (id) src = `https://thumbs2.redgifs.com/${id}.mp4`;
+                    if (a) id = a.href.split('/').pop();
+                }
+                if (!id && location.pathname.includes('/watch/')) {
+                    id = location.pathname.split('/').pop();
+                }
+                
+                if (id) {
+                    try {
+                        const res = await fetch(`https://api.redgifs.com/v2/gifs/${id}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data && data.gif && data.gif.urls) {
+                                src = data.gif.urls.hd || data.gif.urls.sd;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('RedGifs API error:', e);
                     }
                 }
             }
-            
-            // Если все еще нет, смотрим в meta (для прямых ссылок)
+
             if (!src) {
-                const meta = document.querySelector('meta[property="og:video"]');
-                if (meta && meta.content && meta.content.endsWith('.mp4')) {
-                    src = meta.content;
+                const sources = Array.from(video.querySelectorAll('source'));
+                for (const s of sources) {
+                    if (s.src && !s.src.startsWith('blob:')) { src = s.src; break; }
                 }
+                if (!src && video.src && !video.src.startsWith('blob:')) src = video.src;
+                if (!src && video.currentSrc && !video.currentSrc.startsWith('blob:')) src = video.currentSrc;
             }
             
             if (src) return { url: src, type: 'video' };
@@ -318,8 +319,8 @@
         return null;
     }
 
-    function triggerDownload() {
-        const media = findMediaForDownload();
+    async function triggerDownload() {
+        const media = await findMediaForDownloadAsync();
         if (!media) { showToast('❌ Медиа не найдено', true); return; }
         const ext = media.type === 'video' ? 'mp4' : 'jpg';
         const filename = `${document.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${ext}`;
