@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.12
+// @version      1.0.13
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -258,61 +258,58 @@
         return activeItem;
     }
 
-    async function findMediaForDownloadAsync() {
+    function findMediaForDownload() {
         if (rootDomain.includes('pinterest.')) {
             const scripts = Array.from(document.querySelectorAll('script'));
             for (const s of scripts) {
                 const txt = s.textContent || '';
                 if (txt.includes('expMp4')) {
                     const expMp4Match = txt.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+\/expMp4\/[^\s"',]+\.mp4/g);
-                    if (expMp4Match) return { url: expMp4Match[0].replace(/\\/g, ''), type: 'video' };
+                    if (expMp4Match) return { urls: [expMp4Match[0].replace(/\\/g, '')], type: 'video' };
                 }
             }
             const sigEl = document.querySelector('[data-video-signature]');
             if (sigEl) {
                 const sig = sigEl.getAttribute('data-video-signature');
-                if (sig && sig.length >= 6) return { url: `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`, type: 'video' };
+                if (sig && sig.length >= 6) return { urls: [`https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`], type: 'video' };
             }
         }
 
-        // 1. Специфично для RedGifs - ищем элемент ленты даже если video еще не загрузилось
+        // 1. Точная копия логики из старого скрипта (grok_hotkeys_plus_slideshow.user.js от 4 августа)
         if (rootDomain.includes('redgifs.com')) {
-            const activeItem = getActiveRedGifsItem();
-            let id = null;
-            if (activeItem) {
-                id = activeItem.getAttribute('data-feed-item-id');
-                if (!id) {
-                    const a = activeItem.querySelector('a[href*="/watch/"]');
-                    if (a) id = a.href.split('/').pop();
+            const active = getActiveRedGifsItem();
+            const urls = [];
+            const itemId = active ? active.getAttribute('data-feed-item-id') : null;
+
+            // Из картинки poster
+            if (active) {
+                const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]');
+                if (poster && poster.src) {
+                    const mp4Hd = poster.src.replace(/-mobile\.(jpg|png|jpeg)/i, '.mp4').replace(/\.(jpg|png|jpeg)/i, '.mp4');
+                    const mp4Sd = poster.src.replace(/\.(jpg|png|jpeg)/i, '-mobile.mp4');
+                    urls.push(mp4Hd, mp4Sd);
                 }
             }
-            if (!id && location.pathname.includes('/watch/')) {
-                id = location.pathname.split('/').pop();
+
+            const v = getActiveVideo();
+            if (v) {
+                const src = v.currentSrc || v.src || (v.querySelector('source') && v.querySelector('source').src);
+                if (src && !urls.includes(src)) urls.push(src);
             }
-            if (id) {
-                try {
-                    const res = await fetch(`https://api.redgifs.com/v2/gifs/${id}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data && data.gif && data.gif.urls) {
-                            const mp4Url = data.gif.urls.hd || data.gif.urls.sd;
-                            if (mp4Url) return { url: mp4Url, type: 'video' };
-                        }
-                    }
-                } catch (e) {
-                    console.error('RedGifs API error:', e);
-                }
-                // Резервный вариант, если API упало, но мы знаем ID
-                const capId = id.charAt(0).toUpperCase() + id.slice(1);
-                return { url: `https://media.redgifs.com/${capId}.mp4`, type: 'video' };
+
+            if (itemId) {
+                const capId = itemId.charAt(0).toUpperCase() + itemId.slice(1);
+                urls.push(`https://media.redgifs.com/${capId}.mp4`);
+                urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/hd.m3u8`);
+                urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/sd.m3u8`);
             }
+
+            if (urls.length > 0) return { urls: Array.from(new Set(urls.filter(Boolean))), type: 'video' };
         }
 
-        // 2. Стандартный поиск видео для всех остальных сайтов
         const video = getActiveVideo();
         if (video) {
             let src = '';
-            
             if (!src) {
                 const sources = Array.from(video.querySelectorAll('source'));
                 for (const s of sources) {
@@ -321,46 +318,72 @@
                 if (!src && video.src && !video.src.startsWith('blob:')) src = video.src;
                 if (!src && video.currentSrc && !video.currentSrc.startsWith('blob:')) src = video.currentSrc;
             }
-            
-            if (src) return { url: src, type: 'video' };
+            if (src) return { urls: [src], type: 'video' };
         }
 
         const img = document.querySelector('img[src*="pinimg.com/originals/"]') || document.querySelector('img[src*="pinimg.com/736x/"]');
         if (img && img.src) {
             const fullImg = img.src.replace(/\/736x\//, '/originals/').replace(/\/474x\//, '/originals/');
-            return { url: fullImg, type: 'image' };
+            return { urls: [fullImg], type: 'image' };
         }
         
-        // Generic fallback for images (avoid 1x1 pixels)
         const allImgs = Array.from(document.querySelectorAll('img')).filter(i => i.width > 200 && i.height > 200);
         if (allImgs.length > 0 && !rootDomain.includes('redgifs.com') && !rootDomain.includes('vk')) {
-            return { url: allImgs[0].src, type: 'image' };
+            return { urls: [allImgs[0].src], type: 'image' };
         }
         
         return null;
     }
 
-    async function triggerDownload() {
-        const media = await findMediaForDownloadAsync();
-        if (!media) { showToast('❌ Медиа не найдено', true); return; }
+    function triggerDownload() {
+        const media = findMediaForDownload();
+        if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
         const ext = media.type === 'video' ? 'mp4' : 'jpg';
         const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '').trim() || `media_${Date.now()}`;
         const filename = `${titleClean}.${ext}`;
         
-        if (typeof GM_download === 'function') {
-            GM_download({
-                url: media.url,
-                name: filename,
-                saveAs: false,
-                onerror: (err) => {
-                    console.warn('GM_download failed, falling back to Blob download:', err);
-                    downloadBlobMedia(media.url, filename);
+        const urls = media.urls;
+        let attemptedIndex = 0;
+
+        function tryNext() {
+            if (attemptedIndex >= urls.length) {
+                console.warn('Все ссылки не сработали, fallback на Blob...');
+                downloadBlobMedia(urls[0], filename);
+                return;
+            }
+            const targetUrl = urls[attemptedIndex++];
+            const isM3u8 = targetUrl.includes('.m3u8');
+            const targetFilename = isM3u8 ? filename.replace('.mp4', '.m3u8') : filename;
+            
+            if (typeof GM_download === 'function') {
+                try {
+                    GM_download({
+                        url: targetUrl,
+                        name: targetFilename,
+                        saveAs: false,
+                        onload: function(res) {
+                            // Если пришел файл 147 байт (часто ошибка XML от AWS), пробуем дальше
+                            if (res && res.finalUrl && res.finalUrl.includes('error')) {
+                                tryNext();
+                            } else {
+                                showToast('✅ Скачивание успешно запущено!');
+                            }
+                        },
+                        onerror: (err) => {
+                            console.warn(`GM_download failed for ${targetUrl}:`, err);
+                            tryNext();
+                        }
+                    });
+                } catch (e) {
+                    tryNext();
                 }
-            });
-            showToast('⏳ Запуск скачивания...');
-        } else {
-            downloadBlobMedia(media.url, filename);
+            } else {
+                downloadBlobMedia(targetUrl, targetFilename);
+            }
         }
+        
+        showToast('⏳ Запуск скачивания...');
+        tryNext();
     }
 
     // ============================================
