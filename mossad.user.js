@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.9
+// @version      1.0.10
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -323,8 +323,23 @@
         const media = await findMediaForDownloadAsync();
         if (!media) { showToast('❌ Медиа не найдено', true); return; }
         const ext = media.type === 'video' ? 'mp4' : 'jpg';
-        const filename = `${document.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${ext}`;
-        downloadBlobMedia(media.url, filename);
+        const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '').trim() || `media_${Date.now()}`;
+        const filename = `${titleClean}.${ext}`;
+        
+        if (typeof GM_download === 'function') {
+            GM_download({
+                url: media.url,
+                name: filename,
+                saveAs: false,
+                onerror: (err) => {
+                    console.warn('GM_download failed, falling back to Blob download:', err);
+                    downloadBlobMedia(media.url, filename);
+                }
+            });
+            showToast('⏳ Запуск скачивания...');
+        } else {
+            downloadBlobMedia(media.url, filename);
+        }
     }
 
     // ============================================
