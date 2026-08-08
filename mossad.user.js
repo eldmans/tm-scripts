@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.11
+// @version      1.0.12
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -290,8 +290,21 @@
                 id = location.pathname.split('/').pop();
             }
             if (id) {
-                // Старый 100% рабочий метод через прямой вызов
-                return { url: `https://api.redgifs.com/v2/gifs/${id}/hd.m3u8`, type: 'video' };
+                try {
+                    const res = await fetch(`https://api.redgifs.com/v2/gifs/${id}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && data.gif && data.gif.urls) {
+                            const mp4Url = data.gif.urls.hd || data.gif.urls.sd;
+                            if (mp4Url) return { url: mp4Url, type: 'video' };
+                        }
+                    }
+                } catch (e) {
+                    console.error('RedGifs API error:', e);
+                }
+                // Резервный вариант, если API упало, но мы знаем ID
+                const capId = id.charAt(0).toUpperCase() + id.slice(1);
+                return { url: `https://media.redgifs.com/${capId}.mp4`, type: 'video' };
             }
         }
 
