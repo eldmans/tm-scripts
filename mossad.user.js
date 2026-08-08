@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.4
+// @version      1.0.5
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -96,13 +96,14 @@
         Object.assign(target || {}, source);
         return target;
     }
-    config = mergeDeep({...DEFAULT_CONFIG}, config);
+    config = mergeDeep(JSON.parse(JSON.stringify(DEFAULT_CONFIG)), config);
     // Сброс при рефреше страницы
     config.downloadType = 'none';
 
     // Миграция старых настроек скачивания (если там был объект)
     if (!Array.isArray(config.hk.download)) {
-        config.hk.download = [...DEFAULT_CONFIG.hk.download];
+        config.hk.download = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk.download));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
     }
 
     const Settings = {
