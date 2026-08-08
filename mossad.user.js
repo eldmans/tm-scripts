@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.6
+// @version      1.0.7
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -277,6 +277,26 @@
                     src = video.poster.replace('-poster.jpg', '.mp4');
                 } else {
                     src = video.poster.replace('.jpg', '.mp4');
+                }
+            }
+            
+            // Если все еще нет, попробуем достать из ID
+            if (!src && rootDomain.includes('redgifs.com')) {
+                const wrapper = video.closest('.VideoPlayer') || video.closest('div');
+                if (wrapper) {
+                    const a = wrapper.querySelector('a[href*="/watch/"]');
+                    if (a) {
+                        const id = a.href.split('/').pop();
+                        if (id) src = `https://thumbs2.redgifs.com/${id}.mp4`;
+                    }
+                }
+            }
+            
+            // Если все еще нет, смотрим в meta (для прямых ссылок)
+            if (!src) {
+                const meta = document.querySelector('meta[property="og:video"]');
+                if (meta && meta.content && meta.content.endsWith('.mp4')) {
+                    src = meta.content;
                 }
             }
             
@@ -762,6 +782,29 @@
         if (hotkeyMatches(e, config.hk.download)) {
             e.preventDefault();
             triggerDownload();
+        }
+        
+        if (hotkeyMatches(e, config.hk.sound)) {
+            e.preventDefault();
+            const video = getActiveVideo();
+            if (video) video.muted = !video.muted;
+            
+            // Специфично для RedGifs: кликаем по их кнопке, чтобы UI обновился
+            if (rootDomain.includes('redgifs.com')) {
+                const btn = document.querySelector('button.SoundButton');
+                if (btn) btn.click();
+            }
+            showToast(video && video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
+        }
+
+        if (hotkeyMatches(e, config.hk.playPause)) {
+            e.preventDefault();
+            const video = getActiveVideo();
+            if (video) {
+                if (video.paused) video.play();
+                else video.pause();
+                showToast(video.paused ? '▶ Проигрывание' : '⏸ Пауза');
+            }
         }
 
         if (hotkeyMatches(e, config.hk.history) && rootDomain === 'grok.com') {
