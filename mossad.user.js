@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.13
+// @version      1.0.14
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -198,19 +198,33 @@
     // ============================================
     // PINTEREST / DOWNLOAD ENGINE
     // ============================================
-    function downloadBlobMedia(url, filename) {
-        showToast('📥 Скачивание...');
-        if (typeof GM_download === 'function') {
-            try {
-                GM_download({
-                    url: url, name: filename,
-                    onload: () => showToast('✅ Сохранено!'),
-                    onerror: () => fetchAndDownloadBlob(url, filename)
-                });
-                return;
-            } catch (e) {}
+    function triggerDirectBlobDownload(url, filename, onErrorCallback) {
+        if (typeof GM_xmlhttpRequest === 'function') {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: url,
+                responseType: 'blob',
+                onload: (res) => {
+                    if (res.status === 200 && res.response) {
+                        saveBlobToDisk(res.response, filename);
+                    } else {
+                        if (onErrorCallback) onErrorCallback();
+                        else fetchBlobFallback(url, filename);
+                    }
+                },
+                onerror: () => {
+                    if (onErrorCallback) onErrorCallback();
+                    else fetchBlobFallback(url, filename);
+                }
+            });
+        } else {
+            if (onErrorCallback) onErrorCallback();
+            else fetchBlobFallback(url, filename);
         }
-        fetchAndDownloadBlob(url, filename);
+    }
+
+    function downloadBlobMedia(url, filename) {
+        triggerDirectBlobDownload(url, filename);
     }
 
     function fetchAndDownloadBlob(url, filename) {
@@ -355,20 +369,12 @@
             const isM3u8 = targetUrl.includes('.m3u8');
             const targetFilename = isM3u8 ? filename.replace('.mp4', '.m3u8') : filename;
             
-            if (typeof GM_download === 'function') {
+            if (typeof GM_download === 'function' && targetUrl.endsWith('.m3u8')) {
                 try {
                     GM_download({
                         url: targetUrl,
                         name: targetFilename,
                         saveAs: false,
-                        onload: function(res) {
-                            // Если пришел файл 147 байт (часто ошибка XML от AWS), пробуем дальше
-                            if (res && res.finalUrl && res.finalUrl.includes('error')) {
-                                tryNext();
-                            } else {
-                                showToast('✅ Скачивание успешно запущено!');
-                            }
-                        },
                         onerror: (err) => {
                             console.warn(`GM_download failed for ${targetUrl}:`, err);
                             tryNext();
@@ -378,11 +384,11 @@
                     tryNext();
                 }
             } else {
-                downloadBlobMedia(targetUrl, targetFilename);
+                showToast('⏳ Запуск скачивания...');
+                triggerDirectBlobDownload(targetUrl, targetFilename, tryNext);
             }
         }
         
-        showToast('⏳ Запуск скачивания...');
         tryNext();
     }
 
