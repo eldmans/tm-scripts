@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.14
+// @version      1.0.15
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -258,18 +258,45 @@
         showToast('✅ Сохранено!');
     }
 
+    // Точная копия из 2.1.7-redgifs-drag
     function getActiveRedGifsItem() {
-        const items = Array.from(document.querySelectorAll('.tileItem[data-feed-item-id], .VideoPlayer'));
-        let minDiff = Infinity;
-        let activeItem = null;
-        const cy = window.innerHeight / 2;
-        items.forEach(item => {
-            const rect = item.getBoundingClientRect();
-            const y = rect.top + rect.height / 2;
-            const diff = Math.abs(cy - y);
-            if (diff < minDiff) { minDiff = diff; activeItem = item; }
-        });
-        return activeItem;
+        return document.querySelector('.GifPreview_isActive')
+            || document.querySelector('.GifPreview')
+            || document.querySelector('[data-feed-item-id]');
+    }
+
+    function getRedGifsVideo() {
+        const active = getActiveRedGifsItem();
+        if (active) {
+            const v = active.querySelector('video');
+            if (v) return v;
+        }
+        const videos = Array.from(document.querySelectorAll('video'));
+        if (videos.length === 0) return null;
+        let bestVideo = null;
+        let maxVisibleHeight = 0;
+        const vh = window.innerHeight;
+        for (const v of videos) {
+            const rect = v.getBoundingClientRect();
+            const visibleHeight = Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0));
+            if (visibleHeight > maxVisibleHeight) {
+                maxVisibleHeight = visibleHeight;
+                bestVideo = v;
+            }
+        }
+        return bestVideo || videos[0];
+    }
+
+    function getRedGifsTitleFilename(itemId) {
+        let rawTitle = (document.title || '').trim();
+        if (rawTitle.startsWith('"') && rawTitle.endsWith('"')) {
+            rawTitle = rawTitle.slice(1, -1).trim();
+        }
+        if (rawTitle) {
+            const safeTitle = rawTitle.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+            if (safeTitle.length > 0) return `${safeTitle}.mp4`;
+        }
+        return `redgifs_${itemId}_${Date.now()}.mp4`;
     }
 
     function findMediaForDownload() {
@@ -305,7 +332,7 @@
                 }
             }
 
-            const v = getActiveVideo();
+            const v = getRedGifsVideo();
             if (v) {
                 const src = v.currentSrc || v.src || (v.querySelector('source') && v.querySelector('source').src);
                 if (src && !urls.includes(src)) urls.push(src);
@@ -318,7 +345,7 @@
                 urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/sd.m3u8`);
             }
 
-            if (urls.length > 0) return { urls: Array.from(new Set(urls.filter(Boolean))), type: 'video' };
+            if (urls.length > 0) return { urls: Array.from(new Set(urls.filter(Boolean))), type: 'video', itemId: itemId || 'video' };
         }
 
         const video = getActiveVideo();
@@ -352,9 +379,15 @@
     function triggerDownload() {
         const media = findMediaForDownload();
         if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
-        const ext = media.type === 'video' ? 'mp4' : 'jpg';
-        const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '').trim() || `media_${Date.now()}`;
-        const filename = `${titleClean}.${ext}`;
+        
+        let filename;
+        if (rootDomain.includes('redgifs.com') && media.itemId) {
+            filename = getRedGifsTitleFilename(media.itemId);
+        } else {
+            const ext = media.type === 'video' ? 'mp4' : 'jpg';
+            const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
+            filename = `${titleClean}.${ext}`;
+        }
         
         const urls = media.urls;
         let attemptedIndex = 0;
