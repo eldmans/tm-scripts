@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.15
+// @version      1.0.16
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -761,9 +761,11 @@
             panel.querySelectorAll('.mossad-dpad').forEach(btn => {
                 btn.onclick = () => Settings.set('slideshowDirections', [btn.dataset.dir]);
             });
-            panel.querySelector('#mossad-in-loops').onchange = (e) => Settings.set('videoLoops', parseInt(e.target.value) || 1);
-            panel.querySelector('#mossad-in-pdelay').onchange = (e) => Settings.set('slideshowDelay', parseInt(e.target.value) || 12);
-            panel.querySelector('#mossad-in-vdelay').onchange = (e) => Settings.set('delayAfterVideo', parseInt(e.target.value) || 2);
+            // Дебаунс для числовых инпутов, чтобы не стрелять много раз при зажатой стрелке
+            const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+            panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, parseInt(e.target.value) || 1)), 300);
+            panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(1, parseInt(e.target.value) || 12)), 300);
+            panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, parseInt(e.target.value) || 2)), 300);
             panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
             panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
@@ -875,7 +877,8 @@
         `;
         
         modal.innerHTML = `
-            <h3 style="margin:0 0 10px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
+            <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
+            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.0.16 · 2026-08-09 18:03</div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
             <div style="display:flex; justify-content:flex-end; margin-top:10px;">
                 <button id="mossad-hk-close" style="background:#ef4444; border:none; padding:6px 16px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold;">Закрыть</button>
