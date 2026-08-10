@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.17
+// @version      1.0.18
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -53,21 +53,21 @@
         slideshowMode: 'auto',
         slideshowOrientation: 'h',
         slideshowLoopMode: 'off',
-        slideshowDirections: ['right'], // default dpad
+        slideshowDirections: ['up'],  // листание вверх по умолчанию
         videoLoops: 1,
-        slideshowDelay: 12, // для фото
-        delayAfterVideo: 2, // задержка после видео
-        downloadType: 'none',
-        pdAction: 'none', // '-', '+1' (up), 'del'
-        stopOnTabSwitch: false,
-        stopOnBrsrSwitch: true,
+        slideshowDelay: 10,           // фото 10 сек
+        delayAfterVideo: 2,           // пауза 2 сек
+        downloadType: 'none',         // не скачивать
+        pdAction: 'up',               // после DL: +1
+        stopOnTabSwitch: true,        // Tab — включена
+        stopOnBrsrSwitch: false,
         deleteAutoconfirm: false,
         deleteHoldpost: false,
         
         hk: {
             download:       [
-                { key: 'PageDown',   ctrl: false, alt: false, shift: false },
-                { key: 'PageDown',   ctrl: false, alt: false, shift: true }
+                { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
+                { key: 'PageDown',   ctrl: false, alt: false, shift: false }  // PageDown (резерв)
             ],
             upscale:        { key: 'PageUp',     ctrl: false, alt: false, shift: false },
             deleteVid:      { key: 'Delete',     ctrl: false, alt: false, shift: false },
@@ -754,7 +754,10 @@
                     ` : ''}
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
-                <button id="mossad-btn-hk" style="width:100%; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⌨ Настройки горячих клавиш</button>
+                <div style="display:flex; gap:6px;">
+                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⌨ Горячие клавиши</button>
+                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">↺ Сброс</button>
+                </div>
             `;
             
             // Listeners for panel
@@ -777,6 +780,13 @@
             panel.querySelector('#mossad-btn-hk').onclick = () => {
                 if (document.getElementById('mossad-hk-modal')) return;
                 openHotkeySettings();
+            };
+            panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
+                if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
+                localStorage.removeItem(STORAGE_KEY);
+                Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+                window.updateWidgetUI();
+                showToast('✅ Настройки сброшены по умолчанию');
             };
         };
 
@@ -878,9 +888,10 @@
         
         modal.innerHTML = `
             <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
-            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.0.17 · 2026-08-10 20:10</div>
+            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.0.18 · 2026-08-11 01:45</div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
-            <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+            <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
+                <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold;">↺ Клавиши по умолчанию</button>
                 <button id="mossad-hk-close" style="background:#ef4444; border:none; padding:6px 16px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold;">Закрыть</button>
             </div>
         `;
@@ -947,6 +958,14 @@
         
         document.body.appendChild(modal);
         modal.querySelector('#mossad-hk-close').onclick = () => modal.remove();
+        modal.querySelector('#mossad-hk-reset').onclick = () => {
+            if (!confirm('Сбросить все горячие клавиши по умолчанию?')) return;
+            config.hk = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk));
+            Settings.save();
+            modal.remove();
+            openHotkeySettings(); // переоткрыть с обновлёнными клавишами
+            showToast('✅ Клавиши сброшены по умолчанию');
+        };
     }
 
     // ============================================
@@ -979,6 +998,16 @@
         if (hotkeyMatches(e, config.hk.download)) {
             e.preventDefault();
             triggerDownload();
+            // После скачивания — перейти +1 если выбрано
+            if (config.pdAction === 'up') {
+                setTimeout(() => {
+                    const dirs = config.slideshowDirections;
+                    const key = getArrowKey(dirs && dirs.length ? dirs[0] : 'up');
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                }, 600);
+            } else if (config.pdAction === 'del' && rootDomain === 'grok.com') {
+                setTimeout(() => runSmartDelete(), 1000);
+            }
         }
         
         if (hotkeyMatches(e, config.hk.sound)) {
