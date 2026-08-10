@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.16
+// @version      1.0.17
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://grok.com/*
@@ -878,7 +878,7 @@
         
         modal.innerHTML = `
             <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
-            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.0.16 · 2026-08-09 18:03</div>
+            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.0.17 · 2026-08-10 20:10</div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
             <div style="display:flex; justify-content:flex-end; margin-top:10px;">
                 <button id="mossad-hk-close" style="background:#ef4444; border:none; padding:6px 16px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold;">Закрыть</button>
@@ -914,6 +914,10 @@
                 window.capturingFor = k;
                 const handler = (e) => {
                     e.preventDefault(); e.stopPropagation();
+                    
+                    // Игнорируем одиночные нажатия модификаторов — ждём основную клавишу
+                    if (['Control', 'Shift', 'Alt', 'Meta', 'AltGraph'].includes(e.key)) return;
+                    
                     document.removeEventListener('keydown', handler, true);
                     window.capturingFor = null;
                     
@@ -925,7 +929,7 @@
                     
                     const newHk = { key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
                     if (Array.isArray(config.hk[k])) {
-                        config.hk[k] = [newHk]; // Заменяем массив одной новой кнопкой
+                        config.hk[k] = [newHk];
                     } else {
                         config.hk[k] = newHk;
                     }
