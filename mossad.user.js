@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.20
+// @version      1.2.0
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.0.0] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.0] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -77,6 +77,14 @@
         allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
+        
+        // PINTEREST ENGINE CONFIGS
+        pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
+        pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
+        pinterestPhotoPercent: 50,         // 0..100 % (видео = 100 - photo)
+        pinterestMaxVideoDuration: 0,      // макс длительность видео в сек (0 = без лимита)
+        pinterestAutoFS: true,             // авто разворачивание во весь экран
+        pinterestHistory: [],              // история до 100 посещенных URL
         
         hk: {
             download:       [
@@ -727,6 +735,12 @@
             }
         }
         
+        // Pinterest ссылочная навигация
+        if (rootDomain.includes('pinterest.')) {
+            selectNextPinterestPin('next');
+            return;
+        }
+
         // Листание
         const key = getArrowKey(dirs[0]);
         document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
@@ -796,8 +810,9 @@
         lastTime = ct;
         lastRAFTime = timeNow;
         
-        if (currentLoopCount >= config.videoLoops || accumulatedTime >= videoInitialDuration) {
-            // Циклы завершены, запускаем паузу после видео
+        if (currentLoopCount >= config.videoLoops || accumulatedTime >= videoInitialDuration ||
+            (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0 && accumulatedTime >= config.pinterestMaxVideoDuration)) {
+            // Циклы или лимит времени завершены, запускаем паузу после видео
             countdownSeconds = config.delayAfterVideo;
             isCountingDown = true;
             runPhotoTimer();
@@ -818,6 +833,137 @@
             countdownSeconds--;
             runPhotoTimer();
         }, 1000);
+    }
+
+    // ============================================
+    // PINTEREST ENGINE & AUTO FULLSCALE
+    // ============================================
+    function triggerPinterestFullScale() {
+        if (!rootDomain.includes('pinterest.') || !config.pinterestAutoFS) return;
+        setTimeout(() => {
+            let btn = document.querySelector('[aria-label="Показать в полном масштабе"], [title="Показать в полном масштабе"]');
+            if (!btn) {
+                const svg = document.querySelector('svg[aria-label="Показать в полном масштабе"]');
+                if (svg) btn = svg.closest('button') || svg;
+            }
+            if (btn) {
+                btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                console.log('%c[MOSSAD] Auto FullScale clicked', 'color:#3b82f6;');
+            }
+        }, 600);
+    }
+
+    function getPinterestCandidatePins() {
+        const currentPinId = (location.pathname.match(/\/pin\/(\d+)/) || [])[1];
+        const allLinks = Array.from(document.querySelectorAll('a[href*="/pin/"]'));
+        const candidates = [];
+
+        for (const a of allLinks) {
+            const href = a.getAttribute('href') || '';
+            const match = href.match(/\/pin\/(\d+)/);
+            if (match) {
+                const pinId = match[1];
+                if (pinId !== currentPinId && !candidates.some(c => c.pinId === pinId)) {
+                    const container = a.closest('div[data-grid-item], div[role="listitem"]') || a.parentElement || a;
+                    const hasVideo = !!container.querySelector('video, [aria-label*="video"], [aria-label*="видео"], .SoundButton') ||
+                                     /\d+:\d{2}/.test(container.textContent || '');
+                    candidates.push({
+                        pinId,
+                        url: new URL(href, location.origin).href,
+                        type: hasVideo ? 'video' : 'image',
+                        element: a
+                    });
+                }
+            }
+        }
+        return candidates;
+    }
+
+    function selectNextPinterestPin(direction) {
+        if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
+
+        if (direction === 'prev') {
+            if (config.pinterestHistory.length > 0) {
+                const prevUrl = config.pinterestHistory.pop();
+                Settings.save();
+                showToast('◀ Переход назад по истории');
+                window.location.href = prevUrl;
+                return;
+            } else {
+                showToast('⚠️ История просмотров пуста', true);
+                return;
+            }
+        }
+
+        // Записываем текущий URL в историю
+        if (!config.pinterestHistory.includes(location.href)) {
+            config.pinterestHistory.push(location.href);
+            if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
+            Settings.save();
+        }
+
+        // Фоновый виртуальный скролл для гидратации React
+        window.scrollBy({ top: 300, behavior: 'instant' });
+        setTimeout(() => window.scrollBy({ top: -300, behavior: 'instant' }), 40);
+
+        setTimeout(() => {
+            let candidates = getPinterestCandidatePins();
+            let filtered = [];
+            const filterType = config.pinterestFilterType || 'ratio';
+
+            if (filterType === 'image') {
+                filtered = candidates.filter(c => c.type === 'image');
+            } else if (filterType === 'video') {
+                filtered = candidates.filter(c => c.type === 'video');
+            } else if (filterType === 'ratio') {
+                const photoPercent = config.pinterestPhotoPercent ?? 50;
+                const roll = Math.random() * 100;
+                const targetType = roll < photoPercent ? 'image' : 'video';
+                filtered = candidates.filter(c => c.type === targetType);
+                if (filtered.length === 0) {
+                    filtered = candidates.filter(c => c.type === (targetType === 'image' ? 'video' : 'image'));
+                }
+            } else {
+                filtered = candidates; // 'all'
+            }
+
+            // Случай когда у пина 0 ссылок: возврат назад по истории и вызов другого пина
+            if (filtered.length === 0 && candidates.length === 0) {
+                showToast('⚠️ На странице нет ссылок, переход назад...', true);
+                if (config.pinterestHistory.length > 1) {
+                    config.pinterestHistory.pop(); // убираем текущую страницу
+                    const fallbackUrl = config.pinterestHistory.pop();
+                    Settings.save();
+                    window.location.href = fallbackUrl;
+                    return;
+                }
+                filtered = candidates;
+            } else if (filtered.length === 0) {
+                filtered = candidates;
+            }
+
+            const maxCandidates = filtered.slice(0, 30);
+            let targetIndex = 0;
+            const mode = config.pinterestMode || 'rand';
+
+            if (mode === 'rand') {
+                targetIndex = Math.floor(Math.random() * maxCandidates.length);
+            } else if (mode === '+1') {
+                window._pinSeqIndex = ((window._pinSeqIndex || 0) + 1) % maxCandidates.length;
+                targetIndex = window._pinSeqIndex;
+            } else {
+                const num = parseInt(mode, 10) || 1;
+                targetIndex = Math.min(Math.max(0, num - 1), maxCandidates.length - 1);
+            }
+
+            const target = maxCandidates[targetIndex];
+            if (target) {
+                showToast(`📌 Переход на пин #${targetIndex + 1} (${target.type === 'video' ? '🎬 Видео' : '🖼 Фото'})`);
+                window.location.href = target.url;
+            } else {
+                showToast('❌ Подходящий пин не найден', true);
+            }
+        }, 100);
     }
 
     // ============================================
@@ -894,7 +1040,46 @@
 
         const renderPanel = () => {
             const dirs = config.slideshowDirections || [];
+            const isPinterest = rootDomain.includes('pinterest.');
+            const isRatio = (config.pinterestFilterType || 'ratio') === 'ratio';
+
             panel.innerHTML = `
+                ${isPinterest ? `
+                <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,0.03); padding: 6px; border-radius: 8px; border: 1px solid #374151;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: bold; color: #60a5fa;">📌 Pinterest Режим</span>
+                        <label title="Авто разворачивание во весь экран" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:11px;">
+                            <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> FS
+                        </label>
+                    </div>
+                    <div style="display: flex; gap: 4px; align-items: center;">
+                        <span style="color:#9ca3af;">Пин:</span>
+                        <button class="mossad-pmode" data-mode="rand" style="background:${config.pinterestMode === 'rand' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">rand</button>
+                        <button class="mossad-pmode" data-mode="+1" style="background:${config.pinterestMode === '+1' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">+1</button>
+                        <input id="mossad-in-pmode-n" type="number" min="1" max="9" value="${!isNaN(parseInt(config.pinterestMode, 10)) ? config.pinterestMode : '1'}" style="width:30px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="Номер пина 1-9">
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color:#9ca3af;">Тип:</span>
+                        <select id="mossad-sel-ptype" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px; font-size:11px;">
+                            <option value="ratio" ${config.pinterestFilterType === 'ratio' ? 'selected' : ''}>Пропорция %</option>
+                            <option value="all" ${config.pinterestFilterType === 'all' ? 'selected' : ''}>Все</option>
+                            <option value="image" ${config.pinterestFilterType === 'image' ? 'selected' : ''}>Только Фото</option>
+                            <option value="video" ${config.pinterestFilterType === 'video' ? 'selected' : ''}>Только Видео</option>
+                        </select>
+                    </div>
+                    ${isRatio ? `
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
+                        <label style="display:flex; align-items:center; gap:2px;">🖼 Фото %: <input id="mossad-in-photo-pct" type="number" min="0" max="100" value="${config.pinterestPhotoPercent ?? 50}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
+                        <label style="display:flex; align-items:center; gap:2px;">🎬 Видео %: <input id="mossad-in-video-pct" type="number" min="0" max="100" value="${100 - (config.pinterestPhotoPercent ?? 50)}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
+                    </div>
+                    ` : ''}
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <label title="Макс. длительность видео в секундах (0 = без лимита)" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                            Макс. видео (сек): <input id="mossad-in-vmax" type="number" min="0" max="999" value="${config.pinterestMaxVideoDuration || 0}" style="width:40px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;">
+                        </label>
+                    </div>
+                </div>
+                ` : `
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
                         <button class="mossad-dpad" data-dir="up" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">▲</button>
@@ -916,6 +1101,7 @@
                         </label>
                     </div>
                 </div>
+                `}
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <select id="mossad-sel-dl" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
@@ -950,11 +1136,53 @@
             panel.querySelectorAll('.mossad-dpad').forEach(btn => {
                 btn.onclick = () => Settings.set('slideshowDirections', [btn.dataset.dir]);
             });
-            // Дебаунс для числовых инпутов, чтобы не стрелять много раз при зажатой стрелке
             const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
-            panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, parseInt(e.target.value) || 1)), 300);
-            panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(1, parseInt(e.target.value) || 12)), 300);
-            panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, parseInt(e.target.value) || 2)), 300);
+
+            if (isPinterest) {
+                panel.querySelectorAll('.mossad-pmode').forEach(btn => {
+                    btn.onclick = () => Settings.set('pinterestMode', btn.dataset.mode);
+                });
+                const inN = panel.querySelector('#mossad-in-pmode-n');
+                if (inN) {
+                    inN.oninput = debounce((e) => {
+                        const val = Math.min(9, Math.max(1, parseInt(e.target.value, 10) || 1));
+                        Settings.set('pinterestMode', String(val));
+                    }, 300);
+                }
+                const selPType = panel.querySelector('#mossad-sel-ptype');
+                if (selPType) {
+                    selPType.onchange = (e) => Settings.set('pinterestFilterType', e.target.value);
+                }
+                const inPhotoPct = panel.querySelector('#mossad-in-photo-pct');
+                const inVideoPct = panel.querySelector('#mossad-in-video-pct');
+                if (inPhotoPct && inVideoPct) {
+                    inPhotoPct.oninput = debounce((e) => {
+                        let pVal = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
+                        inVideoPct.value = 100 - pVal;
+                        Settings.set('pinterestPhotoPercent', pVal);
+                    }, 300);
+                    inVideoPct.oninput = debounce((e) => {
+                        let vVal = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
+                        let pVal = 100 - vVal;
+                        inPhotoPct.value = pVal;
+                        Settings.set('pinterestPhotoPercent', pVal);
+                    }, 300);
+                }
+                const inVMax = panel.querySelector('#mossad-in-vmax');
+                if (inVMax) {
+                    inVMax.oninput = debounce((e) => {
+                        Settings.set('pinterestMaxVideoDuration', Math.max(0, parseInt(e.target.value, 10) || 0));
+                    }, 300);
+                }
+                const cbFS = panel.querySelector('#mossad-cb-fs');
+                if (cbFS) {
+                    cbFS.onchange = (e) => Settings.set('pinterestAutoFS', e.target.checked);
+                }
+            } else {
+                panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, parseInt(e.target.value) || 1)), 300);
+                panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(1, parseInt(e.target.value) || 12)), 300);
+                panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, parseInt(e.target.value) || 2)), 300);
+            }
             panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
             panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
@@ -1084,7 +1312,7 @@
                 <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">⬇</button>
               </div>
             </div>
-            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.0.19 · 2026-08-11 03:55</div>
+            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.2.0 · 2026-08-11</div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold;">↺ Клавиши по умолчанию</button>
@@ -1285,7 +1513,27 @@
             e.preventDefault();
             window.location.href = 'https://grok.com/imagine/saved';
         }
+
+        // Ручная навигация стрелками на Pinterest (влево/вверх = назад, вправо/вниз = вперед)
+        if (rootDomain.includes('pinterest.')) {
+            if (['ArrowRight', 'ArrowDown'].includes(e.key)) {
+                e.preventDefault();
+                selectNextPinterestPin('next');
+            } else if (['ArrowLeft', 'ArrowUp'].includes(e.key)) {
+                e.preventDefault();
+                selectNextPinterestPin('prev');
+            }
+        }
     }, true);
+
+    // Авто кликер FullScale для Pinterest
+    if (rootDomain.includes('pinterest.')) {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', triggerPinterestFullScale);
+        } else {
+            triggerPinterestFullScale();
+        }
+    }
 
     // Проверяем GitHub при старте (с задержкой чтобы не мешать загрузке)
     setTimeout(checkAndPullOnStartup, 3000);
