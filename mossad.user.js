@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.12
+// @version      1.2.13
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.12] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.13] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -464,9 +464,6 @@
             if (safeTitle.length > 0) return `${safeTitle}.mp4`;
         }
         return `redgifs_${itemId}_${Date.now()}.mp4`;
-    }
-
-    function findMediaForDownload() {
     function getPinterestMainPinData() {
         try {
             const scripts = document.querySelectorAll('script');
@@ -500,7 +497,7 @@
         return { isFound: false, type: 'unknown', bestMp4Url: null };
     }
 
-    function getMediaToDownload() {
+    function findMediaForDownload() {
         if (rootDomain.includes('pinterest.')) {
             const mainPin = getPinterestMainPinData();
             if (mainPin.bestMp4Url) {
