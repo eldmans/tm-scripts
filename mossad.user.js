@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.7
+// @version      1.2.8
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.7] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.8] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -778,18 +778,21 @@
         if (!slideshowActive || slideshowPaused) return;
         if (rafId) cancelAnimationFrame(rafId);
         if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
+        
+        const expectedType = sessionStorage.getItem('mossad_expected_type');
         const video = getActiveVideo();
         
         if (video) {
             if (isNaN(video.duration) || video.duration === 0) {
-                if (retryCount > 25) { // После 5 секунд ожидания листаем дальше
+                if (retryCount > 30) { // До 6 секунд ожидания гидратации параметров видео
                      triggerNextSlide();
                      return;
                 }
                 slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 200);
                 return;
             }
-            // Режим Видео
+            // Видео плеер успешно найден и готов
+            sessionStorage.removeItem('mossad_expected_type');
             isCountingDown = false;
             currentVideoNode = video;
             videoInitialDuration = video.duration;
@@ -799,14 +802,17 @@
             lastRAFTime = performance.now();
             rafId = requestAnimationFrame(checkVideoLoops);
         } else {
-            // Если видео тега нет, возможно SPA страница еще не отрендерила контент.
-            // Подождем до 1 секунды (10 попыток по 100мс), вдруг видео появится.
-            if (retryCount < 10) {
+            // Если заходили на пин с Видео, даем до 5 секунд (50 попыток x 100мс) на появление <video> в SPA DOM
+            if (expectedType === 'video' && retryCount < 50) {
+                if (retryCount % 10 === 0) {
+                    showToast(`⏳ Загрузка видео-плеера... (${Math.floor(retryCount / 10)}/5с)`);
+                }
                 slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 100);
                 return;
             }
 
-            // Режим Фото
+            // Фото пин (или видео не появилось за 5 сек)
+            sessionStorage.removeItem('mossad_expected_type');
             countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
             isCountingDown = true;
             runPhotoTimer();
@@ -820,6 +826,13 @@
             return;
         }
         
+        // Если пользователь поставил видео на паузу — ставим отсчет слайдшоу на паузу!
+        if (currentVideoNode.paused) {
+            lastRAFTime = timeNow;
+            rafId = requestAnimationFrame(checkVideoLoops);
+            return;
+        }
+
         const ct = currentVideoNode.currentTime;
         if (ct < lastTime) {
             // Произошел луп
@@ -827,9 +840,7 @@
             accumulatedTime = 0;
         } else {
             const delta = (timeNow - lastRAFTime) / 1000;
-            if (!currentVideoNode.paused) {
-                accumulatedTime += delta;
-            }
+            accumulatedTime += delta;
         }
         
         lastTime = ct;
@@ -1025,6 +1036,9 @@
 
             const target = maxCandidates[targetIndex];
             if (target) {
+                // Запоминаем тип следующего контента в sessionStorage перед переходом
+                sessionStorage.setItem('mossad_expected_type', target.type);
+
                 // Если свернули на новый путь — усекаем историю впереди
                 config.pinterestHistory = config.pinterestHistory.slice(0, (config.pinterestHistoryIdx ?? (config.pinterestHistory.length - 1)) + 1);
                 config.pinterestHistory.push(target.url);
