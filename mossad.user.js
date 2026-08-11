@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.16
+// @version      1.2.17
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.16] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.17] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -470,13 +470,15 @@
         try {
             const scanText = (txt) => {
                 if (!txt || !txt.includes('auth_web_main_pin')) return null;
-                // Ищем ответ ресурса с результатом resource_response
                 const idx = txt.indexOf('resource_response');
                 if (idx === -1) return null;
                 
-                const slice = txt.slice(Math.max(0, idx - 500), idx + 4000);
-                const hasVideos = /"videos"\s*:\s*\{/i.test(slice) || /"video_list"\s*:\s*\{/i.test(slice) || /duplo-hls/i.test(slice);
-                const hasImages = /"images"\s*:\s*\{/i.test(slice) || /"videos"\s*:\s*null/i.test(slice);
+                const slice = txt.slice(Math.max(0, idx - 500), idx + 8000);
+                const hasVideos = /"videos"\s*:\s*\{/i.test(slice) || 
+                                  /"video_list"\s*:\s*\{/i.test(slice) || 
+                                  /story_pin_video_block/i.test(slice) || 
+                                  /duplo-hls/i.test(slice) ||
+                                  /v1\.pinimg\.com\/videos/i.test(slice);
 
                 let bestMp4Url = null;
                 if (hasVideos) {
@@ -485,9 +487,23 @@
                     if (mp4Matches && mp4Matches.length > 0) {
                         bestMp4Url = mp4Matches[0].replace(/\\/g, '');
                     }
+                    
+                    if (!bestMp4Url) {
+                        const sigMatch = slice.match(/"video_signature"\s*:\s*"([a-f0-9]{32})"/i) ||
+                                         slice.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i);
+                        if (sigMatch) {
+                            const sig = sigMatch[4] || sigMatch[1];
+                            if (sig && sig.length === 32) {
+                                bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
+                            }
+                        }
+                    }
+                    return { isFound: true, type: 'video', bestMp4Url };
                 }
 
-                if (hasVideos) return { isFound: true, type: 'video', bestMp4Url };
+                const isNoVideoStory = /"story_pin_data"\s*:\s*null/i.test(slice) || !/story_pin_video_block/i.test(slice);
+                const hasImages = /"images"\s*:\s*\{/i.test(slice) && isNoVideoStory;
+
                 if (hasImages) return { isFound: true, type: 'image', bestMp4Url: null };
                 return null;
             };
