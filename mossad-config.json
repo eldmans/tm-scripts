@@ -1,0 +1,98 @@
+{
+  "slideshowMode": "auto",
+  "slideshowOrientation": "h",
+  "slideshowLoopMode": "off",
+  "slideshowDirections": [
+    "up"
+  ],
+  "videoLoops": 1,
+  "slideshowDelay": 10,
+  "delayAfterVideo": 2,
+  "downloadType": "none",
+  "pdAction": "up",
+  "stopOnTabSwitch": true,
+  "stopOnBrsrSwitch": false,
+  "deleteAutoconfirm": false,
+  "deleteHoldpost": false,
+  "allowedDomains": [
+    "grok.com",
+    "redgifs.com",
+    "pinterest.com",
+    "pinterest.ru",
+    "civitai.red",
+    "vkvideo.ru",
+    "vk.video",
+    "noodlemagazine.com"
+  ],
+  "githubConfigPath": "mossad-config.json",
+  "hk": {
+    "download": [
+      {
+        "key": "PageDown",
+        "ctrl": false,
+        "alt": false,
+        "shift": true
+      },
+      {
+        "key": "PageDown",
+        "ctrl": false,
+        "alt": false,
+        "shift": false
+      }
+    ],
+    "upscale": {
+      "key": "PageUp",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "deleteVid": {
+      "key": "Delete",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "sound": {
+      "key": "ScrollLock",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "playPause": {
+      "key": "Pause",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "help": {
+      "key": "F1",
+      "ctrl": true,
+      "alt": false,
+      "shift": false
+    },
+    "history": {
+      "key": "Home",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "slideshowPanel": {
+      "key": "Insert",
+      "ctrl": true,
+      "alt": false,
+      "shift": false
+    },
+    "slideshowStart": {
+      "key": "Insert",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "focusWidget": {
+      "key": "F7",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    }
+  }
+}
