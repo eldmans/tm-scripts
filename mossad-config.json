@@ -8,7 +8,7 @@
   "videoLoops": 1,
   "slideshowDelay": 10,
   "delayAfterVideo": 2,
-  "downloadType": "none",
+  "downloadType": "video",
   "pdAction": "up",
   "stopOnTabSwitch": true,
   "stopOnBrsrSwitch": false,
@@ -25,6 +25,13 @@
     "noodlemagazine.com"
   ],
   "githubConfigPath": "mossad-config.json",
+  "pinterestMode": "rand",
+  "pinterestFilterType": "ratio",
+  "pinterestPhotoPercent": 50,
+  "pinterestMaxVideoDuration": 0,
+  "pinterestAutoFS": true,
+  "pinterestHistory": [],
+  "pinterestHistoryIdx": -1,
   "hk": {
     "download": [
       {
