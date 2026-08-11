@@ -9,7 +9,7 @@
   "slideshowDelay": 10,
   "delayAfterVideo": 2,
   "downloadType": "none",
-  "pdAction": "up",
+  "pdAction": "none",
   "stopOnTabSwitch": true,
   "stopOnBrsrSwitch": false,
   "deleteAutoconfirm": false,
