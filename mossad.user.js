@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.19
+// @version      1.0.20
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -535,6 +535,16 @@
     function triggerDownload() {
         const media = findMediaForDownload();
         if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
+
+        // Защита от повторного скачивания одного файла за короткое время
+        const primaryUrl = media.urls[0];
+        const now = Date.now();
+        if (primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
+            console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, пропущено.');
+            return;
+        }
+        _lastDownloadUrl = primaryUrl;
+        _lastDownloadTime = now;
         
         let filename;
         if (rootDomain.includes('redgifs.com') && media.itemId) {
@@ -599,6 +609,11 @@
     let lastTime = 0;
     let lastRAFTime = 0;
     let rafId = null;
+    let _lastDownloadUrl = null;     // защита от повторного скачивания одного файла
+    let _lastDownloadTime = 0;
+    let _samePageSlideCount = 0;     // счётчик попыток перелистнуть с одной и той же страницы
+    let _lastSlideUrl = '';          // URL во время последнего triggerNextSlide
+    const SAME_PAGE_LIMIT = 3;       // сколько раз пробовать перед остановкой
     function getActiveVideo() {
         const videos = Array.from(document.querySelectorAll('video'));
         if (videos.length === 0) return null;
@@ -684,20 +699,35 @@
         if (!slideshowActive || slideshowPaused) return;
         const dirs = config.slideshowDirections;
         if (!dirs || dirs.length === 0) { stopSlideshow(); return; }
-        
+
+        // Защита от зацикливания на конце ленты
+        const curUrl = location.href;
+        if (curUrl === _lastSlideUrl) {
+            _samePageSlideCount++;
+            if (_samePageSlideCount > SAME_PAGE_LIMIT) {
+                console.warn('[MOSSAD] Превышен лимит перелистываний без смены страницы, остановка.');
+                stopSlideshow();
+                showToast('⏹ Слайдшоу остановлен: конец ленты', true);
+                return;
+            }
+        } else {
+            _samePageSlideCount = 0;
+            _lastSlideUrl = curUrl;
+        }
+
         // Скачивание перед перелистыванием
         if (config.downloadType !== 'none') {
             const hasVideo = getActiveVideo() !== null;
             if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
                 triggerDownload();
                 if (config.pdAction === 'del' && rootDomain === 'grok.com') {
-                    setTimeout(() => window.close(), 1000); // Smart Delete logic
+                    setTimeout(() => window.close(), 1000);
                     return;
                 }
             }
         }
         
-        // Листание по D-pad (берем первое направление для простоты)
+        // Листание
         const key = getArrowKey(dirs[0]);
         document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
         setTimeout(() => {
