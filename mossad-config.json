@@ -28,10 +28,10 @@
   "hk": {
     "download": [
       {
-        "key": "PageDown",
+        "key": "ArrowUp",
         "ctrl": false,
         "alt": false,
-        "shift": true
+        "shift": false
       },
       null
     ],
