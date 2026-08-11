@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.3
+// @version      1.2.4
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.4] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -626,8 +626,18 @@
     let _lastSlideUrl = '';          // URL во время последнего triggerNextSlide
     const SAME_PAGE_LIMIT = 3;       // сколько раз пробовать перед остановкой
     function getActiveVideo() {
-        const videos = Array.from(document.querySelectorAll('video'));
+        let videos = Array.from(document.querySelectorAll('video'));
         if (videos.length === 0) return null;
+        
+        // На Пинтересте игнорируем превью-видео из блоков рекомендаций/сетки пинов
+        if (rootDomain.includes('pinterest.')) {
+            videos = videos.filter(v => {
+                const gridCard = v.closest('div[data-grid-item], div[role="listitem"], a[href*="/pin/"]');
+                return !gridCard;
+            });
+            if (videos.length === 0) return null;
+        }
+
         if (videos.length === 1) return videos[0];
         
         let maxVisible = 0;
@@ -1048,7 +1058,7 @@
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
-        topBar.append(timerEl, btnReset, btnStart, btnGear, btnDL, btnUpdate);
+        topBar.append(btnReset, timerEl, btnStart, btnGear, btnDL, btnUpdate);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -1335,7 +1345,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v1.2.3 · 2026-08-11</span>
+              <span>v1.2.4 · 2026-08-11</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
