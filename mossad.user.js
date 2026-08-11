@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.9
+// @version      1.2.11
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.9] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.11] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -778,18 +778,23 @@
         const expected = sessionStorage.getItem('mossad_expected_type');
         if (expected === 'video' || expected === 'image') return expected;
 
+        if (rootDomain.includes('pinterest.') && config.pinterestFilterType === 'video') {
+            return 'video';
+        }
+
+        // Проверяем видеоплееры Pinterest (duplo-hls-video, story-pin, idea-pin, progress-bar, кнопки звука)
+        if (document.querySelector('video, [data-test-id*="video"], [data-test-id*="story-pin"], [data-test-id*="idea-pin"], [data-test-id*="duplo-hls"], button[aria-label*="звук"], button[aria-label*="Sound"], button[aria-label*="Unmute"], .SoundButton')) {
+            return 'video';
+        }
         if (document.querySelector('meta[property="og:video"], meta[name="og:video"], meta[name="twitter:card"][content="player"]')) {
             return 'video';
         }
         const ldJsonScripts = document.querySelectorAll('script[type="application/ld+json"]');
         for (const s of ldJsonScripts) {
-            if ((s.textContent || '').includes('VideoObject')) return 'video';
+            const txt = s.textContent || '';
+            if (txt.includes('VideoObject') || txt.includes('video')) return 'video';
         }
-        const stage = document.querySelector('div[data-test-id="closeup-stage"], div[data-test-id="pin-closeup"], div[role="main"]');
-        if (stage) {
-            if (stage.querySelector('video')) return 'video';
-            if (stage.querySelector('img')) return 'image';
-        }
+
         return 'unknown';
     }
 
@@ -801,9 +806,9 @@
         const detectedType = getPinMediaType();
         const video = getActiveVideo();
         
-        if (video && detectedType !== 'image') {
+        if (video) {
             if (isNaN(video.duration) || video.duration === 0) {
-                if (retryCount > 30) { // До 6 секунд ожидания гидратации параметров видео
+                if (retryCount > 40) { // До 8 секунд ожидания параметров длительности видео
                      triggerNextSlide();
                      return;
                 }
@@ -821,16 +826,19 @@
             lastRAFTime = performance.now();
             rafId = requestAnimationFrame(checkVideoLoops);
         } else {
-            // Если мы шли на видео или мета-теги сообщают о видео, ждем до 5 секунд (50 попыток x 100мс) появление <video>
-            if (detectedType === 'video' && retryCount < 50) {
-                if (retryCount % 10 === 0) {
-                    showToast(`⏳ Загрузка видео-плеера... (${Math.floor(retryCount / 10)}/5с)`);
+            // На Пинтересте или при обнаружении видео-контейнера ждем до 10 секунд (100 попыток x 100мс) гидратации <video>
+            const isVideoExpected = (detectedType === 'video' || rootDomain.includes('pinterest.'));
+            const maxWaitAttempts = isVideoExpected ? 100 : 30;
+
+            if (retryCount < maxWaitAttempts) {
+                if (isVideoExpected && retryCount % 10 === 0) {
+                    showToast(`⏳ Загрузка HLS видео-плеера... (${Math.floor(retryCount / 10)}/10с)`);
                 }
                 slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 100);
                 return;
             }
 
-            // Фото пин (или видео не появилось за 5 сек)
+            // Фото пин
             sessionStorage.removeItem('mossad_expected_type');
             countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
             isCountingDown = true;
