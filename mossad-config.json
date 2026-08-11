@@ -33,12 +33,7 @@
         "alt": false,
         "shift": true
       },
-      {
-        "key": "PageDown",
-        "ctrl": false,
-        "alt": false,
-        "shift": false
-      }
+      null
     ],
     "upscale": {
       "key": "PageUp",
