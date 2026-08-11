@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.1
+// @version      1.2.2
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.1] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -600,9 +600,12 @@
     }
 
     // ============================================
-    // SLIDESHOW LOGIC (AUTO)
+    // SLIDESHOW LOGIC (AUTO) & SESSION PERSISTENCE
     // ============================================
-    let slideshowActive = false;
+    const SESSION_ACTIVE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`;
+    const SESSION_STATE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_wstate`;
+
+    let slideshowActive = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true';
     let slideshowPaused = false;
     let slideshowTimeoutId = null;
     let downloadTimeoutId = null;
@@ -677,7 +680,10 @@
 
     function stopSlideshow() {
         slideshowActive = false;
+        slideshowPaused = false;
         isCountingDown = false;
+        sessionStorage.removeItem(SESSION_ACTIVE_KEY);
+        sessionStorage.removeItem(SESSION_STATE_KEY);
         if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         if (downloadTimeoutId) clearTimeout(downloadTimeoutId);
         if (rafId) cancelAnimationFrame(rafId);
@@ -688,6 +694,8 @@
         if (!slideshowActive) {
             slideshowActive = true;
             slideshowPaused = false;
+            sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
+            sessionStorage.setItem(SESSION_STATE_KEY, 'bar');
             // Закрываем модальное окно настроек горячих клавиш (если открыто)
             const hkModal = document.getElementById('mossad-hk-modal');
             if (hkModal) hkModal.remove();
@@ -973,7 +981,9 @@
     // ============================================
     // WIDGET UI
     // ============================================
-    window.widgetState = 'hidden'; // 'hidden', 'bar', 'panel'
+    window.widgetState = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true'
+        ? (sessionStorage.getItem(SESSION_STATE_KEY) || 'bar')
+        : 'hidden';
 
     function formatTime(secs) {
         if (isNaN(secs)) return '--:--';
@@ -1316,7 +1326,7 @@
                 <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">⬇</button>
               </div>
             </div>
-            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.2.1 · 2026-08-11</div>
+            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.2.2 · 2026-08-11</div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold;">↺ Клавиши по умолчанию</button>
@@ -1537,6 +1547,14 @@
         } else {
             triggerPinterestFullScale();
         }
+    }
+
+    // Возобновление слайдшоу после перехода/перезагрузки страницы
+    if (slideshowActive) {
+        showToast('▶ Слайдшоу возобновлено');
+        setTimeout(() => {
+            scheduleNextSlideCycle(0);
+        }, 500);
     }
 
     // Проверяем GitHub при старте (с задержкой чтобы не мешать загрузке)
