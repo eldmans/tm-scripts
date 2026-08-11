@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.21
+// @version      1.2.22
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.21';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.22';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -560,22 +560,29 @@
 
     function findMediaForDownload() {
         if (rootDomain.includes('pinterest.')) {
+            const pinType = getPinMediaType();
             const mainPin = getPinterestMainPinData();
-            if (mainPin.bestMp4Url) {
-                return { urls: [mainPin.bestMp4Url], type: 'video' };
-            }
-            const scripts = Array.from(document.querySelectorAll('script'));
-            for (const s of scripts) {
-                const txt = s.textContent || '';
-                if (txt.includes('expMp4')) {
-                    const expMp4Match = txt.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+\/expMp4\/[^\s"',]+\.mp4/g);
-                    if (expMp4Match) return { urls: [expMp4Match[0].replace(/\\/g, '')], type: 'video' };
+            
+            // 1. Если главный пин - ВИДЕО
+            if (pinType === 'video' || mainPin.bestMp4Url) {
+                if (mainPin.bestMp4Url) {
+                    return { urls: [mainPin.bestMp4Url], type: 'video' };
+                }
+                const stageSig = document.querySelector('div[data-test-id="closeup-stage"] [data-video-signature], div[data-test-id="pin-closeup"] [data-video-signature]');
+                if (stageSig) {
+                    const sig = stageSig.getAttribute('data-video-signature');
+                    if (sig && sig.length === 32) {
+                        return { urls: [`https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`], type: 'video' };
+                    }
                 }
             }
-            const sigEl = document.querySelector('[data-video-signature]');
-            if (sigEl) {
-                const sig = sigEl.getAttribute('data-video-signature');
-                if (sig && sig.length >= 6) return { urls: [`https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`], type: 'video' };
+
+            // 2. Если главный пин - ФОТО (или не содержит видео)
+            const stageImg = document.querySelector('div[data-test-id="closeup-stage"] img, div[data-test-id="pin-closeup"] img, div[role="main"] img');
+            if (stageImg && stageImg.src) {
+                let imgUrl = stageImg.src;
+                imgUrl = imgUrl.replace(/\/(236x|474x|564x|736x|1200x)\//, '/originals/');
+                return { urls: [imgUrl], type: 'photo' };
             }
         }
 
@@ -1099,7 +1106,8 @@
         return candidates;
     }
 
-    function selectNextPinterestPin(direction) {
+    function selectNextPinterestPin(direction, options = {}) {
+        const isManual = options.isManual || false;
         if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
         let idx = typeof config.pinterestHistoryIdx === 'number' ? config.pinterestHistoryIdx : config.pinterestHistory.length - 1;
 
@@ -1118,8 +1126,8 @@
         }
 
         // direction === 'next'
-        // Если мы отматывали назад и находимся НЕ на самой вершине стека: идем вперед по истории (как в Проводнике)
-        if (idx >= 0 && idx < config.pinterestHistory.length - 1) {
+        // Если выбор сделан ВРУЧНУЮ и мы находимся НЕ на самой вершине стека: идем вперед по истории (как в Проводнике)
+        if (isManual && idx >= 0 && idx < config.pinterestHistory.length - 1) {
             idx++;
             config.pinterestHistoryIdx = idx;
             Settings.save();
@@ -1128,7 +1136,7 @@
             return;
         }
 
-        // Если мы на самой вершине стека (самом свежем пине): генерируем НОВЫЙ переход!
+        // Авто-слайдшоу ИЛИ ручной клик на вершине стека: генерируем НОВЫЙ слайд!
         if (config.pinterestHistory.length === 0 || config.pinterestHistory[config.pinterestHistory.length - 1] !== location.href) {
             config.pinterestHistory.push(location.href);
             if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
@@ -1280,7 +1288,7 @@
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
-        topBar.append(btnReset, timerEl, btnStart, btnGear, btnDL, btnUpdate);
+        topBar.append(timerEl, btnStart, btnGear, btnDL, btnUpdate);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -1382,6 +1390,7 @@
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⌨ Горячие клавиши</button>
+                    <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Мотать до начала/конца ленты">↺ Перемотка</button>
                     <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">↺ Сброс</button>
                 </div>
             `;
@@ -1445,6 +1454,24 @@
                 panel.querySelector('#mossad-cb-aconfirm').onchange = (e) => Settings.set('deleteAutoconfirm', e.target.checked);
                 panel.querySelector('#mossad-cb-holdpost').onchange = (e) => Settings.set('deleteHoldpost', e.target.checked);
             }
+            panel.querySelector('#mossad-btn-rewind').onclick = () => {
+                let oppDir = 'down';
+                if (config.slideshowDirections[0] === 'up') oppDir = 'down';
+                else if (config.slideshowDirections[0] === 'down') oppDir = 'up';
+                else if (config.slideshowDirections[0] === 'left') oppDir = 'right';
+                else if (config.slideshowDirections[0] === 'right') oppDir = 'left';
+                const key = getArrowKey(oppDir);
+                let lastUrl = location.href; let unchangedCount = 0;
+                const interval = setInterval(() => {
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                    setTimeout(() => {
+                        if (location.href === lastUrl) {
+                            unchangedCount++;
+                            if (unchangedCount >= 4) clearInterval(interval);
+                        } else { lastUrl = location.href; unchangedCount = 0; }
+                    }, 60);
+                }, 120);
+            };
             panel.querySelector('#mossad-btn-hk').onclick = () => {
                 if (document.getElementById('mossad-hk-modal')) return;
                 openHotkeySettings();
