@@ -35,7 +35,7 @@
   "hk": {
     "download": [
       {
-        "key": "ArrowUp",
+        "key": "PageDown",
         "ctrl": false,
         "alt": false,
         "shift": false
