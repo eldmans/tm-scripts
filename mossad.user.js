@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.20
+// @version      1.2.21
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.20';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.21';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -728,11 +728,17 @@
         let videos = Array.from(document.querySelectorAll('video'));
         if (videos.length === 0) return null;
         
-        // На Пинтересте игнорируем превью-видео из блоков рекомендаций/сетки пинов
+        // На Пинтересте ищем видео в главном контейнере сцены пина (closeup-stage / main)
         if (rootDomain.includes('pinterest.')) {
+            const mainStage = document.querySelector('div[data-test-id="closeup-stage"], div[data-test-id="pin-closeup"], div[role="main"], div[data-test-id="story-pin-closeup-container"]');
+            if (mainStage) {
+                const stageVideo = mainStage.querySelector('video');
+                if (stageVideo) return stageVideo;
+            }
+
             videos = videos.filter(v => {
-                const gridCard = v.closest('div[data-grid-item], div[role="listitem"], a[href*="/pin/"]');
-                return !gridCard;
+                const isRec = v.closest('div[data-grid-item], div[data-test-id="pin-card"], div[data-test-id="related-pins"], div[data-test-id="search-feed"]');
+                return !isRec;
             });
             if (videos.length === 0) return null;
         }
