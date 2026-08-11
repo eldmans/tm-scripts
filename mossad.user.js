@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.13
+// @version      1.2.15
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.13] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.15] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -464,32 +464,43 @@
             if (safeTitle.length > 0) return `${safeTitle}.mp4`;
         }
         return `redgifs_${itemId}_${Date.now()}.mp4`;
+    }
+
     function getPinterestMainPinData() {
         try {
+            if (window.__PJS_OUTPUT__) {
+                const str = JSON.stringify(window.__PJS_OUTPUT__);
+                if (str.includes('PinResource') || str.includes('videos') || str.includes('video_list')) {
+                    const hasVideos = /"videos"\s*:\s*\{/i.test(str) || /"video_list"\s*:\s*\{/i.test(str);
+                    const mp4Matches = str.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+?\.mp4/g) ||
+                                       str.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"',]+?\.mp4/g);
+                    let bestUrl = mp4Matches && mp4Matches[0] ? mp4Matches[0].replace(/\\/g, '') : null;
+                    return { isFound: true, type: hasVideos ? 'video' : 'image', bestMp4Url: bestUrl };
+                }
+            }
+
             const scripts = document.querySelectorAll('script');
             for (const s of scripts) {
                 const txt = s.textContent || '';
-                if (!txt || !txt.includes('PinResource')) continue;
+                if (!txt || (!txt.includes('PinResource') && !txt.includes('auth_web_main_pin') && !txt.includes('duplo-hls'))) continue;
 
-                if (txt.includes('auth_web_main_pin')) {
-                    const hasVideos = /"videos"\s*:\s*\{/i.test(txt) || /"video_list"\s*:\s*\{/i.test(txt);
-                    const hasNoVideos = /"videos"\s*:\s*null/i.test(txt) && /"story_pin_data"\s*:\s*null/i.test(txt);
-                    
-                    let bestMp4Url = null;
-                    if (hasVideos) {
-                        const mp4Matches = txt.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+?\.mp4/g) ||
-                                           txt.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"',]+?\.mp4/g);
-                        if (mp4Matches && mp4Matches.length > 0) {
-                            bestMp4Url = mp4Matches[0].replace(/\\\/`/g, '/').replace(/\\\//g, '/');
-                        }
+                const hasVideos = /"videos"\s*:\s*\{/i.test(txt) || /"video_list"\s*:\s*\{/i.test(txt) || /duplo-hls/i.test(txt);
+                const hasNoVideos = /"videos"\s*:\s*null/i.test(txt) && /"story_pin_data"\s*:\s*null/i.test(txt);
+                
+                let bestMp4Url = null;
+                if (hasVideos) {
+                    const mp4Matches = txt.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+?\.mp4/g) ||
+                                       txt.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"',]+?\.mp4/g);
+                    if (mp4Matches && mp4Matches.length > 0) {
+                        bestMp4Url = mp4Matches[0].replace(/\\/g, '');
                     }
-
-                    return {
-                        isFound: true,
-                        type: hasVideos ? 'video' : (hasNoVideos ? 'image' : 'unknown'),
-                        bestMp4Url: bestMp4Url
-                    };
                 }
+
+                return {
+                    isFound: true,
+                    type: hasVideos ? 'video' : (hasNoVideos ? 'image' : 'unknown'),
+                    bestMp4Url: bestMp4Url
+                };
             }
         } catch (e) {
             console.error('[MOSSAD] PinResource JSON parse error:', e);
@@ -1442,11 +1453,17 @@
         // Tracker Time
         setInterval(() => {
             if (window.widgetState === 'hidden') return;
-            if (slideshowActive && isCountingDown) {
-                timerEl.textContent = countdownSeconds + 'с';
+            const video = getActiveVideo();
+            if (slideshowActive) {
                 timerEl.style.color = '#3b82f6';
+                if (isCountingDown) {
+                    timerEl.textContent = countdownSeconds + 'с';
+                } else if (video && !isNaN(video.duration)) {
+                    timerEl.textContent = `${formatTime(video.currentTime)}/${formatTime(video.duration)}`;
+                } else {
+                    timerEl.textContent = '⏳...';
+                }
             } else {
-                const video = getActiveVideo();
                 if (video && !isNaN(video.duration)) {
                     timerEl.textContent = `${formatTime(video.currentTime)}/${formatTime(video.duration)}`;
                 } else {
@@ -1454,7 +1471,7 @@
                 }
                 timerEl.style.color = '#9ca3af';
             }
-        }, 1000);
+        }, 500);
     }
 
     if (document.readyState === 'loading') {
