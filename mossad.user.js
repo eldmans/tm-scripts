@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.4
+// @version      1.2.5
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.4] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.5] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -832,8 +832,12 @@
         lastTime = ct;
         lastRAFTime = timeNow;
         
-        if (currentLoopCount >= config.videoLoops || accumulatedTime >= videoInitialDuration ||
-            (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0 && accumulatedTime >= config.pinterestMaxVideoDuration)) {
+        // Лимит времени с учетом количества кругов (videoLoops * maxVideoDuration)
+        const maxDurationCap = (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0)
+            ? (config.videoLoops * config.pinterestMaxVideoDuration)
+            : (config.videoLoops * videoInitialDuration);
+
+        if (currentLoopCount >= config.videoLoops || accumulatedTime >= maxDurationCap) {
             // Циклы или лимит времени завершены, запускаем паузу после видео
             countdownSeconds = config.delayAfterVideo;
             isCountingDown = true;
@@ -1076,43 +1080,43 @@
             const isRatio = (config.pinterestFilterType || 'ratio') === 'ratio';
 
             panel.innerHTML = `
-                ${isPinterest ? `
-                <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,0.03); padding: 6px; border-radius: 8px; border: 1px solid #374151;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: bold; color: #60a5fa;">📌 Pinterest Режим</span>
-                        <label title="Авто разворачивание во весь экран" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:11px;">
-                            <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> FS
-                        </label>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                    ${isPinterest ? `
+                    <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,0.03); padding: 6px; border-radius: 8px; border: 1px solid #374151; flex: 1;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-weight: bold; color: #60a5fa;">📌 Pinterest Режим</span>
+                            <label title="Авто разворачивание во весь экран" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:11px;">
+                                <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> FS
+                            </label>
+                        </div>
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            <span style="color:#9ca3af;">Пин:</span>
+                            <button class="mossad-pmode" data-mode="rand" style="background:${config.pinterestMode === 'rand' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">rand</button>
+                            <button class="mossad-pmode" data-mode="+1" style="background:${config.pinterestMode === '+1' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">+1</button>
+                            <input id="mossad-in-pmode-n" type="number" min="1" max="9" value="${!isNaN(parseInt(config.pinterestMode, 10)) ? config.pinterestMode : '1'}" style="width:30px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="Номер пина 1-9">
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color:#9ca3af;">Тип:</span>
+                            <select id="mossad-sel-ptype" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px; font-size:11px;">
+                                <option value="ratio" ${config.pinterestFilterType === 'ratio' ? 'selected' : ''}>Пропорция %</option>
+                                <option value="all" ${config.pinterestFilterType === 'all' ? 'selected' : ''}>Все</option>
+                                <option value="image" ${config.pinterestFilterType === 'image' ? 'selected' : ''}>Только Фото</option>
+                                <option value="video" ${config.pinterestFilterType === 'video' ? 'selected' : ''}>Только Видео</option>
+                            </select>
+                        </div>
+                        ${isRatio ? `
+                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
+                            <label style="display:flex; align-items:center; gap:2px;">🖼 Фото %: <input id="mossad-in-photo-pct" type="number" min="0" max="100" value="${config.pinterestPhotoPercent ?? 50}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
+                            <label style="display:flex; align-items:center; gap:2px;">🎬 Видео %: <input id="mossad-in-video-pct" type="number" min="0" max="100" value="${100 - (config.pinterestPhotoPercent ?? 50)}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
+                        </div>
+                        ` : ''}
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <label title="Макс. длительность видео в секундах (0 = без лимита)" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                                Макс. видео (сек): <input id="mossad-in-vmax" type="number" min="0" max="999" value="${config.pinterestMaxVideoDuration || 0}" style="width:40px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;">
+                            </label>
+                        </div>
                     </div>
-                    <div style="display: flex; gap: 4px; align-items: center;">
-                        <span style="color:#9ca3af;">Пин:</span>
-                        <button class="mossad-pmode" data-mode="rand" style="background:${config.pinterestMode === 'rand' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">rand</button>
-                        <button class="mossad-pmode" data-mode="+1" style="background:${config.pinterestMode === '+1' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">+1</button>
-                        <input id="mossad-in-pmode-n" type="number" min="1" max="9" value="${!isNaN(parseInt(config.pinterestMode, 10)) ? config.pinterestMode : '1'}" style="width:30px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="Номер пина 1-9">
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="color:#9ca3af;">Тип:</span>
-                        <select id="mossad-sel-ptype" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px; font-size:11px;">
-                            <option value="ratio" ${config.pinterestFilterType === 'ratio' ? 'selected' : ''}>Пропорция %</option>
-                            <option value="all" ${config.pinterestFilterType === 'all' ? 'selected' : ''}>Все</option>
-                            <option value="image" ${config.pinterestFilterType === 'image' ? 'selected' : ''}>Только Фото</option>
-                            <option value="video" ${config.pinterestFilterType === 'video' ? 'selected' : ''}>Только Видео</option>
-                        </select>
-                    </div>
-                    ${isRatio ? `
-                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
-                        <label style="display:flex; align-items:center; gap:2px;">🖼 Фото %: <input id="mossad-in-photo-pct" type="number" min="0" max="100" value="${config.pinterestPhotoPercent ?? 50}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
-                        <label style="display:flex; align-items:center; gap:2px;">🎬 Видео %: <input id="mossad-in-video-pct" type="number" min="0" max="100" value="${100 - (config.pinterestPhotoPercent ?? 50)}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
-                    </div>
-                    ` : ''}
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <label title="Макс. длительность видео в секундах (0 = без лимита)" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-                            Макс. видео (сек): <input id="mossad-in-vmax" type="number" min="0" max="999" value="${config.pinterestMaxVideoDuration || 0}" style="width:40px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;">
-                        </label>
-                    </div>
-                </div>
-                ` : `
-                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    ` : `
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
                         <button class="mossad-dpad" data-dir="up" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">▲</button>
                         <div style="display: flex; gap: 2px;">
@@ -1121,19 +1125,19 @@
                             <button class="mossad-dpad" data-dir="right" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">▶</button>
                         </div>
                     </div>
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <label title="Круги видео" style="display:flex; justify-content:space-between; align-items:center; width:90px;">
+                    `}
+                    <div style="display: flex; flex-direction: column; gap: 4px; min-width: 95px;">
+                        <label title="Круги видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
                             Видео (↺): <input id="mossad-in-loops" type="number" min="1" max="100" value="${config.videoLoops}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
-                        <label title="Задержка фото" style="display:flex; justify-content:space-between; align-items:center; width:90px;">
+                        <label title="Задержка фото" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
                             Фото (сек): <input id="mossad-in-pdelay" type="number" min="1" max="999" value="${config.slideshowDelay}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
-                        <label title="Пауза после видео" style="display:flex; justify-content:space-between; align-items:center; width:90px;">
+                        <label title="Пауза после видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
                             Пауза (сек): <input id="mossad-in-vdelay" type="number" min="0" max="999" value="${config.delayAfterVideo}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                     </div>
                 </div>
-                `}
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <select id="mossad-sel-dl" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
@@ -1210,11 +1214,11 @@
                 if (cbFS) {
                     cbFS.onchange = (e) => Settings.set('pinterestAutoFS', e.target.checked);
                 }
-            } else {
-                panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, parseInt(e.target.value) || 1)), 300);
-                panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(1, parseInt(e.target.value) || 12)), 300);
-                panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, parseInt(e.target.value) || 2)), 300);
             }
+            // Инпуты таймеров (Видео круги, Фото задержка, Пауза после видео) доступны ВСЕГДА
+            panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, parseInt(e.target.value) || 1)), 300);
+            panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(1, parseInt(e.target.value) || 12)), 300);
+            panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, parseInt(e.target.value) || 2)), 300);
             panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
             panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
@@ -1345,7 +1349,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v1.2.4 · 2026-08-11</span>
+              <span>v1.2.5 · 2026-08-11</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
