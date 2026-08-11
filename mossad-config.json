@@ -5,7 +5,7 @@
   "slideshowDirections": [
     "up"
   ],
-  "videoLoops": 1,
+  "videoLoops": 2,
   "slideshowDelay": 10,
   "delayAfterVideo": 2,
   "downloadType": "none",
