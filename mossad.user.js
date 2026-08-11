@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.5
+// @version      1.2.6
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.5] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.6] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -864,19 +864,43 @@
     // ============================================
     // PINTEREST ENGINE & AUTO FULLSCALE
     // ============================================
+    function clickElementFull(el) {
+        if (!el) return;
+        ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {
+            try {
+                el.dispatchEvent(new MouseEvent(evtType, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    buttons: 1
+                }));
+            } catch (e) {}
+        });
+        if (typeof el.click === 'function') {
+            try { el.click(); } catch(e) {}
+        }
+    }
+
     function triggerPinterestFullScale() {
         if (!rootDomain.includes('pinterest.') || !config.pinterestAutoFS) return;
-        setTimeout(() => {
-            let btn = document.querySelector('[aria-label="Показать в полном масштабе"], [title="Показать в полном масштабе"]');
+        
+        let attempts = 0;
+        const interval = setInterval(() => {
+            attempts++;
+            let btn = document.querySelector('[aria-label="Показать в полном масштабе"], [title="Показать в полном масштабе"], [aria-label*="полном масштабе"]');
             if (!btn) {
-                const svg = document.querySelector('svg[aria-label="Показать в полном масштабе"]');
-                if (svg) btn = svg.closest('button') || svg;
+                const svg = document.querySelector('svg[aria-label*="полном масштабе"]');
+                if (svg) btn = svg.closest('[role="button"]') || svg.closest('button') || svg;
             }
+            
             if (btn) {
-                btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                console.log('%c[MOSSAD] Auto FullScale clicked', 'color:#3b82f6;');
+                clickElementFull(btn);
+                console.log('%c[MOSSAD] Auto FullScale clicked target element', 'color:#3b82f6;', btn);
+                clearInterval(interval);
+            } else if (attempts >= 25) { // Ожидание до 5 секунд (25 x 200ms)
+                clearInterval(interval);
             }
-        }, 600);
+        }, 200);
     }
 
     function getPinterestCandidatePins() {
@@ -1349,7 +1373,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v1.2.5 · 2026-08-11</span>
+              <span>v1.2.6 · 2026-08-11</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
