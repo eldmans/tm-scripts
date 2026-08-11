@@ -1,25 +1,10 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.18
+// @version      1.0.19
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
-// @match        *://grok.com/*
-// @match        *://*.grok.com/*
-// @match        *://civitai.red/*
-// @match        *://*.civitai.red/*
-// @match        *://vkvideo.ru/*
-// @match        *://*.vkvideo.ru/*
-// @match        *://vk.video/*
-// @match        *://*.vk.video/*
-// @match        *://*.pinterest.com/*
-// @match        *://*.pinterest.ru/*
-// @match        *://*.pinterest.*/*
-// @match        *://hot.noodlemagazine.com/*
-// @match        *://*.noodlemagazine.com/*
-// @match        *://noodlemagazine.com/*
-// @match        *://redgifs.com/*
-// @match        *://*.redgifs.com/*
+// @match        *://*/*
 // @grant        GM_openInTab
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
@@ -46,6 +31,32 @@
     const rootDomain = getRootDomain(hostname);
     const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
 
+    // Загрузка конфига из localStorage для проверки allowedDomains
+    const _quickCfg = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } })();
+    const _allowedDomains = _quickCfg.allowedDomains || ['grok.com','redgifs.com','pinterest.com','pinterest.ru','civitai.red','vkvideo.ru','vk.video','noodlemagazine.com'];
+    const _isAllowed = _allowedDomains.some(d => hostname.includes(d.split('/')[0]));
+    if (!_isAllowed) {
+        // Показываем маленькую кнопку «+ Добавить сайт в MOSSAD»
+        document.addEventListener('DOMContentLoaded', () => {
+            const btn = document.createElement('button');
+            btn.id = 'mossad-add-site';
+            btn.textContent = '➕ MOSSAD';
+            btn.title = 'Добавить этот сайт в MOSSAD';
+            btn.style.cssText = 'position:fixed;bottom:12px;right:12px;z-index:9999999;background:rgba(20,20,20,0.85);color:#60a5fa;border:1px solid #374151;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;font-family:system-ui;backdrop-filter:blur(8px);';
+            btn.onclick = () => {
+                const cfg = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } })();
+                const domains = cfg.allowedDomains || _allowedDomains;
+                if (!domains.includes(hostname)) domains.push(hostname);
+                cfg.allowedDomains = domains;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+                btn.textContent = '✅ Добавлено! Перезагрузи страницу';
+                btn.style.color = '#10b981';
+            };
+            document.body.appendChild(btn);
+        });
+        return; // Выход — сайт не в списке
+    }
+
     // ============================================
     // СИСТЕМА НАСТРОЕК
     // ============================================
@@ -63,6 +74,9 @@
         stopOnBrsrSwitch: false,
         deleteAutoconfirm: false,
         deleteHoldpost: false,
+        allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com'],
+        githubToken: '',
+        githubConfigPath: 'mossad-config.json',
         
         hk: {
             download:       [
@@ -111,12 +125,154 @@
         save: () => {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
             if (window.updateWidgetUI) window.updateWidgetUI();
+            scheduleSyncPush(); // Запускаем батч-синхронизацию
         },
         set: (key, val) => {
             config[key] = val;
             Settings.save();
         },
     };
+
+    // ============================================
+    // GITHUB SYNC
+    // ============================================
+    const GITHUB_OWNER = 'eldmans';
+    const GITHUB_REPO = 'tm-scripts';
+    const GITHUB_BRANCH = 'grok';
+
+    let _syncQueue = []; // батч изменений
+    let _syncTimer = null;
+    let _syncStatusEl = null;
+
+    function getSyncStatusEl() {
+        if (!_syncStatusEl || !document.body.contains(_syncStatusEl)) {
+            _syncStatusEl = document.createElement('div');
+            _syncStatusEl.id = 'mossad-sync-status';
+            _syncStatusEl.style.cssText = `position:fixed;bottom:8px;right:8px;z-index:9999998;font-size:11px;padding:3px 8px;border-radius:6px;background:rgba(15,15,15,0.85);backdrop-filter:blur(6px);border:1px solid #374151;color:#9ca3af;font-family:system-ui;pointer-events:none;transition:opacity 0.3s;opacity:0;`;
+            document.body.appendChild(_syncStatusEl);
+        }
+        return _syncStatusEl;
+    }
+
+    function showSyncStatus(text, color = '#9ca3af', autoHide = false) {
+        const el = getSyncStatusEl();
+        el.textContent = text;
+        el.style.color = color;
+        el.style.opacity = '1';
+        if (autoHide) setTimeout(() => { el.style.opacity = '0'; }, 3000);
+    }
+
+    async function pushConfigToGitHub() {
+        if (!config.githubToken) return;
+        const token = config.githubToken;
+        const path = config.githubConfigPath || 'mossad-config.json';
+        const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
+        
+        // Получаем текущий SHA файла
+        let sha = null;
+        try {
+            const res = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: apiUrl,
+                    headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' },
+                    onload: resolve,
+                    onerror: reject
+                });
+            });
+            if (res.status === 200) {
+                const data = JSON.parse(res.responseText);
+                sha = data.sha;
+            }
+        } catch (e) {}
+        
+        // Экспортируем конфиг без токена
+        const exportCfg = JSON.parse(JSON.stringify(config));
+        delete exportCfg.githubToken;
+        const content = btoa(unescape(encodeURIComponent(JSON.stringify(exportCfg, null, 2))));
+        
+        const body = JSON.stringify({
+            message: `mossad: sync config from ${hostname}`,
+            content,
+            branch: GITHUB_BRANCH,
+            ...(sha ? { sha } : {})
+        });
+        
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'PUT',
+                url: apiUrl,
+                headers: { 'Authorization': `token ${token}`, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github.v3+json' },
+                data: body,
+                onload: (res) => {
+                    if (res.status >= 200 && res.status < 300) resolve();
+                    else reject(new Error(`HTTP ${res.status}: ${res.responseText}`));
+                },
+                onerror: reject
+            });
+        });
+    }
+
+    async function pullConfigFromGitHub() {
+        if (!config.githubToken) return;
+        const token = config.githubToken;
+        const path = config.githubConfigPath || 'mossad-config.json';
+        const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}?t=${Date.now()}`;
+        
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: apiUrl,
+                headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' },
+                onload: (res) => {
+                    if (res.status === 200) {
+                        try {
+                            const data = JSON.parse(res.responseText);
+                            const decoded = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\n/g, '')))));
+                            // Применяем конфиг, сохраняя локальный токен
+                            const token = config.githubToken;
+                            Object.assign(config, decoded);
+                            config.githubToken = token;
+                            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+                            if (window.updateWidgetUI) window.updateWidgetUI();
+                            resolve(true);
+                        } catch (e) { reject(e); }
+                    } else {
+                        reject(new Error(`HTTP ${res.status}`));
+                    }
+                },
+                onerror: reject
+            });
+        });
+    }
+
+    // Отложенный батч-пуш
+    function scheduleSyncPush() {
+        if (!config.githubToken) return;
+        if (_syncTimer) clearTimeout(_syncTimer);
+        showSyncStatus('🔄 Синхронизация...', '#f59e0b');
+        
+        _syncTimer = setTimeout(async () => {
+            try {
+                await pushConfigToGitHub();
+                showSyncStatus('✅ Синхронизировано', '#10b981', true);
+            } catch (e) {
+                showSyncStatus('⚠️ Ошибка синхронизации', '#ef4444');
+                console.error('[MOSSAD Sync] Push failed:', e);
+            }
+        }, 2000); // Батчим: ждём 2 секунды после последнего изменения
+    }
+
+    // Проверка при старте
+    async function checkAndPullOnStartup() {
+        if (!config.githubToken) return;
+        try {
+            const pulled = await pullConfigFromGitHub();
+            if (pulled) showSyncStatus('✅ Конфиг обновлён', '#10b981', true);
+        } catch (e) {
+            // Тихо — возможно нет файла ещё
+        }
+    }
 
     window.addEventListener('storage', (ev) => {
         if (ev.key !== STORAGE_KEY || window.capturingFor !== null) return;
@@ -888,7 +1044,17 @@
         
         modal.innerHTML = `
             <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
-            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.0.18 · 2026-08-11 01:45</div>
+            <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
+              <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">GitHub Sync Token:</div>
+              <div style="display:flex;gap:6px;">
+                <input id="mossad-gh-token" type="password" placeholder="github_pat_..." 
+                  style="flex:1;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:4px 8px;font-size:12px;" 
+                  value="${config.githubToken || ''}">
+                <button id="mossad-gh-save" style="background:#3b82f6;border:none;border-radius:4px;color:#fff;padding:4px 10px;cursor:pointer;font-size:12px;">💾</button>
+                <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">⬇</button>
+              </div>
+            </div>
+            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.0.19 · 2026-08-11 03:55</div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold;">↺ Клавиши по умолчанию</button>
@@ -910,53 +1076,105 @@
             const label = document.createElement('span');
             label.textContent = keysMap[k];
             label.style.fontSize = '13px';
+            label.style.flex = '1';
             
-            const btn = document.createElement('button');
-            btn.style.cssText = `background:#374151; border:none; color:#3b82f6; padding:4px 10px; border-radius:4px; cursor:pointer; min-width:80px; font-weight:bold; font-size:12px;`;
+            const slotsContainer = document.createElement('div');
+            slotsContainer.style.cssText = 'display:flex; gap:6px; align-items:center;';
             
-            let currentHk = config.hk[k];
-            if (Array.isArray(currentHk)) currentHk = currentHk[0]; // Показываем первую комбинацию
-            btn.textContent = formatHotkey(currentHk);
+            let hkArr = Array.isArray(config.hk[k]) ? [...config.hk[k]] : [config.hk[k], null];
+            while (hkArr.length < 2) hkArr.push(null);
             
-            btn.onclick = () => {
-                btn.textContent = 'Нажмите клавишу...';
-                btn.style.color = '#ef4444';
+            const createSlot = (slotIndex) => {
+                const slotDiv = document.createElement('div');
+                slotDiv.style.cssText = 'display:flex; gap:2px; align-items:center;';
                 
-                window.capturingFor = k;
-                const handler = (e) => {
-                    e.preventDefault(); e.stopPropagation();
+                const btn = document.createElement('button');
+                btn.style.cssText = `background:#374151; border:none; color:#3b82f6; padding:4px 10px; border-radius:4px; cursor:pointer; min-width:60px; font-weight:bold; font-size:12px; text-align:center;`;
+                btn.textContent = formatHotkey(hkArr[slotIndex]);
+                
+                const resetBtn = document.createElement('button');
+                resetBtn.innerHTML = '↺';
+                resetBtn.title = 'Сброс слота';
+                resetBtn.style.cssText = `background:transparent; border:none; color:#9ca3af; cursor:pointer; padding:0 2px; font-size:12px;`;
+                
+                const disableBtn = document.createElement('button');
+                disableBtn.innerHTML = '—';
+                disableBtn.title = 'Отключить слот';
+                disableBtn.style.cssText = `background:transparent; border:none; color:#ef4444; cursor:pointer; padding:0 2px; font-size:12px; font-weight:bold;`;
+                
+                btn.onclick = () => {
+                    btn.textContent = '...';
+                    btn.style.color = '#ef4444';
                     
-                    // Игнорируем одиночные нажатия модификаторов — ждём основную клавишу
-                    if (['Control', 'Shift', 'Alt', 'Meta', 'AltGraph'].includes(e.key)) return;
-                    
-                    document.removeEventListener('keydown', handler, true);
-                    window.capturingFor = null;
-                    
-                    if (e.key === 'Escape') {
-                        btn.textContent = formatHotkey(currentHk);
+                    window.capturingFor = k;
+                    const handler = (e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        if (['Control', 'Shift', 'Alt', 'Meta', 'AltGraph'].includes(e.key)) return;
+                        
+                        document.removeEventListener('keydown', handler, true);
+                        window.capturingFor = null;
+                        
+                        if (e.key === 'Escape') {
+                            btn.textContent = formatHotkey(hkArr[slotIndex]);
+                            btn.style.color = '#3b82f6';
+                            return;
+                        }
+                        
+                        const newHk = { key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
+                        hkArr[slotIndex] = newHk;
+                        config.hk[k] = hkArr;
+                        Settings.save();
+                        
+                        btn.textContent = formatHotkey(newHk);
                         btn.style.color = '#3b82f6';
-                        return;
-                    }
-                    
-                    const newHk = { key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
-                    if (Array.isArray(config.hk[k])) {
-                        config.hk[k] = [newHk];
-                    } else {
-                        config.hk[k] = newHk;
-                    }
-                    Settings.save();
-                    
-                    btn.textContent = formatHotkey(newHk);
-                    btn.style.color = '#3b82f6';
+                    };
+                    document.addEventListener('keydown', handler, true);
                 };
-                document.addEventListener('keydown', handler, true);
+                
+                resetBtn.onclick = () => {
+                    const defArr = Array.isArray(DEFAULT_CONFIG.hk[k]) ? DEFAULT_CONFIG.hk[k] : [DEFAULT_CONFIG.hk[k], null];
+                    const defHk = slotIndex < defArr.length ? defArr[slotIndex] : null;
+                    hkArr[slotIndex] = defHk;
+                    config.hk[k] = hkArr;
+                    Settings.save();
+                    btn.textContent = formatHotkey(defHk);
+                };
+                
+                disableBtn.onclick = () => {
+                    hkArr[slotIndex] = null;
+                    config.hk[k] = hkArr;
+                    Settings.save();
+                    btn.textContent = formatHotkey(null);
+                };
+                
+                slotDiv.append(btn, resetBtn, disableBtn);
+                return slotDiv;
             };
             
-            row.append(label, btn);
+            slotsContainer.append(createSlot(0), createSlot(1));
+            row.append(label, slotsContainer);
             list.append(row);
         });
         
         document.body.appendChild(modal);
+        
+        modal.querySelector('#mossad-gh-save').onclick = () => {
+            config.githubToken = modal.querySelector('#mossad-gh-token').value.trim();
+            Settings.save();
+            showToast('✅ Токен сохранён');
+        };
+        modal.querySelector('#mossad-gh-pull').onclick = async () => {
+            showSyncStatus('🔄 Получение конфига...', '#f59e0b');
+            try {
+                await pullConfigFromGitHub();
+                showToast('✅ Конфиг получен с GitHub');
+                modal.remove();
+                openHotkeySettings();
+            } catch (e) {
+                showToast('❌ Ошибка: ' + e.message, true);
+            }
+        };
+
         modal.querySelector('#mossad-hk-close').onclick = () => modal.remove();
         modal.querySelector('#mossad-hk-reset').onclick = () => {
             if (!confirm('Сбросить все горячие клавиши по умолчанию?')) return;
@@ -1038,5 +1256,8 @@
             window.location.href = 'https://grok.com/imagine/saved';
         }
     }, true);
+
+    // Проверяем GitHub при старте (с задержкой чтобы не мешать загрузке)
+    setTimeout(checkAndPullOnStartup, 3000);
 
 })();
