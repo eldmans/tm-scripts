@@ -8,7 +8,7 @@
   "videoLoops": 1,
   "slideshowDelay": 10,
   "delayAfterVideo": 2,
-  "downloadType": "video",
+  "downloadType": "none",
   "pdAction": "up",
   "stopOnTabSwitch": true,
   "stopOnBrsrSwitch": false,
