@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.11
+// @version      1.2.12
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.11] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.12] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -467,7 +467,45 @@
     }
 
     function findMediaForDownload() {
+    function getPinterestMainPinData() {
+        try {
+            const scripts = document.querySelectorAll('script');
+            for (const s of scripts) {
+                const txt = s.textContent || '';
+                if (!txt || !txt.includes('PinResource')) continue;
+
+                if (txt.includes('auth_web_main_pin')) {
+                    const hasVideos = /"videos"\s*:\s*\{/i.test(txt) || /"video_list"\s*:\s*\{/i.test(txt);
+                    const hasNoVideos = /"videos"\s*:\s*null/i.test(txt) && /"story_pin_data"\s*:\s*null/i.test(txt);
+                    
+                    let bestMp4Url = null;
+                    if (hasVideos) {
+                        const mp4Matches = txt.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+?\.mp4/g) ||
+                                           txt.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"',]+?\.mp4/g);
+                        if (mp4Matches && mp4Matches.length > 0) {
+                            bestMp4Url = mp4Matches[0].replace(/\\\/`/g, '/').replace(/\\\//g, '/');
+                        }
+                    }
+
+                    return {
+                        isFound: true,
+                        type: hasVideos ? 'video' : (hasNoVideos ? 'image' : 'unknown'),
+                        bestMp4Url: bestMp4Url
+                    };
+                }
+            }
+        } catch (e) {
+            console.error('[MOSSAD] PinResource JSON parse error:', e);
+        }
+        return { isFound: false, type: 'unknown', bestMp4Url: null };
+    }
+
+    function getMediaToDownload() {
         if (rootDomain.includes('pinterest.')) {
+            const mainPin = getPinterestMainPinData();
+            if (mainPin.bestMp4Url) {
+                return { urls: [mainPin.bestMp4Url], type: 'video' };
+            }
             const scripts = Array.from(document.querySelectorAll('script'));
             for (const s of scripts) {
                 const txt = s.textContent || '';
@@ -778,8 +816,13 @@
         const expected = sessionStorage.getItem('mossad_expected_type');
         if (expected === 'video' || expected === 'image') return expected;
 
-        if (rootDomain.includes('pinterest.') && config.pinterestFilterType === 'video') {
-            return 'video';
+        if (rootDomain.includes('pinterest.')) {
+            const pinData = getPinterestMainPinData();
+            if (pinData.isFound && (pinData.type === 'video' || pinData.type === 'image')) {
+                return pinData.type;
+            }
+            if (config.pinterestFilterType === 'video') return 'video';
+            if (config.pinterestFilterType === 'image') return 'image';
         }
 
         // Проверяем видеоплееры Pinterest (duplo-hls-video, story-pin, idea-pin, progress-bar, кнопки звука)
@@ -804,8 +847,17 @@
         if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         
         const detectedType = getPinMediaType();
-        const video = getActiveVideo();
         
+        if (detectedType === 'image') {
+            // Мгновенный запуск фото-таймера на 0 миллисекунде без ожиданий!
+            sessionStorage.removeItem('mossad_expected_type');
+            countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
+            isCountingDown = true;
+            runPhotoTimer();
+            return;
+        }
+
+        const video = getActiveVideo();
         if (video) {
             if (isNaN(video.duration) || video.duration === 0) {
                 if (retryCount > 40) { // До 8 секунд ожидания параметров длительности видео
@@ -826,13 +878,13 @@
             lastRAFTime = performance.now();
             rafId = requestAnimationFrame(checkVideoLoops);
         } else {
-            // На Пинтересте или при обнаружении видео-контейнера ждем до 10 секунд (100 попыток x 100мс) гидратации <video>
-            const isVideoExpected = (detectedType === 'video' || rootDomain.includes('pinterest.'));
-            const maxWaitAttempts = isVideoExpected ? 100 : 30;
+            // Ожидание монтирования <video> (для видео-пинов)
+            const isVideoExpected = (detectedType === 'video' || (rootDomain.includes('pinterest.') && config.pinterestFilterType === 'video'));
+            const maxWaitAttempts = isVideoExpected ? 80 : 30; // 8 сек для видео, 3 сек для неизвестных
 
             if (retryCount < maxWaitAttempts) {
                 if (isVideoExpected && retryCount % 10 === 0) {
-                    showToast(`⏳ Загрузка HLS видео-плеера... (${Math.floor(retryCount / 10)}/10с)`);
+                    showToast(`⏳ Загрузка HLS видео-плеера... (${Math.floor(retryCount / 10)}/8с)`);
                 }
                 slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 100);
                 return;
