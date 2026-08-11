@@ -688,7 +688,11 @@
         if (!slideshowActive) {
             slideshowActive = true;
             slideshowPaused = false;
-            if (window.widgetState === 'hidden') window.widgetState = 'bar';
+            // Закрываем модальное окно настроек горячих клавиш (если открыто)
+            const hkModal = document.getElementById('mossad-hk-modal');
+            if (hkModal) hkModal.remove();
+            // Сворачиваем виджет в компактную полоску (bar)
+            window.widgetState = 'bar';
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleNextSlideCycle(0);
         } else {
