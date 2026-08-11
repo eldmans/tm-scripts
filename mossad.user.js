@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.6
+// @version      1.2.7
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.6] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.7] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -85,6 +85,7 @@
         pinterestMaxVideoDuration: 0,      // макс длительность видео в сек (0 = без лимита)
         pinterestAutoFS: true,             // авто разворачивание во весь экран
         pinterestHistory: [],              // история до 100 посещенных URL
+        pinterestHistoryIdx: -1,           // текущий индекс в истории (как в Проводнике)
         
         hk: {
             download:       [
@@ -100,6 +101,8 @@
             slideshowPanel: { key: 'Insert',     ctrl: true,  alt: false, shift: false },
             slideshowStart: { key: 'Insert',     ctrl: false, alt: false, shift: false },
             focusWidget:    { key: 'F7',         ctrl: false, alt: false, shift: false },
+            nextSlide:      { key: ' ',          ctrl: false, alt: false, shift: false }, // Пробел — сдвинуть слайд
+            duplicateNext:  { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
         }
     };
 
@@ -931,24 +934,38 @@
 
     function selectNextPinterestPin(direction) {
         if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
+        let idx = typeof config.pinterestHistoryIdx === 'number' ? config.pinterestHistoryIdx : config.pinterestHistory.length - 1;
 
         if (direction === 'prev') {
-            if (config.pinterestHistory.length > 0) {
-                const prevUrl = config.pinterestHistory.pop();
+            if (idx > 0) {
+                idx--;
+                config.pinterestHistoryIdx = idx;
                 Settings.save();
-                showToast('◀ Переход назад по истории');
-                window.location.href = prevUrl;
+                showToast(`◀ Назад по истории (${idx + 1}/${config.pinterestHistory.length})`);
+                window.location.href = config.pinterestHistory[idx];
                 return;
             } else {
-                showToast('⚠️ История просмотров пуста', true);
+                showToast('⚠️ Вы в самом начале истории просмотров', true);
                 return;
             }
         }
 
-        // Записываем текущий URL в историю
-        if (!config.pinterestHistory.includes(location.href)) {
+        // direction === 'next'
+        // Если мы отматывали назад и находимся НЕ на самой вершине стека: идем вперед по истории (как в Проводнике)
+        if (idx >= 0 && idx < config.pinterestHistory.length - 1) {
+            idx++;
+            config.pinterestHistoryIdx = idx;
+            Settings.save();
+            showToast(`▶ Вперед по истории (${idx + 1}/${config.pinterestHistory.length})`);
+            window.location.href = config.pinterestHistory[idx];
+            return;
+        }
+
+        // Если мы на самой вершине стека (самом свежем пине): генерируем НОВЫЙ переход!
+        if (config.pinterestHistory.length === 0 || config.pinterestHistory[config.pinterestHistory.length - 1] !== location.href) {
             config.pinterestHistory.push(location.href);
             if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
+            config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
             Settings.save();
         }
 
@@ -980,11 +997,11 @@
             // Случай когда у пина 0 ссылок: возврат назад по истории и вызов другого пина
             if (filtered.length === 0 && candidates.length === 0) {
                 showToast('⚠️ На странице нет ссылок, переход назад...', true);
-                if (config.pinterestHistory.length > 1) {
-                    config.pinterestHistory.pop(); // убираем текущую страницу
-                    const fallbackUrl = config.pinterestHistory.pop();
+                if (config.pinterestHistory.length > 1 && idx > 0) {
+                    idx--;
+                    config.pinterestHistoryIdx = idx;
                     Settings.save();
-                    window.location.href = fallbackUrl;
+                    window.location.href = config.pinterestHistory[idx];
                     return;
                 }
                 filtered = candidates;
@@ -1008,7 +1025,14 @@
 
             const target = maxCandidates[targetIndex];
             if (target) {
-                showToast(`📌 Переход на пин #${targetIndex + 1} (${target.type === 'video' ? '🎬 Видео' : '🖼 Фото'})`);
+                // Если свернули на новый путь — усекаем историю впереди
+                config.pinterestHistory = config.pinterestHistory.slice(0, (config.pinterestHistoryIdx ?? (config.pinterestHistory.length - 1)) + 1);
+                config.pinterestHistory.push(target.url);
+                if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
+                config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
+                Settings.save();
+
+                showToast(`📌 Новый пин #${targetIndex + 1} (${target.type === 'video' ? '🎬 Видео' : '🖼 Фото'})`);
                 window.location.href = target.url;
             } else {
                 showToast('❌ Подходящий пин не найден', true);
@@ -1389,7 +1413,8 @@
         const keysMap = {
             download: 'Скачать (DL)', upscale: 'Улучшить', deleteVid: 'Удалить видео', sound: 'Звук (вкл/выкл)',
             playPause: 'Пауза/Плей', help: 'Настройки клавиш', history: 'История (Grok)', 
-            slideshowPanel: 'Меню слайдшоу', slideshowStart: 'Старт слайдшоу'
+            slideshowPanel: 'Меню слайдшоу', slideshowStart: 'Старт слайдшоу',
+            nextSlide: 'Следующий слайд (Пробел)', duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)'
         };
         
         Object.keys(keysMap).forEach(k => {
@@ -1577,6 +1602,28 @@
         if (hotkeyMatches(e, config.hk.history) && rootDomain === 'grok.com') {
             e.preventDefault();
             window.location.href = 'https://grok.com/imagine/saved';
+        }
+
+        // Принудительный следующий слайд (Пробел)
+        if (hotkeyMatches(e, config.hk.nextSlide)) {
+            if (slideshowActive) {
+                e.preventDefault();
+                showToast('⏭ Принудительный переход...');
+                triggerNextSlide();
+            }
+        }
+
+        // Дублирование страницы в фоновой вкладке + принудительный переход (Ctrl + Пробел)
+        if (hotkeyMatches(e, config.hk.duplicateNext)) {
+            e.preventDefault();
+            if (typeof GM_openInTab === 'function') {
+                GM_openInTab(location.href, { active: false, insert: true });
+                showToast('📑 Открыто во вкладке в фоне + Переход...');
+            } else {
+                window.open(location.href, '_blank');
+                showToast('📑 Открыта вкладка + Переход...');
+            }
+            triggerNextSlide();
         }
 
         // Ручная навигация стрелками на Pinterest (влево/вверх = назад, вправо/вниз = вперед)
