@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.2
+// @version      1.2.3
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.2] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.3] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -1040,7 +1040,15 @@
         btnDL.title = 'Скачать';
         btnDL.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #10b981; cursor: pointer; font-size: 14px; padding: 4px 8px;`;
 
-        topBar.append(timerEl, btnReset, btnStart, btnGear, btnDL);
+        const btnUpdate = document.createElement('button');
+        btnUpdate.innerHTML = '🔄';
+        btnUpdate.title = 'Обновить скрипт с GitHub (Tampermonkey)';
+        btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 14px; padding: 4px 8px; transition: transform 0.2s ease;`;
+        btnUpdate.onclick = () => {
+            window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
+        };
+
+        topBar.append(timerEl, btnReset, btnStart, btnGear, btnDL, btnUpdate);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -1326,7 +1334,12 @@
                 <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">⬇</button>
               </div>
             </div>
-            <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">v1.2.2 · 2026-08-11</div>
+            <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+              <span>v1.2.3 · 2026-08-11</span>
+              <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
+                 title="Обновить скрипт в Tampermonkey" 
+                 style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
+            </div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold;">↺ Клавиши по умолчанию</button>
