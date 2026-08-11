@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.8
+// @version      1.2.9
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    console.log('%c[MOSSAD v1.2.8] Скрипт загружен', 'color:#10b981; font-weight:bold');
+    console.log('%c[MOSSAD v1.2.9] Скрипт загружен', 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -774,15 +774,34 @@
         }, 500);
     }
 
+    function getPinMediaType() {
+        const expected = sessionStorage.getItem('mossad_expected_type');
+        if (expected === 'video' || expected === 'image') return expected;
+
+        if (document.querySelector('meta[property="og:video"], meta[name="og:video"], meta[name="twitter:card"][content="player"]')) {
+            return 'video';
+        }
+        const ldJsonScripts = document.querySelectorAll('script[type="application/ld+json"]');
+        for (const s of ldJsonScripts) {
+            if ((s.textContent || '').includes('VideoObject')) return 'video';
+        }
+        const stage = document.querySelector('div[data-test-id="closeup-stage"], div[data-test-id="pin-closeup"], div[role="main"]');
+        if (stage) {
+            if (stage.querySelector('video')) return 'video';
+            if (stage.querySelector('img')) return 'image';
+        }
+        return 'unknown';
+    }
+
     function scheduleNextSlideCycle(initSec, retryCount = 0) {
         if (!slideshowActive || slideshowPaused) return;
         if (rafId) cancelAnimationFrame(rafId);
         if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         
-        const expectedType = sessionStorage.getItem('mossad_expected_type');
+        const detectedType = getPinMediaType();
         const video = getActiveVideo();
         
-        if (video) {
+        if (video && detectedType !== 'image') {
             if (isNaN(video.duration) || video.duration === 0) {
                 if (retryCount > 30) { // До 6 секунд ожидания гидратации параметров видео
                      triggerNextSlide();
@@ -802,8 +821,8 @@
             lastRAFTime = performance.now();
             rafId = requestAnimationFrame(checkVideoLoops);
         } else {
-            // Если заходили на пин с Видео, даем до 5 секунд (50 попыток x 100мс) на появление <video> в SPA DOM
-            if (expectedType === 'video' && retryCount < 50) {
+            // Если мы шли на видео или мета-теги сообщают о видео, ждем до 5 секунд (50 попыток x 100мс) появление <video>
+            if (detectedType === 'video' && retryCount < 50) {
                 if (retryCount % 10 === 0) {
                     showToast(`⏳ Загрузка видео-плеера... (${Math.floor(retryCount / 10)}/5с)`);
                 }
