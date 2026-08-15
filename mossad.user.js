@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.25
+// @version      1.2.26
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.25';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.26';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -492,10 +492,25 @@
 
     /** Извлекает email из Next.js Flight данных на странице */
     function grokExtractEmail() {
+        // 1. window.__NEXT_DATA__ (стандартный Next.js)
+        try {
+            const nd = window.__NEXT_DATA__;
+            if (nd) {
+                const str = JSON.stringify(nd);
+                const m = str.match(/"email":"([^"]+@[^"]+)"/);
+                if (m) return m[1];
+            }
+        } catch(e) {}
+        // 2. Все <script> теги
         for (const s of document.querySelectorAll('script')) {
-            const m = s.textContent.match(/"email"\s*:\s*"([^"]+@[^"]+)"/);
+            const m = s.textContent.match(/"email":"([^"]+@[^"]+)"/);
             if (m) return m[1];
         }
+        // 3. Весь HTML страницы (RSC-чанки, встроенные данные)
+        try {
+            const m = document.documentElement.innerHTML.match(/"email":"([^"]+@[^"]+)"/);
+            if (m) return m[1];
+        } catch(e) {}
         return 'unknown';
     }
 
