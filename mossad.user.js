@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.27
+// @version      1.2.28
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.27';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.28';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -492,23 +492,15 @@
 
     /** Извлекает email из Next.js Flight данных на странице */
     function grokExtractEmail() {
-        // 1. window.__NEXT_DATA__ (стандартный Next.js)
-        try {
-            const nd = window.__NEXT_DATA__;
-            if (nd) {
-                const str = JSON.stringify(nd);
-                const m = str.match(/"email":"([^"]+@[^"]+)"/);
-                if (m) return m[1];
-            }
-        } catch(e) {}
-        // 2. Все <script> теги
+        // Просто находим слово email, затем вытащиваем email-паттерн после него
+        // Работает для "email":"val", \"email\":\"val\", любого варианта
+        const re = /email.{0,6}([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/;
         for (const s of document.querySelectorAll('script')) {
-            const m = s.textContent.match(/"email":"([^"]+@[^"]+)"/);
+            const m = s.textContent.match(re);
             if (m) return m[1];
         }
-        // 3. Весь HTML страницы (RSC-чанки, встроенные данные)
         try {
-            const m = document.documentElement.innerHTML.match(/"email":"([^"]+@[^"]+)"/);
+            const m = document.documentElement.innerHTML.match(re);
             if (m) return m[1];
         } catch(e) {}
         return 'unknown';
@@ -611,54 +603,45 @@
         showToast('⏹ Gallery слайдшоу остановлено');
     }
 
-    /** Инициализация плашки на /imagine/saved */
+    /** Инициализация строки галереи внутри виджета MOSSAD (только на /imagine/saved) */
     function initGrokGalleryBar() {
         if (!isGrokSavedPage()) return;
-        if (document.getElementById('mossad-gallery-bar')) return;
+        if (document.getElementById('mossad-gallery-row')) return;
 
-        const bar = document.createElement('div');
-        bar.id = 'mossad-gallery-bar';
-        bar.style.cssText = `
-            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-            z-index: 999999; display: flex; gap: 8px; align-items: center;
-            background: rgba(15,15,15,0.88); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 14px;
-            padding: 8px 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-            font-family: system-ui, -apple-system, sans-serif;
+        // Дожидаемся контейнера (initWidget вызывается раньше)
+        const container = document.getElementById('mossad-widget-container');
+        if (!container) return;
+
+        // Считываем существующую коллекцию
+        let colCount = 0;
+        try { const d = JSON.parse(localStorage.getItem(GALLERY_COLLECTION_KEY)); colCount = d.links.length || 0; } catch {}
+
+        const row = document.createElement('div');
+        row.id = 'mossad-gallery-row';
+        row.style.cssText = `
+            background: rgba(20,20,20,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 6px 12px;
+            display: flex; align-items: center; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            font-family: system-ui,-apple-system,sans-serif;
         `;
 
         const btnCollect = document.createElement('button');
         btnCollect.id = 'mossad-gallery-collect';
-        btnCollect.textContent = '📋 Собрать';
-        btnCollect.style.cssText = `
-            cursor:pointer; border:none; border-radius:8px; padding:7px 14px;
-            font-weight:700; font-size:13px; background:#1f2937; color:#e5e7eb;
-            transition:all 0.2s ease;
-        `;
-        btnCollect.onmouseenter = () => { if (!btnCollect.dataset.done) btnCollect.style.background='#374151'; };
-        btnCollect.onmouseleave = () => { if (!btnCollect.dataset.done) btnCollect.style.background='#1f2937'; };
+        btnCollect.textContent = colCount > 0 ? `✅ ${colCount}` : '📋 Собрать';
+        btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:${colCount > 0 ? '#065f46' : '#1f2937'};color:#e5e7eb;transition:all 0.2s;`;
         btnCollect.onclick = () => {
             grokSaveCollection(btnCollect);
             btnCollect.dataset.done = '1';
         };
 
-        const btnSS = document.createElement('button');
-        btnSS.id = 'mossad-gallery-ss';
-        // Проверяем — активно ли слайдшоу
         const _ssRaw = localStorage.getItem(GALLERY_SS_KEY);
         const _ssActive = _ssRaw ? (() => { try { return JSON.parse(_ssRaw).active; } catch { return false; } })() : false;
+        const btnSS = document.createElement('button');
+        btnSS.id = 'mossad-gallery-ss';
         btnSS.textContent = _ssActive ? '⏹ Стоп' : '🎲 Слайдшоу';
-        btnSS.style.cssText = `
-            cursor:pointer; border:none; border-radius:8px; padding:7px 14px;
-            font-weight:700; font-size:13px;
-            background:${_ssActive ? '#7f1d1d' : '#1e3a5f'}; color:${_ssActive ? '#fca5a5' : '#93c5fd'};
-            transition:all 0.2s ease;
-        `;
-        btnSS.onmouseenter = () => btnSS.style.opacity = '0.85';
-        btnSS.onmouseleave = () => btnSS.style.opacity = '1';
+        btnSS.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:${_ssActive ? '#7f1d1d' : '#1e3a5f'};color:${_ssActive ? '#fca5a5' : '#93c5fd'};transition:all 0.2s;`;
         btnSS.onclick = () => {
-            const ssRaw = localStorage.getItem(GALLERY_SS_KEY);
-            const active = ssRaw ? (() => { try { return JSON.parse(ssRaw).active; } catch { return false; } })() : false;
+            const active = (() => { try { return JSON.parse(localStorage.getItem(GALLERY_SS_KEY) || '{}').active; } catch { return false; } })();
             if (active) {
                 grokStopGallerySlideshow();
                 btnSS.textContent = '🎲 Слайдшоу';
@@ -668,8 +651,9 @@
             }
         };
 
-        bar.append(btnCollect, btnSS);
-        document.body.appendChild(bar);
+        row.append(btnCollect, btnSS);
+        // Вставляем первой строкой — старая полоска автоматически смещается ниже
+        container.insertBefore(row, container.firstChild);
     }
 
     /** На странице поста — продолжение Gallery Slideshow через стандартный движок MOSSAD */
