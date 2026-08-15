@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.26
+// @version      1.2.27
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.26';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.27';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -672,7 +672,7 @@
         document.body.appendChild(bar);
     }
 
-    /** На странице поста — продолжение Gallery Slideshow */
+    /** На странице поста — продолжение Gallery Slideshow через стандартный движок MOSSAD */
     function grokGallerySlideshowTick() {
         if (!isGrokPostPage()) return;
         const raw = localStorage.getItem(GALLERY_SS_KEY);
@@ -681,13 +681,11 @@
         try { ss = JSON.parse(raw); } catch { return; }
         if (!ss.active) return;
 
-        const delay = (ss.delay || 10) * 1000;
-
         // Показываем индикатор
         const indicator = document.createElement('div');
         indicator.id = 'mossad-gallery-indicator';
         const qLeft  = (ss.queue || []).length;
-        const showed  = (ss.total || 0) - qLeft;
+        const showed = (ss.total || 0) - qLeft;
         indicator.style.cssText = `
             position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
             z-index:999999; background:rgba(15,15,15,0.88); backdrop-filter:blur(12px);
@@ -696,36 +694,22 @@
             color:#9ca3af; display:flex; align-items:center; gap:10px;
             box-shadow:0 4px 20px rgba(0,0,0,0.5);
         `;
-        let countdown = Math.round(delay / 1000);
-        indicator.innerHTML = `<span id="mgi-info">🎲 Круг ${ss.circle} · ${showed}/${ss.total}</span><span id="mgi-cd" style="color:#3b82f6;font-weight:700;min-width:28px;text-align:right">${countdown}с</span><button id="mgi-stop" style="background:#374151;border:none;border-radius:6px;color:#f87171;padding:3px 8px;cursor:pointer;font-size:11px;font-weight:bold;">⏹</button>`;
+        indicator.innerHTML = `<span>🎲 Круг ${ss.circle} · ${showed}/${ss.total}</span><button id="mgi-stop" style="background:#374151;border:none;border-radius:6px;color:#f87171;padding:3px 8px;cursor:pointer;font-size:11px;font-weight:bold;">⏹</button>`;
         document.body.appendChild(indicator);
 
-        const cdEl = indicator.querySelector('#mgi-cd');
-        document.getElementById('mgi-stop').onclick = () => {
-            grokStopGallerySlideshow();
-            clearInterval(cdInterval);
-            clearTimeout(navTimer);
+        // Устанавливаем функцию перехода: её вызовет triggerNextSlide
+        window._mossadGalleryActive = true;
+        window._mossadGalleryNextFn = () => {
             indicator.remove();
-        };
+            window._mossadGalleryActive = false;
+            window._mossadGalleryNextFn = null;
 
-        const cdInterval = setInterval(() => {
-            countdown--;
-            if (cdEl) cdEl.textContent = countdown + 'с';
-        }, 1000);
-
-        const navTimer = setTimeout(() => {
-            clearInterval(cdInterval);
-            indicator.remove();
-
-            // Обновляем очередь
-            let queue = ss.queue || [];
+            let queue  = ss.queue  || [];
             let circle = ss.circle || 1;
 
             if (queue.length === 0) {
-                // Круг закончился
                 playCircleDoneSound();
                 circle++;
-                // Восстанавливаем полный список и перемешиваем заново
                 const colRaw = localStorage.getItem(GALLERY_COLLECTION_KEY);
                 let allLinks = [];
                 if (colRaw) { try { allLinks = JSON.parse(colRaw).links || []; } catch {} }
@@ -738,7 +722,23 @@
             ss.circle = circle;
             localStorage.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
             window.location.href = nextUrl;
-        }, delay);
+        };
+
+        document.getElementById('mgi-stop').onclick = () => {
+            grokStopGallerySlideshow();
+            window._mossadGalleryActive = false;
+            window._mossadGalleryNextFn = null;
+            stopSlideshow();
+            indicator.remove();
+        };
+
+        // Запускаем стандартный движок — он сам разберётся фото/видео/циклы/паузы
+        slideshowActive = true;
+        slideshowPaused = false;
+        sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
+        window.widgetState = 'bar';
+        if (window.updateWidgetUI) window.updateWidgetUI();
+        setTimeout(() => scheduleNextSlideCycle(0), 300);
     }
 
     function fetchBlobFallback(url, filename) {
@@ -1201,6 +1201,19 @@
             }
         }
         
+        // Gallery Slideshow: вместо клавиши — переходим на следующий URL из очереди
+        if (window._mossadGalleryActive && typeof window._mossadGalleryNextFn === 'function') {
+            // Скачивание (если включено) перед переходом
+            if (config.downloadType !== 'none') {
+                const hasVideo = getActiveVideo() !== null;
+                if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
+                    triggerDownload();
+                }
+            }
+            window._mossadGalleryNextFn();
+            return;
+        }
+
         // Pinterest ссылочная навигация
         if (rootDomain.includes('pinterest.')) {
             selectNextPinterestPin('next');
