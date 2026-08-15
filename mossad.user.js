@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.28
+// @version      1.2.29
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.28';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.29';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1567,7 +1567,7 @@
         const container = document.createElement('div');
         container.id = 'mossad-widget-container';
         container.style.cssText = `
-            position: fixed; top: 20px; right: 20px; z-index: 999998;
+            position: fixed; top: ${isGrokSavedPage() ? '72px' : '20px'}; right: 20px; z-index: 999998;
             font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; user-select: none;
             display: flex; flex-direction: column; gap: 4px;
         `;
