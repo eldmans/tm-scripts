@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.24
+// @version      1.2.25
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.24';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.25';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -481,7 +481,250 @@
     }
 
     // Граница: только на странице поста grok.com/imagine/post/... работают DL, Delete, слайдшоу и т.д.
-    const isGrokPostPage = () => rootDomain === 'grok.com' && /\/imagine\/post\//.test(location.pathname);
+    const isGrokPostPage  = () => rootDomain === 'grok.com' && /\/imagine\/post\//.test(location.pathname);
+    const isGrokSavedPage = () => rootDomain === 'grok.com' && /\/imagine\/saved/.test(location.pathname);
+
+    // ============================================================
+    // GROK IMAGINE GALLERY — сбор ссылок + рандомное слайдшоу
+    // ============================================================
+    const GALLERY_COLLECTION_KEY = 'mossad_grok_imagine_collection';
+    const GALLERY_SS_KEY         = 'mossad_grok_imagine_ss';
+
+    /** Извлекает email из Next.js Flight данных на странице */
+    function grokExtractEmail() {
+        for (const s of document.querySelectorAll('script')) {
+            const m = s.textContent.match(/"email"\s*:\s*"([^"]+@[^"]+)"/);
+            if (m) return m[1];
+        }
+        return 'unknown';
+    }
+
+    /** Собирает все уникальные ссылки /imagine/post/... из DOM текущей страницы */
+    function grokCollectLinks() {
+        const links = new Set();
+        document.querySelectorAll('a[href*="/imagine/post/"]').forEach(a => {
+            const href = a.getAttribute('href') || '';
+            if (!href) return;
+            const full = href.startsWith('http') ? href : 'https://grok.com' + href;
+            links.add(full);
+        });
+        return Array.from(links);
+    }
+
+    /** Fisher-Yates перемешивание */
+    function fisherYatesShuffle(arr) {
+        const a = arr.slice();
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    }
+
+    /** Звуковой сигнал окончания круга (до-ми-соль) */
+    function playCircleDoneSound() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            [523, 659, 784].forEach((freq, i) => {
+                const osc = ctx.createOscillator();
+                const g   = ctx.createGain();
+                osc.connect(g); g.connect(ctx.destination);
+                osc.frequency.value = freq;
+                osc.type = 'sine';
+                const t0 = ctx.currentTime + i * 0.18;
+                g.gain.setValueAtTime(0.25, t0);
+                g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.35);
+                osc.start(t0); osc.stop(t0 + 0.35);
+            });
+        } catch(e) { /* AudioContext может быть заблокирован */ }
+    }
+
+    /** Кнопка 1: сохранить коллекцию + скачать .txt */
+    function grokSaveCollection(btnEl) {
+        const links = grokCollectLinks();
+        if (links.length === 0) {
+            showToast('⚠️ Ссылки не найдены. Проскролльте страницу до конца!', true);
+            return;
+        }
+        const email = grokExtractEmail();
+        const date  = new Date().toISOString().slice(0, 10);
+        // Сохраняем в localStorage
+        const saved = { email, date, links };
+        localStorage.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(saved));
+        // Скачиваем .txt
+        const filename = `${email}_${date}_${links.length}_links.txt`;
+        const blob = new Blob([links.join('\n')], { type: 'text/plain' });
+        const url  = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 2000);
+        if (btnEl) {
+            btnEl.textContent = `✅ ${links.length} собрано`;
+            btnEl.style.background = '#065f46';
+        }
+        showToast(`✅ Собрано ${links.length} ссылок → ${filename}`);
+    }
+
+    /** Кнопка 2: запустить рандомное слайдшоу по коллекции */
+    function grokStartGallerySlideshow(btnEl) {
+        const raw = localStorage.getItem(GALLERY_COLLECTION_KEY);
+        if (!raw) {
+            showToast('⚠️ Сначала соберите коллекцию (кнопка 📋)', true);
+            return;
+        }
+        let data;
+        try { data = JSON.parse(raw); } catch { showToast('⚠️ Ошибка чтения коллекции', true); return; }
+        const allLinks = data.links || [];
+        if (allLinks.length === 0) { showToast('⚠️ Коллекция пуста', true); return; }
+
+        const queue = fisherYatesShuffle(allLinks);
+        const ss = { active: true, queue, circle: 1, total: allLinks.length, delay: config.slideshowDelay || 10 };
+        localStorage.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+
+        showToast(`🎲 Слайдшоу: круг 1, ${allLinks.length} генераций`);
+        // Переходим на первый URL
+        const nextUrl = queue.shift();
+        ss.queue = queue;
+        localStorage.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+        setTimeout(() => { window.location.href = nextUrl; }, 300);
+    }
+
+    /** Останавливает Gallery Slideshow */
+    function grokStopGallerySlideshow() {
+        localStorage.removeItem(GALLERY_SS_KEY);
+        showToast('⏹ Gallery слайдшоу остановлено');
+    }
+
+    /** Инициализация плашки на /imagine/saved */
+    function initGrokGalleryBar() {
+        if (!isGrokSavedPage()) return;
+        if (document.getElementById('mossad-gallery-bar')) return;
+
+        const bar = document.createElement('div');
+        bar.id = 'mossad-gallery-bar';
+        bar.style.cssText = `
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+            z-index: 999999; display: flex; gap: 8px; align-items: center;
+            background: rgba(15,15,15,0.88); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 14px;
+            padding: 8px 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+            font-family: system-ui, -apple-system, sans-serif;
+        `;
+
+        const btnCollect = document.createElement('button');
+        btnCollect.id = 'mossad-gallery-collect';
+        btnCollect.textContent = '📋 Собрать';
+        btnCollect.style.cssText = `
+            cursor:pointer; border:none; border-radius:8px; padding:7px 14px;
+            font-weight:700; font-size:13px; background:#1f2937; color:#e5e7eb;
+            transition:all 0.2s ease;
+        `;
+        btnCollect.onmouseenter = () => { if (!btnCollect.dataset.done) btnCollect.style.background='#374151'; };
+        btnCollect.onmouseleave = () => { if (!btnCollect.dataset.done) btnCollect.style.background='#1f2937'; };
+        btnCollect.onclick = () => {
+            grokSaveCollection(btnCollect);
+            btnCollect.dataset.done = '1';
+        };
+
+        const btnSS = document.createElement('button');
+        btnSS.id = 'mossad-gallery-ss';
+        // Проверяем — активно ли слайдшоу
+        const _ssRaw = localStorage.getItem(GALLERY_SS_KEY);
+        const _ssActive = _ssRaw ? (() => { try { return JSON.parse(_ssRaw).active; } catch { return false; } })() : false;
+        btnSS.textContent = _ssActive ? '⏹ Стоп' : '🎲 Слайдшоу';
+        btnSS.style.cssText = `
+            cursor:pointer; border:none; border-radius:8px; padding:7px 14px;
+            font-weight:700; font-size:13px;
+            background:${_ssActive ? '#7f1d1d' : '#1e3a5f'}; color:${_ssActive ? '#fca5a5' : '#93c5fd'};
+            transition:all 0.2s ease;
+        `;
+        btnSS.onmouseenter = () => btnSS.style.opacity = '0.85';
+        btnSS.onmouseleave = () => btnSS.style.opacity = '1';
+        btnSS.onclick = () => {
+            const ssRaw = localStorage.getItem(GALLERY_SS_KEY);
+            const active = ssRaw ? (() => { try { return JSON.parse(ssRaw).active; } catch { return false; } })() : false;
+            if (active) {
+                grokStopGallerySlideshow();
+                btnSS.textContent = '🎲 Слайдшоу';
+                btnSS.style.background = '#1e3a5f'; btnSS.style.color = '#93c5fd';
+            } else {
+                grokStartGallerySlideshow(btnSS);
+            }
+        };
+
+        bar.append(btnCollect, btnSS);
+        document.body.appendChild(bar);
+    }
+
+    /** На странице поста — продолжение Gallery Slideshow */
+    function grokGallerySlideshowTick() {
+        if (!isGrokPostPage()) return;
+        const raw = localStorage.getItem(GALLERY_SS_KEY);
+        if (!raw) return;
+        let ss;
+        try { ss = JSON.parse(raw); } catch { return; }
+        if (!ss.active) return;
+
+        const delay = (ss.delay || 10) * 1000;
+
+        // Показываем индикатор
+        const indicator = document.createElement('div');
+        indicator.id = 'mossad-gallery-indicator';
+        const qLeft  = (ss.queue || []).length;
+        const showed  = (ss.total || 0) - qLeft;
+        indicator.style.cssText = `
+            position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+            z-index:999999; background:rgba(15,15,15,0.88); backdrop-filter:blur(12px);
+            border:1px solid rgba(255,255,255,0.1); border-radius:10px;
+            padding:6px 16px; font-family:system-ui,sans-serif; font-size:12px;
+            color:#9ca3af; display:flex; align-items:center; gap:10px;
+            box-shadow:0 4px 20px rgba(0,0,0,0.5);
+        `;
+        let countdown = Math.round(delay / 1000);
+        indicator.innerHTML = `<span id="mgi-info">🎲 Круг ${ss.circle} · ${showed}/${ss.total}</span><span id="mgi-cd" style="color:#3b82f6;font-weight:700;min-width:28px;text-align:right">${countdown}с</span><button id="mgi-stop" style="background:#374151;border:none;border-radius:6px;color:#f87171;padding:3px 8px;cursor:pointer;font-size:11px;font-weight:bold;">⏹</button>`;
+        document.body.appendChild(indicator);
+
+        const cdEl = indicator.querySelector('#mgi-cd');
+        document.getElementById('mgi-stop').onclick = () => {
+            grokStopGallerySlideshow();
+            clearInterval(cdInterval);
+            clearTimeout(navTimer);
+            indicator.remove();
+        };
+
+        const cdInterval = setInterval(() => {
+            countdown--;
+            if (cdEl) cdEl.textContent = countdown + 'с';
+        }, 1000);
+
+        const navTimer = setTimeout(() => {
+            clearInterval(cdInterval);
+            indicator.remove();
+
+            // Обновляем очередь
+            let queue = ss.queue || [];
+            let circle = ss.circle || 1;
+
+            if (queue.length === 0) {
+                // Круг закончился
+                playCircleDoneSound();
+                circle++;
+                // Восстанавливаем полный список и перемешиваем заново
+                const colRaw = localStorage.getItem(GALLERY_COLLECTION_KEY);
+                let allLinks = [];
+                if (colRaw) { try { allLinks = JSON.parse(colRaw).links || []; } catch {} }
+                queue = fisherYatesShuffle(allLinks);
+                showToast(`🔄 Круг ${circle} начался! (${queue.length} генераций)`);
+            }
+
+            const nextUrl = queue.shift();
+            ss.queue  = queue;
+            ss.circle = circle;
+            localStorage.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+            window.location.href = nextUrl;
+        }, delay);
+    }
 
     function fetchBlobFallback(url, filename) {
         fetch(url).then(res => res.blob()).then(blob => saveBlobToDisk(blob, filename))
@@ -1647,9 +1890,11 @@
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initWidget);
+        document.addEventListener('DOMContentLoaded', () => { initWidget(); initGrokGalleryBar(); grokGallerySlideshowTick(); });
     } else {
         initWidget();
+        initGrokGalleryBar();
+        grokGallerySlideshowTick();
     }
 
     function openHotkeySettings() {
@@ -1676,7 +1921,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-08-11</span>
+              <span>v${SCRIPT_VERSION} · 2026-08-15</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
