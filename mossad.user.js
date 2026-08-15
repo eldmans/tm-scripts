@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.23
+// @version      1.2.24
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.23';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.24';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -104,6 +104,8 @@
             focusWidget:    { key: 'F7',         ctrl: false, alt: false, shift: false },
             nextSlide:      { key: ' ',          ctrl: false, alt: false, shift: false }, // Пробел — сдвинуть слайд
             duplicateNext:  { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
+            rewind:         { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
+            updateScript:   { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
         }
     };
 
@@ -310,7 +312,11 @@
         if (!hk) return false;
         if (Array.isArray(hk)) return hk.some(k => hotkeyMatches(e, k));
         if (!hk.key) return false;
-        return e.key === hk.key && !!e.ctrlKey === !!hk.ctrl && !!e.altKey === !!hk.alt && !!e.shiftKey === !!hk.shift;
+        return e.key === hk.key &&
+            !!e.ctrlKey  === !!hk.ctrl &&
+            !!e.altKey   === !!hk.alt &&
+            !!e.shiftKey === !!hk.shift &&
+            (hk.meta === undefined ? true : !!e.metaKey === !!hk.meta);
     }
 
     // ============================================
@@ -408,6 +414,74 @@
             });
         } else { fetchBlobFallback(url, filename); }
     }
+
+    // ============================================================
+    // GROK: Smart Delete (click "Удалить изображение"/"Удалить видео", auto-confirm, hold-post)
+    // ============================================================
+    function runSmartDelete() {
+        if (rootDomain !== 'grok.com') return;
+        // Определяем текст кнопки удаления по текущему медиа-типу пина
+        const hasVideo = !!getActiveVideo();
+        const deleteBtnLabel = hasVideo ? 'Удалить видео' : 'Удалить изображение';
+
+        // 1. Находим кнопку удаления (предварительно: если hold post — запоминаем URL поста до открытия диалога)
+        let postUrl = null;
+        if (config.deleteHoldpost) {
+            // URL формат /imagine/post/ID/response/RID
+            const m = location.pathname.match(/(\/imagine\/post\/[^/]+)/);
+            if (m) postUrl = m[1];
+        }
+
+        // 2. Находим и кликаем кнопку удаления (ищем по aria-label или текст)
+        const findDelBtn = () => {
+            const all = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]'));
+            return all.find(el => {
+                const txt = (el.textContent || '').trim();
+                const aria = (el.getAttribute('aria-label') || '').trim();
+                return txt === deleteBtnLabel || aria === deleteBtnLabel ||
+                       txt.includes('Удалить') || aria.includes('Удалить') ||
+                       txt.toLowerCase().includes('delete') || aria.toLowerCase().includes('delete');
+            });
+        };
+
+        const delBtn = findDelBtn();
+        if (!delBtn) {
+            showToast('⚠️ Кнопка удаления не найдена на странице', true);
+            return;
+        }
+        delBtn.click();
+        showToast('✕ Удаление...');
+
+        // 3. Автоподтверждение (если включено)
+        if (config.deleteAutoconfirm) {
+            let confirmAttempts = 0;
+            const confirmInterval = setInterval(() => {
+                confirmAttempts++;
+                const confirmBtns = Array.from(document.querySelectorAll('button, [role="button"]'));
+                const confirmBtn = confirmBtns.find(el => {
+                    const txt = (el.textContent || '').trim().toLowerCase();
+                    const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+                    return txt === 'удалить' || aria === 'удалить' ||
+                           txt === 'delete' || aria === 'delete' ||
+                           txt === 'confirm' || txt === 'yes' || aria === 'confirm';
+                });
+                if (confirmBtn) {
+                    confirmBtn.click();
+                    clearInterval(confirmInterval);
+                    // 4. hold post: вернуться на страницу поста после удаления
+                    if (postUrl) {
+                        setTimeout(() => {
+                            window.location.href = postUrl;
+                        }, 800);
+                    }
+                }
+                if (confirmAttempts > 25) clearInterval(confirmInterval); // 5с ожидания
+            }, 200);
+        }
+    }
+
+    // Граница: только на странице поста grok.com/imagine/post/... работают DL, Delete, слайдшоу и т.д.
+    const isGrokPostPage = () => rootDomain === 'grok.com' && /\/imagine\/post\//.test(location.pathname);
 
     function fetchBlobFallback(url, filename) {
         fetch(url).then(res => res.blob()).then(blob => saveBlobToDisk(blob, filename))
@@ -1257,11 +1331,23 @@
         timerEl.id = 'mossad-timer';
         timerEl.style.cssText = `font-family: monospace; font-size: 13px; min-width: 95px; width: auto; white-space: nowrap; text-align: center; color: #9ca3af; padding: 0 4px;`;
         
+        const btnClose = document.createElement('button');
+        btnClose.innerHTML = '✕';
+        btnClose.title = 'Скрыть виджет';
+        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1; transition: color 0.2s;`;
+        btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
+        btnClose.onmouseleave = () => { btnClose.style.color = '#6b7280'; };
+        btnClose.onclick = () => {
+            window.widgetState = 'hidden';
+            window.updateWidgetUI();
+        };
+
         const btnReset = document.createElement('button');
+        btnReset.id = 'mossad-btn-rewind-bar';
         btnReset.innerHTML = '↺';
-        btnReset.title = 'Мотать до начала/конца';
-        btnReset.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 16px; padding: 0 4px;`;
-        
+        btnReset.title = 'Перемотка (Alt+R)';
+        btnReset.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 15px; padding: 0 4px;`;
+
         const btnStart = document.createElement('button');
         btnStart.id = 'mossad-btn-start';
         btnStart.innerHTML = '🚀 Пуск';
@@ -1282,13 +1368,14 @@
 
         const btnUpdate = document.createElement('button');
         btnUpdate.innerHTML = '🔄';
-        btnUpdate.title = 'Обновить скрипт с GitHub (Tampermonkey)';
+        btnUpdate.title = 'Обновить скрипт (Win+Alt+R)';
         btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 14px; padding: 4px 8px; transition: transform 0.2s ease;`;
         btnUpdate.onclick = () => {
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
-        topBar.append(timerEl, btnStart, btnGear, btnDL, btnUpdate);
+        // Порядок: ✕ | …таймер… | 🚀Пуск | ⚙▼ | 💾 | ↺ | 🔄
+        topBar.append(btnClose, timerEl, btnStart, btnGear, btnDL, btnReset, btnUpdate);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -1454,24 +1541,7 @@
                 panel.querySelector('#mossad-cb-aconfirm').onchange = (e) => Settings.set('deleteAutoconfirm', e.target.checked);
                 panel.querySelector('#mossad-cb-holdpost').onchange = (e) => Settings.set('deleteHoldpost', e.target.checked);
             }
-            panel.querySelector('#mossad-btn-rewind').onclick = () => {
-                let oppDir = 'down';
-                if (config.slideshowDirections[0] === 'up') oppDir = 'down';
-                else if (config.slideshowDirections[0] === 'down') oppDir = 'up';
-                else if (config.slideshowDirections[0] === 'left') oppDir = 'right';
-                else if (config.slideshowDirections[0] === 'right') oppDir = 'left';
-                const key = getArrowKey(oppDir);
-                let lastUrl = location.href; let unchangedCount = 0;
-                const interval = setInterval(() => {
-                    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                    setTimeout(() => {
-                        if (location.href === lastUrl) {
-                            unchangedCount++;
-                            if (unchangedCount >= 4) clearInterval(interval);
-                        } else { lastUrl = location.href; unchangedCount = 0; }
-                    }, 60);
-                }, 120);
-            };
+            panel.querySelector('#mossad-btn-rewind').onclick = doRewind;
             panel.querySelector('#mossad-btn-hk').onclick = () => {
                 if (document.getElementById('mossad-hk-modal')) return;
                 openHotkeySettings();
@@ -1494,13 +1564,18 @@
             window.widgetState = window.widgetState === 'panel' ? 'bar' : 'panel';
             window.updateWidgetUI();
         };
-        btnDL.onclick = triggerDownload;
-        btnReset.onclick = () => {
+        // Скачать и удалить: работает только на страницах постов grok.com
+        btnDL.onclick = () => {
+            if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
+            triggerDownload();
+        };
+        const doRewind = () => {
             let oppDir = 'down';
-            if (config.slideshowDirections[0] === 'up') oppDir = 'down';
-            else if (config.slideshowDirections[0] === 'down') oppDir = 'up';
-            else if (config.slideshowDirections[0] === 'left') oppDir = 'right';
-            else if (config.slideshowDirections[0] === 'right') oppDir = 'left';
+            const d0 = (config.slideshowDirections || ['up'])[0];
+            if (d0 === 'up') oppDir = 'down';
+            else if (d0 === 'down') oppDir = 'up';
+            else if (d0 === 'left') oppDir = 'right';
+            else if (d0 === 'right') oppDir = 'left';
             const key = getArrowKey(oppDir);
             let lastUrl = location.href; let unchangedCount = 0;
             const interval = setInterval(() => {
@@ -1513,6 +1588,7 @@
                 }, 60);
             }, 120);
         };
+        btnReset.onclick = doRewind;
 
         window.updateWidgetUI = () => {
             if (window.widgetState === 'hidden') {
@@ -1765,6 +1841,7 @@
         }
 
         if (hotkeyMatches(e, config.hk.download)) {
+            if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
             e.preventDefault();
             triggerDownload();
             // После скачивания — перейти +1 если выбрано
@@ -1779,12 +1856,17 @@
             }
         }
         
+        if (hotkeyMatches(e, config.hk.deleteVid)) {
+            if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
+            e.preventDefault();
+            runSmartDelete();
+        }
+
         if (hotkeyMatches(e, config.hk.sound)) {
             e.preventDefault();
             const video = getActiveVideo();
             if (video) video.muted = !video.muted;
-            
-            // Специфично для RedGifs: кликаем по их кнопке, чтобы UI обновился
+            // Специфично для RedGifs
             if (rootDomain.includes('redgifs.com')) {
                 const btn = document.querySelector('button.SoundButton');
                 if (btn) btn.click();
@@ -1805,6 +1887,16 @@
         if (hotkeyMatches(e, config.hk.history) && rootDomain === 'grok.com') {
             e.preventDefault();
             window.location.href = 'https://grok.com/imagine/saved';
+        }
+
+        // Alt+R: перемотка (Win+Alt+R: обновить скрипт)
+        if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+            e.preventDefault();
+            if (e.metaKey) {
+                window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
+            } else {
+                doRewind();
+            }
         }
 
         // Принудительный следующий слайд (Пробел)
