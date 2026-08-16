@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.31
+// @version      1.2.32
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.31';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.32';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -496,7 +496,7 @@
     function grokExtractEmail() {
         // Просто находим слово email, затем вытащиваем email-паттерн после него
         // Работает для "email":"val", \"email\":\"val\", любого варианта
-        const re = /email.{0,6}([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/;
+        const re = /email[^a-zA-Z0-9]+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/;
         for (const s of document.querySelectorAll('script')) {
             const m = s.textContent.match(re);
             if (m) return m[1];
@@ -555,27 +555,17 @@
         } catch(e) { /* AudioContext может быть заблокирован */ }
     }
 
-    /** Кнопка 1: сохранить коллекцию в sessionStorage + скачать .txt */
+    /** Кнопка 1: сохранить коллекцию в sessionStorage (без скачивания) */
     function grokSaveCollection(btnEl) {
         const items = grokCollectLinks();
         if (items.length === 0) {
             showToast('⚠️ Ссылки не найдены. Проскролльте страницу до конца!', true);
             return;
         }
-        const email = grokExtractEmail();
-        const date  = new Date().toISOString().slice(0, 10);
+        const date   = new Date().toISOString().slice(0, 10);
         const videos = items.filter(i => i.type === 'video').length;
         const photos = items.length - videos;
-        // sessionStorage — только текущая вкладка
-        _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({ email, date, items }));
-        // Скачиваем .txt (url TAB type)
-        const filename = `${email}_${date}_${items.length}_links.txt`;
-        const blob = new Blob([items.map(i => `${i.url}\t${i.type}`).join('\n')], { type: 'text/plain' });
-        const bUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = bUrl; a.download = filename;
-        document.body.appendChild(a); a.click();
-        setTimeout(() => { a.remove(); URL.revokeObjectURL(bUrl); }, 2000);
+        _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({ date, items }));
         if (btnEl) {
             btnEl.textContent = `✅ ${items.length} (📹${videos} 🖼${photos})`;
             btnEl.style.background = '#065f46';
@@ -583,6 +573,25 @@
             btnEl.dataset.collectedCount = String(items.length);
         }
         showToast(`✅ Собрано ${items.length} → 📹${videos} видео, 🖼${photos} фото`);
+    }
+
+    /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */
+    function grokDownloadCollection() {
+        const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
+        if (!raw) { showToast('⚠️ Сначала нажмите «Собрать»', true); return; }
+        let data;
+        try { data = JSON.parse(raw); } catch { showToast('⚠️ Ошибка чтения', true); return; }
+        const items = data.items || [];
+        const email = grokExtractEmail();
+        const date  = data.date || new Date().toISOString().slice(0, 10);
+        const filename = `${email}_${date}_${items.length}_links.txt`;
+        const blob = new Blob([items.map(i => `${i.url}\t${i.type}`).join('\n')], { type: 'text/plain' });
+        const bUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = bUrl; a.download = filename;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { a.remove(); URL.revokeObjectURL(bUrl); }, 2000);
+        showToast(`📥 Скачано: ${filename}`);
     }
 
     /** Кнопка 2: запустить рандомное слайдшоу по коллекции */
@@ -671,7 +680,14 @@
             }
         };
 
-        row.append(btnCollect, btnSS);
+        const btnDl = document.createElement('button');
+        btnDl.id = 'mossad-gallery-dl';
+        btnDl.textContent = '📥';
+        btnDl.title = 'Скачать коллекцию .txt';
+        btnDl.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 8px;font-size:14px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
+        btnDl.onclick = () => grokDownloadCollection();
+
+        row.append(btnCollect, btnSS, btnDl);
         container.insertBefore(row, container.firstChild);
     }
 
