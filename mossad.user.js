@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.32
+// @version      1.2.33
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.32';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.33';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -760,6 +760,45 @@
         window.widgetState = 'bar';
         if (window.updateWidgetUI) window.updateWidgetUI();
         setTimeout(() => scheduleNextSlideCycle(0), 300);
+    }
+
+    /** Клавиши ←→ по коллекции (только если текущий пост есть в списке) */
+    function grokGalleryKeyboardNav() {
+        if (!isGrokPostPage()) return;
+        const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
+        if (!raw) return;
+        let data;
+        try { data = JSON.parse(raw); } catch { return; }
+        const items = data.items || [];
+        if (items.length === 0) return;
+
+        // UUID текущего поста
+        const currentId = location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
+        if (!currentId) return;
+        if (!items.some(it => it.url.includes(currentId))) return; // не наш пост — не перехватываем
+
+        document.addEventListener('keydown', function _gNav(e) {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+
+            // Перепроверяем по актуальному URL
+            const curId = location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
+            const curIdx = curId ? items.findIndex(it => it.url.includes(curId)) : -1;
+            if (curIdx === -1) {
+                document.removeEventListener('keydown', _gNav, true);
+                return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const nextIdx = e.key === 'ArrowRight'
+                ? (curIdx + 1) % items.length
+                : (curIdx - 1 + items.length) % items.length;
+            const next = items[nextIdx];
+            if (next.type) sessionStorage.setItem('mossad_expected_type', next.type);
+            showToast(`←→ ${nextIdx + 1}/${items.length} • ${next.type === 'video' ? '📹' : '🖼'}`);
+            window.location.href = next.url;
+        }, true); // capture — раньше страницы
     }
 
     function fetchBlobFallback(url, filename) {
@@ -1954,11 +1993,12 @@
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { initWidget(); initGrokGalleryBar(); grokGallerySlideshowTick(); });
+        document.addEventListener('DOMContentLoaded', () => { initWidget(); initGrokGalleryBar(); grokGallerySlideshowTick(); grokGalleryKeyboardNav(); });
     } else {
         initWidget();
         initGrokGalleryBar();
         grokGallerySlideshowTick();
+        grokGalleryKeyboardNav();
     }
 
     function openHotkeySettings() {
