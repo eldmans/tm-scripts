@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.29
+// @version      1.2.30
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.29';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.30';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1225,7 +1225,22 @@
             if (config.pinterestFilterType === 'image') return 'image';
         }
 
-        // Проверяем видеоплееры Pinterest (duplo-hls-video, story-pin, idea-pin, progress-bar, кнопки звука)
+        // Быстрое определение по кнопкам Grok (появляются раньше видео-плеера)
+        if (rootDomain === 'grok.com') {
+            const allBtns = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]'));
+            const btnTexts = allBtns.map(el => (el.textContent || '').trim());
+            const btnArias = allBtns.map(el => (el.getAttribute('aria-label') || '').toLowerCase());
+            // "Удалить изображение" — железное подтверждение что это фото
+            if (btnTexts.some(t => t === 'Удалить изображение' || t === 'Delete image')) return 'image';
+            // Видео-признаки по кнопкам
+            if (
+                btnTexts.some(t => t === 'Удалить видео' || t === 'Delete video' || t === 'Продлить' || t === 'Extend') ||
+                btnArias.some(a => a.includes('звук') || a.includes('sound') || a.includes('mute') || a.includes('unmute')) ||
+                allBtns.some(el => /звук/i.test(el.textContent))
+            ) return 'video';
+        }
+
+        // Проверяем видеоплееры (duplo-hls-video, story-pin, idea-pin, кнопки звука)
         if (document.querySelector('video, [data-test-id*="video"], [data-test-id*="story-pin"], [data-test-id*="idea-pin"], [data-test-id*="duplo-hls"], button[aria-label*="звук"], button[aria-label*="Sound"], button[aria-label*="Unmute"], .SoundButton')) {
             return 'video';
         }
