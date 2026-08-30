@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.34
+// @version      1.2.35
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.34';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.35';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1054,6 +1054,12 @@
         _lastDownloadUrl = primaryUrl;
         _lastDownloadTime = now;
         
+        // --- Вспомогательная функция: применить {var[N]} синтаксис ---
+        function applyTplVar(value, len) {
+            return len > 0 ? value.slice(0, len) : value;
+        }
+
+        // --- Базовое имя файла (без шаблона) ---
         let filename;
         if (rootDomain.includes('redgifs.com') && media.itemId) {
             filename = getRedGifsTitleFilename(media.itemId);
@@ -1063,24 +1069,53 @@
             filename = `${titleClean}.${ext}`;
         }
 
-        // Применяем шаблон имени файла, если включён
+        // --- Применяем шаблон имени файла, если включён ---
         if (config.filenameTemplateEnabled && config.filenameTemplate && config.filenameTemplate.trim()) {
             const now2 = new Date();
-            const pad = (n) => String(n).padStart(2, '0');
-            const dateStr = `${now2.getFullYear()}-${pad(now2.getMonth()+1)}-${pad(now2.getDate())}`;
-            const timeStr = `${pad(now2.getHours())}-${pad(now2.getMinutes())}-${pad(now2.getSeconds())}`;
-            const ext = media.type === 'video' ? 'mp4' : 'jpg';
+            const pad2 = (n) => String(n).padStart(2, '0');
+            const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
+            const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
+            const ext2 = media.type === 'video' ? 'mp4' : 'jpg';
             const titleClean2 = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
-            filename = config.filenameTemplate.trim()
-                .replace(/\{title\}/gi, titleClean2)
-                .replace(/\{date\}/gi, dateStr)
-                .replace(/\{time\}/gi, timeStr)
-                .replace(/\{ext\}/gi, ext)
-                .replace(/\{domain\}/gi, rootDomain.replace(/[^a-z0-9._-]/gi, '_'))
-                .replace(/\{n\}/gi, String(Date.now()).slice(-6))
-                .replace(/[\\/:*?"<>|]/g, '_');
-            // Добавить расширение, если не указано в шаблоне
-            if (!filename.includes('.')) filename += `.${ext}`;
+            const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
+            const nStr = String(Date.now()).slice(-6);
+
+            // Словарь переменных (значение без обрезки)
+            const vars = {
+                title: titleClean2,
+                date:  dateStr,
+                time:  timeStr,
+                ext:   ext2,
+                domain: domainClean,
+                n:     nStr,
+            };
+
+            // Регулярка: {varname} или {varname[N]}
+            filename = config.filenameTemplate.trim().replace(
+                /\{(\w+)(?:\[(\d+)\])?\}/gi,
+                (_, name, lenStr) => {
+                    const key = name.toLowerCase();
+                    const val = key in vars ? vars[key] : '';
+                    const len = lenStr ? parseInt(lenStr, 10) : 0;
+                    return applyTplVar(val, len);
+                }
+            ).replace(/[\\/:*?"<>|]/g, '_');
+
+            // Добавить расширение, если шаблон его не содержит
+            if (!filename.includes('.')) filename += `.${ext2}`;
+        }
+
+        // --- Счётчик дубликатов: (001), (002)... ---
+        {
+            // Разбиваем имя на базу и расширение
+            const lastDot = filename.lastIndexOf('.');
+            const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
+            const extPart = lastDot !== -1 ? filename.slice(lastDot) : '';
+            const count = (_filenameCounter.get(base) || 0) + 1;
+            _filenameCounter.set(base, count);
+            if (count > 1) {
+                filename = `${base} (${String(count - 1).padStart(3, '0')})${extPart}`;
+            }
         }
 
         const urls = media.urls;
@@ -1142,6 +1177,7 @@
     let rafId = null;
     let _lastDownloadUrl = null;     // защита от повторного скачивания одного файла
     let _lastDownloadTime = 0;
+    const _filenameCounter = new Map(); // счётчик по базовому имени → (001)(002)...
     let _samePageSlideCount = 0;     // счётчик попыток перелистнуть с одной и той же страницы
     let _lastSlideUrl = '';          // URL во время последнего triggerNextSlide
     const SAME_PAGE_LIMIT = 3;       // сколько раз пробовать перед остановкой
