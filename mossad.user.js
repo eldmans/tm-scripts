@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.33
+// @version      1.2.34
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.33';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.34';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -78,6 +78,8 @@
         allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
+        filenameTemplate: '',            // шаблон имени файла (пустой = не задан)
+        filenameTemplateEnabled: false,  // использовать шаблон?
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
@@ -1060,7 +1062,27 @@
             const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
             filename = `${titleClean}.${ext}`;
         }
-        
+
+        // Применяем шаблон имени файла, если включён
+        if (config.filenameTemplateEnabled && config.filenameTemplate && config.filenameTemplate.trim()) {
+            const now2 = new Date();
+            const pad = (n) => String(n).padStart(2, '0');
+            const dateStr = `${now2.getFullYear()}-${pad(now2.getMonth()+1)}-${pad(now2.getDate())}`;
+            const timeStr = `${pad(now2.getHours())}-${pad(now2.getMinutes())}-${pad(now2.getSeconds())}`;
+            const ext = media.type === 'video' ? 'mp4' : 'jpg';
+            const titleClean2 = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
+            filename = config.filenameTemplate.trim()
+                .replace(/\{title\}/gi, titleClean2)
+                .replace(/\{date\}/gi, dateStr)
+                .replace(/\{time\}/gi, timeStr)
+                .replace(/\{ext\}/gi, ext)
+                .replace(/\{domain\}/gi, rootDomain.replace(/[^a-z0-9._-]/gi, '_'))
+                .replace(/\{n\}/gi, String(Date.now()).slice(-6))
+                .replace(/[\\/:*?"<>|]/g, '_');
+            // Добавить расширение, если не указано в шаблоне
+            if (!filename.includes('.')) filename += `.${ext}`;
+        }
+
         const urls = media.urls;
         let attemptedIndex = 0;
 
@@ -1798,6 +1820,15 @@
                     </div>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
+                        <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> Шаблон:
+                    </label>
+                    <input id="mossad-in-fn-tpl" type="text" placeholder="{title}_{date}.{ext}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
+                        title="Шаблон имени файла. Переменные: {title} {date} {time} {ext} {domain} {n}"
+                        style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
+                </div>
+                <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <select id="mossad-sel-dl" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
                         <option value="none" ${config.downloadType === 'none' ? 'selected' : ''}>Не скачивать</option>
@@ -1881,6 +1912,8 @@
             panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, parseInt(e.target.value) || 2)), 300);
             panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
+            panel.querySelector('#mossad-cb-fn-tpl').onchange = (e) => Settings.set('filenameTemplateEnabled', e.target.checked);
+            panel.querySelector('#mossad-in-fn-tpl').oninput = debounce((e) => Settings.set('filenameTemplate', e.target.value), 400);
             panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
             panel.querySelector('#mossad-cb-brsr').onchange = (e) => Settings.set('stopOnBrsrSwitch', e.target.checked);
             if (rootDomain === 'grok.com') {
@@ -2025,7 +2058,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-08-15</span>
+              <span>v${SCRIPT_VERSION} · 2026-08-30</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
