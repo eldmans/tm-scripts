@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.35
+// @version      1.2.36
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.35';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.36';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -34,7 +34,7 @@
 
     // Загрузка конфига из localStorage для проверки allowedDomains
     const _quickCfg = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } })();
-    const _allowedDomains = _quickCfg.allowedDomains || ['grok.com','redgifs.com','pinterest.com','pinterest.ru','civitai.red','vkvideo.ru','vk.video','noodlemagazine.com'];
+    const _allowedDomains = _quickCfg.allowedDomains || ['grok.com','redgifs.com','pinterest.com','pinterest.ru','civitai.red','vkvideo.ru','vk.video','noodlemagazine.com','instagram.com'];
     const _isAllowed = _allowedDomains.some(d => hostname.includes(d.split('/')[0]));
     if (!_isAllowed) {
         // Показываем маленькую кнопку «+ Добавить сайт в MOSSAD»
@@ -75,7 +75,7 @@
         stopOnBrsrSwitch: false,
         deleteAutoconfirm: false,
         deleteHoldpost: false,
-        allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com'],
+        allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
         filenameTemplate: '',            // шаблон имени файла (пустой = не задан)
@@ -952,7 +952,64 @@
         return { isFound: false, type: 'unknown', bestMp4Url: null };
     }
 
+    // ============================================
+    // INSTAGRAM ENGINE
+    // ============================================
+    const _igVideoUrls = [];   // перехваченные URL видео CDN инсты
+
+    if (rootDomain.includes('instagram.com')) {
+        // --- Перехват fetch ---
+        const _origFetch = window.fetch;
+        window.fetch = function (...args) {
+            const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+            if (/cdninstagram\.com.*\.(mp4|mov)/i.test(url) || /instagram\.f[a-z0-9-]+\.fna\.fbcdn\.net.*\.(mp4|mov)/i.test(url)) {
+                const clean = url.split('?')[0] + (url.includes('?') ? '?' + url.split('?')[1].split('&').filter(p => !/^bytestart|byteend/i.test(p)).join('&') : '');
+                if (!_igVideoUrls.includes(clean)) { _igVideoUrls.unshift(clean); if (_igVideoUrls.length > 20) _igVideoUrls.pop(); }
+            }
+            return _origFetch.apply(this, args);
+        };
+
+        // --- Перехват XHR ---
+        const _origXHROpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+            if (typeof url === 'string' && (/cdninstagram\.com.*\.(mp4|mov)/i.test(url) || /instagram\.f[a-z0-9-]+\.fna\.fbcdn\.net.*\.(mp4|mov)/i.test(url))) {
+                const clean = url.split('?')[0];
+                if (!_igVideoUrls.includes(clean)) { _igVideoUrls.unshift(clean); if (_igVideoUrls.length > 20) _igVideoUrls.pop(); }
+            }
+            return _origXHROpen.call(this, method, url, ...rest);
+        };
+
+        // --- MutationObserver: ловим src у <video> напрямую ---
+        const _igObserver = new MutationObserver(() => {
+            document.querySelectorAll('video[src], video > source[src]').forEach(el => {
+                const src = el.src || el.getAttribute('src') || '';
+                if (src && !src.startsWith('blob:') && (src.includes('cdninstagram') || src.includes('fbcdn.net')) && !_igVideoUrls.includes(src)) {
+                    _igVideoUrls.unshift(src); if (_igVideoUrls.length > 20) _igVideoUrls.pop();
+                }
+            });
+        });
+        document.addEventListener('DOMContentLoaded', () => _igObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['src'] }));
+    }
+
     function findMediaForDownload() {
+        // Instagram — возвращаем последний перехваченный URL
+        if (rootDomain.includes('instagram.com')) {
+            // Сначала — прямые src у видео на странице
+            const vids = Array.from(document.querySelectorAll('video'));
+            for (const v of vids) {
+                const src = v.currentSrc || v.src || (v.querySelector('source') || {}).src || '';
+                if (src && !src.startsWith('blob:') && (src.includes('cdninstagram') || src.includes('fbcdn.net'))) {
+                    return { urls: [src], type: 'video' };
+                }
+            }
+            // Затем — перехваченные через fetch/XHR
+            if (_igVideoUrls.length > 0) {
+                return { urls: [..._igVideoUrls], type: 'video' };
+            }
+            showToast('⏳ Инста: запусти видео — скрипт поймает URL', true);
+            return null;
+        }
+
         if (rootDomain.includes('pinterest.')) {
             const pinType = getPinMediaType();
             const mainPin = getPinterestMainPinData();
