@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.36
+// @version      1.2.37
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.36';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.37';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -78,7 +78,7 @@
         allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
-        filenameTemplate: '',            // шаблон имени файла (пустой = не задан)
+        filenameTemplate: '{title}_{domain[4]}',  // шаблон имени файла по умолчанию
         filenameTemplateEnabled: false,  // использовать шаблон?
         
         // PINTEREST ENGINE CONFIGS
@@ -142,6 +142,15 @@
             localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleSyncPush(); // Запускаем батч-синхронизацию
+        },
+        // Сохранить без ре-рендера UI (для текстовых полей — не сбивает фокус)
+        saveQuiet: () => {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            scheduleSyncPush();
+        },
+        setQuiet: (key, val) => {
+            config[key] = val;
+            Settings.saveQuiet();
         },
         set: (key, val) => {
             config[key] = val;
@@ -957,54 +966,100 @@
     // ============================================
     const _igVideoUrls = [];   // перехваченные URL видео CDN инсты
 
+    /** Добавить URL в список, дедупликация, новые — в начало */
+    function _igPush(url) {
+        if (!url || url.startsWith('blob:')) return;
+        // Убираем bytestart/byteend параметры чтобы URL был полным
+        const clean = url.replace(/[?&](bytestart|byteend)=[^&]*/gi, '').replace(/[?&]$/, '');
+        if (!_igVideoUrls.includes(clean)) {
+            _igVideoUrls.unshift(clean);
+            if (_igVideoUrls.length > 30) _igVideoUrls.pop();
+            console.log('[MOSSAD/IG] Поймал URL:', clean.slice(0, 80));
+        }
+    }
+
+    /** Проверяет, похож ли URL на медиа CDN инсты */
+    function _igIsCdnUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        return /cdninstagram\.com/i.test(url) ||
+               /\.fbcdn\.net/i.test(url) ||
+               /instagram\.f[a-z0-9-]+\d+\.fna/i.test(url);
+    }
+
+    /** Парсим JSON-данные страницы — инста вставляет видео URL в script-теги */
+    function _igScrapePageJson() {
+        const found = [];
+        // Ищем все fbcdn.net и cdninstagram.com URL в тексте страницы
+        const pageText = document.documentElement.innerHTML;
+        const re = /https:\/\/[^"'\s]*(?:fbcdn\.net|cdninstagram\.com)[^"'\s]*/g;
+        let m;
+        while ((m = re.exec(pageText)) !== null) {
+            let u = m[0].replace(/\\u0026/g, '&').replace(/\\/g, '').split('"')[0];
+            if (u && (u.includes('.mp4') || u.includes('video') || u.includes('/v/'))) {
+                found.push(u);
+            }
+        }
+        return found;
+    }
+
     if (rootDomain.includes('instagram.com')) {
-        // --- Перехват fetch ---
+        // --- Перехват fetch — ловим любой CDN запрос, не только .mp4 ---
         const _origFetch = window.fetch;
         window.fetch = function (...args) {
             const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
-            if (/cdninstagram\.com.*\.(mp4|mov)/i.test(url) || /instagram\.f[a-z0-9-]+\.fna\.fbcdn\.net.*\.(mp4|mov)/i.test(url)) {
-                const clean = url.split('?')[0] + (url.includes('?') ? '?' + url.split('?')[1].split('&').filter(p => !/^bytestart|byteend/i.test(p)).join('&') : '');
-                if (!_igVideoUrls.includes(clean)) { _igVideoUrls.unshift(clean); if (_igVideoUrls.length > 20) _igVideoUrls.pop(); }
-            }
-            return _origFetch.apply(this, args);
+            if (_igIsCdnUrl(url)) _igPush(url);
+            const p = _origFetch.apply(this, args);
+            // Дополнительно: проверяем Content-Type ответа
+            p.then && p.then(r => {
+                try {
+                    if (r && r.headers && r.headers.get('content-type') && r.headers.get('content-type').includes('video')) {
+                        _igPush(r.url || url);
+                    }
+                } catch {}
+            }).catch(() => {});
+            return p;
         };
 
         // --- Перехват XHR ---
         const _origXHROpen = XMLHttpRequest.prototype.open;
         XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-            if (typeof url === 'string' && (/cdninstagram\.com.*\.(mp4|mov)/i.test(url) || /instagram\.f[a-z0-9-]+\.fna\.fbcdn\.net.*\.(mp4|mov)/i.test(url))) {
-                const clean = url.split('?')[0];
-                if (!_igVideoUrls.includes(clean)) { _igVideoUrls.unshift(clean); if (_igVideoUrls.length > 20) _igVideoUrls.pop(); }
-            }
+            if (typeof url === 'string' && _igIsCdnUrl(url)) _igPush(url);
             return _origXHROpen.call(this, method, url, ...rest);
         };
 
-        // --- MutationObserver: ловим src у <video> напрямую ---
+        // --- MutationObserver: прямые src у <video> ---
         const _igObserver = new MutationObserver(() => {
-            document.querySelectorAll('video[src], video > source[src]').forEach(el => {
-                const src = el.src || el.getAttribute('src') || '';
-                if (src && !src.startsWith('blob:') && (src.includes('cdninstagram') || src.includes('fbcdn.net')) && !_igVideoUrls.includes(src)) {
-                    _igVideoUrls.unshift(src); if (_igVideoUrls.length > 20) _igVideoUrls.pop();
-                }
+            document.querySelectorAll('video, video > source').forEach(el => {
+                const src = el.src || el.getAttribute('src') || el.currentSrc || '';
+                if (_igIsCdnUrl(src)) _igPush(src);
             });
         });
-        document.addEventListener('DOMContentLoaded', () => _igObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['src'] }));
+        const _igStartObs = () => {
+            if (document.body) _igObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['src'] });
+        };
+        if (document.body) _igStartObs(); else document.addEventListener('DOMContentLoaded', _igStartObs);
     }
 
     function findMediaForDownload() {
         // Instagram — возвращаем последний перехваченный URL
         if (rootDomain.includes('instagram.com')) {
-            // Сначала — прямые src у видео на странице
+            // 1. Прямые src у видео (иногда инста не использует blob)
             const vids = Array.from(document.querySelectorAll('video'));
             for (const v of vids) {
                 const src = v.currentSrc || v.src || (v.querySelector('source') || {}).src || '';
-                if (src && !src.startsWith('blob:') && (src.includes('cdninstagram') || src.includes('fbcdn.net'))) {
+                if (src && _igIsCdnUrl(src) && !src.startsWith('blob:')) {
                     return { urls: [src], type: 'video' };
                 }
             }
-            // Затем — перехваченные через fetch/XHR
+            // 2. Перехваченные через fetch/XHR/Observer
             if (_igVideoUrls.length > 0) {
                 return { urls: [..._igVideoUrls], type: 'video' };
+            }
+            // 3. Парсинг JSON со страницы (инста встраивает URL в script-теги)
+            const scraped = _igScrapePageJson();
+            if (scraped.length > 0) {
+                scraped.forEach(u => _igPush(u));
+                return { urls: scraped, type: 'video' };
             }
             showToast('⏳ Инста: запусти видео — скрипт поймает URL', true);
             return null;
@@ -2006,7 +2061,10 @@
             panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
             panel.querySelector('#mossad-cb-fn-tpl').onchange = (e) => Settings.set('filenameTemplateEnabled', e.target.checked);
-            panel.querySelector('#mossad-in-fn-tpl').oninput = debounce((e) => Settings.set('filenameTemplate', e.target.value), 400);
+            const fnTplInput = panel.querySelector('#mossad-in-fn-tpl');
+            const _saveFnTpl = (e) => Settings.setQuiet('filenameTemplate', e.target.value);
+            fnTplInput.onblur   = _saveFnTpl;  // сохранить при потере фокуса (Tab / клик)
+            fnTplInput.onchange = _saveFnTpl;  // сохранить при Enter
             panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
             panel.querySelector('#mossad-cb-brsr').onchange = (e) => Settings.set('stopOnBrsrSwitch', e.target.checked);
             if (rootDomain === 'grok.com') {
