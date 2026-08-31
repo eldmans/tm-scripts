@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.37
-// @description  РЈРЅРёРІРµСЂСЃР°Р»СЊРЅС‹Р№ СЃРєСЂРёРїС‚ РґР»СЏ Р°РІС‚Рѕ-СЃР»Р°Р№РґС€РѕСѓ, СЃРєР°С‡РёРІР°РЅРёСЏ РјРµРґРёР° Рё РіРѕСЂСЏС‡РёС… РєР»Р°РІРёС€.
+// @version      1.2.38
+// @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
 // @grant        GM_openInTab
@@ -20,7 +20,7 @@
     'use strict';
 
     const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.37';
-    console.log(`%c[MOSSAD v${SCRIPT_VERSION}] РЎРєСЂРёРїС‚ Р·Р°РіСЂСѓР¶РµРЅ`, 'color:#10b981; font-weight:bold');
+    console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
     
@@ -32,17 +32,17 @@
     const rootDomain = getRootDomain(hostname);
     const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
 
-    // Р—Р°РіСЂСѓР·РєР° РєРѕРЅС„РёРіР° РёР· localStorage РґР»СЏ РїСЂРѕРІРµСЂРєРё allowedDomains
+    // Загрузка конфига из localStorage для проверки allowedDomains
     const _quickCfg = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } })();
     const _allowedDomains = _quickCfg.allowedDomains || ['grok.com','redgifs.com','pinterest.com','pinterest.ru','civitai.red','vkvideo.ru','vk.video','noodlemagazine.com','instagram.com'];
     const _isAllowed = _allowedDomains.some(d => hostname.includes(d.split('/')[0]));
     if (!_isAllowed) {
-        // РџРѕРєР°Р·С‹РІР°РµРј РјР°Р»РµРЅСЊРєСѓСЋ РєРЅРѕРїРєСѓ В«+ Р”РѕР±Р°РІРёС‚СЊ СЃР°Р№С‚ РІ MOSSADВ»
+        // Показываем маленькую кнопку «+ Добавить сайт в MOSSAD»
         document.addEventListener('DOMContentLoaded', () => {
             const btn = document.createElement('button');
             btn.id = 'mossad-add-site';
-            btn.textContent = 'вћ• MOSSAD';
-            btn.title = 'Р”РѕР±Р°РІРёС‚СЊ СЌС‚РѕС‚ СЃР°Р№С‚ РІ MOSSAD';
+            btn.textContent = '? MOSSAD';
+            btn.title = 'Добавить этот сайт в MOSSAD';
             btn.style.cssText = 'position:fixed;bottom:12px;right:12px;z-index:9999999;background:rgba(20,20,20,0.85);color:#60a5fa;border:1px solid #374151;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;font-family:system-ui;backdrop-filter:blur(8px);';
             btn.onclick = () => {
                 const cfg = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } })();
@@ -50,50 +50,50 @@
                 if (!domains.includes(hostname)) domains.push(hostname);
                 cfg.allowedDomains = domains;
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
-                btn.textContent = 'вњ… Р”РѕР±Р°РІР»РµРЅРѕ! РџРµСЂРµР·Р°РіСЂСѓР·Рё СЃС‚СЂР°РЅРёС†Сѓ';
+                btn.textContent = '? Добавлено! Перезагрузи страницу';
                 btn.style.color = '#10b981';
             };
             document.body.appendChild(btn);
         });
-        return; // Р’С‹С…РѕРґ вЂ” СЃР°Р№С‚ РЅРµ РІ СЃРїРёСЃРєРµ
+        return; // Выход — сайт не в списке
     }
 
     // ============================================
-    // РЎРРЎРўР•РњРђ РќРђРЎРўР РћР•Рљ
+    // СИСТЕМА НАСТРОЕК
     // ============================================
     const DEFAULT_CONFIG = {
         slideshowMode: 'auto',
         slideshowOrientation: 'h',
         slideshowLoopMode: 'off',
-        slideshowDirections: ['up'],  // Р»РёСЃС‚Р°РЅРёРµ РІРІРµСЂС… РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ
+        slideshowDirections: ['up'],  // листание вверх по умолчанию
         videoLoops: 1,
-        slideshowDelay: 10,           // С„РѕС‚Рѕ 10 СЃРµРє
-        delayAfterVideo: 2,           // РїР°СѓР·Р° 2 СЃРµРє
-        downloadType: 'none',         // РЅРµ СЃРєР°С‡РёРІР°С‚СЊ
-        pdAction: 'up',               // РїРѕСЃР»Рµ DL: +1
-        stopOnTabSwitch: true,        // Tab вЂ” РІРєР»СЋС‡РµРЅР°
+        slideshowDelay: 10,           // фото 10 сек
+        delayAfterVideo: 2,           // пауза 2 сек
+        downloadType: 'none',         // не скачивать
+        pdAction: 'up',               // после DL: +1
+        stopOnTabSwitch: true,        // Tab — включена
         stopOnBrsrSwitch: false,
         deleteAutoconfirm: false,
         deleteHoldpost: false,
         allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
-        filenameTemplate: '{title}_{domain[4]}',  // С€Р°Р±Р»РѕРЅ РёРјРµРЅРё С„Р°Р№Р»Р° РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ
-        filenameTemplateEnabled: false,  // РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ С€Р°Р±Р»РѕРЅ?
+        filenameTemplate: '{title}_{domain[4]}',  // шаблон имени файла по умолчанию
+        filenameTemplateEnabled: false,  // использовать шаблон?
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
         pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
-        pinterestPhotoPercent: 50,         // 0..100 % (РІРёРґРµРѕ = 100 - photo)
-        pinterestMaxVideoDuration: 0,      // РјР°РєСЃ РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ РІРёРґРµРѕ РІ СЃРµРє (0 = Р±РµР· Р»РёРјРёС‚Р°)
-        pinterestAutoFS: true,             // Р°РІС‚Рѕ СЂР°Р·РІРѕСЂР°С‡РёРІР°РЅРёРµ РІРѕ РІРµСЃСЊ СЌРєСЂР°РЅ
-        pinterestHistory: [],              // РёСЃС‚РѕСЂРёСЏ РґРѕ 100 РїРѕСЃРµС‰РµРЅРЅС‹С… URL
-        pinterestHistoryIdx: -1,           // С‚РµРєСѓС‰РёР№ РёРЅРґРµРєСЃ РІ РёСЃС‚РѕСЂРёРё (РєР°Рє РІ РџСЂРѕРІРѕРґРЅРёРєРµ)
+        pinterestPhotoPercent: 50,         // 0..100 % (видео = 100 - photo)
+        pinterestMaxVideoDuration: 0,      // макс длительность видео в сек (0 = без лимита)
+        pinterestAutoFS: true,             // авто разворачивание во весь экран
+        pinterestHistory: [],              // история до 100 посещенных URL
+        pinterestHistoryIdx: -1,           // текущий индекс в истории (как в Проводнике)
         
         hk: {
             download:       [
                 { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
-                { key: 'PageDown',   ctrl: false, alt: false, shift: false }  // PageDown (СЂРµР·РµСЂРІ)
+                { key: 'PageDown',   ctrl: false, alt: false, shift: false }  // PageDown (резерв)
             ],
             upscale:        { key: 'PageUp',     ctrl: false, alt: false, shift: false },
             deleteVid:      { key: 'Delete',     ctrl: false, alt: false, shift: false },
@@ -104,10 +104,10 @@
             slideshowPanel: { key: 'Insert',     ctrl: true,  alt: false, shift: false },
             slideshowStart: { key: 'Insert',     ctrl: false, alt: false, shift: false },
             focusWidget:    { key: 'F7',         ctrl: false, alt: false, shift: false },
-            nextSlide:      { key: ' ',          ctrl: false, alt: false, shift: false }, // РџСЂРѕР±РµР» вЂ” СЃРґРІРёРЅСѓС‚СЊ СЃР»Р°Р№Рґ
-            duplicateNext:  { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+РџСЂРѕР±РµР» вЂ” РѕС‚РєСЂС‹С‚СЊ РІ С„РѕРЅРµ + СЃРґРІРёРЅСѓС‚СЊ
-            rewind:         { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R вЂ” РїРµСЂРµРјРѕС‚РєР°
-            updateScript:   { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R вЂ” РѕР±РЅРѕРІРёС‚СЊ СЃРєСЂРёРїС‚
+            nextSlide:      { key: ' ',          ctrl: false, alt: false, shift: false }, // Пробел — сдвинуть слайд
+            duplicateNext:  { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
+            rewind:         { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
+            updateScript:   { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
         }
     };
 
@@ -127,10 +127,10 @@
         return target;
     }
     config = mergeDeep(JSON.parse(JSON.stringify(DEFAULT_CONFIG)), config);
-    // РЎР±СЂРѕСЃ РїСЂРё СЂРµС„СЂРµС€Рµ СЃС‚СЂР°РЅРёС†С‹
+    // Сброс при рефреше страницы
     config.downloadType = 'none';
 
-    // РњРёРіСЂР°С†РёСЏ СЃС‚Р°СЂС‹С… РЅР°СЃС‚СЂРѕРµРє СЃРєР°С‡РёРІР°РЅРёСЏ (РµСЃР»Рё С‚Р°Рј Р±С‹Р» РѕР±СЉРµРєС‚)
+    // Миграция старых настроек скачивания (если там был объект)
     if (!Array.isArray(config.hk.download)) {
         config.hk.download = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk.download));
         localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
@@ -141,9 +141,9 @@
         save: () => {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
             if (window.updateWidgetUI) window.updateWidgetUI();
-            scheduleSyncPush(); // Р—Р°РїСѓСЃРєР°РµРј Р±Р°С‚С‡-СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЋ
+            scheduleSyncPush(); // Запускаем батч-синхронизацию
         },
-        // РЎРѕС…СЂР°РЅРёС‚СЊ Р±РµР· СЂРµ-СЂРµРЅРґРµСЂР° UI (РґР»СЏ С‚РµРєСЃС‚РѕРІС‹С… РїРѕР»РµР№ вЂ” РЅРµ СЃР±РёРІР°РµС‚ С„РѕРєСѓСЃ)
+        // Сохранить без ре-рендера UI (для текстовых полей — не сбивает фокус)
         saveQuiet: () => {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
             scheduleSyncPush();
@@ -165,7 +165,7 @@
     const GITHUB_REPO = 'tm-scripts';
     const GITHUB_BRANCH = 'grok';
 
-    let _syncQueue = []; // Р±Р°С‚С‡ РёР·РјРµРЅРµРЅРёР№
+    let _syncQueue = []; // батч изменений
     let _syncTimer = null;
     let _syncStatusEl = null;
 
@@ -193,7 +193,7 @@
         const path = config.githubConfigPath || 'mossad-config.json';
         const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
         
-        // РџРѕР»СѓС‡Р°РµРј С‚РµРєСѓС‰РёР№ SHA С„Р°Р№Р»Р°
+        // Получаем текущий SHA файла
         let sha = null;
         try {
             const res = await new Promise((resolve, reject) => {
@@ -211,7 +211,7 @@
             }
         } catch (e) {}
         
-        // Р­РєСЃРїРѕСЂС‚РёСЂСѓРµРј РєРѕРЅС„РёРі Р±РµР· С‚РѕРєРµРЅР°
+        // Экспортируем конфиг без токена
         const exportCfg = JSON.parse(JSON.stringify(config));
         delete exportCfg.githubToken;
         const content = btoa(unescape(encodeURIComponent(JSON.stringify(exportCfg, null, 2))));
@@ -254,7 +254,7 @@
                         try {
                             const data = JSON.parse(res.responseText);
                             const decoded = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\n/g, '')))));
-                            // РџСЂРёРјРµРЅСЏРµРј РєРѕРЅС„РёРі, СЃРѕС…СЂР°РЅСЏСЏ Р»РѕРєР°Р»СЊРЅС‹Р№ С‚РѕРєРµРЅ
+                            // Применяем конфиг, сохраняя локальный токен
                             const token = config.githubToken;
                             Object.assign(config, decoded);
                             config.githubToken = token;
@@ -271,31 +271,31 @@
         });
     }
 
-    // РћС‚Р»РѕР¶РµРЅРЅС‹Р№ Р±Р°С‚С‡-РїСѓС€
+    // Отложенный батч-пуш
     function scheduleSyncPush() {
         if (!config.githubToken) return;
         if (_syncTimer) clearTimeout(_syncTimer);
-        showSyncStatus('рџ”„ РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ...', '#f59e0b');
+        showSyncStatus('?? Синхронизация...', '#f59e0b');
         
         _syncTimer = setTimeout(async () => {
             try {
                 await pushConfigToGitHub();
-                showSyncStatus('вњ… РЎРёРЅС…СЂРѕРЅРёР·РёСЂРѕРІР°РЅРѕ', '#10b981', true);
+                showSyncStatus('? Синхронизировано', '#10b981', true);
             } catch (e) {
-                showSyncStatus('вљ пёЏ РћС€РёР±РєР° СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё', '#ef4444');
+                showSyncStatus('?? Ошибка синхронизации', '#ef4444');
                 console.error('[MOSSAD Sync] Push failed:', e);
             }
-        }, 2000); // Р‘Р°С‚С‡РёРј: Р¶РґС‘Рј 2 СЃРµРєСѓРЅРґС‹ РїРѕСЃР»Рµ РїРѕСЃР»РµРґРЅРµРіРѕ РёР·РјРµРЅРµРЅРёСЏ
+        }, 2000); // Батчим: ждём 2 секунды после последнего изменения
     }
 
-    // РџСЂРѕРІРµСЂРєР° РїСЂРё СЃС‚Р°СЂС‚Рµ
+    // Проверка при старте
     async function checkAndPullOnStartup() {
         if (!config.githubToken) return;
         try {
             const pulled = await pullConfigFromGitHub();
-            if (pulled) showSyncStatus('вњ… РљРѕРЅС„РёРі РѕР±РЅРѕРІР»С‘РЅ', '#10b981', true);
+            if (pulled) showSyncStatus('? Конфиг обновлён', '#10b981', true);
         } catch (e) {
-            // РўРёС…Рѕ вЂ” РІРѕР·РјРѕР¶РЅРѕ РЅРµС‚ С„Р°Р№Р»Р° РµС‰С‘
+            // Тихо — возможно нет файла ещё
         }
     }
 
@@ -311,7 +311,7 @@
     });
 
     function formatHotkey(hk) {
-        if (!hk || !hk.key) return 'вЂ”';
+        if (!hk || !hk.key) return '—';
         const parts = [];
         if (hk.ctrl)  parts.push('Ctrl');
         if (hk.alt)   parts.push('Alt');
@@ -427,43 +427,43 @@
     }
 
     // ============================================================
-    // GROK: Smart Delete (click "РЈРґР°Р»РёС‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ"/"РЈРґР°Р»РёС‚СЊ РІРёРґРµРѕ", auto-confirm, hold-post)
+    // GROK: Smart Delete (click "Удалить изображение"/"Удалить видео", auto-confirm, hold-post)
     // ============================================================
     function runSmartDelete() {
         if (rootDomain !== 'grok.com') return;
-        // РћРїСЂРµРґРµР»СЏРµРј С‚РµРєСЃС‚ РєРЅРѕРїРєРё СѓРґР°Р»РµРЅРёСЏ РїРѕ С‚РµРєСѓС‰РµРјСѓ РјРµРґРёР°-С‚РёРїСѓ РїРёРЅР°
+        // Определяем текст кнопки удаления по текущему медиа-типу пина
         const hasVideo = !!getActiveVideo();
-        const deleteBtnLabel = hasVideo ? 'РЈРґР°Р»РёС‚СЊ РІРёРґРµРѕ' : 'РЈРґР°Р»РёС‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ';
+        const deleteBtnLabel = hasVideo ? 'Удалить видео' : 'Удалить изображение';
 
-        // 1. РќР°С…РѕРґРёРј РєРЅРѕРїРєСѓ СѓРґР°Р»РµРЅРёСЏ (РїСЂРµРґРІР°СЂРёС‚РµР»СЊРЅРѕ: РµСЃР»Рё hold post вЂ” Р·Р°РїРѕРјРёРЅР°РµРј URL РїРѕСЃС‚Р° РґРѕ РѕС‚РєСЂС‹С‚РёСЏ РґРёР°Р»РѕРіР°)
+        // 1. Находим кнопку удаления (предварительно: если hold post — запоминаем URL поста до открытия диалога)
         let postUrl = null;
         if (config.deleteHoldpost) {
-            // URL С„РѕСЂРјР°С‚ /imagine/post/ID/response/RID
+            // URL формат /imagine/post/ID/response/RID
             const m = location.pathname.match(/(\/imagine\/post\/[^/]+)/);
             if (m) postUrl = m[1];
         }
 
-        // 2. РќР°С…РѕРґРёРј Рё РєР»РёРєР°РµРј РєРЅРѕРїРєСѓ СѓРґР°Р»РµРЅРёСЏ (РёС‰РµРј РїРѕ aria-label РёР»Рё С‚РµРєСЃС‚)
+        // 2. Находим и кликаем кнопку удаления (ищем по aria-label или текст)
         const findDelBtn = () => {
             const all = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]'));
             return all.find(el => {
                 const txt = (el.textContent || '').trim();
                 const aria = (el.getAttribute('aria-label') || '').trim();
                 return txt === deleteBtnLabel || aria === deleteBtnLabel ||
-                       txt.includes('РЈРґР°Р»РёС‚СЊ') || aria.includes('РЈРґР°Р»РёС‚СЊ') ||
+                       txt.includes('Удалить') || aria.includes('Удалить') ||
                        txt.toLowerCase().includes('delete') || aria.toLowerCase().includes('delete');
             });
         };
 
         const delBtn = findDelBtn();
         if (!delBtn) {
-            showToast('вљ пёЏ РљРЅРѕРїРєР° СѓРґР°Р»РµРЅРёСЏ РЅРµ РЅР°Р№РґРµРЅР° РЅР° СЃС‚СЂР°РЅРёС†Рµ', true);
+            showToast('?? Кнопка удаления не найдена на странице', true);
             return;
         }
         delBtn.click();
-        showToast('вњ• РЈРґР°Р»РµРЅРёРµ...');
+        showToast('? Удаление...');
 
-        // 3. РђРІС‚РѕРїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ (РµСЃР»Рё РІРєР»СЋС‡РµРЅРѕ)
+        // 3. Автоподтверждение (если включено)
         if (config.deleteAutoconfirm) {
             let confirmAttempts = 0;
             const confirmInterval = setInterval(() => {
@@ -472,41 +472,41 @@
                 const confirmBtn = confirmBtns.find(el => {
                     const txt = (el.textContent || '').trim().toLowerCase();
                     const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
-                    return txt === 'СѓРґР°Р»РёС‚СЊ' || aria === 'СѓРґР°Р»РёС‚СЊ' ||
+                    return txt === 'удалить' || aria === 'удалить' ||
                            txt === 'delete' || aria === 'delete' ||
                            txt === 'confirm' || txt === 'yes' || aria === 'confirm';
                 });
                 if (confirmBtn) {
                     confirmBtn.click();
                     clearInterval(confirmInterval);
-                    // 4. hold post: РІРµСЂРЅСѓС‚СЊСЃСЏ РЅР° СЃС‚СЂР°РЅРёС†Сѓ РїРѕСЃС‚Р° РїРѕСЃР»Рµ СѓРґР°Р»РµРЅРёСЏ
+                    // 4. hold post: вернуться на страницу поста после удаления
                     if (postUrl) {
                         setTimeout(() => {
                             window.location.href = postUrl;
                         }, 800);
                     }
                 }
-                if (confirmAttempts > 25) clearInterval(confirmInterval); // 5СЃ РѕР¶РёРґР°РЅРёСЏ
+                if (confirmAttempts > 25) clearInterval(confirmInterval); // 5с ожидания
             }, 200);
         }
     }
 
-    // Р“СЂР°РЅРёС†Р°: С‚РѕР»СЊРєРѕ РЅР° СЃС‚СЂР°РЅРёС†Рµ РїРѕСЃС‚Р° grok.com/imagine/post/... СЂР°Р±РѕС‚Р°СЋС‚ DL, Delete, СЃР»Р°Р№РґС€РѕСѓ Рё С‚.Рґ.
+    // Граница: только на странице поста grok.com/imagine/post/... работают DL, Delete, слайдшоу и т.д.
     const isGrokPostPage  = () => rootDomain === 'grok.com' && /\/imagine\/post\//.test(location.pathname);
     const isGrokSavedPage = () => rootDomain === 'grok.com' && /\/imagine\/saved/.test(location.pathname);
 
     // ============================================================
-    // GROK IMAGINE GALLERY вЂ” СЃР±РѕСЂ СЃСЃС‹Р»РѕРє + СЂР°РЅРґРѕРјРЅРѕРµ СЃР»Р°Р№РґС€РѕСѓ
+    // GROK IMAGINE GALLERY — сбор ссылок + рандомное слайдшоу
     // ============================================================
-    // sessionStorage: Р¶РёРІС‘С‚ С‚РѕР»СЊРєРѕ РІ С‚РµРєСѓС‰РµР№ РІРєР»Р°РґРєРµ, СѓРјРёСЂР°РµС‚ РїСЂРё Р·Р°РєСЂС‹С‚РёРё, РЅРµ СЃРјРµС€РёРІР°РµС‚СЃСЏ РјРµР¶РґСѓ РІРєР»Р°РґРєР°РјРё
+    // sessionStorage: живёт только в текущей вкладке, умирает при закрытии, не смешивается между вкладками
     const GALLERY_COLLECTION_KEY = 'mossad_grok_imagine_collection';
     const GALLERY_SS_KEY         = 'mossad_grok_imagine_ss';
-    const _gSS = sessionStorage; // РєРѕСЂРѕС‚РєРёР№ РїСЃРµРІРґРѕРЅРёРј
+    const _gSS = sessionStorage; // короткий псевдоним
 
-    /** РР·РІР»РµРєР°РµС‚ email РёР· Next.js Flight РґР°РЅРЅС‹С… РЅР° СЃС‚СЂР°РЅРёС†Рµ */
+    /** Извлекает email из Next.js Flight данных на странице */
     function grokExtractEmail() {
-        // РџСЂРѕСЃС‚Рѕ РЅР°С…РѕРґРёРј СЃР»РѕРІРѕ email, Р·Р°С‚РµРј РІС‹С‚Р°С‰РёРІР°РµРј email-РїР°С‚С‚РµСЂРЅ РїРѕСЃР»Рµ РЅРµРіРѕ
-        // Р Р°Р±РѕС‚Р°РµС‚ РґР»СЏ "email":"val", \"email\":\"val\", Р»СЋР±РѕРіРѕ РІР°СЂРёР°РЅС‚Р°
+        // Просто находим слово email, затем вытащиваем email-паттерн после него
+        // Работает для "email":"val", \"email\":\"val\", любого варианта
         const re = /email[^a-zA-Z0-9]+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/;
         for (const s of document.querySelectorAll('script')) {
             const m = s.textContent.match(re);
@@ -519,7 +519,7 @@
         return 'unknown';
     }
 
-    /** РЎРѕР±РёСЂР°РµС‚ РІСЃРµ СѓРЅРёРєР°Р»СЊРЅС‹Рµ СЃСЃС‹Р»РєРё /imagine/post/... РёР· DOM + РѕРїСЂРµРґРµР»СЏРµС‚ С‚РёРї РїРѕ span СЃ С‚Р°Р№РјРµСЂРѕРј */
+    /** Собирает все уникальные ссылки /imagine/post/... из DOM + определяет тип по span с таймером */
     function grokCollectLinks() {
         const seen = new Set();
         const items = [];
@@ -529,16 +529,16 @@
             const url = href.startsWith('http') ? href : 'https://grok.com' + href;
             if (seen.has(url)) return;
             seen.add(url);
-            // РљР°СЂС‚РѕС‡РєР° вЂ” Р±Р»РёР¶Р°Р№С€РёР№ listitem / masonry-item СЂРѕРґРёС‚РµР»СЊ
+            // Карточка — ближайший listitem / masonry-item родитель
             const card = a.closest('[role="listitem"], [data-masonry-key]') || a.parentElement;
-            // Р’РёРґРµРѕ = РµСЃС‚СЊ span СЃ РєР»Р°СЃСЃРѕРј tabular-nums (С‚Р°Р№РјРµСЂ 0:06)
+            // Видео = есть span с классом tabular-nums (таймер 0:06)
             const hasTimer = !!(card && card.querySelector('span.tabular-nums'));
             items.push({ url, type: hasTimer ? 'video' : 'photo' });
         });
         return items;
     }
 
-    /** Fisher-Yates РїРµСЂРµРјРµС€РёРІР°РЅРёРµ */
+    /** Fisher-Yates перемешивание */
     function fisherYatesShuffle(arr) {
         const a = arr.slice();
         for (let i = a.length - 1; i > 0; i--) {
@@ -548,7 +548,7 @@
         return a;
     }
 
-    /** Р—РІСѓРєРѕРІРѕР№ СЃРёРіРЅР°Р» РѕРєРѕРЅС‡Р°РЅРёСЏ РєСЂСѓРіР° (РґРѕ-РјРё-СЃРѕР»СЊ) */
+    /** Звуковой сигнал окончания круга (до-ми-соль) */
     function playCircleDoneSound() {
         try {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -563,14 +563,14 @@
                 g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.35);
                 osc.start(t0); osc.stop(t0 + 0.35);
             });
-        } catch(e) { /* AudioContext РјРѕР¶РµС‚ Р±С‹С‚СЊ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ */ }
+        } catch(e) { /* AudioContext может быть заблокирован */ }
     }
 
-    /** РљРЅРѕРїРєР° 1: СЃРѕС…СЂР°РЅРёС‚СЊ РєРѕР»Р»РµРєС†РёСЋ РІ sessionStorage (Р±РµР· СЃРєР°С‡РёРІР°РЅРёСЏ) */
+    /** Кнопка 1: сохранить коллекцию в sessionStorage (без скачивания) */
     function grokSaveCollection(btnEl) {
         const items = grokCollectLinks();
         if (items.length === 0) {
-            showToast('вљ пёЏ РЎСЃС‹Р»РєРё РЅРµ РЅР°Р№РґРµРЅС‹. РџСЂРѕСЃРєСЂРѕР»Р»СЊС‚Рµ СЃС‚СЂР°РЅРёС†Сѓ РґРѕ РєРѕРЅС†Р°!', true);
+            showToast('?? Ссылки не найдены. Проскролльте страницу до конца!', true);
             return;
         }
         const date   = new Date().toISOString().slice(0, 10);
@@ -578,20 +578,20 @@
         const photos = items.length - videos;
         _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({ date, items }));
         if (btnEl) {
-            btnEl.textContent = `вњ… ${items.length} (рџ“№${videos} рџ–ј${photos})`;
+            btnEl.textContent = `? ${items.length} (??${videos} ??${photos})`;
             btnEl.style.background = '#065f46';
             btnEl.style.color = '#e5e7eb';
             btnEl.dataset.collectedCount = String(items.length);
         }
-        showToast(`вњ… РЎРѕР±СЂР°РЅРѕ ${items.length} в†’ рџ“№${videos} РІРёРґРµРѕ, рџ–ј${photos} С„РѕС‚Рѕ`);
+        showToast(`? Собрано ${items.length} > ??${videos} видео, ??${photos} фото`);
     }
 
-    /** РћС‚РґРµР»СЊРЅР°СЏ РєРЅРѕРїРєР° вЂ” СЃРєР°С‡Р°С‚СЊ .txt СЃ РєРѕР»Р»РµРєС†РёРµР№ (С‚РѕР»СЊРєРѕ С‚РѕРіРґР° РёР·РІР»РµРєР°РµС‚ email) */
+    /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */
     function grokDownloadCollection() {
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-        if (!raw) { showToast('вљ пёЏ РЎРЅР°С‡Р°Р»Р° РЅР°Р¶РјРёС‚Рµ В«РЎРѕР±СЂР°С‚СЊВ»', true); return; }
+        if (!raw) { showToast('?? Сначала нажмите «Собрать»', true); return; }
         let data;
-        try { data = JSON.parse(raw); } catch { showToast('вљ пёЏ РћС€РёР±РєР° С‡С‚РµРЅРёСЏ', true); return; }
+        try { data = JSON.parse(raw); } catch { showToast('?? Ошибка чтения', true); return; }
         const items = data.items || [];
         const email = grokExtractEmail();
         const date  = data.date || new Date().toISOString().slice(0, 10);
@@ -602,41 +602,41 @@
         a.href = bUrl; a.download = filename;
         document.body.appendChild(a); a.click();
         setTimeout(() => { a.remove(); URL.revokeObjectURL(bUrl); }, 2000);
-        showToast(`рџ“Ґ РЎРєР°С‡Р°РЅРѕ: ${filename}`);
+        showToast(`?? Скачано: ${filename}`);
     }
 
-    /** РљРЅРѕРїРєР° 2: Р·Р°РїСѓСЃС‚РёС‚СЊ СЂР°РЅРґРѕРјРЅРѕРµ СЃР»Р°Р№РґС€РѕСѓ РїРѕ РєРѕР»Р»РµРєС†РёРё */
+    /** Кнопка 2: запустить рандомное слайдшоу по коллекции */
     function grokStartGallerySlideshow(btnEl) {
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
         if (!raw) {
-            showToast('вљ пёЏ РЎРЅР°С‡Р°Р»Р° СЃРѕР±РµСЂРёС‚Рµ РєРѕР»Р»РµРєС†РёСЋ (РєРЅРѕРїРєР° рџ“‹)', true);
+            showToast('?? Сначала соберите коллекцию (кнопка ??)', true);
             return;
         }
         let data;
-        try { data = JSON.parse(raw); } catch { showToast('вљ пёЏ РћС€РёР±РєР° С‡С‚РµРЅРёСЏ РєРѕР»Р»РµРєС†РёРё', true); return; }
+        try { data = JSON.parse(raw); } catch { showToast('?? Ошибка чтения коллекции', true); return; }
         const allItems = data.items || [];
-        if (allItems.length === 0) { showToast('вљ пёЏ РљРѕР»Р»РµРєС†РёСЏ РїСѓСЃС‚Р°', true); return; }
+        if (allItems.length === 0) { showToast('?? Коллекция пуста', true); return; }
 
         const queue = fisherYatesShuffle(allItems); // queue of {url, type}
         const ss = { active: true, queue, circle: 1, total: allItems.length };
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
 
-        showToast(`рџЋІ РЎР»Р°Р№РґС€РѕСѓ: РєСЂСѓРі 1, ${allItems.length} РіРµРЅРµСЂР°С†РёР№`);
+        showToast(`?? Слайдшоу: круг 1, ${allItems.length} генераций`);
         const next = queue.shift();
         ss.queue = queue;
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
-        // РџРѕРґСЃРєР°Р·С‹РІР°РµРј РґРІРёР¶РєСѓ С‚РёРї СЃР»РµРґСѓСЋС‰РµРіРѕ РїРѕСЃС‚Р°
+        // Подсказываем движку тип следующего поста
         if (next.type) sessionStorage.setItem('mossad_expected_type', next.type);
         setTimeout(() => { window.location.href = next.url; }, 300);
     }
 
-    /** РћСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ Gallery Slideshow */
+    /** Останавливает Gallery Slideshow */
     function grokStopGallerySlideshow() {
         _gSS.removeItem(GALLERY_SS_KEY);
-        showToast('вЏ№ Gallery СЃР»Р°Р№РґС€РѕСѓ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ');
+        showToast('? Gallery слайдшоу остановлено');
     }
 
-    /** РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ СЃС‚СЂРѕРєРё РіР°Р»РµСЂРµРё РІРЅСѓС‚СЂРё РІРёРґР¶РµС‚Р° MOSSAD (С‚РѕР»СЊРєРѕ РЅР° /imagine/saved) */
+    /** Инициализация строки галереи внутри виджета MOSSAD (только на /imagine/saved) */
     function initGrokGalleryBar() {
         if (!isGrokSavedPage()) return;
         if (document.getElementById('mossad-gallery-row')) return;
@@ -655,36 +655,36 @@
 
         const btnCollect = document.createElement('button');
         btnCollect.id = 'mossad-gallery-collect';
-        btnCollect.textContent = 'рџ“‹ РЎРѕР±СЂР°С‚СЊ';
+        btnCollect.textContent = '?? Собрать';
         btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
         btnCollect.onclick = () => { grokSaveCollection(btnCollect); };
 
-        // РњРѕРЅРёС‚РѕСЂРёРј РёР·РјРµРЅРµРЅРёРµ С‡РёСЃР»Р° СЃСЃС‹Р»РѕРє РЅР° СЃС‚СЂР°РЅРёС†Рµ РєР°Р¶РґС‹Рµ 2СЃ
+        // Мониторим изменение числа ссылок на странице каждые 2с
         setInterval(() => {
             const currentCount = document.querySelectorAll('a[href*="/imagine/post/"]').length;
             const savedCount = parseInt(btnCollect.dataset.collectedCount || '0', 10);
-            if (savedCount === 0) return; // РµС‰С‘ РЅРµ СЃРѕР±РёСЂР°Р»Рё
+            if (savedCount === 0) return; // ещё не собирали
             if (currentCount !== savedCount) {
-                // Р§РёСЃР»Рѕ РёР·РјРµРЅРёР»РѕСЃСЊ вЂ” РЅР°РјРµРєР°РµРј РїРµСЂРµСЃРѕР±СЂР°С‚СЊ
+                // Число изменилось — намекаем пересобрать
                 const diff = currentCount - savedCount;
                 const sign = diff > 0 ? '+' : '';
-                btnCollect.textContent = `рџ”ґ ${currentCount} (${sign}${diff})`;
+                btnCollect.textContent = `?? ${currentCount} (${sign}${diff})`;
                 btnCollect.style.background = '#7f1d1d';
                 btnCollect.style.color = '#fca5a5';
-                btnCollect.dataset.collectedCount = String(currentCount); // РѕР±РЅРѕРІР»СЏРµРј С‡С‚РѕР±С‹ РЅРµ СЃРїР°РјРёС‚СЊ
+                btnCollect.dataset.collectedCount = String(currentCount); // обновляем чтобы не спамить
             }
         }, 2000);
 
         const _ssActive = (() => { try { return JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch { return false; } })();
         const btnSS = document.createElement('button');
         btnSS.id = 'mossad-gallery-ss';
-        btnSS.textContent = _ssActive ? 'вЏ№ РЎС‚РѕРї' : 'рџЋІ РЎР»Р°Р№РґС€РѕСѓ';
+        btnSS.textContent = _ssActive ? '? Стоп' : '?? Слайдшоу';
         btnSS.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:${_ssActive ? '#7f1d1d' : '#1e3a5f'};color:${_ssActive ? '#fca5a5' : '#93c5fd'};transition:all 0.2s;`;
         btnSS.onclick = () => {
             const active = (() => { try { return JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch { return false; } })();
             if (active) {
                 grokStopGallerySlideshow();
-                btnSS.textContent = 'рџЋІ РЎР»Р°Р№РґС€РѕСѓ';
+                btnSS.textContent = '?? Слайдшоу';
                 btnSS.style.background = '#1e3a5f'; btnSS.style.color = '#93c5fd';
             } else {
                 grokStartGallerySlideshow(btnSS);
@@ -693,8 +693,8 @@
 
         const btnDl = document.createElement('button');
         btnDl.id = 'mossad-gallery-dl';
-        btnDl.textContent = 'рџ“Ґ';
-        btnDl.title = 'РЎРєР°С‡Р°С‚СЊ РєРѕР»Р»РµРєС†РёСЋ .txt';
+        btnDl.textContent = '??';
+        btnDl.title = 'Скачать коллекцию .txt';
         btnDl.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 8px;font-size:14px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
         btnDl.onclick = () => grokDownloadCollection();
 
@@ -702,7 +702,7 @@
         container.insertBefore(row, container.firstChild);
     }
 
-    /** РќР° СЃС‚СЂР°РЅРёС†Рµ РїРѕСЃС‚Р° вЂ” РїСЂРѕРґРѕР»Р¶РµРЅРёРµ Gallery Slideshow С‡РµСЂРµР· СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ РґРІРёР¶РѕРє MOSSAD */
+    /** На странице поста — продолжение Gallery Slideshow через стандартный движок MOSSAD */
     function grokGallerySlideshowTick() {
         if (!isGrokPostPage()) return;
         const raw = _gSS.getItem(GALLERY_SS_KEY);
@@ -711,7 +711,7 @@
         try { ss = JSON.parse(raw); } catch { return; }
         if (!ss.active) return;
 
-        // РџРѕРєР°Р·С‹РІР°РµРј РёРЅРґРёРєР°С‚РѕСЂ
+        // Показываем индикатор
         const indicator = document.createElement('div');
         indicator.id = 'mossad-gallery-indicator';
         const qLeft  = (ss.queue || []).length;
@@ -724,10 +724,10 @@
             color:#9ca3af; display:flex; align-items:center; gap:10px;
             box-shadow:0 4px 20px rgba(0,0,0,0.5);
         `;
-        indicator.innerHTML = `<span>рџЋІ РљСЂСѓРі ${ss.circle} В· ${showed}/${ss.total}</span><button id="mgi-stop" style="background:#374151;border:none;border-radius:6px;color:#f87171;padding:3px 8px;cursor:pointer;font-size:11px;font-weight:bold;">вЏ№</button>`;
+        indicator.innerHTML = `<span>?? Круг ${ss.circle} · ${showed}/${ss.total}</span><button id="mgi-stop" style="background:#374151;border:none;border-radius:6px;color:#f87171;padding:3px 8px;cursor:pointer;font-size:11px;font-weight:bold;">?</button>`;
         document.body.appendChild(indicator);
 
-        // РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј С„СѓРЅРєС†РёСЋ РїРµСЂРµС…РѕРґР°: РµС‘ РІС‹Р·РѕРІРµС‚ triggerNextSlide
+        // Устанавливаем функцию перехода: её вызовет triggerNextSlide
         window._mossadGalleryActive = true;
         window._mossadGalleryNextFn = () => {
             indicator.remove();
@@ -744,16 +744,16 @@
                 let allItems = [];
                 if (colRaw) { try { allItems = JSON.parse(colRaw).items || []; } catch {} }
                 queue = fisherYatesShuffle(allItems);
-                showToast(`рџ”„ РљСЂСѓРі ${circle} РЅР°С‡Р°Р»СЃСЏ! (${queue.length} РіРµРЅРµСЂР°С†РёР№)`);
+                showToast(`?? Круг ${circle} начался! (${queue.length} генераций)`);
             }
 
             const next = queue.shift();
             ss.queue  = queue;
             ss.circle = circle;
             _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
-            // РџРѕРґСЃРєР°Р·С‹РІР°РµРј РґРІРёР¶РєСѓ С‚РёРї СЃР»РµРґСѓСЋС‰РµРіРѕ РїРѕСЃС‚Р° вЂ” РЅРµС‚ 6СЃ РѕР¶РёРґР°РЅРёСЏ РЅР° С„РѕС‚Рѕ
+            // Подсказываем движку тип следующего поста — нет 6с ожидания на фото
             if (next && next.type) sessionStorage.setItem('mossad_expected_type', next.type);
-            window.location.href = next.url || next; // РїРѕРґРґРµСЂР¶РєР° СЃС‚Р°СЂС‹С… СЃС‚СЂРѕРєРѕРІС‹С… РѕС‡РµСЂРµРґРµР№
+            window.location.href = next.url || next; // поддержка старых строковых очередей
         };
 
         document.getElementById('mgi-stop').onclick = () => {
@@ -764,7 +764,7 @@
             indicator.remove();
         };
 
-        // Р—Р°РїСѓСЃРєР°РµРј СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ РґРІРёР¶РѕРє вЂ” РѕРЅ СЃР°Рј СЂР°Р·Р±РµСЂС‘С‚СЃСЏ С„РѕС‚Рѕ/РІРёРґРµРѕ/С†РёРєР»С‹/РїР°СѓР·С‹
+        // Запускаем стандартный движок — он сам разберётся фото/видео/циклы/паузы
         slideshowActive = true;
         slideshowPaused = false;
         sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
@@ -773,7 +773,7 @@
         setTimeout(() => scheduleNextSlideCycle(0), 300);
     }
 
-    /** РљР»Р°РІРёС€Рё в†ђв†’ РїРѕ РєРѕР»Р»РµРєС†РёРё (С‚РѕР»СЊРєРѕ РµСЃР»Рё С‚РµРєСѓС‰РёР№ РїРѕСЃС‚ РµСЃС‚СЊ РІ СЃРїРёСЃРєРµ) */
+    /** Клавиши <> по коллекции (только если текущий пост есть в списке) */
     function grokGalleryKeyboardNav() {
         if (!isGrokPostPage()) return;
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
@@ -783,15 +783,15 @@
         const items = data.items || [];
         if (items.length === 0) return;
 
-        // UUID С‚РµРєСѓС‰РµРіРѕ РїРѕСЃС‚Р°
+        // UUID текущего поста
         const currentId = location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
         if (!currentId) return;
-        if (!items.some(it => it.url.includes(currentId))) return; // РЅРµ РЅР°С€ РїРѕСЃС‚ вЂ” РЅРµ РїРµСЂРµС…РІР°С‚С‹РІР°РµРј
+        if (!items.some(it => it.url.includes(currentId))) return; // не наш пост — не перехватываем
 
         document.addEventListener('keydown', function _gNav(e) {
             if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
 
-            // РџРµСЂРµРїСЂРѕРІРµСЂСЏРµРј РїРѕ Р°РєС‚СѓР°Р»СЊРЅРѕРјСѓ URL
+            // Перепроверяем по актуальному URL
             const curId = location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
             const curIdx = curId ? items.findIndex(it => it.url.includes(curId)) : -1;
             if (curIdx === -1) {
@@ -807,15 +807,15 @@
                 : (curIdx - 1 + items.length) % items.length;
             const next = items[nextIdx];
             if (next.type) sessionStorage.setItem('mossad_expected_type', next.type);
-            showToast(`в†ђв†’ ${nextIdx + 1}/${items.length} вЂў ${next.type === 'video' ? 'рџ“№' : 'рџ–ј'}`);
+            showToast(`<> ${nextIdx + 1}/${items.length} • ${next.type === 'video' ? '??' : '??'}`);
             window.location.href = next.url;
-        }, true); // capture вЂ” СЂР°РЅСЊС€Рµ СЃС‚СЂР°РЅРёС†С‹
+        }, true); // capture — раньше страницы
     }
 
     function fetchBlobFallback(url, filename) {
         fetch(url).then(res => res.blob()).then(blob => saveBlobToDisk(blob, filename))
         .catch(err => {
-            showToast('вљ пёЏ РџСЂСЏРјРѕРµ СЃРєР°С‡РёРІР°РЅРёРµ РЅРµРґРѕСЃС‚СѓРїРЅРѕ, РѕС‚РєСЂС‹С‚Рѕ РІ РЅРѕРІРѕР№ РІРєР»Р°РґРєРµ', true);
+            showToast('?? Прямое скачивание недоступно, открыто в новой вкладке', true);
             window.open(url, '_blank');
         });
     }
@@ -826,10 +826,10 @@
         a.href = blobUrl; a.download = filename;
         document.body.appendChild(a); a.click();
         setTimeout(() => { a.remove(); URL.revokeObjectURL(blobUrl); }, 2000);
-        showToast('вњ… РЎРѕС…СЂР°РЅРµРЅРѕ!');
+        showToast('? Сохранено!');
     }
 
-    // РўРѕС‡РЅР°СЏ РєРѕРїРёСЏ РёР· 2.1.7-redgifs-drag
+    // Точная копия из 2.1.7-redgifs-drag
     function getActiveRedGifsItem() {
         return document.querySelector('.GifPreview_isActive')
             || document.querySelector('.GifPreview')
@@ -872,7 +872,7 @@
 
     function getPinterestMainPinData() {
         try {
-            // 1. РџСЂСЏРјРѕР№ РѕСЃРјРѕС‚СЂ DOM С‚РµРіРѕРІ РІРёРґРµРѕ РіР»Р°РІРЅРѕРіРѕ РїРёРЅР° (closeup-video-main, duplo-hls-video)
+            // 1. Прямой осмотр DOM тегов видео главного пина (closeup-video-main, duplo-hls-video)
             const mainVideo = document.querySelector('video[elementtiming*="video"], video[data-test-id="duplo-hls-video"], video[src*="v1.pinimg.com"], video.jI_JN7');
             if (mainVideo) {
                 const src = mainVideo.src || (mainVideo.querySelector('source') && mainVideo.querySelector('source').src) || '';
@@ -888,7 +888,7 @@
                 return { isFound: true, type: 'video', bestMp4Url };
             }
 
-            // 2. РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ СЂР°Р·РјРµС‚РєРё DOM РЅР° РїСЂРµРґРјРµС‚ v1.pinimg.com/videos/iht/hls/ РёР»Рё elementtiming="closeup-video-main"
+            // 2. Сканирование разметки DOM на предмет v1.pinimg.com/videos/iht/hls/ или elementtiming="closeup-video-main"
             const fullHtml = document.documentElement.innerHTML || '';
             const hlsMatch = fullHtml.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/iht\\?\/hls\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{32})\.m3u8/i) ||
                              fullHtml.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i);
@@ -907,10 +907,10 @@
                 const idx = txt.indexOf('resource_response');
                 if (idx === -1) return null;
                 
-                // Р‘РµСЂРµРј СЃ Р·Р°РїР°СЃРѕРј 40000 СЃРёРјРІРѕР»РѕРІ, С‚.Рє. story_pin_data СЃ РІРёРґРµРѕ-Р±Р»РѕРєРѕРј Р»РµР¶РёС‚ РіР»СѓР±РѕРєРѕ РІРЅРёР·Сѓ JSON
+                // Берем с запасом 40000 символов, т.к. story_pin_data с видео-блоком лежит глубоко внизу JSON
                 const slice = txt.slice(Math.max(0, idx - 500), idx + 40000);
 
-                // 1. РџР•Р Р’Р«Рњ Р”Р•Р›РћРњ РР©Р•Рњ РЎРР“РќРђРўРЈР Р« Р Р‘Р›РћРљР Р’РР”Р•Рћ
+                // 1. ПЕРВЫМ ДЕЛОМ ИЩЕМ СИГНАТУРЫ И БЛОКИ ВИДЕО
                 const sigMatch = slice.match(/"video_signature"\s*:\s*"([a-f0-9]{32})"/i) ||
                                  slice.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i) ||
                                  slice.match(/thumbnails\/originals\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\./i);
@@ -937,7 +937,7 @@
                     return { isFound: true, type: 'video', bestMp4Url };
                 }
 
-                // 2. Р РўРћР›Р¬РљРћ Р•РЎР›Р РќР РћР”РќРћР“Рћ РџР РР—РќРђРљРђ Р’РР”Р•Рћ РќР•Рў вЂ” Р­РўРћ Р¤РћРўРћ
+                // 2. И ТОЛЬКО ЕСЛИ НИ ОДНОГО ПРИЗНАКА ВИДЕО НЕТ — ЭТО ФОТО
                 if (/"images"\s*:\s*\{/i.test(slice) || /"image_signature"/i.test(slice)) {
                     return { isFound: true, type: 'image', bestMp4Url: null };
                 }
@@ -964,52 +964,60 @@
     // ============================================
     // INSTAGRAM ENGINE
     // ============================================
-    const _igVideoUrls = [];   // РїРµСЂРµС…РІР°С‡РµРЅРЅС‹Рµ URL РІРёРґРµРѕ CDN РёРЅСЃС‚С‹
+    const _igVideoUrls = [];   // перехваченные URL видео CDN инсты
 
-    /** Р”РѕР±Р°РІРёС‚СЊ URL РІ СЃРїРёСЃРѕРє, РґРµРґСѓРїР»РёРєР°С†РёСЏ, РЅРѕРІС‹Рµ вЂ” РІ РЅР°С‡Р°Р»Рѕ */
+    /** Добавить URL в список, дедупликация, новые — в начало */
     function _igPush(url) {
         if (!url || url.startsWith('blob:')) return;
-        // РЈР±РёСЂР°РµРј bytestart/byteend РїР°СЂР°РјРµС‚СЂС‹ С‡С‚РѕР±С‹ URL Р±С‹Р» РїРѕР»РЅС‹Рј
+        // Убираем bytestart/byteend параметры чтобы URL был полным
         const clean = url.replace(/[?&](bytestart|byteend)=[^&]*/gi, '').replace(/[?&]$/, '');
         if (!_igVideoUrls.includes(clean)) {
             _igVideoUrls.unshift(clean);
             if (_igVideoUrls.length > 30) _igVideoUrls.pop();
-            console.log('[MOSSAD/IG] РџРѕР№РјР°Р» URL:', clean.slice(0, 80));
+            console.log('[MOSSAD/IG] Поймал URL:', clean.slice(0, 80));
         }
     }
 
-    /** РџСЂРѕРІРµСЂСЏРµС‚, РїРѕС…РѕР¶ Р»Рё URL РЅР° РјРµРґРёР° CDN РёРЅСЃС‚С‹ */
-    function _igIsCdnUrl(url) {
-        if (!url || typeof url !== 'string') return false;
-        return /cdninstagram\.com/i.test(url) ||
-               /\.fbcdn\.net/i.test(url) ||
-               /instagram\.f[a-z0-9-]+\d+\.fna/i.test(url);
+    /**
+     * Проверяет, является ли URL реальным видео CDN инсты.
+     * Требует /v/t*.* или .mp4. Исключает манифесты/картинки/json.
+     */
+    function _igIsVideoUrl(url) {
+        if (!url || typeof url !== 'string' || url.startsWith('blob:')) return false;
+        if (!/fbcdn\.net|cdninstagram\.com/i.test(url)) return false;
+        if (/\.(jpg|jpeg|png|webp|gif|json|js|css|woff|svg|ico|m3u8|mpd)(\?|$)/i.test(url)) return false;
+        if (/manifest|integrity|checksum/i.test(url)) return false;
+        const path = url.split('?')[0];
+        return /\/v\/t\d+\.\d+/i.test(path) || /\.mp4/i.test(path);
     }
 
-    /** РџР°СЂСЃРёРј JSON-РґР°РЅРЅС‹Рµ СЃС‚СЂР°РЅРёС†С‹ вЂ” РёРЅСЃС‚Р° РІСЃС‚Р°РІР»СЏРµС‚ РІРёРґРµРѕ URL РІ script-С‚РµРіРё */
+    /** Парсим script-теги страницы — инста встраивает видео URL в JSON */
     function _igScrapePageJson() {
         const found = [];
-        // РС‰РµРј РІСЃРµ fbcdn.net Рё cdninstagram.com URL РІ С‚РµРєСЃС‚Рµ СЃС‚СЂР°РЅРёС†С‹
-        const pageText = document.documentElement.innerHTML;
-        const re = /https:\/\/[^"'\s]*(?:fbcdn\.net|cdninstagram\.com)[^"'\s]*/g;
-        let m;
-        while ((m = re.exec(pageText)) !== null) {
-            let u = m[0].replace(/\\u0026/g, '&').replace(/\\/g, '').split('"')[0];
-            if (u && (u.includes('.mp4') || u.includes('video') || u.includes('/v/'))) {
-                found.push(u);
+        document.querySelectorAll('script').forEach(s => {
+            const txt = s.textContent || '';
+            if (!txt.includes('fbcdn.net') && !txt.includes('cdninstagram.com')) return;
+            const re = /https:\\?\/\\?\/[^\"'\s\\]+(?:fbcdn\.net|cdninstagram\.com)[^\"'\s\\]*/g;
+            let m;
+            while ((m = re.exec(txt)) !== null) {
+                const u = m[0].replace(/\\u0026/g, '&').replace(/\\u002F/gi, '/').replace(/\\/g, '');
+                if (_igIsVideoUrl(u) && !found.includes(u)) {
+                    console.log('[MOSSAD/IG] script URL:', u.slice(0, 100));
+                    found.push(u);
+                }
             }
-        }
+        });
         return found;
     }
 
     if (rootDomain.includes('instagram.com')) {
-        // --- РџРµСЂРµС…РІР°С‚ fetch вЂ” Р»РѕРІРёРј Р»СЋР±РѕР№ CDN Р·Р°РїСЂРѕСЃ, РЅРµ С‚РѕР»СЊРєРѕ .mp4 ---
+        // --- Перехват fetch — ловим любой CDN запрос, не только .mp4 ---
         const _origFetch = window.fetch;
         window.fetch = function (...args) {
             const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
-            if (_igIsCdnUrl(url)) _igPush(url);
+            if (_igIsVideoUrl(url)) _igPush(url);
             const p = _origFetch.apply(this, args);
-            // Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ: РїСЂРѕРІРµСЂСЏРµРј Content-Type РѕС‚РІРµС‚Р°
+            // Дополнительно: проверяем Content-Type ответа
             p.then && p.then(r => {
                 try {
                     if (r && r.headers && r.headers.get('content-type') && r.headers.get('content-type').includes('video')) {
@@ -1020,18 +1028,18 @@
             return p;
         };
 
-        // --- РџРµСЂРµС…РІР°С‚ XHR ---
+        // --- Перехват XHR ---
         const _origXHROpen = XMLHttpRequest.prototype.open;
         XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-            if (typeof url === 'string' && _igIsCdnUrl(url)) _igPush(url);
+            if (typeof url === 'string' && _igIsVideoUrl(url)) _igPush(url);
             return _origXHROpen.call(this, method, url, ...rest);
         };
 
-        // --- MutationObserver: РїСЂСЏРјС‹Рµ src Сѓ <video> ---
+        // --- MutationObserver: прямые src у <video> ---
         const _igObserver = new MutationObserver(() => {
             document.querySelectorAll('video, video > source').forEach(el => {
                 const src = el.src || el.getAttribute('src') || el.currentSrc || '';
-                if (_igIsCdnUrl(src)) _igPush(src);
+                if (_igIsVideoUrl(src)) _igPush(src);
             });
         });
         const _igStartObs = () => {
@@ -1041,27 +1049,27 @@
     }
 
     function findMediaForDownload() {
-        // Instagram вЂ” РІРѕР·РІСЂР°С‰Р°РµРј РїРѕСЃР»РµРґРЅРёР№ РїРµСЂРµС…РІР°С‡РµРЅРЅС‹Р№ URL
+        // Instagram — возвращаем последний перехваченный URL
         if (rootDomain.includes('instagram.com')) {
-            // 1. РџСЂСЏРјС‹Рµ src Сѓ РІРёРґРµРѕ (РёРЅРѕРіРґР° РёРЅСЃС‚Р° РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚ blob)
+            // 1. Прямые src у видео (иногда инста не использует blob)
             const vids = Array.from(document.querySelectorAll('video'));
             for (const v of vids) {
                 const src = v.currentSrc || v.src || (v.querySelector('source') || {}).src || '';
-                if (src && _igIsCdnUrl(src) && !src.startsWith('blob:')) {
+                if (src && _igIsVideoUrl(src) && !src.startsWith('blob:')) {
                     return { urls: [src], type: 'video' };
                 }
             }
-            // 2. РџРµСЂРµС…РІР°С‡РµРЅРЅС‹Рµ С‡РµСЂРµР· fetch/XHR/Observer
+            // 2. Перехваченные через fetch/XHR/Observer
             if (_igVideoUrls.length > 0) {
                 return { urls: [..._igVideoUrls], type: 'video' };
             }
-            // 3. РџР°СЂСЃРёРЅРі JSON СЃРѕ СЃС‚СЂР°РЅРёС†С‹ (РёРЅСЃС‚Р° РІСЃС‚СЂР°РёРІР°РµС‚ URL РІ script-С‚РµРіРё)
+            // 3. Парсинг JSON со страницы (инста встраивает URL в script-теги)
             const scraped = _igScrapePageJson();
             if (scraped.length > 0) {
                 scraped.forEach(u => _igPush(u));
                 return { urls: scraped, type: 'video' };
             }
-            showToast('вЏі РРЅСЃС‚Р°: Р·Р°РїСѓСЃС‚Рё РІРёРґРµРѕ вЂ” СЃРєСЂРёРїС‚ РїРѕР№РјР°РµС‚ URL', true);
+            showToast('? Инста: запусти видео — скрипт поймает URL', true);
             return null;
         }
 
@@ -1069,7 +1077,7 @@
             const pinType = getPinMediaType();
             const mainPin = getPinterestMainPinData();
             
-            // 1. Р•СЃР»Рё РіР»Р°РІРЅС‹Р№ РїРёРЅ - Р’РР”Р•Рћ
+            // 1. Если главный пин - ВИДЕО
             if (pinType === 'video' || mainPin.bestMp4Url) {
                 if (mainPin.bestMp4Url) {
                     return { urls: [mainPin.bestMp4Url], type: 'video' };
@@ -1083,7 +1091,7 @@
                 }
             }
 
-            // 2. Р•СЃР»Рё РіР»Р°РІРЅС‹Р№ РїРёРЅ - Р¤РћРўРћ (РёР»Рё РЅРµ СЃРѕРґРµСЂР¶РёС‚ РІРёРґРµРѕ)
+            // 2. Если главный пин - ФОТО (или не содержит видео)
             const stageImg = document.querySelector('div[data-test-id="closeup-stage"] img, div[data-test-id="pin-closeup"] img, div[role="main"] img');
             if (stageImg && stageImg.src) {
                 let imgUrl = stageImg.src;
@@ -1092,13 +1100,13 @@
             }
         }
 
-        // 1. РўРѕС‡РЅР°СЏ РєРѕРїРёСЏ Р»РѕРіРёРєРё РёР· СЃС‚Р°СЂРѕРіРѕ СЃРєСЂРёРїС‚Р° (grok_hotkeys_plus_slideshow.user.js РѕС‚ 4 Р°РІРіСѓСЃС‚Р°)
+        // 1. Точная копия логики из старого скрипта (grok_hotkeys_plus_slideshow.user.js от 4 августа)
         if (rootDomain.includes('redgifs.com')) {
             const active = getActiveRedGifsItem();
             const urls = [];
             const itemId = active ? active.getAttribute('data-feed-item-id') : null;
 
-            // РР· РєР°СЂС‚РёРЅРєРё poster
+            // Из картинки poster
             if (active) {
                 const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]');
                 if (poster && poster.src) {
@@ -1154,24 +1162,24 @@
 
     function triggerDownload() {
         const media = findMediaForDownload();
-        if (!media || !media.urls || media.urls.length === 0) { showToast('вќЊ РњРµРґРёР° РЅРµ РЅР°Р№РґРµРЅРѕ', true); return; }
+        if (!media || !media.urls || media.urls.length === 0) { showToast('? Медиа не найдено', true); return; }
 
-        // Р—Р°С‰РёС‚Р° РѕС‚ РїРѕРІС‚РѕСЂРЅРѕРіРѕ СЃРєР°С‡РёРІР°РЅРёСЏ РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р° Р·Р° РєРѕСЂРѕС‚РєРѕРµ РІСЂРµРјСЏ
+        // Защита от повторного скачивания одного файла за короткое время
         const primaryUrl = media.urls[0];
         const now = Date.now();
         if (primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
-            console.warn('[MOSSAD] РџРѕРІС‚РѕСЂРЅРѕРµ СЃРєР°С‡РёРІР°РЅРёРµ С‚РѕРіРѕ Р¶Рµ С„Р°Р№Р»Р° Р·Р° 5СЃРµРє, РїСЂРѕРїСѓС‰РµРЅРѕ.');
+            console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, пропущено.');
             return;
         }
         _lastDownloadUrl = primaryUrl;
         _lastDownloadTime = now;
         
-        // --- Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅР°СЏ С„СѓРЅРєС†РёСЏ: РїСЂРёРјРµРЅРёС‚СЊ {var[N]} СЃРёРЅС‚Р°РєСЃРёСЃ ---
+        // --- Вспомогательная функция: применить {var[N]} синтаксис ---
         function applyTplVar(value, len) {
             return len > 0 ? value.slice(0, len) : value;
         }
 
-        // --- Р‘Р°Р·РѕРІРѕРµ РёРјСЏ С„Р°Р№Р»Р° (Р±РµР· С€Р°Р±Р»РѕРЅР°) ---
+        // --- Базовое имя файла (без шаблона) ---
         let filename;
         if (rootDomain.includes('redgifs.com') && media.itemId) {
             filename = getRedGifsTitleFilename(media.itemId);
@@ -1181,7 +1189,7 @@
             filename = `${titleClean}.${ext}`;
         }
 
-        // --- РџСЂРёРјРµРЅСЏРµРј С€Р°Р±Р»РѕРЅ РёРјРµРЅРё С„Р°Р№Р»Р°, РµСЃР»Рё РІРєР»СЋС‡С‘РЅ ---
+        // --- Применяем шаблон имени файла, если включён ---
         if (config.filenameTemplateEnabled && config.filenameTemplate && config.filenameTemplate.trim()) {
             const now2 = new Date();
             const pad2 = (n) => String(n).padStart(2, '0');
@@ -1192,7 +1200,7 @@
             const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
             const nStr = String(Date.now()).slice(-6);
 
-            // РЎР»РѕРІР°СЂСЊ РїРµСЂРµРјРµРЅРЅС‹С… (Р·РЅР°С‡РµРЅРёРµ Р±РµР· РѕР±СЂРµР·РєРё)
+            // Словарь переменных (значение без обрезки)
             const vars = {
                 title: titleClean2,
                 date:  dateStr,
@@ -1202,7 +1210,7 @@
                 n:     nStr,
             };
 
-            // Р РµРіСѓР»СЏСЂРєР°: {varname} РёР»Рё {varname[N]}
+            // Регулярка: {varname} или {varname[N]}
             filename = config.filenameTemplate.trim().replace(
                 /\{(\w+)(?:\[(\d+)\])?\}/gi,
                 (_, name, lenStr) => {
@@ -1213,13 +1221,13 @@
                 }
             ).replace(/[\\/:*?"<>|]/g, '_');
 
-            // Р”РѕР±Р°РІРёС‚СЊ СЂР°СЃС€РёСЂРµРЅРёРµ, РµСЃР»Рё С€Р°Р±Р»РѕРЅ РµРіРѕ РЅРµ СЃРѕРґРµСЂР¶РёС‚
+            // Добавить расширение, если шаблон его не содержит
             if (!filename.includes('.')) filename += `.${ext2}`;
         }
 
-        // --- РЎС‡С‘С‚С‡РёРє РґСѓР±Р»РёРєР°С‚РѕРІ: (001), (002)... ---
+        // --- Счётчик дубликатов: (001), (002)... ---
         {
-            // Р Р°Р·Р±РёРІР°РµРј РёРјСЏ РЅР° Р±Р°Р·Сѓ Рё СЂР°СЃС€РёСЂРµРЅРёРµ
+            // Разбиваем имя на базу и расширение
             const lastDot = filename.lastIndexOf('.');
             const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
             const extPart = lastDot !== -1 ? filename.slice(lastDot) : '';
@@ -1235,7 +1243,7 @@
 
         function tryNext() {
             if (attemptedIndex >= urls.length) {
-                console.warn('Р’СЃРµ СЃСЃС‹Р»РєРё РЅРµ СЃСЂР°Р±РѕС‚Р°Р»Рё, fallback РЅР° Blob...');
+                console.warn('Все ссылки не сработали, fallback на Blob...');
                 downloadBlobMedia(urls[0], filename);
                 return;
             }
@@ -1258,7 +1266,7 @@
                     tryNext();
                 }
             } else {
-                showToast('вЏі Р—Р°РїСѓСЃРє СЃРєР°С‡РёРІР°РЅРёСЏ...');
+                showToast('? Запуск скачивания...');
                 triggerDirectBlobDownload(targetUrl, targetFilename, tryNext);
             }
         }
@@ -1277,9 +1285,9 @@
     let slideshowTimeoutId = null;
     let downloadTimeoutId = null;
     let countdownSeconds = 0;
-    let isCountingDown = false; // РћС‚СЃС‡РµС‚ РІСЂРµРјРµРЅРё РїРѕСЃР»Рµ РІРёРґРµРѕ РёР»Рё РґР»СЏ С„РѕС‚Рѕ
+    let isCountingDown = false; // Отсчет времени после видео или для фото
     
-    // Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅС‹Рµ РїРµСЂРµРјРµРЅРЅС‹Рµ РґР»СЏ С†РёРєР»РѕРІ
+    // Вспомогательные переменные для циклов
     let currentVideoNode = null;
     let videoInitialDuration = 0;
     let currentLoopCount = 0;
@@ -1287,17 +1295,17 @@
     let lastTime = 0;
     let lastRAFTime = 0;
     let rafId = null;
-    let _lastDownloadUrl = null;     // Р·Р°С‰РёС‚Р° РѕС‚ РїРѕРІС‚РѕСЂРЅРѕРіРѕ СЃРєР°С‡РёРІР°РЅРёСЏ РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р°
+    let _lastDownloadUrl = null;     // защита от повторного скачивания одного файла
     let _lastDownloadTime = 0;
-    const _filenameCounter = new Map(); // СЃС‡С‘С‚С‡РёРє РїРѕ Р±Р°Р·РѕРІРѕРјСѓ РёРјРµРЅРё в†’ (001)(002)...
-    let _samePageSlideCount = 0;     // СЃС‡С‘С‚С‡РёРє РїРѕРїС‹С‚РѕРє РїРµСЂРµР»РёСЃС‚РЅСѓС‚СЊ СЃ РѕРґРЅРѕР№ Рё С‚РѕР№ Р¶Рµ СЃС‚СЂР°РЅРёС†С‹
-    let _lastSlideUrl = '';          // URL РІРѕ РІСЂРµРјСЏ РїРѕСЃР»РµРґРЅРµРіРѕ triggerNextSlide
-    const SAME_PAGE_LIMIT = 3;       // СЃРєРѕР»СЊРєРѕ СЂР°Р· РїСЂРѕР±РѕРІР°С‚СЊ РїРµСЂРµРґ РѕСЃС‚Р°РЅРѕРІРєРѕР№
+    const _filenameCounter = new Map(); // счётчик по базовому имени > (001)(002)...
+    let _samePageSlideCount = 0;     // счётчик попыток перелистнуть с одной и той же страницы
+    let _lastSlideUrl = '';          // URL во время последнего triggerNextSlide
+    const SAME_PAGE_LIMIT = 3;       // сколько раз пробовать перед остановкой
     function getActiveVideo() {
         let videos = Array.from(document.querySelectorAll('video'));
         if (videos.length === 0) return null;
         
-        // РќР° РџРёРЅС‚РµСЂРµСЃС‚Рµ РёС‰РµРј РІРёРґРµРѕ РІ РіР»Р°РІРЅРѕРј РєРѕРЅС‚РµР№РЅРµСЂРµ СЃС†РµРЅС‹ РїРёРЅР° (closeup-stage / main)
+        // На Пинтересте ищем видео в главном контейнере сцены пина (closeup-stage / main)
         if (rootDomain.includes('pinterest.')) {
             const mainStage = document.querySelector('div[data-test-id="closeup-stage"], div[data-test-id="pin-closeup"], div[role="main"], div[data-test-id="story-pin-closeup-container"]');
             if (mainStage) {
@@ -1348,11 +1356,11 @@
             if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
             if (rafId) cancelAnimationFrame(rafId);
             
-            // РЎР±СЂР°СЃС‹РІР°РµРј С‚Р°Р№РјРµСЂ РІ РёРЅС‚РµСЂС„РµР№СЃРµ РЅРµРјРµРґР»РµРЅРЅРѕ!
+            // Сбрасываем таймер в интерфейсе немедленно!
             isCountingDown = false;
             countdownSeconds = 0;
             
-            // Р–РґРµРј С‡СѓС‚СЊ-С‡СѓС‚СЊ, С‡С‚РѕР±С‹ SPA СѓСЃРїРµР»Рѕ РѕР±РЅРѕРІРёС‚СЊ DOM
+            // Ждем чуть-чуть, чтобы SPA успело обновить DOM
             setTimeout(() => {
                 if (slideshowActive) scheduleNextSlideCycle(0);
             }, 100);
@@ -1380,10 +1388,10 @@
             slideshowPaused = false;
             sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
             sessionStorage.setItem(SESSION_STATE_KEY, 'bar');
-            // Р—Р°РєСЂС‹РІР°РµРј РјРѕРґР°Р»СЊРЅРѕРµ РѕРєРЅРѕ РЅР°СЃС‚СЂРѕРµРє РіРѕСЂСЏС‡РёС… РєР»Р°РІРёС€ (РµСЃР»Рё РѕС‚РєСЂС‹С‚Рѕ)
+            // Закрываем модальное окно настроек горячих клавиш (если открыто)
             const hkModal = document.getElementById('mossad-hk-modal');
             if (hkModal) hkModal.remove();
-            // РЎРІРѕСЂР°С‡РёРІР°РµРј РІРёРґР¶РµС‚ РІ РєРѕРјРїР°РєС‚РЅСѓСЋ РїРѕР»РѕСЃРєСѓ (bar)
+            // Сворачиваем виджет в компактную полоску (bar)
             window.widgetState = 'bar';
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleNextSlideCycle(0);
@@ -1404,14 +1412,14 @@
         const dirs = config.slideshowDirections;
         if (!dirs || dirs.length === 0) { stopSlideshow(); return; }
 
-        // Р—Р°С‰РёС‚Р° РѕС‚ Р·Р°С†РёРєР»РёРІР°РЅРёСЏ РЅР° РєРѕРЅС†Рµ Р»РµРЅС‚С‹
+        // Защита от зацикливания на конце ленты
         const curUrl = location.href;
         if (curUrl === _lastSlideUrl) {
             _samePageSlideCount++;
             if (_samePageSlideCount > SAME_PAGE_LIMIT) {
-                console.warn('[MOSSAD] РџСЂРµРІС‹С€РµРЅ Р»РёРјРёС‚ РїРµСЂРµР»РёСЃС‚С‹РІР°РЅРёР№ Р±РµР· СЃРјРµРЅС‹ СЃС‚СЂР°РЅРёС†С‹, РѕСЃС‚Р°РЅРѕРІРєР°.');
+                console.warn('[MOSSAD] Превышен лимит перелистываний без смены страницы, остановка.');
                 stopSlideshow();
-                showToast('вЏ№ РЎР»Р°Р№РґС€РѕСѓ РѕСЃС‚Р°РЅРѕРІР»РµРЅ: РєРѕРЅРµС† Р»РµРЅС‚С‹', true);
+                showToast('? Слайдшоу остановлен: конец ленты', true);
                 return;
             }
         } else {
@@ -1419,7 +1427,7 @@
             _lastSlideUrl = curUrl;
         }
 
-        // РЎРєР°С‡РёРІР°РЅРёРµ РїРµСЂРµРґ РїРµСЂРµР»РёСЃС‚С‹РІР°РЅРёРµРј
+        // Скачивание перед перелистыванием
         if (config.downloadType !== 'none') {
             const hasVideo = getActiveVideo() !== null;
             if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
@@ -1431,9 +1439,9 @@
             }
         }
         
-        // Gallery Slideshow: РІРјРµСЃС‚Рѕ РєР»Р°РІРёС€Рё вЂ” РїРµСЂРµС…РѕРґРёРј РЅР° СЃР»РµРґСѓСЋС‰РёР№ URL РёР· РѕС‡РµСЂРµРґРё
+        // Gallery Slideshow: вместо клавиши — переходим на следующий URL из очереди
         if (window._mossadGalleryActive && typeof window._mossadGalleryNextFn === 'function') {
-            // РЎРєР°С‡РёРІР°РЅРёРµ (РµСЃР»Рё РІРєР»СЋС‡РµРЅРѕ) РїРµСЂРµРґ РїРµСЂРµС…РѕРґРѕРј
+            // Скачивание (если включено) перед переходом
             if (config.downloadType !== 'none') {
                 const hasVideo = getActiveVideo() !== null;
                 if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
@@ -1444,13 +1452,13 @@
             return;
         }
 
-        // Pinterest СЃСЃС‹Р»РѕС‡РЅР°СЏ РЅР°РІРёРіР°С†РёСЏ
+        // Pinterest ссылочная навигация
         if (rootDomain.includes('pinterest.')) {
             selectNextPinterestPin('next');
             return;
         }
 
-        // Р›РёСЃС‚Р°РЅРёРµ
+        // Листание
         const key = getArrowKey(dirs[0]);
         document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
         setTimeout(() => {
@@ -1471,23 +1479,23 @@
             if (config.pinterestFilterType === 'image') return 'image';
         }
 
-        // Р‘С‹СЃС‚СЂРѕРµ РѕРїСЂРµРґРµР»РµРЅРёРµ РїРѕ РєРЅРѕРїРєР°Рј Grok (РїРѕСЏРІР»СЏСЋС‚СЃСЏ СЂР°РЅСЊС€Рµ РІРёРґРµРѕ-РїР»РµРµСЂР°)
+        // Быстрое определение по кнопкам Grok (появляются раньше видео-плеера)
         if (rootDomain === 'grok.com') {
             const allBtns = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]'));
             const btnTexts = allBtns.map(el => (el.textContent || '').trim());
             const btnArias = allBtns.map(el => (el.getAttribute('aria-label') || '').toLowerCase());
-            // "РЈРґР°Р»РёС‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ" вЂ” Р¶РµР»РµР·РЅРѕРµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ С‡С‚Рѕ СЌС‚Рѕ С„РѕС‚Рѕ
-            if (btnTexts.some(t => t === 'РЈРґР°Р»РёС‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ' || t === 'Delete image')) return 'image';
-            // Р’РёРґРµРѕ-РїСЂРёР·РЅР°РєРё РїРѕ РєРЅРѕРїРєР°Рј
+            // "Удалить изображение" — железное подтверждение что это фото
+            if (btnTexts.some(t => t === 'Удалить изображение' || t === 'Delete image')) return 'image';
+            // Видео-признаки по кнопкам
             if (
-                btnTexts.some(t => t === 'РЈРґР°Р»РёС‚СЊ РІРёРґРµРѕ' || t === 'Delete video' || t === 'РџСЂРѕРґР»РёС‚СЊ' || t === 'Extend') ||
-                btnArias.some(a => a.includes('Р·РІСѓРє') || a.includes('sound') || a.includes('mute') || a.includes('unmute')) ||
-                allBtns.some(el => /Р·РІСѓРє/i.test(el.textContent))
+                btnTexts.some(t => t === 'Удалить видео' || t === 'Delete video' || t === 'Продлить' || t === 'Extend') ||
+                btnArias.some(a => a.includes('звук') || a.includes('sound') || a.includes('mute') || a.includes('unmute')) ||
+                allBtns.some(el => /звук/i.test(el.textContent))
             ) return 'video';
         }
 
-        // РџСЂРѕРІРµСЂСЏРµРј РІРёРґРµРѕРїР»РµРµСЂС‹ (duplo-hls-video, story-pin, idea-pin, РєРЅРѕРїРєРё Р·РІСѓРєР°)
-        if (document.querySelector('video, [data-test-id*="video"], [data-test-id*="story-pin"], [data-test-id*="idea-pin"], [data-test-id*="duplo-hls"], button[aria-label*="Р·РІСѓРє"], button[aria-label*="Sound"], button[aria-label*="Unmute"], .SoundButton')) {
+        // Проверяем видеоплееры (duplo-hls-video, story-pin, idea-pin, кнопки звука)
+        if (document.querySelector('video, [data-test-id*="video"], [data-test-id*="story-pin"], [data-test-id*="idea-pin"], [data-test-id*="duplo-hls"], button[aria-label*="звук"], button[aria-label*="Sound"], button[aria-label*="Unmute"], .SoundButton')) {
             return 'video';
         }
         if (document.querySelector('meta[property="og:video"], meta[name="og:video"], meta[name="twitter:card"][content="player"]')) {
@@ -1511,7 +1519,7 @@
         const video = getActiveVideo();
 
         if (detectedType === 'image') {
-            // РњРіРЅРѕРІРµРЅРЅС‹Р№ Р·Р°РїСѓСЃРє С„РѕС‚Рѕ-С‚Р°Р№РјРµСЂР° РЅР° 0 РјРёР»Р»РёСЃРµРєСѓРЅРґРµ
+            // Мгновенный запуск фото-таймера на 0 миллисекунде
             sessionStorage.removeItem('mossad_expected_type');
             countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
             isCountingDown = true;
@@ -1521,7 +1529,7 @@
 
         if (video) {
             if (isNaN(video.duration) || video.duration === 0) {
-                if (retryCount > 40) { // Р”Рѕ 8 СЃРµРєСѓРЅРґ РѕР¶РёРґР°РЅРёСЏ РїР°СЂР°РјРµС‚СЂРѕРІ РІРёРґРµРѕ
+                if (retryCount > 40) { // До 8 секунд ожидания параметров видео
                      triggerNextSlide();
                      return;
                 }
@@ -1538,13 +1546,13 @@
             lastRAFTime = performance.now();
             rafId = requestAnimationFrame(checkVideoLoops);
         } else {
-            // Р•СЃР»Рё РІ DOM СѓР¶Рµ РµСЃС‚СЊ РіР»Р°РІРЅР°СЏ РєР°СЂС‚РёРЅРєР° РїРёРЅР° Рё РЅРµС‚ РєРѕРЅС‚РµР№РЅРµСЂРѕРІ РІРёРґРµРѕ
+            // Если в DOM уже есть главная картинка пина и нет контейнеров видео
             const stage = document.querySelector('div[data-test-id="closeup-stage"], div[data-test-id="pin-closeup"], div[role="main"]');
             const mainImg = stage ? stage.querySelector('img') : null;
-            const hasVideoElements = document.querySelector('div[data-test-id="video-player"], div[data-test-id="story-pin-video"], button[aria-label*="Р·РІСѓРє"], button[aria-label*="Sound"], .SoundButton');
+            const hasVideoElements = document.querySelector('div[data-test-id="video-player"], div[data-test-id="story-pin-video"], button[aria-label*="звук"], button[aria-label*="Sound"], .SoundButton');
 
             if (detectedType === 'unknown' && mainImg && !hasVideoElements && retryCount >= 5) {
-                // Р—Р°РїСѓСЃРє С„РѕС‚Рѕ-С‚Р°Р№РјРµСЂР° РїРѕСЃР»Рµ 500РјСЃ РїСЂРѕРІРµСЂРєРё РєР°СЂС‚РёРЅРєРё
+                // Запуск фото-таймера после 500мс проверки картинки
                 sessionStorage.removeItem('mossad_expected_type');
                 countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
                 isCountingDown = true;
@@ -1552,19 +1560,19 @@
                 return;
             }
 
-            // РћР¶РёРґР°РЅРёРµ РјРѕРЅС‚РёСЂРѕРІР°РЅРёСЏ <video> (РґР»СЏ РІРёРґРµРѕ-РїРёРЅРѕРІ)
+            // Ожидание монтирования <video> (для видео-пинов)
             const isVideoExpected = (detectedType === 'video' || (rootDomain.includes('pinterest.') && config.pinterestFilterType === 'video'));
-            const maxWaitAttempts = isVideoExpected ? 60 : 15; // 6 СЃРµРє РґР»СЏ РІРёРґРµРѕ, 1.5 СЃРµРє РґР»СЏ РѕСЃС‚Р°Р»СЊРЅС‹С…
+            const maxWaitAttempts = isVideoExpected ? 60 : 15; // 6 сек для видео, 1.5 сек для остальных
 
             if (retryCount < maxWaitAttempts) {
                 if (isVideoExpected && retryCount % 10 === 0) {
-                    showToast(`вЏі Р—Р°РіСЂСѓР·РєР° HLS РІРёРґРµРѕ-РїР»РµРµСЂР°... (${Math.floor(retryCount / 10)}/6СЃ)`);
+                    showToast(`? Загрузка HLS видео-плеера... (${Math.floor(retryCount / 10)}/6с)`);
                 }
                 slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 100);
                 return;
             }
 
-            // Р¤РѕР»Р±СЌРє РЅР° С„РѕС‚Рѕ
+            // Фолбэк на фото
             sessionStorage.removeItem('mossad_expected_type');
             countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
             isCountingDown = true;
@@ -1575,11 +1583,11 @@
     function checkVideoLoops(timeNow) {
         if (!slideshowActive || slideshowPaused) return;
         if (!currentVideoNode || !document.body.contains(currentVideoNode)) {
-            scheduleNextSlideCycle(0); // Р’РёРґРµРѕ РёСЃС‡РµР·Р»Рѕ, РїРµСЂРµР·Р°РїСѓСЃРє Р»РѕРіРёРєРё
+            scheduleNextSlideCycle(0); // Видео исчезло, перезапуск логики
             return;
         }
         
-        // Р•СЃР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїРѕСЃС‚Р°РІРёР» РІРёРґРµРѕ РЅР° РїР°СѓР·Сѓ вЂ” СЃС‚Р°РІРёРј РѕС‚СЃС‡РµС‚ СЃР»Р°Р№РґС€РѕСѓ РЅР° РїР°СѓР·Сѓ!
+        // Если пользователь поставил видео на паузу — ставим отсчет слайдшоу на паузу!
         if (currentVideoNode.paused) {
             lastRAFTime = timeNow;
             rafId = requestAnimationFrame(checkVideoLoops);
@@ -1588,7 +1596,7 @@
 
         const ct = currentVideoNode.currentTime;
         if (ct < lastTime) {
-            // РџСЂРѕРёР·РѕС€РµР» Р»СѓРї
+            // Произошел луп
             currentLoopCount++;
             accumulatedTime = 0;
         } else {
@@ -1599,13 +1607,13 @@
         lastTime = ct;
         lastRAFTime = timeNow;
         
-        // Р›РёРјРёС‚ РІСЂРµРјРµРЅРё СЃ СѓС‡РµС‚РѕРј РєРѕР»РёС‡РµСЃС‚РІР° РєСЂСѓРіРѕРІ (videoLoops * maxVideoDuration)
+        // Лимит времени с учетом количества кругов (videoLoops * maxVideoDuration)
         const maxDurationCap = (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0)
             ? (config.videoLoops * config.pinterestMaxVideoDuration)
             : (config.videoLoops * videoInitialDuration);
 
         if (currentLoopCount >= config.videoLoops || accumulatedTime >= maxDurationCap) {
-            // Р¦РёРєР»С‹ РёР»Рё Р»РёРјРёС‚ РІСЂРµРјРµРЅРё Р·Р°РІРµСЂС€РµРЅС‹, Р·Р°РїСѓСЃРєР°РµРј РїР°СѓР·Сѓ РїРѕСЃР»Рµ РІРёРґРµРѕ
+            // Циклы или лимит времени завершены, запускаем паузу после видео
             countdownSeconds = config.delayAfterVideo;
             isCountingDown = true;
             runPhotoTimer();
@@ -1654,9 +1662,9 @@
         let attempts = 0;
         const interval = setInterval(() => {
             attempts++;
-            let btn = document.querySelector('[aria-label="РџРѕРєР°Р·Р°С‚СЊ РІ РїРѕР»РЅРѕРј РјР°СЃС€С‚Р°Р±Рµ"], [title="РџРѕРєР°Р·Р°С‚СЊ РІ РїРѕР»РЅРѕРј РјР°СЃС€С‚Р°Р±Рµ"], [aria-label*="РїРѕР»РЅРѕРј РјР°СЃС€С‚Р°Р±Рµ"]');
+            let btn = document.querySelector('[aria-label="Показать в полном масштабе"], [title="Показать в полном масштабе"], [aria-label*="полном масштабе"]');
             if (!btn) {
-                const svg = document.querySelector('svg[aria-label*="РїРѕР»РЅРѕРј РјР°СЃС€С‚Р°Р±Рµ"]');
+                const svg = document.querySelector('svg[aria-label*="полном масштабе"]');
                 if (svg) btn = svg.closest('[role="button"]') || svg.closest('button') || svg;
             }
             
@@ -1664,7 +1672,7 @@
                 clickElementFull(btn);
                 console.log('%c[MOSSAD] Auto FullScale clicked target element', 'color:#3b82f6;', btn);
                 clearInterval(interval);
-            } else if (attempts >= 25) { // РћР¶РёРґР°РЅРёРµ РґРѕ 5 СЃРµРєСѓРЅРґ (25 x 200ms)
+            } else if (attempts >= 25) { // Ожидание до 5 секунд (25 x 200ms)
                 clearInterval(interval);
             }
         }, 200);
@@ -1682,7 +1690,7 @@
                 const pinId = match[1];
                 if (pinId !== currentPinId && !candidates.some(c => c.pinId === pinId)) {
                     const container = a.closest('div[data-grid-item], div[role="listitem"]') || a.parentElement || a;
-                    const hasVideo = !!container.querySelector('video, [aria-label*="video"], [aria-label*="РІРёРґРµРѕ"], .SoundButton') ||
+                    const hasVideo = !!container.querySelector('video, [aria-label*="video"], [aria-label*="видео"], .SoundButton') ||
                                      /\d+:\d{2}/.test(container.textContent || '');
                     candidates.push({
                         pinId,
@@ -1706,27 +1714,27 @@
                 idx--;
                 config.pinterestHistoryIdx = idx;
                 Settings.save();
-                showToast(`в—Ђ РќР°Р·Р°Рґ РїРѕ РёСЃС‚РѕСЂРёРё (${idx + 1}/${config.pinterestHistory.length})`);
+                showToast(`? Назад по истории (${idx + 1}/${config.pinterestHistory.length})`);
                 window.location.href = config.pinterestHistory[idx];
                 return;
             } else {
-                showToast('вљ пёЏ Р’С‹ РІ СЃР°РјРѕРј РЅР°С‡Р°Р»Рµ РёСЃС‚РѕСЂРёРё РїСЂРѕСЃРјРѕС‚СЂРѕРІ', true);
+                showToast('?? Вы в самом начале истории просмотров', true);
                 return;
             }
         }
 
         // direction === 'next'
-        // Р•СЃР»Рё РІС‹Р±РѕСЂ СЃРґРµР»Р°РЅ Р’Р РЈР§РќРЈР® Рё РјС‹ РЅР°С…РѕРґРёРјСЃСЏ РќР• РЅР° СЃР°РјРѕР№ РІРµСЂС€РёРЅРµ СЃС‚РµРєР°: РёРґРµРј РІРїРµСЂРµРґ РїРѕ РёСЃС‚РѕСЂРёРё (РєР°Рє РІ РџСЂРѕРІРѕРґРЅРёРєРµ)
+        // Если выбор сделан ВРУЧНУЮ и мы находимся НЕ на самой вершине стека: идем вперед по истории (как в Проводнике)
         if (isManual && idx >= 0 && idx < config.pinterestHistory.length - 1) {
             idx++;
             config.pinterestHistoryIdx = idx;
             Settings.save();
-            showToast(`в–¶ Р’РїРµСЂРµРґ РїРѕ РёСЃС‚РѕСЂРёРё (${idx + 1}/${config.pinterestHistory.length})`);
+            showToast(`? Вперед по истории (${idx + 1}/${config.pinterestHistory.length})`);
             window.location.href = config.pinterestHistory[idx];
             return;
         }
 
-        // РђРІС‚Рѕ-СЃР»Р°Р№РґС€РѕСѓ РР›Р СЂСѓС‡РЅРѕР№ РєР»РёРє РЅР° РІРµСЂС€РёРЅРµ СЃС‚РµРєР°: РіРµРЅРµСЂРёСЂСѓРµРј РќРћР’Р«Р™ СЃР»Р°Р№Рґ!
+        // Авто-слайдшоу ИЛИ ручной клик на вершине стека: генерируем НОВЫЙ слайд!
         if (config.pinterestHistory.length === 0 || config.pinterestHistory[config.pinterestHistory.length - 1] !== location.href) {
             config.pinterestHistory.push(location.href);
             if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
@@ -1734,7 +1742,7 @@
             Settings.save();
         }
 
-        // Р¤РѕРЅРѕРІС‹Р№ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ СЃРєСЂРѕР»Р» РґР»СЏ РіРёРґСЂР°С‚Р°С†РёРё React
+        // Фоновый виртуальный скролл для гидратации React
         window.scrollBy({ top: 300, behavior: 'instant' });
         setTimeout(() => window.scrollBy({ top: -300, behavior: 'instant' }), 40);
 
@@ -1759,9 +1767,9 @@
                 filtered = candidates; // 'all'
             }
 
-            // РЎР»СѓС‡Р°Р№ РєРѕРіРґР° Сѓ РїРёРЅР° 0 СЃСЃС‹Р»РѕРє: РІРѕР·РІСЂР°С‚ РЅР°Р·Р°Рґ РїРѕ РёСЃС‚РѕСЂРёРё Рё РІС‹Р·РѕРІ РґСЂСѓРіРѕРіРѕ РїРёРЅР°
+            // Случай когда у пина 0 ссылок: возврат назад по истории и вызов другого пина
             if (filtered.length === 0 && candidates.length === 0) {
-                showToast('вљ пёЏ РќР° СЃС‚СЂР°РЅРёС†Рµ РЅРµС‚ СЃСЃС‹Р»РѕРє, РїРµСЂРµС…РѕРґ РЅР°Р·Р°Рґ...', true);
+                showToast('?? На странице нет ссылок, переход назад...', true);
                 if (config.pinterestHistory.length > 1 && idx > 0) {
                     idx--;
                     config.pinterestHistoryIdx = idx;
@@ -1790,20 +1798,20 @@
 
             const target = maxCandidates[targetIndex];
             if (target) {
-                // Р—Р°РїРѕРјРёРЅР°РµРј С‚РёРї СЃР»РµРґСѓСЋС‰РµРіРѕ РєРѕРЅС‚РµРЅС‚Р° РІ sessionStorage РїРµСЂРµРґ РїРµСЂРµС…РѕРґРѕРј
+                // Запоминаем тип следующего контента в sessionStorage перед переходом
                 sessionStorage.setItem('mossad_expected_type', target.type);
 
-                // Р•СЃР»Рё СЃРІРµСЂРЅСѓР»Рё РЅР° РЅРѕРІС‹Р№ РїСѓС‚СЊ вЂ” СѓСЃРµРєР°РµРј РёСЃС‚РѕСЂРёСЋ РІРїРµСЂРµРґРё
+                // Если свернули на новый путь — усекаем историю впереди
                 config.pinterestHistory = config.pinterestHistory.slice(0, (config.pinterestHistoryIdx ?? (config.pinterestHistory.length - 1)) + 1);
                 config.pinterestHistory.push(target.url);
                 if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
                 config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
                 Settings.save();
 
-                showToast(`рџ“Њ РќРѕРІС‹Р№ РїРёРЅ #${targetIndex + 1} (${target.type === 'video' ? 'рџЋ¬ Р’РёРґРµРѕ' : 'рџ–ј Р¤РѕС‚Рѕ'})`);
+                showToast(`?? Новый пин #${targetIndex + 1} (${target.type === 'video' ? '?? Видео' : '?? Фото'})`);
                 window.location.href = target.url;
             } else {
-                showToast('вќЊ РџРѕРґС…РѕРґСЏС‰РёР№ РїРёРЅ РЅРµ РЅР°Р№РґРµРЅ', true);
+                showToast('? Подходящий пин не найден', true);
             }
         }, 100);
     }
@@ -1848,8 +1856,8 @@
         timerEl.style.cssText = `font-family: monospace; font-size: 13px; min-width: 95px; width: auto; white-space: nowrap; text-align: center; color: #9ca3af; padding: 0 4px;`;
         
         const btnClose = document.createElement('button');
-        btnClose.innerHTML = 'вњ•';
-        btnClose.title = 'РЎРєСЂС‹С‚СЊ РІРёРґР¶РµС‚';
+        btnClose.innerHTML = '?';
+        btnClose.title = 'Скрыть виджет';
         btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1; transition: color 0.2s;`;
         btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
         btnClose.onmouseleave = () => { btnClose.style.color = '#6b7280'; };
@@ -1860,13 +1868,13 @@
 
         const btnReset = document.createElement('button');
         btnReset.id = 'mossad-btn-rewind-bar';
-        btnReset.innerHTML = 'в†є';
-        btnReset.title = 'РџРµСЂРµРјРѕС‚РєР° (Alt+R)';
+        btnReset.innerHTML = '?';
+        btnReset.title = 'Перемотка (Alt+R)';
         btnReset.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 15px; padding: 0 4px;`;
 
         const btnStart = document.createElement('button');
         btnStart.id = 'mossad-btn-start';
-        btnStart.innerHTML = 'рџљЂ РџСѓСЃРє';
+        btnStart.innerHTML = '?? Пуск';
         btnStart.style.cssText = `
             cursor: pointer; border: none; border-radius: 6px; padding: 5px 12px;
             font-weight: 700; font-size: 13px; transition: all 0.2s ease;
@@ -1874,23 +1882,23 @@
         `;
         
         const btnGear = document.createElement('button');
-        btnGear.innerHTML = 'вљ™в–ј';
+        btnGear.innerHTML = '?Ў';
         btnGear.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 14px; padding: 0 4px; transition: color 0.2s ease;`;
         
         const btnDL = document.createElement('button');
-        btnDL.innerHTML = 'рџ’ѕ';
-        btnDL.title = 'РЎРєР°С‡Р°С‚СЊ';
+        btnDL.innerHTML = '??';
+        btnDL.title = 'Скачать';
         btnDL.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #10b981; cursor: pointer; font-size: 14px; padding: 4px 8px;`;
 
         const btnUpdate = document.createElement('button');
-        btnUpdate.innerHTML = 'рџ”„';
-        btnUpdate.title = 'РћР±РЅРѕРІРёС‚СЊ СЃРєСЂРёРїС‚ (Win+Alt+R)';
+        btnUpdate.innerHTML = '??';
+        btnUpdate.title = 'Обновить скрипт (Win+Alt+R)';
         btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 14px; padding: 4px 8px; transition: transform 0.2s ease;`;
         btnUpdate.onclick = () => {
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
-        // РџРѕСЂСЏРґРѕРє: вњ• | вЂ¦С‚Р°Р№РјРµСЂвЂ¦ | рџљЂРџСѓСЃРє | вљ™в–ј | рџ’ѕ | в†є | рџ”„
+        // Порядок: ? | …таймер… | ??Пуск | ?Ў | ?? | ? | ??
         topBar.append(btnClose, timerEl, btnStart, btnGear, btnDL, btnReset, btnUpdate);
 
         // SETTINGS PANEL
@@ -1913,97 +1921,97 @@
                     ${isPinterest ? `
                     <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,0.03); padding: 6px; border-radius: 8px; border: 1px solid #374151; flex: 1;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-weight: bold; color: #60a5fa;">рџ“Њ Pinterest Р РµР¶РёРј</span>
-                            <label title="РђРІС‚Рѕ СЂР°Р·РІРѕСЂР°С‡РёРІР°РЅРёРµ РІРѕ РІРµСЃСЊ СЌРєСЂР°РЅ" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:11px;">
+                            <span style="font-weight: bold; color: #60a5fa;">?? Pinterest Режим</span>
+                            <label title="Авто разворачивание во весь экран" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:11px;">
                                 <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> FS
                             </label>
                         </div>
                         <div style="display: flex; gap: 4px; align-items: center;">
-                            <span style="color:#9ca3af;">РџРёРЅ:</span>
+                            <span style="color:#9ca3af;">Пин:</span>
                             <button class="mossad-pmode" data-mode="rand" style="background:${config.pinterestMode === 'rand' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">rand</button>
                             <button class="mossad-pmode" data-mode="+1" style="background:${config.pinterestMode === '+1' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">+1</button>
-                            <input id="mossad-in-pmode-n" type="number" min="1" max="9" value="${!isNaN(parseInt(config.pinterestMode, 10)) ? config.pinterestMode : '1'}" style="width:30px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="РќРѕРјРµСЂ РїРёРЅР° 1-9">
+                            <input id="mossad-in-pmode-n" type="number" min="1" max="9" value="${!isNaN(parseInt(config.pinterestMode, 10)) ? config.pinterestMode : '1'}" style="width:30px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="Номер пина 1-9">
                         </div>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="color:#9ca3af;">РўРёРї:</span>
+                            <span style="color:#9ca3af;">Тип:</span>
                             <select id="mossad-sel-ptype" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px; font-size:11px;">
-                                <option value="ratio" ${config.pinterestFilterType === 'ratio' ? 'selected' : ''}>РџСЂРѕРїРѕСЂС†РёСЏ %</option>
-                                <option value="all" ${config.pinterestFilterType === 'all' ? 'selected' : ''}>Р’СЃРµ</option>
-                                <option value="image" ${config.pinterestFilterType === 'image' ? 'selected' : ''}>РўРѕР»СЊРєРѕ Р¤РѕС‚Рѕ</option>
-                                <option value="video" ${config.pinterestFilterType === 'video' ? 'selected' : ''}>РўРѕР»СЊРєРѕ Р’РёРґРµРѕ</option>
+                                <option value="ratio" ${config.pinterestFilterType === 'ratio' ? 'selected' : ''}>Пропорция %</option>
+                                <option value="all" ${config.pinterestFilterType === 'all' ? 'selected' : ''}>Все</option>
+                                <option value="image" ${config.pinterestFilterType === 'image' ? 'selected' : ''}>Только Фото</option>
+                                <option value="video" ${config.pinterestFilterType === 'video' ? 'selected' : ''}>Только Видео</option>
                             </select>
                         </div>
                         ${isRatio ? `
                         <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
-                            <label style="display:flex; align-items:center; gap:2px;">рџ–ј Р¤РѕС‚Рѕ %: <input id="mossad-in-photo-pct" type="number" min="0" max="100" value="${config.pinterestPhotoPercent ?? 50}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
-                            <label style="display:flex; align-items:center; gap:2px;">рџЋ¬ Р’РёРґРµРѕ %: <input id="mossad-in-video-pct" type="number" min="0" max="100" value="${100 - (config.pinterestPhotoPercent ?? 50)}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
+                            <label style="display:flex; align-items:center; gap:2px;">?? Фото %: <input id="mossad-in-photo-pct" type="number" min="0" max="100" value="${config.pinterestPhotoPercent ?? 50}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
+                            <label style="display:flex; align-items:center; gap:2px;">?? Видео %: <input id="mossad-in-video-pct" type="number" min="0" max="100" value="${100 - (config.pinterestPhotoPercent ?? 50)}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
                         </div>
                         ` : ''}
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <label title="РњР°РєСЃ. РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ РІРёРґРµРѕ РІ СЃРµРєСѓРЅРґР°С… (0 = Р±РµР· Р»РёРјРёС‚Р°)" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-                                РњР°РєСЃ. РІРёРґРµРѕ (СЃРµРє): <input id="mossad-in-vmax" type="number" min="0" max="999" value="${config.pinterestMaxVideoDuration || 0}" style="width:40px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;">
+                            <label title="Макс. длительность видео в секундах (0 = без лимита)" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                                Макс. видео (сек): <input id="mossad-in-vmax" type="number" min="0" max="999" value="${config.pinterestMaxVideoDuration || 0}" style="width:40px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;">
                             </label>
                         </div>
                     </div>
                     ` : `
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
-                        <button class="mossad-dpad" data-dir="up" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">в–І</button>
+                        <button class="mossad-dpad" data-dir="up" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">^</button>
                         <div style="display: flex; gap: 2px;">
-                            <button class="mossad-dpad" data-dir="left" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">в—Ђ</button>
-                            <button class="mossad-dpad" data-dir="down" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">в–ј</button>
-                            <button class="mossad-dpad" data-dir="right" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">в–¶</button>
+                            <button class="mossad-dpad" data-dir="left" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">?</button>
+                            <button class="mossad-dpad" data-dir="down" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">Ў</button>
+                            <button class="mossad-dpad" data-dir="right" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">?</button>
                         </div>
                     </div>
                     `}
                     <div style="display: flex; flex-direction: column; gap: 4px; min-width: 95px;">
-                        <label title="РљСЂСѓРіРё РІРёРґРµРѕ" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
-                            Р’РёРґРµРѕ (в†є): <input id="mossad-in-loops" type="number" min="1" max="100" value="${config.videoLoops}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
+                        <label title="Круги видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
+                            Видео (?): <input id="mossad-in-loops" type="number" min="1" max="100" value="${config.videoLoops}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
-                        <label title="Р—Р°РґРµСЂР¶РєР° С„РѕС‚Рѕ" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
-                            Р¤РѕС‚Рѕ (СЃРµРє): <input id="mossad-in-pdelay" type="number" min="1" max="999" value="${config.slideshowDelay}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
+                        <label title="Задержка фото" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
+                            Фото (сек): <input id="mossad-in-pdelay" type="number" min="1" max="999" value="${config.slideshowDelay}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
-                        <label title="РџР°СѓР·Р° РїРѕСЃР»Рµ РІРёРґРµРѕ" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
-                            РџР°СѓР·Р° (СЃРµРє): <input id="mossad-in-vdelay" type="number" min="0" max="999" value="${config.delayAfterVideo}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
+                        <label title="Пауза после видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
+                            Пауза (сек): <input id="mossad-in-vdelay" type="number" min="0" max="999" value="${config.delayAfterVideo}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                     </div>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; align-items: center; gap: 6px;">
-                    <label title="РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ С€Р°Р±Р»РѕРЅ РёРјРµРЅРё С„Р°Р№Р»Р° РїСЂРё СЃРєР°С‡РёРІР°РЅРёРё" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
-                        <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> РЁР°Р±Р»РѕРЅ:
+                    <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
+                        <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> Шаблон:
                     </label>
                     <input id="mossad-in-fn-tpl" type="text" placeholder="{title}_{date}.{ext}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
-                        title="РЁР°Р±Р»РѕРЅ РёРјРµРЅРё С„Р°Р№Р»Р°. РџРµСЂРµРјРµРЅРЅС‹Рµ: {title} {date} {time} {ext} {domain} {n}"
+                        title="Шаблон имени файла. Переменные: {title} {date} {time} {ext} {domain} {n}"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <select id="mossad-sel-dl" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
-                        <option value="none" ${config.downloadType === 'none' ? 'selected' : ''}>РќРµ СЃРєР°С‡РёРІР°С‚СЊ</option>
-                        <option value="all" ${config.downloadType === 'all' ? 'selected' : ''}>РљР°С‡Р°С‚СЊ Р’СЃС‘</option>
-                        <option value="photo" ${config.downloadType === 'photo' ? 'selected' : ''}>РљР°С‡Р°С‚СЊ Р¤РѕС‚Рѕ</option>
-                        <option value="video" ${config.downloadType === 'video' ? 'selected' : ''}>РљР°С‡Р°С‚СЊ Р’РёРґРµРѕ</option>
+                        <option value="none" ${config.downloadType === 'none' ? 'selected' : ''}>Не скачивать</option>
+                        <option value="all" ${config.downloadType === 'all' ? 'selected' : ''}>Качать Всё</option>
+                        <option value="photo" ${config.downloadType === 'photo' ? 'selected' : ''}>Качать Фото</option>
+                        <option value="video" ${config.downloadType === 'video' ? 'selected' : ''}>Качать Видео</option>
                     </select>
                     <select id="mossad-sel-pd" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
-                        <option value="none" ${config.pdAction === 'none' ? 'selected' : ''}>РџРѕСЃР»Рµ DL: вЂ”</option>
-                        <option value="up" ${config.pdAction === 'up' ? 'selected' : ''}>РџРѕСЃР»Рµ DL: +1</option>
-                        ${rootDomain === 'grok.com' ? `<option value="del" ${config.pdAction === 'del' ? 'selected' : ''}>РџРѕСЃР»Рµ DL: del</option>` : ''}
+                        <option value="none" ${config.pdAction === 'none' ? 'selected' : ''}>После DL: —</option>
+                        <option value="up" ${config.pdAction === 'up' ? 'selected' : ''}>После DL: +1</option>
+                        ${rootDomain === 'grok.com' ? `<option value="del" ${config.pdAction === 'del' ? 'selected' : ''}>После DL: del</option>` : ''}
                     </select>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
-                    <label title="РџР°СѓР·Р° РїСЂРё РїРµСЂРµРєР»СЋС‡РµРЅРёРё РІРєР»Р°РґРєРё"><input id="mossad-cb-tab" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnTabSwitch ? 'checked' : ''}> Tab</label>
-                    <label title="РџР°СѓР·Р° РїСЂРё РїРѕС‚РµСЂРµ С„РѕРєСѓСЃР° Р±СЂР°СѓР·РµСЂР°"><input id="mossad-cb-brsr" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnBrsrSwitch ? 'checked' : ''}> Brsr</label>
+                    <label title="Пауза при переключении вкладки"><input id="mossad-cb-tab" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnTabSwitch ? 'checked' : ''}> Tab</label>
+                    <label title="Пауза при потере фокуса браузера"><input id="mossad-cb-brsr" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnBrsrSwitch ? 'checked' : ''}> Brsr</label>
                     ${rootDomain === 'grok.com' ? `
-                    <label title="РђРІС‚РѕРїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ СѓРґР°Р»РµРЅРёСЏ"><input id="mossad-cb-aconfirm" type="checkbox" style="accent-color:#3b82f6;" ${config.deleteAutoconfirm ? 'checked' : ''}> a.confirm</label>
-                    <label title="РЈРјРЅС‹Р№ РІРѕР·РІСЂР°С‚ Рє РїРѕСЃС‚Сѓ"><input id="mossad-cb-holdpost" type="checkbox" style="accent-color:#3b82f6;" ${config.deleteHoldpost ? 'checked' : ''}> hold post</label>
+                    <label title="Автоподтверждение удаления"><input id="mossad-cb-aconfirm" type="checkbox" style="accent-color:#3b82f6;" ${config.deleteAutoconfirm ? 'checked' : ''}> a.confirm</label>
+                    <label title="Умный возврат к посту"><input id="mossad-cb-holdpost" type="checkbox" style="accent-color:#3b82f6;" ${config.deleteHoldpost ? 'checked' : ''}> hold post</label>
                     ` : ''}
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">вЊЁ Р“РѕСЂСЏС‡РёРµ РєР»Р°РІРёС€Рё</button>
-                    <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="РњРѕС‚Р°С‚СЊ РґРѕ РЅР°С‡Р°Р»Р°/РєРѕРЅС†Р° Р»РµРЅС‚С‹">в†є РџРµСЂРµРјРѕС‚РєР°</button>
-                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="РЎР±СЂРѕСЃРёС‚СЊ РІСЃРµ РЅР°СЃС‚СЂРѕР№РєРё Рё РєР»Р°РІРёС€Рё РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ">в†є РЎР±СЂРѕСЃ</button>
+                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">? Горячие клавиши</button>
+                    <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Мотать до начала/конца ленты">? Перемотка</button>
+                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">? Сброс</button>
                 </div>
             `;
             
@@ -2054,7 +2062,7 @@
                     cbFS.onchange = (e) => Settings.set('pinterestAutoFS', e.target.checked);
                 }
             }
-            // РРЅРїСѓС‚С‹ С‚Р°Р№РјРµСЂРѕРІ (Р’РёРґРµРѕ РєСЂСѓРіРё, Р¤РѕС‚Рѕ Р·Р°РґРµСЂР¶РєР°, РџР°СѓР·Р° РїРѕСЃР»Рµ РІРёРґРµРѕ) РґРѕСЃС‚СѓРїРЅС‹ Р’РЎР•Р“Р”Рђ
+            // Инпуты таймеров (Видео круги, Фото задержка, Пауза после видео) доступны ВСЕГДА
             panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, parseInt(e.target.value) || 1)), 300);
             panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(1, parseInt(e.target.value) || 12)), 300);
             panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, parseInt(e.target.value) || 2)), 300);
@@ -2063,8 +2071,8 @@
             panel.querySelector('#mossad-cb-fn-tpl').onchange = (e) => Settings.set('filenameTemplateEnabled', e.target.checked);
             const fnTplInput = panel.querySelector('#mossad-in-fn-tpl');
             const _saveFnTpl = (e) => Settings.setQuiet('filenameTemplate', e.target.value);
-            fnTplInput.onblur   = _saveFnTpl;  // СЃРѕС…СЂР°РЅРёС‚СЊ РїСЂРё РїРѕС‚РµСЂРµ С„РѕРєСѓСЃР° (Tab / РєР»РёРє)
-            fnTplInput.onchange = _saveFnTpl;  // СЃРѕС…СЂР°РЅРёС‚СЊ РїСЂРё Enter
+            fnTplInput.onblur   = _saveFnTpl;  // сохранить при потере фокуса (Tab / клик)
+            fnTplInput.onchange = _saveFnTpl;  // сохранить при Enter
             panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
             panel.querySelector('#mossad-cb-brsr').onchange = (e) => Settings.set('stopOnBrsrSwitch', e.target.checked);
             if (rootDomain === 'grok.com') {
@@ -2077,11 +2085,11 @@
                 openHotkeySettings();
             };
             panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
-                if (!confirm('РЎР±СЂРѕСЃРёС‚СЊ РІСЃРµ РЅР°СЃС‚СЂРѕР№РєРё Рё РіРѕСЂСЏС‡РёРµ РєР»Р°РІРёС€Рё РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ?')) return;
+                if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
                 localStorage.removeItem(STORAGE_KEY);
                 Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
                 window.updateWidgetUI();
-                showToast('вњ… РќР°СЃС‚СЂРѕР№РєРё СЃР±СЂРѕС€РµРЅС‹ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ');
+                showToast('? Настройки сброшены по умолчанию');
             };
         };
 
@@ -2094,7 +2102,7 @@
             window.widgetState = window.widgetState === 'panel' ? 'bar' : 'panel';
             window.updateWidgetUI();
         };
-        // РЎРєР°С‡Р°С‚СЊ Рё СѓРґР°Р»РёС‚СЊ: СЂР°Р±РѕС‚Р°РµС‚ С‚РѕР»СЊРєРѕ РЅР° СЃС‚СЂР°РЅРёС†Р°С… РїРѕСЃС‚РѕРІ grok.com
+        // Скачать и удалить: работает только на страницах постов grok.com
         btnDL.onclick = () => {
             if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
             triggerDownload();
@@ -2159,11 +2167,11 @@
             if (slideshowActive) {
                 timerEl.style.color = '#3b82f6';
                 if (isCountingDown) {
-                    timerEl.textContent = countdownSeconds + 'СЃ';
+                    timerEl.textContent = countdownSeconds + 'с';
                 } else if (video && !isNaN(video.duration)) {
                     timerEl.textContent = `${formatTime(video.currentTime)}/${formatTime(video.duration)}`;
                 } else {
-                    timerEl.textContent = 'вЏі...';
+                    timerEl.textContent = '?...';
                 }
             } else {
                 if (video && !isNaN(video.duration)) {
@@ -2197,36 +2205,36 @@
         `;
         
         modal.innerHTML = `
-            <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">РќР°СЃС‚СЂРѕР№РєРё РіРѕСЂСЏС‡РёС… РєР»Р°РІРёС€</h3>
+            <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
               <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">GitHub Sync Token:</div>
               <div style="display:flex;gap:6px;">
                 <input id="mossad-gh-token" type="password" placeholder="github_pat_..." 
                   style="flex:1;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:4px 8px;font-size:12px;" 
                   value="${config.githubToken || ''}">
-                <button id="mossad-gh-save" style="background:#3b82f6;border:none;border-radius:4px;color:#fff;padding:4px 10px;cursor:pointer;font-size:12px;">рџ’ѕ</button>
-                <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="РџРѕР»СѓС‡РёС‚СЊ РєРѕРЅС„РёРі СЃ GitHub">в¬‡</button>
+                <button id="mossad-gh-save" style="background:#3b82f6;border:none;border-radius:4px;color:#fff;padding:4px 10px;cursor:pointer;font-size:12px;">??</button>
+                <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">?</button>
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} В· 2026-08-30</span>
+              <span>v${SCRIPT_VERSION} · 2026-08-30</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
-                 title="РћР±РЅРѕРІРёС‚СЊ СЃРєСЂРёРїС‚ РІ Tampermonkey" 
-                 style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">рџ”„ РћР±РЅРѕРІРёС‚СЊ</a>
+                 title="Обновить скрипт в Tampermonkey" 
+                 style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">?? Обновить</a>
             </div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
-                <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold;">в†є РљР»Р°РІРёС€Рё РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ</button>
-                <button id="mossad-hk-close" style="background:#ef4444; border:none; padding:6px 16px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold;">Р—Р°РєСЂС‹С‚СЊ</button>
+                <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold;">? Клавиши по умолчанию</button>
+                <button id="mossad-hk-close" style="background:#ef4444; border:none; padding:6px 16px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold;">Закрыть</button>
             </div>
         `;
         
         const list = modal.querySelector('#mossad-hk-list');
         const keysMap = {
-            download: 'РЎРєР°С‡Р°С‚СЊ (DL)', upscale: 'РЈР»СѓС‡С€РёС‚СЊ', deleteVid: 'РЈРґР°Р»РёС‚СЊ РІРёРґРµРѕ', sound: 'Р—РІСѓРє (РІРєР»/РІС‹РєР»)',
-            playPause: 'РџР°СѓР·Р°/РџР»РµР№', help: 'РќР°СЃС‚СЂРѕР№РєРё РєР»Р°РІРёС€', history: 'РСЃС‚РѕСЂРёСЏ (Grok)', 
-            slideshowPanel: 'РњРµРЅСЋ СЃР»Р°Р№РґС€РѕСѓ', slideshowStart: 'РЎС‚Р°СЂС‚ СЃР»Р°Р№РґС€РѕСѓ',
-            nextSlide: 'РЎР»РµРґСѓСЋС‰РёР№ СЃР»Р°Р№Рґ (РџСЂРѕР±РµР»)', duplicateNext: 'Р”СѓР±Р»РёСЂРѕРІР°С‚СЊ РІ С„РѕРЅРµ + РЎР»Р°Р№Рґ (Ctrl+РџСЂРѕР±РµР»)'
+            download: 'Скачать (DL)', upscale: 'Улучшить', deleteVid: 'Удалить видео', sound: 'Звук (вкл/выкл)',
+            playPause: 'Пауза/Плей', help: 'Настройки клавиш', history: 'История (Grok)', 
+            slideshowPanel: 'Меню слайдшоу', slideshowStart: 'Старт слайдшоу',
+            nextSlide: 'Следующий слайд (Пробел)', duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)'
         };
         
         Object.keys(keysMap).forEach(k => {
@@ -2253,13 +2261,13 @@
                 btn.textContent = formatHotkey(hkArr[slotIndex]);
                 
                 const resetBtn = document.createElement('button');
-                resetBtn.innerHTML = 'в†є';
-                resetBtn.title = 'РЎР±СЂРѕСЃ СЃР»РѕС‚Р°';
+                resetBtn.innerHTML = '?';
+                resetBtn.title = 'Сброс слота';
                 resetBtn.style.cssText = `background:transparent; border:none; color:#9ca3af; cursor:pointer; padding:0 2px; font-size:12px;`;
                 
                 const disableBtn = document.createElement('button');
-                disableBtn.innerHTML = 'вЂ”';
-                disableBtn.title = 'РћС‚РєР»СЋС‡РёС‚СЊ СЃР»РѕС‚';
+                disableBtn.innerHTML = '—';
+                disableBtn.title = 'Отключить слот';
                 disableBtn.style.cssText = `background:transparent; border:none; color:#ef4444; cursor:pointer; padding:0 2px; font-size:12px; font-weight:bold;`;
                 
                 btn.onclick = () => {
@@ -2321,28 +2329,28 @@
         modal.querySelector('#mossad-gh-save').onclick = () => {
             config.githubToken = modal.querySelector('#mossad-gh-token').value.trim();
             Settings.save();
-            showToast('вњ… РўРѕРєРµРЅ СЃРѕС…СЂР°РЅС‘РЅ');
+            showToast('? Токен сохранён');
         };
         modal.querySelector('#mossad-gh-pull').onclick = async () => {
-            showSyncStatus('рџ”„ РџРѕР»СѓС‡РµРЅРёРµ РєРѕРЅС„РёРіР°...', '#f59e0b');
+            showSyncStatus('?? Получение конфига...', '#f59e0b');
             try {
                 await pullConfigFromGitHub();
-                showToast('вњ… РљРѕРЅС„РёРі РїРѕР»СѓС‡РµРЅ СЃ GitHub');
+                showToast('? Конфиг получен с GitHub');
                 modal.remove();
                 openHotkeySettings();
             } catch (e) {
-                showToast('вќЊ РћС€РёР±РєР°: ' + e.message, true);
+                showToast('? Ошибка: ' + e.message, true);
             }
         };
 
         modal.querySelector('#mossad-hk-close').onclick = () => modal.remove();
         modal.querySelector('#mossad-hk-reset').onclick = () => {
-            if (!confirm('РЎР±СЂРѕСЃРёС‚СЊ РІСЃРµ РіРѕСЂСЏС‡РёРµ РєР»Р°РІРёС€Рё РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ?')) return;
+            if (!confirm('Сбросить все горячие клавиши по умолчанию?')) return;
             config.hk = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk));
             Settings.save();
             modal.remove();
-            openHotkeySettings(); // РїРµСЂРµРѕС‚РєСЂС‹С‚СЊ СЃ РѕР±РЅРѕРІР»С‘РЅРЅС‹РјРё РєР»Р°РІРёС€Р°РјРё
-            showToast('вњ… РљР»Р°РІРёС€Рё СЃР±СЂРѕС€РµРЅС‹ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ');
+            openHotkeySettings(); // переоткрыть с обновлёнными клавишами
+            showToast('? Клавиши сброшены по умолчанию');
         };
     }
 
@@ -2377,7 +2385,7 @@
             if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
             e.preventDefault();
             triggerDownload();
-            // РџРѕСЃР»Рµ СЃРєР°С‡РёРІР°РЅРёСЏ вЂ” РїРµСЂРµР№С‚Рё +1 РµСЃР»Рё РІС‹Р±СЂР°РЅРѕ
+            // После скачивания — перейти +1 если выбрано
             if (config.pdAction === 'up') {
                 setTimeout(() => {
                     const dirs = config.slideshowDirections;
@@ -2399,12 +2407,12 @@
             e.preventDefault();
             const video = getActiveVideo();
             if (video) video.muted = !video.muted;
-            // РЎРїРµС†РёС„РёС‡РЅРѕ РґР»СЏ RedGifs
+            // Специфично для RedGifs
             if (rootDomain.includes('redgifs.com')) {
                 const btn = document.querySelector('button.SoundButton');
                 if (btn) btn.click();
             }
-            showToast(video && video.muted ? 'рџ”‡ Р—РІСѓРє РІС‹РєР»СЋС‡РµРЅ' : 'рџ”Љ Р—РІСѓРє РІРєР»СЋС‡РµРЅ');
+            showToast(video && video.muted ? '?? Звук выключен' : '?? Звук включен');
         }
 
         if (hotkeyMatches(e, config.hk.playPause)) {
@@ -2413,7 +2421,7 @@
             if (video) {
                 if (video.paused) video.play();
                 else video.pause();
-                showToast(video.paused ? 'в–¶ РџСЂРѕРёРіСЂС‹РІР°РЅРёРµ' : 'вЏё РџР°СѓР·Р°');
+                showToast(video.paused ? '? Проигрывание' : '? Пауза');
             }
         }
 
@@ -2422,7 +2430,7 @@
             window.location.href = 'https://grok.com/imagine/saved';
         }
 
-        // Alt+R: РїРµСЂРµРјРѕС‚РєР° (Win+Alt+R: РѕР±РЅРѕРІРёС‚СЊ СЃРєСЂРёРїС‚)
+        // Alt+R: перемотка (Win+Alt+R: обновить скрипт)
         if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
             e.preventDefault();
             if (e.metaKey) {
@@ -2432,29 +2440,29 @@
             }
         }
 
-        // РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅС‹Р№ СЃР»РµРґСѓСЋС‰РёР№ СЃР»Р°Р№Рґ (РџСЂРѕР±РµР»)
+        // Принудительный следующий слайд (Пробел)
         if (hotkeyMatches(e, config.hk.nextSlide)) {
             if (slideshowActive) {
                 e.preventDefault();
-                showToast('вЏ­ РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅС‹Р№ РїРµСЂРµС…РѕРґ...');
+                showToast('? Принудительный переход...');
                 triggerNextSlide();
             }
         }
 
-        // Р”СѓР±Р»РёСЂРѕРІР°РЅРёРµ СЃС‚СЂР°РЅРёС†С‹ РІ С„РѕРЅРѕРІРѕР№ РІРєР»Р°РґРєРµ + РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅС‹Р№ РїРµСЂРµС…РѕРґ (Ctrl + РџСЂРѕР±РµР»)
+        // Дублирование страницы в фоновой вкладке + принудительный переход (Ctrl + Пробел)
         if (hotkeyMatches(e, config.hk.duplicateNext)) {
             e.preventDefault();
             if (typeof GM_openInTab === 'function') {
                 GM_openInTab(location.href, { active: false, insert: true });
-                showToast('рџ“‘ РћС‚РєСЂС‹С‚Рѕ РІРѕ РІРєР»Р°РґРєРµ РІ С„РѕРЅРµ + РџРµСЂРµС…РѕРґ...');
+                showToast('?? Открыто во вкладке в фоне + Переход...');
             } else {
                 window.open(location.href, '_blank');
-                showToast('рџ“‘ РћС‚РєСЂС‹С‚Р° РІРєР»Р°РґРєР° + РџРµСЂРµС…РѕРґ...');
+                showToast('?? Открыта вкладка + Переход...');
             }
             triggerNextSlide();
         }
 
-        // Р СѓС‡РЅР°СЏ РЅР°РІРёРіР°С†РёСЏ СЃС‚СЂРµР»РєР°РјРё РЅР° Pinterest (РІР»РµРІРѕ/РІРІРµСЂС… = РЅР°Р·Р°Рґ, РІРїСЂР°РІРѕ/РІРЅРёР· = РІРїРµСЂРµРґ)
+        // Ручная навигация стрелками на Pinterest (влево/вверх = назад, вправо/вниз = вперед)
         if (rootDomain.includes('pinterest.')) {
             if (['ArrowRight', 'ArrowDown'].includes(e.key)) {
                 e.preventDefault();
@@ -2466,7 +2474,7 @@
         }
     }, true);
 
-    // РђРІС‚Рѕ РєР»РёРєРµСЂ FullScale РґР»СЏ Pinterest
+    // Авто кликер FullScale для Pinterest
     if (rootDomain.includes('pinterest.')) {
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', triggerPinterestFullScale);
@@ -2475,15 +2483,15 @@
         }
     }
 
-    // Р’РѕР·РѕР±РЅРѕРІР»РµРЅРёРµ СЃР»Р°Р№РґС€РѕСѓ РїРѕСЃР»Рµ РїРµСЂРµС…РѕРґР°/РїРµСЂРµР·Р°РіСЂСѓР·РєРё СЃС‚СЂР°РЅРёС†С‹
+    // Возобновление слайдшоу после перехода/перезагрузки страницы
     if (slideshowActive) {
-        showToast('в–¶ РЎР»Р°Р№РґС€РѕСѓ РІРѕР·РѕР±РЅРѕРІР»РµРЅРѕ');
+        showToast('? Слайдшоу возобновлено');
         setTimeout(() => {
             scheduleNextSlideCycle(0);
         }, 500);
     }
 
-    // РџСЂРѕРІРµСЂСЏРµРј GitHub РїСЂРё СЃС‚Р°СЂС‚Рµ (СЃ Р·Р°РґРµСЂР¶РєРѕР№ С‡С‚РѕР±С‹ РЅРµ РјРµС€Р°С‚СЊ Р·Р°РіСЂСѓР·РєРµ)
+    // Проверяем GitHub при старте (с задержкой чтобы не мешать загрузке)
     setTimeout(checkAndPullOnStartup, 3000);
 
 })();
