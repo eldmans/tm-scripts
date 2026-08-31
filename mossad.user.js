@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.38
+// @version      1.2.39
 // @description  ”ниверсальный скрипт дл€ авто-слайдшоу, скачивани€ медиа и гор€чих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -1046,6 +1046,21 @@
             if (document.body) _igObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['src'] });
         };
         if (document.body) _igStartObs(); else document.addEventListener('DOMContentLoaded', _igStartObs);
+
+        // Clear URL cache on SPA navigation (Instagram uses pushState)
+        let _igLastHref = location.href;
+        function _igOnNavigate() {
+            if (location.href !== _igLastHref) {
+                _igLastHref = location.href;
+                _igVideoUrls.length = 0;
+                console.log('[MOSSAD/IG] Navigation: URL cache cleared for new post');
+            }
+        }
+        const _origPush = history.pushState.bind(history);
+        const _origReplace = history.replaceState.bind(history);
+        history.pushState = function(...a) { _origPush(...a); _igOnNavigate(); };
+        history.replaceState = function(...a) { _origReplace(...a); _igOnNavigate(); };
+        window.addEventListener('popstate', _igOnNavigate);
     }
 
     function findMediaForDownload() {
