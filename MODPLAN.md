@@ -35,8 +35,8 @@
 
 ## БЛОК 1: РЕФАКТОРИНГ — МОДУЛЬНОСТЬ
 
-### [ ] BLOCK-101: Вынести Instagram engine в отдельный логический блок
-**Читать строки:** `grep -n "INSTAGRAM ENGINE"` → примерно L964–L1042
+### [x] BLOCK-101: Вынести Instagram engine в отдельный логический блок
+**Читать строки:** `grep -n "INSTAGRAM ENGINE"` → примерно L964–L1042  
 **Задача:**
 - Обернуть весь Instagram-код в объект `window.MOSSAD_ENGINES.instagram = { ... }`
 - Методы: `isSupported()`, `findMedia()`, `onNavigate()`, `init()`
@@ -49,6 +49,8 @@
 2. `_igScrapePageJson` иногда находит не-видео URL → фильтровать через `_igIsVideoUrl()`
 
 **Проверка:** Открыть пост на instagram.com, запустить видео, нажать DL. Перейти на следующий пост, снова DL. Должны скачаться разные файлы.
+
+**Статус:** ✅ Завершено в v1.2.41 | 2026-09-01
 
 ---
 
@@ -208,3 +210,4 @@ python -c "r=open('mossad.user.js','rb').read(); print('OK' if b'\xe2\x9d\x8c' i
 | Дата | Автор | Что изменено |
 |---|---|---|
 | 2026-08-31 | Antigravity | Создан план v1.0 |
+| 2026-09-01 | Antigravity | BLOCK-101 завершён — Instagram engine → window.MOSSAD_ENGINES.instagram, фикс навигации (pushState), фильтр _igIsVideoUrl |
