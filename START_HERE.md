@@ -15,8 +15,9 @@
 3. [MODPLAN.md](file:///c:/Users/user/Documents/tm-scripts/grok/MODPLAN.md) — Архитектурный план модулей, статус готовности каждого модуля и сайтов.
 4. [TODO.md](file:///c:/Users/user/Documents/tm-scripts/grok/TODO.md) — Бэклог задач (с приоритетами).
 5. [GEMINI.md](file:///c:/Users/user/Documents/tm-scripts/grok/GEMINI.md) — Жёсткие правила версионирования, Git workflow и сохранения UI.
-6. [SCRATCHPAD.md](file:///c:/Users/user/Documents/tm-scripts/grok/SCRATCHPAD.md) — Быстрые рабочие заметки текущей сессии.
-7. `src/` — Исходный код, разбитый на изолированные модули:
+6. [CHANGELOG.md](file:///c:/Users/user/Documents/tm-scripts/grok/CHANGELOG.md) — Человеческий журнал изменений версий (что, зачем и когда менялось).
+7. [SCRATCHPAD.md](file:///c:/Users/user/Documents/tm-scripts/grok/SCRATCHPAD.md) — Быстрые рабочие заметки текущей сессии.
+8. `src/` — Исходный код, разбитый на изолированные модули:
    - `src/core/` — конфиг, настройки, горячие клавиши, утилиты.
    - `src/engines/` — логика конкретных сайтов (`grok.js`, `pinterest.js`, `instagram.js`, `redgifs.js`, `generic.js`).
    - `src/download/` — подсистема перехвата медиа и скачивания.
