@@ -297,24 +297,79 @@
         return null;
     }
 
-    function runSmartDelete() {
+    let _grokDeleteInProgress = false;
+
+    async function runSmartDelete() {
         if (rootDomain !== 'grok.com' || !isGrokPostPage()) return;
-        blurActiveInput();
+        if (_grokDeleteInProgress) return;
+        _grokDeleteInProgress = true;
 
-        const hasVideo = !!getActiveVideo();
-        const deleteBtnLabels = hasVideo
-            ? ['удалить видео', 'delete video', 'удалить', 'delete']
-            : ['удалить изображение', 'delete image', 'удалить', 'delete'];
+        try {
+            blurActiveInput();
+            const initialUrl = location.href;
+            let finalTargetUrl = null;
 
-        // Шаг 0: если включен hold post — определяем целевой соседний URL
-        let neighborUrl = config.deleteHoldpost ? getGrokNeighborPostUrl() : null;
+            // hold post: предварительный шаг в направлении DPad и возврат для надежной фиксации целевого URL
+            if (config.deleteHoldpost) {
+                const dirs = config.slideshowDirections;
+                const dPadDir = (dirs && dirs.length) ? dirs[0] : 'up';
+                const forwardKey = getArrowKey(dPadDir);
+                const oppDir = dPadDir === 'up' ? 'down' : (dPadDir === 'down' ? 'up' : (dPadDir === 'left' ? 'right' : 'left'));
+                const backKey = getArrowKey(oppDir);
 
-        const executeDeleteClick = (delBtn) => {
-            triggerClick(delBtn, 'Delete Button');
-            showToast('✕ Удаление...');
+                showToast('🔍 Фиксация позиции...');
 
-            // Автоподтверждение удаления (a.confirm)
-            if (config.deleteAutoconfirm) {
+                const sendKey = (k) => {
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+                    document.dispatchEvent(new KeyboardEvent('keyup', { key: k, bubbles: true }));
+                };
+
+                // 1. Листаем вперед в сторону DPad
+                sendKey(forwardKey);
+
+                // Ждем смены URL на целевой пост
+                const peekStart = Date.now();
+                while (Date.now() - peekStart < 1500) {
+                    await new Promise(r => setTimeout(r, 40));
+                    if (location.href !== initialUrl && isGrokPostPage()) {
+                        finalTargetUrl = location.href;
+                        break;
+                    }
+                    if (Date.now() - peekStart > 350 && location.href === initialUrl && !finalTargetUrl) {
+                        sendKey(forwardKey);
+                    }
+                }
+
+                // 2. Листаем обратно на исходный пост
+                if (finalTargetUrl) {
+                    console.log(`[MOSSAD] hold post: найден целевой финишный пост: ${finalTargetUrl}`);
+                    sendKey(backKey);
+
+                    const backStart = Date.now();
+                    while (Date.now() - backStart < 1500) {
+                        await new Promise(r => setTimeout(r, 40));
+                        if (location.href === initialUrl) break;
+                        if (Date.now() - backStart > 350 && location.href !== initialUrl) {
+                            sendKey(backKey);
+                        }
+                    }
+                    await new Promise(r => setTimeout(r, 250)); // пауза для готовности DOM исходного поста
+                } else {
+                    // Фолбэк на анализ DOM / коллекцию, если шаг не изменил URL
+                    finalTargetUrl = getGrokNeighborPostUrl();
+                    console.warn('[MOSSAD] hold post: шаг вперед не изменил URL, fallback:', finalTargetUrl);
+                }
+            }
+
+            // 3. Запуск удаления и подтверждения
+            const deleteBtnLabels = [
+                'удалить видео', 'delete video',
+                'удалить изображение', 'delete image',
+                'удалить', 'delete'
+            ];
+
+            const triggerConfirm = () => {
+                if (!config.deleteAutoconfirm) return;
                 retryAction((attempt) => {
                     const confirmKeywords = ['удалить изображение', 'удалить видео', 'удалить', 'delete', 'confirm', 'ok', 'yes', 'да'];
                     const dialog = document.querySelector('[role="dialog"]') || document;
@@ -325,46 +380,66 @@
                         return true;
                     }
                     return false;
-                }, [100, 300, 500]);
-            }
+                }, [100, 250, 450, 750]);
+            };
 
-            // hold post: переходим на соседний пост, чтобы не улететь в конец ленты
-            if (config.deleteHoldpost) {
-                setTimeout(() => {
-                    if (neighborUrl) {
-                        console.log(`[MOSSAD] hold post: navigating to ${neighborUrl}`);
-                        window.location.href = neighborUrl;
-                    } else {
-                        // Если сосед не был известен заранее — делаем шаг по направлению
-                        const dirs = config.slideshowDirections;
-                        const key = getArrowKey(dirs && dirs.length ? dirs[0] : 'up');
-                        document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                    }
-                }, 800);
-            }
-        };
+            const directDelBtn = findGrokButton(deleteBtnLabels);
+            let deleteClicked = false;
 
-        // 1. Прямой поиск кнопки удаления
-        const directDelBtn = findGrokButton(deleteBtnLabels);
-        if (directDelBtn) {
-            executeDeleteClick(directDelBtn);
-            return;
-        }
-
-        // 2. Если прямой кнопки нет — ищем в меню «три точки»
-        const dotsBtn = findGrok3DotsMenuButton();
-        if (dotsBtn) {
-            triggerClick(dotsBtn, 'Post actions (for Delete)');
-            retryAction((attempt) => {
-                const innerDel = findGrokButton(deleteBtnLabels);
-                if (innerDel) {
-                    executeDeleteClick(innerDel);
-                    return true;
+            if (directDelBtn) {
+                triggerClick(directDelBtn, 'Delete Button');
+                showToast('✕ Удаление...');
+                triggerConfirm();
+                deleteClicked = true;
+            } else {
+                const dotsBtn = findGrok3DotsMenuButton();
+                if (dotsBtn) {
+                    triggerClick(dotsBtn, 'Post actions (for Delete)');
+                    deleteClicked = await new Promise((resolve) => {
+                        retryAction((attempt) => {
+                            const innerDel = findGrokButton(deleteBtnLabels);
+                            if (innerDel) {
+                                triggerClick(innerDel, 'Delete Button (from menu)');
+                                showToast('✕ Удаление...');
+                                triggerConfirm();
+                                resolve(true);
+                                return true;
+                            }
+                            if (attempt === 3) resolve(false);
+                            return false;
+                        }, [100, 250, 450]);
+                    });
                 }
-                return false;
-            }, [100, 300, 500]);
-        } else {
-            showToast('⚠️ Кнопка удаления не найдена', true);
+            }
+
+            if (!deleteClicked) {
+                showToast('⚠️ Кнопка удаления не найдена', true);
+                _grokDeleteInProgress = false;
+                return;
+            }
+
+            // 4. Если включен hold post и зафиксирован finalTargetUrl:
+            // ждем, пока сменится URL (пост удалился и Grok перекинул со страницы),
+            // и в этот момент немедленно переходим на целевой сохранённый URL
+            if (config.deleteHoldpost && finalTargetUrl) {
+                const waitStart = Date.now();
+                let urlRedirected = false;
+                while (Date.now() - waitStart < 8000) {
+                    await new Promise(r => setTimeout(r, 40));
+                    if (location.href !== initialUrl) {
+                        urlRedirected = true;
+                        break;
+                    }
+                }
+
+                console.log(`[MOSSAD] hold post: удаление завершено (смена URL: ${urlRedirected}). Переход на: ${finalTargetUrl}`);
+                showToast('🎯 Переход к сохранённому посту...');
+                window.location.href = finalTargetUrl;
+            }
+        } finally {
+            setTimeout(() => {
+                _grokDeleteInProgress = false;
+            }, 1200);
         }
     }
 
