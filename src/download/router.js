@@ -91,16 +91,29 @@
         return null;
     }
 
-    function triggerDownload() {
+    function triggerDownload(bypassDuplicateCheck = false) {
         if (rootDomain === 'grok.com') {
-            if (triggerGrokDownload()) return;
+            if (triggerGrokDownload(bypassDuplicateCheck)) return;
         }
 
         const media = findMediaForDownload();
         if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
 
-        // Защита от повторного скачивания одного файла за короткое время
         const primaryUrl = media.urls[0];
+
+        // Проверка дубликата в истории (для Pinterest, Instagram, RedGifs и др.)
+        if (!bypassDuplicateCheck && typeof checkFileInHistory === 'function' && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(location.href)) {
+            checkFileInHistory(null, primaryUrl, location.href).then(record => {
+                if (record) {
+                    showDuplicateDownloadNotice(record, () => triggerDownload(true));
+                } else {
+                    triggerDownload(true);
+                }
+            });
+            return;
+        }
+
+        // Защита от повторного скачивания одного файла за короткое время
         const now = Date.now();
         if (primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
             console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, пропущено.');

@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import os, sys, re, datetime
 
 BANNER_FILE = "src/banner.js"
@@ -11,6 +11,7 @@ MODULES = [
     "src/core/utils.js",
     "src/engines/noodle.js",
     "src/download/blob.js",
+    "src/download/history.js",
     "src/engines/grok.js",
     "src/engines/instagram.js",
     "src/download/router.js",

@@ -245,8 +245,10 @@
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⚙ Настройки</button>
-                    <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Мотать до начала/конца ленты">↺ Перемотка</button>
-                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">↺ Сброс</button>
+                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py)">📥 База</button>
+                    <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Мотать до начала/конца ленты">↺</button>
+                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">↺ Сброс</button>
+                    <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
             `;
             
@@ -322,6 +324,28 @@
                 panel.querySelector('#mossad-cb-holdpost').onchange = (e) => Settings.set('deleteHoldpost', e.target.checked);
             }
             panel.querySelector('#mossad-btn-rewind').onclick = doRewind;
+            const btnImportDb = panel.querySelector('#mossad-btn-import-db');
+            const fileDbInput = panel.querySelector('#mossad-file-db');
+            if (btnImportDb && fileDbInput) {
+                btnImportDb.onclick = () => fileDbInput.click();
+                fileDbInput.onchange = (e) => {
+                    const file = e.target.files && e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = async (evt) => {
+                        try {
+                            const data = JSON.parse(evt.target.result);
+                            if (typeof importDownloadHistory === 'function') {
+                                const count = await importDownloadHistory(data);
+                                showToast(`✅ Импортировано ${count} записей в базу хешей!`);
+                            }
+                        } catch (err) {
+                            showToast('❌ Ошибка чтения JSON файла базы', true);
+                        }
+                    };
+                    reader.readAsText(file, 'utf-8');
+                };
+            }
             panel.querySelector('#mossad-btn-hk').onclick = () => {
                 if (document.getElementById('mossad-hk-modal')) return;
                 openHotkeySettings();

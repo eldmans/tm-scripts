@@ -129,11 +129,37 @@
     // ============================================================
     // GROK: Download with 3-Dots Fallback
     // ============================================================
-    function triggerGrokDownload() {
+    function triggerGrokDownload(bypassDuplicateCheck = false) {
         if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
         blurActiveInput();
 
+        const currentPostUrl = location.href;
+        const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+
+        // Проверка дубликата в истории
+        if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl)) {
+            checkFileInHistory(null, null, currentPostUrl).then(record => {
+                if (record) {
+                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true));
+                } else {
+                    triggerGrokDownload(true);
+                }
+            });
+            return true;
+        }
+
         const dlKeywords = ['download', 'скачать'];
+
+        const onDownloadTriggered = () => {
+            showToast('📥 Скачивание...');
+            saveFileToHistory({
+                hash: '',
+                filename: `grok_${currentPostId || Date.now()}.${getActiveVideo() ? 'mp4' : 'jpg'}`,
+                url: currentPostUrl,
+                postUrl: currentPostUrl,
+                domain: 'grok.com'
+            });
+        };
 
         // 1. Прямая кнопка на панели
         let directBtn = findGrokButton(dlKeywords);
@@ -149,7 +175,7 @@
 
         if (directBtn) {
             triggerClick(directBtn, 'Grok Direct Download');
-            showToast('📥 Скачивание...');
+            onDownloadTriggered();
             return true;
         }
 
@@ -161,7 +187,7 @@
                 const innerDl = findGrokButton(dlKeywords);
                 if (innerDl) {
                     triggerClick(innerDl, 'Grok Download from 3-dots');
-                    showToast('📥 Скачивание...');
+                    onDownloadTriggered();
                     return true;
                 }
                 return false;
@@ -670,6 +696,18 @@
     }
 
     function saveBlobToDisk(blob, filename) {
+        if (typeof computeSHA256 === 'function' && typeof saveFileToHistory === 'function') {
+            computeSHA256(blob).then(hash => {
+                saveFileToHistory({
+                    hash,
+                    filename,
+                    url: location.href,
+                    postUrl: location.href,
+                    size: blob.size,
+                    domain: rootDomain
+                });
+            });
+        }
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl; a.download = filename;
