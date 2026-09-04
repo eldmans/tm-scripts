@@ -15,6 +15,7 @@
         stopOnBrsrSwitch: false,
         deleteAutoconfirm: false,
         deleteHoldpost: false,
+        allowDuplicates: false,       // Дубли: качать дубликаты сразу без подтверждения
         allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',

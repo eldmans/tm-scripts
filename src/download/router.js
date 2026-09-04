@@ -103,7 +103,7 @@
 
         // Проверка дубликата в истории (для Pinterest, Instagram, RedGifs и др.)
         if (!bypassDuplicateCheck && typeof checkFileInHistory === 'function' && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(location.href)) {
-            checkFileInHistory(null, primaryUrl, location.href).then(record => {
+            checkFileInHistory(null, primaryUrl, location.href, media.type).then(record => {
                 if (record) {
                     showDuplicateDownloadNotice(record, () => triggerDownload(true));
                 } else {
@@ -210,12 +210,18 @@
                             tryNext();
                         }
                     });
+                    if (typeof performPostDownloadAction === 'function') {
+                        performPostDownloadAction();
+                    }
                 } catch (e) {
                     tryNext();
                 }
             } else {
                 showToast('⏳ Запуск скачивания...');
                 triggerDirectBlobDownload(targetUrl, targetFilename, tryNext);
+                if (typeof performPostDownloadAction === 'function') {
+                    performPostDownloadAction();
+                }
             }
         }
         

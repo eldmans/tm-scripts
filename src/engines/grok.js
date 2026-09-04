@@ -137,8 +137,10 @@
         const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
 
         // Проверка дубликата в истории
+        const hasVid = getActiveVideo() !== null;
+        const currentMediaType = hasVid ? 'video' : 'photo';
         if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl)) {
-            checkFileInHistory(null, null, currentPostUrl).then(record => {
+            checkFileInHistory(null, null, currentPostUrl, currentMediaType).then(record => {
                 if (record) {
                     showDuplicateDownloadNotice(record, () => triggerGrokDownload(true));
                 } else {
@@ -154,11 +156,15 @@
             showToast('📥 Скачивание...');
             saveFileToHistory({
                 hash: '',
-                filename: `grok_${currentPostId || Date.now()}.${getActiveVideo() ? 'mp4' : 'jpg'}`,
+                filename: `grok_${currentPostId || Date.now()}.${hasVid ? 'mp4' : 'jpg'}`,
                 url: currentPostUrl,
                 postUrl: currentPostUrl,
-                domain: 'grok.com'
+                domain: 'grok.com',
+                type: currentMediaType
             });
+            if (typeof performPostDownloadAction === 'function') {
+                performPostDownloadAction();
+            }
         };
 
         // 1. Прямая кнопка на панели

@@ -91,4 +91,29 @@
         };
     }
 
+    /**
+     * Выполняет пост-действие после фактического скачивания (+1 или del).
+     * Срабатывает ТОЛЬКО когда скачивание реально началось, а не при блокировке дубликата.
+     */
+    function performPostDownloadAction() {
+        if (!config || config.pdAction === 'none') return;
+        if (config.pdAction === 'up') {
+            setTimeout(() => {
+                const dirs = config.slideshowDirections;
+                const key = getArrowKey(dirs && dirs.length ? dirs[0] : 'up');
+                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                if (typeof triggerUniversalFullScreen === 'function') {
+                    triggerUniversalFullScreen();
+                }
+            }, 600);
+        } else if (config.pdAction === 'del' && rootDomain === 'grok.com') {
+            setTimeout(() => {
+                if (typeof runSmartDelete === 'function') {
+                    runSmartDelete();
+                }
+            }, 1000);
+        }
+    }
+
+
 

@@ -29,17 +29,6 @@
             if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
             e.preventDefault();
             triggerDownload();
-            // После скачивания — перейти +1 если выбрано
-            if (config.pdAction === 'up') {
-                setTimeout(() => {
-                    const dirs = config.slideshowDirections;
-                    const key = getArrowKey(dirs && dirs.length ? dirs[0] : 'up');
-                    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                    triggerUniversalFullScreen();
-                }, 600);
-            } else if (config.pdAction === 'del' && rootDomain === 'grok.com') {
-                setTimeout(() => runSmartDelete(), 1000);
-            }
         }
 
         if (hotkeyMatches(e, config.hk.upscale)) {
