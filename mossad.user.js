@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.41
+// @version      1.2.42
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.37';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.42';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -66,7 +66,7 @@
         slideshowOrientation: 'h',
         slideshowLoopMode: 'off',
         slideshowDirections: ['up'],  // листание вверх по умолчанию
-        videoLoops: 1,
+        videoLoops: 2,
         slideshowDelay: 10,           // фото 10 сек
         delayAfterVideo: 2,           // пауза 2 сек
         downloadType: 'none',         // не скачивать
@@ -78,7 +78,7 @@
         allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
-        filenameTemplate: '{title}_{domain[4]}',  // шаблон имени файла по умолчанию
+        filenameTemplate: '-{domain[4]}',  // шаблон имени файла по умолчанию
         filenameTemplateEnabled: false,  // использовать шаблон?
         
         // PINTEREST ENGINE CONFIGS
@@ -633,12 +633,22 @@
     /** Останавливает Gallery Slideshow */
     function grokStopGallerySlideshow() {
         _gSS.removeItem(GALLERY_SS_KEY);
+        window._mossadGalleryActive = false;
+        window._mossadGalleryNextFn = null;
+        const ind = document.getElementById('mossad-gallery-indicator');
+        if (ind) ind.remove();
+        const btnSS = document.getElementById('mossad-gallery-ss');
+        if (btnSS) {
+            btnSS.textContent = '🎲 Слайдшоу';
+            btnSS.style.background = '#1e3a5f';
+            btnSS.style.color = '#93c5fd';
+        }
         showToast('⏹ Gallery слайдшоу остановлено');
     }
 
-    /** Инициализация строки галереи внутри виджета MOSSAD (только на /imagine/saved) */
+    /** Инициализация строки галереи внутри виджета MOSSAD (для всех страниц grok.com) */
     function initGrokGalleryBar() {
-        if (!isGrokSavedPage()) return;
+        if (rootDomain !== 'grok.com') return;
         if (document.getElementById('mossad-gallery-row')) return;
 
         const container = document.getElementById('mossad-widget-container');
@@ -650,40 +660,67 @@
             background: rgba(20,20,20,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 6px 12px;
             display: flex; align-items: center; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            font-family: system-ui,-apple-system,sans-serif;
+            font-family: system-ui,-apple-system,sans-serif; cursor: grab;
         `;
 
         const btnCollect = document.createElement('button');
         btnCollect.id = 'mossad-gallery-collect';
-        btnCollect.textContent = '📋 Собрать';
+        let savedCount = 0;
+        try {
+            const cRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
+            if (cRaw) savedCount = (JSON.parse(cRaw).items || []).length;
+        } catch(e) {}
+        btnCollect.textContent = savedCount > 0 ? `📋 Собрано (${savedCount})` : '📋 Собрать';
         btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
-        btnCollect.onclick = () => { grokSaveCollection(btnCollect); };
-
-        // Мониторим изменение числа ссылок на странице каждые 2с
-        setInterval(() => {
-            const currentCount = document.querySelectorAll('a[href*="/imagine/post/"]').length;
-            const savedCount = parseInt(btnCollect.dataset.collectedCount || '0', 10);
-            if (savedCount === 0) return; // ещё не собирали
-            if (currentCount !== savedCount) {
-                // Число изменилось — намекаем пересобрать
-                const diff = currentCount - savedCount;
-                const sign = diff > 0 ? '+' : '';
-                btnCollect.textContent = `🔴 ${currentCount} (${sign}${diff})`;
-                btnCollect.style.background = '#7f1d1d';
-                btnCollect.style.color = '#fca5a5';
-                btnCollect.dataset.collectedCount = String(currentCount); // обновляем чтобы не спамить
+        btnCollect.onclick = () => {
+            if (isGrokSavedPage()) {
+                grokSaveCollection(btnCollect);
+            } else {
+                showToast('ℹ️ Переход на /imagine/saved для сбора...');
+                setTimeout(() => { window.location.href = 'https://grok.com/imagine/saved'; }, 300);
             }
-        }, 2000);
+        };
 
-        const _ssActive = (() => { try { return JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch { return false; } })();
+        if (isGrokSavedPage()) {
+            // Мониторим изменение числа ссылок на странице каждые 2с
+            setInterval(() => {
+                const currentCount = document.querySelectorAll('a[href*="/imagine/post/"]').length;
+                const sc = parseInt(btnCollect.dataset.collectedCount || String(savedCount), 10);
+                if (sc === 0) return;
+                if (currentCount !== sc) {
+                    const diff = currentCount - sc;
+                    const sign = diff > 0 ? '+' : '';
+                    btnCollect.textContent = `🔴 ${currentCount} (${sign}${diff})`;
+                    btnCollect.style.background = '#7f1d1d';
+                    btnCollect.style.color = '#fca5a5';
+                    btnCollect.dataset.collectedCount = String(currentCount);
+                }
+            }, 2000);
+        }
+
+        // На странице /saved слайдшоу никогда не должно гореть красным «Стоп»
+        const _ssActive = (() => {
+            if (isGrokSavedPage()) return false;
+            try {
+                const item = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}');
+                return !!item.active && (slideshowActive || sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true');
+            } catch { return false; }
+        })();
+
         const btnSS = document.createElement('button');
         btnSS.id = 'mossad-gallery-ss';
         btnSS.textContent = _ssActive ? '⏹ Стоп' : '🎲 Слайдшоу';
         btnSS.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:${_ssActive ? '#7f1d1d' : '#1e3a5f'};color:${_ssActive ? '#fca5a5' : '#93c5fd'};transition:all 0.2s;`;
         btnSS.onclick = () => {
-            const active = (() => { try { return JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch { return false; } })();
+            const active = (() => {
+                try {
+                    const item = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}');
+                    return !!item.active;
+                } catch { return false; }
+            })();
             if (active) {
                 grokStopGallerySlideshow();
+                stopSlideshow();
                 btnSS.textContent = '🎲 Слайдшоу';
                 btnSS.style.background = '#1e3a5f'; btnSS.style.color = '#93c5fd';
             } else {
@@ -698,8 +735,23 @@
         btnDl.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 8px;font-size:14px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
         btnDl.onclick = () => grokDownloadCollection();
 
-        row.append(btnCollect, btnSS, btnDl);
+        // Стрелочка вниз: открывает/закрывает вторую полоску (TopBar)
+        const btnToggleTop = document.createElement('button');
+        btnToggleTop.id = 'mossad-gallery-toggle-top';
+        btnToggleTop.innerHTML = '▼';
+        btnToggleTop.title = 'Показать / скрыть панель управления';
+        btnToggleTop.style.cssText = `background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 4px;transition:color 0.2s;`;
+        btnToggleTop.onclick = () => {
+            window.widgetState = window.widgetState === 'hidden' ? 'bar' : 'hidden';
+            if (window.updateWidgetUI) window.updateWidgetUI();
+        };
+
+        row.append(btnCollect, btnSS, btnDl, btnToggleTop);
         container.insertBefore(row, container.firstChild);
+
+        if (typeof window.makeWidgetDraggable === 'function') {
+            window.makeWidgetDraggable(row);
+        }
     }
 
     /** На странице поста — продолжение Gallery Slideshow через стандартный движок MOSSAD */
@@ -1423,11 +1475,32 @@
         if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         if (downloadTimeoutId) clearTimeout(downloadTimeoutId);
         if (rafId) cancelAnimationFrame(rafId);
+        if (rootDomain === 'grok.com') {
+            _gSS.removeItem(GALLERY_SS_KEY);
+            window._mossadGalleryActive = false;
+            window._mossadGalleryNextFn = null;
+            const ind = document.getElementById('mossad-gallery-indicator');
+            if (ind) ind.remove();
+            const btnSS = document.getElementById('mossad-gallery-ss');
+            if (btnSS) {
+                btnSS.textContent = '🎲 Слайдшоу';
+                btnSS.style.background = '#1e3a5f';
+                btnSS.style.color = '#93c5fd';
+            }
+        }
         if (window.updateWidgetUI) window.updateWidgetUI();
     }
 
     function startSlideshow() {
         if (!slideshowActive) {
+            // При локальном старте гарантируем, что это НЕ галерейный режим
+            if (rootDomain === 'grok.com') {
+                window._mossadGalleryActive = false;
+                window._mossadGalleryNextFn = null;
+                _gSS.removeItem(GALLERY_SS_KEY);
+                const ind = document.getElementById('mossad-gallery-indicator');
+                if (ind) ind.remove();
+            }
             slideshowActive = true;
             slideshowPaused = false;
             sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
@@ -1879,11 +1952,62 @@
     function initWidget() {
         const container = document.createElement('div');
         container.id = 'mossad-widget-container';
+
+        let savedPos = null;
+        try {
+            savedPos = JSON.parse(localStorage.getItem('mossad_widget_pos'));
+        } catch(e) {}
+
+        const defTop = isGrokSavedPage() ? '72px' : '20px';
+        const initTop = (savedPos && savedPos.top) ? savedPos.top : defTop;
+        const initLeft = (savedPos && savedPos.left) ? savedPos.left : null;
+
         container.style.cssText = `
-            position: fixed; top: ${isGrokSavedPage() ? '72px' : '20px'}; right: 20px; z-index: 999998;
+            position: fixed;
+            top: ${initTop};
+            ${initLeft ? `left: ${initLeft};` : 'right: 20px;'}
+            z-index: 999998;
             font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; user-select: none;
             display: flex; flex-direction: column; gap: 4px;
         `;
+
+        window.makeWidgetDraggable = function(handleEl) {
+            if (!handleEl) return;
+            handleEl.style.cursor = 'grab';
+            handleEl.addEventListener('mousedown', (e) => {
+                if (e.target.closest('button, input, select, label, a')) return;
+                e.preventDefault();
+                handleEl.style.cursor = 'grabbing';
+                const rect = container.getBoundingClientRect();
+                const shiftX = e.clientX - rect.left;
+                const shiftY = e.clientY - rect.top;
+
+                function onMouseMove(moveEvent) {
+                    let newLeft = moveEvent.clientX - shiftX;
+                    let newTop = moveEvent.clientY - shiftY;
+                    newLeft = Math.max(0, Math.min(window.innerWidth - rect.width, newLeft));
+                    newTop = Math.max(0, Math.min(window.innerHeight - rect.height, newTop));
+                    container.style.left = newLeft + 'px';
+                    container.style.top = newTop + 'px';
+                    container.style.right = 'auto';
+                }
+
+                function onMouseUp() {
+                    handleEl.style.cursor = 'grab';
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                    try {
+                        localStorage.setItem('mossad_widget_pos', JSON.stringify({
+                            left: container.style.left,
+                            top: container.style.top
+                        }));
+                    } catch(err) {}
+                }
+
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            });
+        };
 
         // TOP BAR
         const topBar = document.createElement('div');
@@ -1892,8 +2016,9 @@
             background: rgba(20, 20, 20, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 6px 12px;
             display: flex; align-items: center; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            transition: all 0.3s ease;
+            transition: all 0.3s ease; cursor: grab;
         `;
+        window.makeWidgetDraggable(topBar);
         
         const timerEl = document.createElement('div');
         timerEl.id = 'mossad-timer';
@@ -2053,7 +2178,7 @@
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⌨ Горячие клавиши</button>
+                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⚙ Настройки</button>
                     <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Мотать до начала/конца ленты">↺ Перемотка</button>
                     <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 10px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">↺ Сброс</button>
                 </div>
@@ -2261,7 +2386,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-01</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-04</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
