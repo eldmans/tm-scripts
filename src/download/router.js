@@ -137,17 +137,40 @@
         const oldBase = isDup ? (currentDup.filename || '').replace(/\.[^/.]+$/, '').trim() : '';
         const dblSuffix = isDup ? ` (${oldBase || 'original'}) DBL` : '';
         
+        // Извлечение UUID / ID поста для короткого именования (первые 8 символов)
+        let postId = '';
+        if (rootDomain === 'grok.com') {
+            const m = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
+            if (m) postId = m[1];
+        } else if (rootDomain.includes('pinterest.')) {
+            const m = location.pathname.match(/\/pin\/(\d+)/);
+            if (m) postId = m[1];
+        } else if (rootDomain.includes('redgifs.com')) {
+            postId = media.itemId || '';
+        } else if (rootDomain.includes('instagram.com')) {
+            const m = location.pathname.match(/\/(?:p|reel)\/([^/?#]+)/);
+            if (m) postId = m[1];
+        }
+        if (!postId && media.itemId) postId = media.itemId;
+        if (!postId) postId = String(Date.now());
+
+        const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
+        const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
+
         // --- Вспомогательная функция: применить {var[N]} синтаксис ---
         function applyTplVar(value, len) {
             return len > 0 ? value.slice(0, len) : value;
         }
 
-        // --- Базовое имя файла (без шаблона) ---
+        // --- Базовое имя файла (по умолчанию: 8 символов ID + домен) ---
         let filename;
+        const ext = media.type === 'video' ? 'mp4' : 'jpg';
         if (rootDomain.includes('redgifs.com') && media.itemId) {
-            filename = getRedGifsTitleFilename(media.itemId);
+            filename = `${getRedGifsTitleFilename(media.itemId)}`;
+        } else if (shortId && shortId.length >= 4) {
+            // Формат по умолчанию: {8 символов UUID}-{домен}.{ext}
+            filename = `${shortId}-${domainClean}.${ext}`;
         } else {
-            const ext = media.type === 'video' ? 'mp4' : 'jpg';
             const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
             filename = `${titleClean}.${ext}`;
         }
@@ -160,11 +183,17 @@
             const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
             const ext2 = media.type === 'video' ? 'mp4' : 'jpg';
             const titleClean2 = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
-            const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
             const nStr = String(Date.now()).slice(-6);
 
             // Словарь переменных (значение без обрезки)
             const vars = {
+                id:      postId,
+                uuid:    postId,
+                hash:    postId,
+                postid:  postId,
+                id8:     shortId,
+                hash8:   shortId,
+                uuid8:   shortId,
                 title:   titleClean2,
                 date:    dateStr,
                 time:    timeStr,

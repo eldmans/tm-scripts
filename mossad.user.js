@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.48
+// @version      1.2.49
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.48';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.49';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -79,7 +79,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
-        filenameTemplate: '-{domain[4]}',  // шаблон имени файла по умолчанию
+        filenameTemplate: '{id8}-{domain}.{ext}',  // шаблон имени файла по умолчанию (8 символов UUID + домен)
         filenameTemplateEnabled: false,  // использовать шаблон?
         
         // PINTEREST ENGINE CONFIGS
@@ -1045,14 +1045,55 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const dlKeywords = ['download', 'скачать'];
 
         const onDownloadTriggered = () => {
-            let grokFilename = `grok_${currentPostId || Date.now()}.${hasVid ? 'mp4' : 'jpg'}`;
-            if (duplicateRecord && duplicateRecord.filename) {
-                const oldBase = duplicateRecord.filename.replace(/\.[^/.]+$/, '').trim() || 'original';
-                const curBase = `grok_${currentPostId || Date.now()}`;
-                grokFilename = `${curBase} (${oldBase}) DBL.${hasVid ? 'mp4' : 'jpg'}`;
+            const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
+            const ext2 = hasVid ? 'mp4' : 'jpg';
+            const oldBase = duplicateRecord ? (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim() : '';
+            const dblSuffix = duplicateRecord ? ` (${oldBase || 'original'}) DBL` : '';
+
+            let grokFilename = `${shortId}-grok${dblSuffix}.${ext2}`;
+
+            if (config.filenameTemplateEnabled && config.filenameTemplate && config.filenameTemplate.trim()) {
+                const now2 = new Date();
+                const pad2 = (n) => String(n).padStart(2, '0');
+                const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
+                const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
+                const vars = {
+                    id:      currentPostId || '',
+                    uuid:    currentPostId || '',
+                    hash:    currentPostId || '',
+                    postid:  currentPostId || '',
+                    id8:     shortId,
+                    hash8:   shortId,
+                    uuid8:   shortId,
+                    domain:  'grok',
+                    title:   'Imagine - Grok',
+                    date:    dateStr,
+                    time:    timeStr,
+                    ext:     ext2,
+                    n:       String(Date.now()).slice(-6),
+                    dbl:     dblSuffix,
+                    oldname: oldBase,
+                    copy:    oldBase
+                };
+                const tplStr = config.filenameTemplate.trim();
+                const hasDblVar = /\{dbl\}/i.test(tplStr);
+                grokFilename = tplStr.replace(/\{(\w+)(?:\[(\d+)\])?\}/gi, (_, name, lenStr) => {
+                    const key = name.toLowerCase();
+                    const val = key in vars ? vars[key] : '';
+                    const len = lenStr ? parseInt(lenStr, 10) : 0;
+                    return len > 0 ? val.slice(0, len) : val;
+                }).replace(/[\\/:*?"<>|]/g, '_');
+
+                if (!grokFilename.includes('.')) grokFilename += `.${ext2}`;
+                if (duplicateRecord && !hasDblVar) {
+                    const lastDot = grokFilename.lastIndexOf('.');
+                    const base = lastDot !== -1 ? grokFilename.slice(0, lastDot) : grokFilename;
+                    const extPart = lastDot !== -1 ? grokFilename.slice(lastDot) : `.${ext2}`;
+                    grokFilename = `${base}${dblSuffix}${extPart}`;
+                }
             }
 
-            showToast(`📥 Скачивание ${duplicateRecord ? '(дубликат)' : ''}...`);
+            showToast(`📥 Скачивание: ${grokFilename}...`);
             saveFileToHistory({
                 hash: '',
                 filename: grokFilename,
@@ -2042,17 +2083,40 @@ function findMediaForDownload() {
         const oldBase = isDup ? (currentDup.filename || '').replace(/\.[^/.]+$/, '').trim() : '';
         const dblSuffix = isDup ? ` (${oldBase || 'original'}) DBL` : '';
         
+        // Извлечение UUID / ID поста для короткого именования (первые 8 символов)
+        let postId = '';
+        if (rootDomain === 'grok.com') {
+            const m = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
+            if (m) postId = m[1];
+        } else if (rootDomain.includes('pinterest.')) {
+            const m = location.pathname.match(/\/pin\/(\d+)/);
+            if (m) postId = m[1];
+        } else if (rootDomain.includes('redgifs.com')) {
+            postId = media.itemId || '';
+        } else if (rootDomain.includes('instagram.com')) {
+            const m = location.pathname.match(/\/(?:p|reel)\/([^/?#]+)/);
+            if (m) postId = m[1];
+        }
+        if (!postId && media.itemId) postId = media.itemId;
+        if (!postId) postId = String(Date.now());
+
+        const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
+        const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
+
         // --- Вспомогательная функция: применить {var[N]} синтаксис ---
         function applyTplVar(value, len) {
             return len > 0 ? value.slice(0, len) : value;
         }
 
-        // --- Базовое имя файла (без шаблона) ---
+        // --- Базовое имя файла (по умолчанию: 8 символов ID + домен) ---
         let filename;
+        const ext = media.type === 'video' ? 'mp4' : 'jpg';
         if (rootDomain.includes('redgifs.com') && media.itemId) {
-            filename = getRedGifsTitleFilename(media.itemId);
+            filename = `${getRedGifsTitleFilename(media.itemId)}`;
+        } else if (shortId && shortId.length >= 4) {
+            // Формат по умолчанию: {8 символов UUID}-{домен}.{ext}
+            filename = `${shortId}-${domainClean}.${ext}`;
         } else {
-            const ext = media.type === 'video' ? 'mp4' : 'jpg';
             const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
             filename = `${titleClean}.${ext}`;
         }
@@ -2065,11 +2129,17 @@ function findMediaForDownload() {
             const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
             const ext2 = media.type === 'video' ? 'mp4' : 'jpg';
             const titleClean2 = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
-            const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
             const nStr = String(Date.now()).slice(-6);
 
             // Словарь переменных (значение без обрезки)
             const vars = {
+                id:      postId,
+                uuid:    postId,
+                hash:    postId,
+                postid:  postId,
+                id8:     shortId,
+                hash8:   shortId,
+                uuid8:   shortId,
                 title:   titleClean2,
                 date:    dateStr,
                 time:    timeStr,
@@ -2994,8 +3064,8 @@ function findMediaForDownload() {
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
                         <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> Шаблон:
                     </label>
-                    <input id="mossad-in-fn-tpl" type="text" placeholder="{title}_{date}.{ext}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
-                        title="Шаблон имени файла. Переменные: {title} {date} {time} {ext} {domain} {n} {dbl} {oldname}"
+                    <input id="mossad-in-fn-tpl" type="text" placeholder="{id8}-{domain}.{ext}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
+                        title="Шаблон имени файла. Переменные: {id8} {id} {domain} {title} {date} {time} {ext} {n} {dbl} {oldname}"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>

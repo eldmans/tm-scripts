@@ -19,7 +19,7 @@
         allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
-        filenameTemplate: '-{domain[4]}',  // шаблон имени файла по умолчанию
+        filenameTemplate: '{id8}-{domain}.{ext}',  // шаблон имени файла по умолчанию (8 символов UUID + домен)
         filenameTemplateEnabled: false,  // использовать шаблон?
         
         // PINTEREST ENGINE CONFIGS

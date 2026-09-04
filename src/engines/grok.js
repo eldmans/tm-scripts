@@ -153,14 +153,55 @@
         const dlKeywords = ['download', 'скачать'];
 
         const onDownloadTriggered = () => {
-            let grokFilename = `grok_${currentPostId || Date.now()}.${hasVid ? 'mp4' : 'jpg'}`;
-            if (duplicateRecord && duplicateRecord.filename) {
-                const oldBase = duplicateRecord.filename.replace(/\.[^/.]+$/, '').trim() || 'original';
-                const curBase = `grok_${currentPostId || Date.now()}`;
-                grokFilename = `${curBase} (${oldBase}) DBL.${hasVid ? 'mp4' : 'jpg'}`;
+            const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
+            const ext2 = hasVid ? 'mp4' : 'jpg';
+            const oldBase = duplicateRecord ? (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim() : '';
+            const dblSuffix = duplicateRecord ? ` (${oldBase || 'original'}) DBL` : '';
+
+            let grokFilename = `${shortId}-grok${dblSuffix}.${ext2}`;
+
+            if (config.filenameTemplateEnabled && config.filenameTemplate && config.filenameTemplate.trim()) {
+                const now2 = new Date();
+                const pad2 = (n) => String(n).padStart(2, '0');
+                const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
+                const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
+                const vars = {
+                    id:      currentPostId || '',
+                    uuid:    currentPostId || '',
+                    hash:    currentPostId || '',
+                    postid:  currentPostId || '',
+                    id8:     shortId,
+                    hash8:   shortId,
+                    uuid8:   shortId,
+                    domain:  'grok',
+                    title:   'Imagine - Grok',
+                    date:    dateStr,
+                    time:    timeStr,
+                    ext:     ext2,
+                    n:       String(Date.now()).slice(-6),
+                    dbl:     dblSuffix,
+                    oldname: oldBase,
+                    copy:    oldBase
+                };
+                const tplStr = config.filenameTemplate.trim();
+                const hasDblVar = /\{dbl\}/i.test(tplStr);
+                grokFilename = tplStr.replace(/\{(\w+)(?:\[(\d+)\])?\}/gi, (_, name, lenStr) => {
+                    const key = name.toLowerCase();
+                    const val = key in vars ? vars[key] : '';
+                    const len = lenStr ? parseInt(lenStr, 10) : 0;
+                    return len > 0 ? val.slice(0, len) : val;
+                }).replace(/[\\/:*?"<>|]/g, '_');
+
+                if (!grokFilename.includes('.')) grokFilename += `.${ext2}`;
+                if (duplicateRecord && !hasDblVar) {
+                    const lastDot = grokFilename.lastIndexOf('.');
+                    const base = lastDot !== -1 ? grokFilename.slice(0, lastDot) : grokFilename;
+                    const extPart = lastDot !== -1 ? grokFilename.slice(lastDot) : `.${ext2}`;
+                    grokFilename = `${base}${dblSuffix}${extPart}`;
+                }
             }
 
-            showToast(`📥 Скачивание ${duplicateRecord ? '(дубликат)' : ''}...`);
+            showToast(`📥 Скачивание: ${grokFilename}...`);
             saveFileToHistory({
                 hash: '',
                 filename: grokFilename,
