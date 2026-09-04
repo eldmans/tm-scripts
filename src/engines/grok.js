@@ -1,65 +1,290 @@
     // ============================================================
-    // GROK: Smart Delete (click "Удалить изображение"/"Удалить видео", auto-confirm, hold-post)
+    // GROK HELPERS: Button Finders & Actions
     // ============================================================
-    function runSmartDelete() {
+
+    /**
+     * Поиск кнопки/кликабельного элемента по ключевым словам (aria-label, title, textContent).
+     * Регистронезависимый (case-insensitive) поиск, универсален для RU/EN.
+     */
+    function findGrokButton(keywords, rootEl = document) {
+        if (!Array.isArray(keywords)) keywords = [keywords];
+        const lowerKeywords = keywords.map(k => k.toLowerCase().trim());
+        const candidates = Array.from(rootEl.querySelectorAll('button, [role="button"], [role="menuitem"], a'));
+        return candidates.find(el => {
+            if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            const title = (el.getAttribute('title') || '').toLowerCase();
+            const txt = (el.textContent || '').trim().toLowerCase();
+            return lowerKeywords.some(k => aria.includes(k) || title.includes(k) || txt.includes(k));
+        }) || null;
+    }
+
+    /**
+     * Находит кнопку «три точки» (меню действий с постом) в Grok.
+     */
+    function findGrok3DotsMenuButton() {
+        // 1. Поиск по aria-label и тексту
+        const byLabel = findGrokButton([
+            'действия с постом', 'post actions', 'more options', 'more', 'ещё', 'три точки'
+        ]);
+        if (byLabel) return byLabel;
+
+        // 2. Поиск по SVG иконке (кнопка с 3 точками / кругами)
+        return Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+            if (b.offsetParent === null) return false;
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            if (aria.includes('post') || aria.includes('действи') || aria.includes('more')) return true;
+            const svgs = b.querySelectorAll('svg');
+            for (const svg of svgs) {
+                if (svg.querySelectorAll('circle').length >= 3) return true;
+                const path = svg.querySelector('path');
+                const d = path ? (path.getAttribute('d') || '') : '';
+                if (d.includes('M12') && d.includes('C12')) return true;
+            }
+            return false;
+        }) || null;
+    }
+
+    // ============================================================
+    // GROK: Sound Toggle (Mute / Unmute via Player DOM Button)
+    // ============================================================
+    function toggleGrokSound() {
         if (rootDomain !== 'grok.com') return;
-        // Определяем текст кнопки удаления по текущему медиа-типу пина
-        const hasVideo = !!getActiveVideo();
-        const deleteBtnLabel = hasVideo ? 'Удалить видео' : 'Удалить изображение';
+        blurActiveInput();
 
-        // 1. Находим кнопку удаления (предварительно: если hold post — запоминаем URL поста до открытия диалога)
-        let postUrl = null;
-        if (config.deleteHoldpost) {
-            // URL формат /imagine/post/ID/response/RID
-            const m = location.pathname.match(/(\/imagine\/post\/[^/]+)/);
-            if (m) postUrl = m[1];
-        }
+        // Ищем кнопку звука в интерфейсе плеера Grok
+        const soundWords = ['заглушить', 'включить звук', 'звук', 'sound', 'mute', 'unmute'];
+        const btn = findGrokButton(soundWords);
 
-        // 2. Находим и кликаем кнопку удаления (ищем по aria-label или текст)
-        const findDelBtn = () => {
-            const all = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]'));
-            return all.find(el => {
-                const txt = (el.textContent || '').trim();
-                const aria = (el.getAttribute('aria-label') || '').trim();
-                return txt === deleteBtnLabel || aria === deleteBtnLabel ||
-                       txt.includes('Удалить') || aria.includes('Удалить') ||
-                       txt.toLowerCase().includes('delete') || aria.toLowerCase().includes('delete');
-            });
-        };
-
-        const delBtn = findDelBtn();
-        if (!delBtn) {
-            showToast('⚠️ Кнопка удаления не найдена на странице', true);
+        if (btn) {
+            triggerClick(btn, 'Grok Sound Toggle');
+            const isMuted = (btn.getAttribute('aria-label') || btn.textContent || '').toLowerCase().includes('включить') ||
+                            (btn.getAttribute('aria-label') || btn.textContent || '').toLowerCase().includes('unmute');
+            showToast(isMuted ? '🔊 Звук включен' : '🔇 Звук выключен');
             return;
         }
-        delBtn.click();
-        showToast('✕ Удаление...');
 
-        // 3. Автоподтверждение (если включено)
-        if (config.deleteAutoconfirm) {
-            let confirmAttempts = 0;
-            const confirmInterval = setInterval(() => {
-                confirmAttempts++;
-                const confirmBtns = Array.from(document.querySelectorAll('button, [role="button"]'));
-                const confirmBtn = confirmBtns.find(el => {
-                    const txt = (el.textContent || '').trim().toLowerCase();
-                    const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
-                    return txt === 'удалить' || aria === 'удалить' ||
-                           txt === 'delete' || aria === 'delete' ||
-                           txt === 'confirm' || txt === 'yes' || aria === 'confirm';
-                });
-                if (confirmBtn) {
-                    confirmBtn.click();
-                    clearInterval(confirmInterval);
-                    // 4. hold post: вернуться на страницу поста после удаления
-                    if (postUrl) {
-                        setTimeout(() => {
-                            window.location.href = postUrl;
-                        }, 800);
-                    }
+        // Фолбэк на HTML5 video, если кнопка в DOM не найдена
+        const video = getActiveVideo();
+        if (video) {
+            video.muted = !video.muted;
+            showToast(video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
+        } else {
+            showToast('⚠️ Видео не найдено', true);
+        }
+    }
+
+    // ============================================================
+    // GROK: PageUp Upscale (RU/EN, Case-insensitive, Submenu -> 720p)
+    // ============================================================
+    function runGrokUpscale() {
+        if (rootDomain !== 'grok.com' || !isGrokPostPage()) return;
+        blurActiveInput();
+
+        const upscaleKeywords = ['upscale', 'enhance', 'improve quality', 'повысить качество', 'улучшить качество', 'увеличить'];
+
+        const triggerPhase2Submenu = () => {
+            // Фаза 2: выбор «Увеличить до 720p» / «Upscale to 720p» / «720p»
+            const target720pKeywords = ['увеличить до 720p', 'upscale to 720p', '720p'];
+            retryAction((attempt) => {
+                const subItem = findGrokButton(target720pKeywords);
+                if (subItem) {
+                    triggerClick(subItem, 'Upscale to 720p');
+                    showToast('✅ Увеличение до 720p запущено');
+                    return true; // прерывает попытки
                 }
-                if (confirmAttempts > 25) clearInterval(confirmInterval); // 5с ожидания
-            }, 200);
+                if (attempt === 3) {
+                    showToast('ℹ️ Меню 720p не появилось', true);
+                }
+                return false;
+            }, [100, 300, 500]);
+        };
+
+        // Фаза 1: ищем основную кнопку Upscale
+        const directBtn = findGrokButton(upscaleKeywords);
+        if (directBtn) {
+            triggerClick(directBtn, 'Upscale Phase 1');
+            triggerPhase2Submenu();
+            return;
+        }
+
+        // Если прямой кнопки нет — пробуем через 3 точки
+        const dotsBtn = findGrok3DotsMenuButton();
+        if (dotsBtn) {
+            triggerClick(dotsBtn, 'Post actions (for Upscale)');
+            retryAction((attempt) => {
+                const menuBtn = findGrokButton(upscaleKeywords);
+                if (menuBtn) {
+                    triggerClick(menuBtn, 'Upscale Phase 1 from 3-dots');
+                    triggerPhase2Submenu();
+                    return true;
+                }
+                return false;
+            }, [100, 300, 500]);
+        } else {
+            showToast('⚠️ Кнопка Upscale не найдена', true);
+        }
+    }
+
+    // ============================================================
+    // GROK: Download with 3-Dots Fallback
+    // ============================================================
+    function triggerGrokDownload() {
+        if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
+        blurActiveInput();
+
+        const dlKeywords = ['download', 'скачать'];
+
+        // 1. Прямая кнопка на панели
+        let directBtn = findGrokButton(dlKeywords);
+        if (!directBtn) {
+            // Поиск по SVG характерной иконки загрузки
+            directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                if (b.offsetParent === null) return false;
+                const path = b.querySelector('path');
+                const d = path ? (path.getAttribute('d') || '') : '';
+                return d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
+            });
+        }
+
+        if (directBtn) {
+            triggerClick(directBtn, 'Grok Direct Download');
+            showToast('📥 Скачивание...');
+            return true;
+        }
+
+        // 2. Если прямой кнопки нет — открываем три точки
+        const dotsBtn = findGrok3DotsMenuButton();
+        if (dotsBtn) {
+            triggerClick(dotsBtn, 'Post actions (for Download)');
+            retryAction((attempt) => {
+                const innerDl = findGrokButton(dlKeywords);
+                if (innerDl) {
+                    triggerClick(innerDl, 'Grok Download from 3-dots');
+                    showToast('📥 Скачивание...');
+                    return true;
+                }
+                return false;
+            }, [100, 300, 500]);
+            return true;
+        }
+
+        return false;
+    }
+
+    // ============================================================
+    // GROK: Smart Delete (3-dots fallback, a.confirm, hold-post)
+    // ============================================================
+    function getGrokNeighborPostUrl() {
+        // 1. Проверяем карточки постов в текущем DOM
+        const cards = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
+        const currentIdMatch = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
+        const currentId = currentIdMatch ? currentIdMatch[1] : null;
+
+        if (cards.length > 0 && currentId) {
+            const urls = cards.map(c => c.href || c.getAttribute('href') || '').filter(Boolean);
+            const seen = new Map();
+            for (const u of urls) {
+                const m = u.match(/\/imagine\/post\/([^/?#]+)/);
+                if (m && !seen.has(m[1])) seen.set(m[1], u);
+            }
+            const unique = Array.from(seen.keys());
+            const idx = unique.indexOf(currentId);
+            const dir = (config.slideshowDirections && config.slideshowDirections.length) ? config.slideshowDirections[0] : 'up';
+
+            let targetId = null;
+            if (dir === 'down' || dir === 'right') {
+                targetId = (idx >= 0 && idx < unique.length - 1) ? unique[idx + 1] : (unique.length > 0 ? unique[0] : null);
+            } else {
+                targetId = (idx > 0) ? unique[idx - 1] : (unique.length > 0 ? unique[unique.length - 1] : null);
+            }
+            if (targetId && seen.get(targetId)) return seen.get(targetId);
+        }
+
+        // 2. Проверяем ссылки из сохраненной коллекции галереи
+        try {
+            const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
+            if (raw && currentId) {
+                const items = (JSON.parse(raw).items || []).map(i => i.url || i);
+                const idx = items.findIndex(u => u.includes(currentId));
+                if (idx !== -1) {
+                    const nextIdx = (idx + 1) % items.length;
+                    return items[nextIdx];
+                }
+            }
+        } catch (e) {}
+
+        return null;
+    }
+
+    function runSmartDelete() {
+        if (rootDomain !== 'grok.com' || !isGrokPostPage()) return;
+        blurActiveInput();
+
+        const hasVideo = !!getActiveVideo();
+        const deleteBtnLabels = hasVideo
+            ? ['удалить видео', 'delete video', 'удалить', 'delete']
+            : ['удалить изображение', 'delete image', 'удалить', 'delete'];
+
+        // Шаг 0: если включен hold post — определяем целевой соседний URL
+        let neighborUrl = config.deleteHoldpost ? getGrokNeighborPostUrl() : null;
+
+        const executeDeleteClick = (delBtn) => {
+            triggerClick(delBtn, 'Delete Button');
+            showToast('✕ Удаление...');
+
+            // Автоподтверждение удаления (a.confirm)
+            if (config.deleteAutoconfirm) {
+                retryAction((attempt) => {
+                    const confirmKeywords = ['удалить изображение', 'удалить видео', 'удалить', 'delete', 'confirm', 'ok', 'yes', 'да'];
+                    const dialog = document.querySelector('[role="dialog"]') || document;
+                    const confirmBtn = findGrokButton(confirmKeywords, dialog);
+                    if (confirmBtn) {
+                        triggerClick(confirmBtn, 'Confirm Delete');
+                        console.log('[MOSSAD] Delete confirmed on attempt', attempt);
+                        return true;
+                    }
+                    return false;
+                }, [100, 300, 500]);
+            }
+
+            // hold post: переходим на соседний пост, чтобы не улететь в конец ленты
+            if (config.deleteHoldpost) {
+                setTimeout(() => {
+                    if (neighborUrl) {
+                        console.log(`[MOSSAD] hold post: navigating to ${neighborUrl}`);
+                        window.location.href = neighborUrl;
+                    } else {
+                        // Если сосед не был известен заранее — делаем шаг по направлению
+                        const dirs = config.slideshowDirections;
+                        const key = getArrowKey(dirs && dirs.length ? dirs[0] : 'up');
+                        document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                    }
+                }, 800);
+            }
+        };
+
+        // 1. Прямой поиск кнопки удаления
+        const directDelBtn = findGrokButton(deleteBtnLabels);
+        if (directDelBtn) {
+            executeDeleteClick(directDelBtn);
+            return;
+        }
+
+        // 2. Если прямой кнопки нет — ищем в меню «три точки»
+        const dotsBtn = findGrok3DotsMenuButton();
+        if (dotsBtn) {
+            triggerClick(dotsBtn, 'Post actions (for Delete)');
+            retryAction((attempt) => {
+                const innerDel = findGrokButton(deleteBtnLabels);
+                if (innerDel) {
+                    executeDeleteClick(innerDel);
+                    return true;
+                }
+                return false;
+            }, [100, 300, 500]);
+        } else {
+            showToast('⚠️ Кнопка удаления не найдена', true);
         }
     }
 

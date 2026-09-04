@@ -27,6 +27,7 @@
         pinterestPhotoPercent: 50,         // 0..100 % (видео = 100 - photo)
         pinterestMaxVideoDuration: 0,      // макс длительность видео в сек (0 = без лимита)
         pinterestAutoFS: true,             // авто разворачивание во весь экран
+        autoFS: true,                      // универсальный авто Full Screen
         pinterestHistory: [],              // история до 100 посещенных URL
         pinterestHistoryIdx: -1,           // текущий индекс в истории (как в Проводнике)
         

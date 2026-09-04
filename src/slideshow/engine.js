@@ -61,6 +61,61 @@
         return bestVideo;
     }
 
+    // ============================================
+    // UNIVERSAL AUTO FULL SCREEN (FS)
+    // ============================================
+    function triggerUniversalFullScreen() {
+        const isEnabled = config.autoFS !== undefined ? config.autoFS : (config.pinterestAutoFS !== undefined ? config.pinterestAutoFS : true);
+        if (!isEnabled) return;
+        if (document.fullscreenElement) return;
+
+        retryAction((attempt) => {
+            if (document.fullscreenElement) return true;
+
+            // 1. Pinterest: "Показать в полном масштабе"
+            if (rootDomain.includes('pinterest.')) {
+                let btn = document.querySelector('[aria-label="Показать в полном масштабе"], [title="Показать в полном масштабе"], [aria-label*="полном масштабе"]');
+                if (!btn) {
+                    const svg = document.querySelector('svg[aria-label*="полном масштабе"]');
+                    if (svg) btn = svg.closest('[role="button"]') || svg.closest('button') || svg;
+                }
+                if (btn) {
+                    triggerClick(btn, 'Pinterest FullScale');
+                    return true;
+                }
+            }
+
+            // 2. Grok: кнопка Full Screen
+            if (rootDomain === 'grok.com') {
+                const fsKeywords = ['во весь экран', 'полноэкран', 'full screen', 'fullscreen'];
+                const btn = (typeof findGrokButton === 'function' ? findGrokButton(fsKeywords) : null)
+                    || Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                        const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                        const title = (b.getAttribute('title') || '').toLowerCase();
+                        return fsKeywords.some(k => aria.includes(k) || title.includes(k));
+                    });
+                if (btn) {
+                    triggerClick(btn, 'Grok FullScreen');
+                    return true;
+                }
+            }
+
+            // 3. Универсальный поиск для остальных сайтов
+            const genericBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                const title = (b.getAttribute('title') || '').toLowerCase();
+                return aria.includes('fullscreen') || aria.includes('full screen') || aria.includes('во весь экран') ||
+                       title.includes('fullscreen') || title.includes('full screen') || title.includes('во весь экран');
+            });
+            if (genericBtn) {
+                triggerClick(genericBtn, 'Universal FullScreen');
+                return true;
+            }
+
+            return false;
+        }, [100, 300, 500]);
+    }
+
     let lastUrlForSlideshow = location.href;
     let lastActiveVideo = null;
 
@@ -83,6 +138,10 @@
             // Сбрасываем таймер в интерфейсе немедленно!
             isCountingDown = false;
             countdownSeconds = 0;
+
+            if (urlChanged) {
+                triggerUniversalFullScreen();
+            }
             
             // Ждем чуть-чуть, чтобы SPA успело обновить DOM
             setTimeout(() => {
@@ -206,6 +265,7 @@
         // Листание
         const key = getArrowKey(dirs[0]);
         document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+        triggerUniversalFullScreen();
         setTimeout(() => {
             scheduleNextSlideCycle(0);
         }, 500);

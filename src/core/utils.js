@@ -23,3 +23,72 @@
         setTimeout(() => toast.style.opacity = '0', 3500);
     }
 
+    // ============================================
+    // GENERAL HELPERS & RETRY ENGINE
+    // ============================================
+
+    /**
+     * Снимает фокус с активного поля ввода, если он там остался.
+     */
+    function blurActiveInput() {
+        const activeEl = document.activeElement;
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+            try { activeEl.blur(); } catch (e) {}
+        }
+    }
+
+    /**
+     * Полный программный клик по элементу с эмуляцией pointer/mouse событий.
+     */
+    function triggerClick(el, label = '') {
+        if (!el) return;
+        ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {
+            try {
+                el.dispatchEvent(new MouseEvent(evtType, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    buttons: 1
+                }));
+            } catch (e) {}
+        });
+        if (typeof el.click === 'function') {
+            try { el.click(); } catch(e) {}
+        }
+        if (label) {
+            console.log(`%c[MOSSAD] Clicked "${label}"`, 'color:#10b981;', el);
+        }
+    }
+
+    /**
+     * Выполняет действие с серией попыток (по умолчанию через 100, 300, 500 мс).
+     * Если fn возвращает truthy значение (например, true или найденный элемент) — цепочка немедленно прерывается.
+     * @param {(attempt: number) => any} fn Функция-попытка.
+     * @param {number[]} delays Задержки в миллисекундах от старта.
+     * @returns {() => void} Функция принудительной отмены оставшихся попыток.
+     */
+    function retryAction(fn, delays = [100, 300, 500]) {
+        let stopped = false;
+        const timeouts = [];
+        delays.forEach((delay, idx) => {
+            const tid = setTimeout(() => {
+                if (stopped) return;
+                try {
+                    const res = fn(idx + 1);
+                    if (res) {
+                        stopped = true;
+                        timeouts.forEach(t => clearTimeout(t));
+                    }
+                } catch (e) {
+                    console.error('[MOSSAD] retryAction error:', e);
+                }
+            }, delay);
+            timeouts.push(tid);
+        });
+        return () => {
+            stopped = true;
+            timeouts.forEach(t => clearTimeout(t));
+        };
+    }
+
+

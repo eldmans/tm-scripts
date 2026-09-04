@@ -92,6 +92,10 @@
     }
 
     function triggerDownload() {
+        if (rootDomain === 'grok.com') {
+            if (triggerGrokDownload()) return;
+        }
+
         const media = findMediaForDownload();
         if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
 

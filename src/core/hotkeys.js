@@ -35,9 +35,17 @@
                     const dirs = config.slideshowDirections;
                     const key = getArrowKey(dirs && dirs.length ? dirs[0] : 'up');
                     document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                    triggerUniversalFullScreen();
                 }, 600);
             } else if (config.pdAction === 'del' && rootDomain === 'grok.com') {
                 setTimeout(() => runSmartDelete(), 1000);
+            }
+        }
+
+        if (hotkeyMatches(e, config.hk.upscale)) {
+            if (rootDomain === 'grok.com' && isGrokPostPage()) {
+                e.preventDefault();
+                runGrokUpscale();
             }
         }
         
@@ -49,14 +57,18 @@
 
         if (hotkeyMatches(e, config.hk.sound)) {
             e.preventDefault();
-            const video = getActiveVideo();
-            if (video) video.muted = !video.muted;
-            // Специфично для RedGifs
-            if (rootDomain.includes('redgifs.com')) {
-                const btn = document.querySelector('button.SoundButton');
-                if (btn) btn.click();
+            if (rootDomain === 'grok.com') {
+                toggleGrokSound();
+            } else {
+                const video = getActiveVideo();
+                if (video) video.muted = !video.muted;
+                // Специфично для RedGifs
+                if (rootDomain.includes('redgifs.com')) {
+                    const btn = document.querySelector('button.SoundButton');
+                    if (btn) btn.click();
+                }
+                showToast(video && video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
             }
-            showToast(video && video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
         }
 
         if (hotkeyMatches(e, config.hk.playPause)) {
@@ -118,13 +130,11 @@
         }
     }, true);
 
-    // Авто кликер FullScale для Pinterest
-    if (rootDomain.includes('pinterest.')) {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', triggerPinterestFullScale);
-        } else {
-            triggerPinterestFullScale();
-        }
+    // Авто кликер FullScreen при старте страницы
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', triggerUniversalFullScreen);
+    } else {
+        triggerUniversalFullScreen();
     }
 
     // Возобновление слайдшоу после перехода/перезагрузки страницы
