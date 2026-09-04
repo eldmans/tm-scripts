@@ -1,0 +1,7 @@
+*.bak
+temp_*.js
+_archive/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

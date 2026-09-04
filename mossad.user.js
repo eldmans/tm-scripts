@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.43
+// @version      1.2.44
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.43';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.44';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -58,7 +58,7 @@
         return; // Выход — сайт не в списке
     }
 
-    // ============================================
+// ============================================
     // СИСТЕМА НАСТРОЕК
     // ============================================
     const DEFAULT_CONFIG = {
@@ -158,7 +158,7 @@
         },
     };
 
-    // ============================================
+// ============================================
     // GITHUB SYNC
     // ============================================
     const GITHUB_OWNER = 'eldmans';
@@ -330,7 +330,7 @@
             (hk.meta === undefined ? true : !!e.metaKey === !!hk.meta);
     }
 
-    // ============================================
+// ============================================
     // TOAST NOTIFICATIONS
     // ============================================
     function showToast(message, isError = false) {
@@ -355,7 +355,7 @@
         setTimeout(() => toast.style.opacity = '0', 3500);
     }
 
-    // ============================================
+// ============================================
     // NOODLE MAGAZINE MODULE
     // ============================================
     if (rootDomain === 'noodlemagazine.com') {
@@ -380,7 +380,7 @@
         setInterval(cleanupJoinNow, 500);
     }
 
-    // ============================================
+// ============================================
     // PINTEREST / DOWNLOAD ENGINE
     // ============================================
     function triggerDirectBlobDownload(url, filename, onErrorCallback) {
@@ -426,7 +426,7 @@
         } else { fetchBlobFallback(url, filename); }
     }
 
-    // ============================================================
+// ============================================================
     // GROK: Smart Delete (click "Удалить изображение"/"Удалить видео", auto-confirm, hold-post)
     // ============================================================
     function runSmartDelete() {
@@ -1013,7 +1013,7 @@
         return { isFound: false, type: 'unknown', bestMp4Url: null };
     }
 
-    // ============================================
+// ============================================
     // INSTAGRAM ENGINE
     // ============================================
     window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
@@ -1163,7 +1163,7 @@
     })();
     window.MOSSAD_ENGINES.instagram.init();
 
-    function findMediaForDownload() {
+function findMediaForDownload() {
         // Instagram — делегируем к движку
         if (window.MOSSAD_ENGINES.instagram?.isSupported()) {
             return window.MOSSAD_ENGINES.instagram.findMedia();
@@ -1370,7 +1370,7 @@
         tryNext();
     }
 
-    // ============================================
+// ============================================
     // SLIDESHOW LOGIC (AUTO) & SESSION PERSISTENCE
     // ============================================
     const SESSION_ACTIVE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`;
@@ -1753,7 +1753,7 @@
         }, 1000);
     }
 
-    // ============================================
+// ============================================
     // PINTEREST ENGINE & AUTO FULLSCALE
     // ============================================
     function clickElementFull(el) {
@@ -1933,7 +1933,7 @@
         }, 100);
     }
 
-    // ============================================
+// ============================================
     // WIDGET UI
     // ============================================
     window.widgetState = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true'
@@ -2523,7 +2523,7 @@
         };
     }
 
-    // ============================================
+// ============================================
     // GLOBAL HOTKEYS & LISTENERS
     // ============================================
     window.capturingFor = null; 
