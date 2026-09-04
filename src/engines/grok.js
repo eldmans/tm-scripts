@@ -129,7 +129,7 @@
     // ============================================================
     // GROK: Download with 3-Dots Fallback
     // ============================================================
-    function triggerGrokDownload(bypassDuplicateCheck = false) {
+    function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null) {
         if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
         blurActiveInput();
 
@@ -142,9 +142,9 @@
         if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl)) {
             checkFileInHistory(null, null, currentPostUrl, currentMediaType).then(record => {
                 if (record) {
-                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true));
+                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record));
                 } else {
-                    triggerGrokDownload(true);
+                    triggerGrokDownload(true, null);
                 }
             });
             return true;
@@ -153,10 +153,17 @@
         const dlKeywords = ['download', 'скачать'];
 
         const onDownloadTriggered = () => {
-            showToast('📥 Скачивание...');
+            let grokFilename = `grok_${currentPostId || Date.now()}.${hasVid ? 'mp4' : 'jpg'}`;
+            if (duplicateRecord && duplicateRecord.filename) {
+                const oldBase = duplicateRecord.filename.replace(/\.[^/.]+$/, '').trim() || 'original';
+                const curBase = `grok_${currentPostId || Date.now()}`;
+                grokFilename = `${curBase} (${oldBase}) DBL.${hasVid ? 'mp4' : 'jpg'}`;
+            }
+
+            showToast(`📥 Скачивание ${duplicateRecord ? '(дубликат)' : ''}...`);
             saveFileToHistory({
                 hash: '',
-                filename: `grok_${currentPostId || Date.now()}.${hasVid ? 'mp4' : 'jpg'}`,
+                filename: grokFilename,
                 url: currentPostUrl,
                 postUrl: currentPostUrl,
                 domain: 'grok.com',

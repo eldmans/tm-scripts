@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.47
+// @version      1.2.48
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.47';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.48';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1021,7 +1021,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     // ============================================================
     // GROK: Download with 3-Dots Fallback
     // ============================================================
-    function triggerGrokDownload(bypassDuplicateCheck = false) {
+    function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null) {
         if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
         blurActiveInput();
 
@@ -1034,9 +1034,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl)) {
             checkFileInHistory(null, null, currentPostUrl, currentMediaType).then(record => {
                 if (record) {
-                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true));
+                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record));
                 } else {
-                    triggerGrokDownload(true);
+                    triggerGrokDownload(true, null);
                 }
             });
             return true;
@@ -1045,10 +1045,17 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const dlKeywords = ['download', 'скачать'];
 
         const onDownloadTriggered = () => {
-            showToast('📥 Скачивание...');
+            let grokFilename = `grok_${currentPostId || Date.now()}.${hasVid ? 'mp4' : 'jpg'}`;
+            if (duplicateRecord && duplicateRecord.filename) {
+                const oldBase = duplicateRecord.filename.replace(/\.[^/.]+$/, '').trim() || 'original';
+                const curBase = `grok_${currentPostId || Date.now()}`;
+                grokFilename = `${curBase} (${oldBase}) DBL.${hasVid ? 'mp4' : 'jpg'}`;
+            }
+
+            showToast(`📥 Скачивание ${duplicateRecord ? '(дубликат)' : ''}...`);
             saveFileToHistory({
                 hash: '',
-                filename: `grok_${currentPostId || Date.now()}.${hasVid ? 'mp4' : 'jpg'}`,
+                filename: grokFilename,
                 url: currentPostUrl,
                 postUrl: currentPostUrl,
                 domain: 'grok.com',
@@ -1989,9 +1996,17 @@ function findMediaForDownload() {
         return null;
     }
 
-    function triggerDownload(bypassDuplicateCheck = false) {
+    let _activeDuplicateRecord = null;
+
+    function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null) {
+        if (duplicateRecord) {
+            _activeDuplicateRecord = duplicateRecord;
+        } else if (!bypassDuplicateCheck) {
+            _activeDuplicateRecord = null;
+        }
+
         if (rootDomain === 'grok.com') {
-            if (triggerGrokDownload(bypassDuplicateCheck)) return;
+            if (triggerGrokDownload(bypassDuplicateCheck, duplicateRecord || _activeDuplicateRecord)) return;
         }
 
         const media = findMediaForDownload();
@@ -2003,9 +2018,11 @@ function findMediaForDownload() {
         if (!bypassDuplicateCheck && typeof checkFileInHistory === 'function' && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(location.href)) {
             checkFileInHistory(null, primaryUrl, location.href, media.type).then(record => {
                 if (record) {
-                    showDuplicateDownloadNotice(record, () => triggerDownload(true));
+                    _activeDuplicateRecord = record;
+                    showDuplicateDownloadNotice(record, () => triggerDownload(true, record));
                 } else {
-                    triggerDownload(true);
+                    _activeDuplicateRecord = null;
+                    triggerDownload(true, null);
                 }
             });
             return;
@@ -2019,6 +2036,11 @@ function findMediaForDownload() {
         }
         _lastDownloadUrl = primaryUrl;
         _lastDownloadTime = now;
+
+        const currentDup = duplicateRecord || _activeDuplicateRecord;
+        const isDup = Boolean(currentDup && currentDup.filename);
+        const oldBase = isDup ? (currentDup.filename || '').replace(/\.[^/.]+$/, '').trim() : '';
+        const dblSuffix = isDup ? ` (${oldBase || 'original'}) DBL` : '';
         
         // --- Вспомогательная функция: применить {var[N]} синтаксис ---
         function applyTplVar(value, len) {
@@ -2048,16 +2070,22 @@ function findMediaForDownload() {
 
             // Словарь переменных (значение без обрезки)
             const vars = {
-                title: titleClean2,
-                date:  dateStr,
-                time:  timeStr,
-                ext:   ext2,
-                domain: domainClean,
-                n:     nStr,
+                title:   titleClean2,
+                date:    dateStr,
+                time:    timeStr,
+                ext:     ext2,
+                domain:  domainClean,
+                n:       nStr,
+                dbl:     dblSuffix,
+                oldname: oldBase,
+                copy:    oldBase,
             };
 
+            const tplStr = config.filenameTemplate.trim();
+            const hasDblVar = /\{dbl\}/i.test(tplStr);
+
             // Регулярка: {varname} или {varname[N]}
-            filename = config.filenameTemplate.trim().replace(
+            filename = tplStr.replace(
                 /\{(\w+)(?:\[(\d+)\])?\}/gi,
                 (_, name, lenStr) => {
                     const key = name.toLowerCase();
@@ -2069,19 +2097,20 @@ function findMediaForDownload() {
 
             // Добавить расширение, если шаблон его не содержит
             if (!filename.includes('.')) filename += `.${ext2}`;
-        }
 
-        // --- Счётчик дубликатов: (001), (002)... ---
-        {
-            // Разбиваем имя на базу и расширение
+            // Если шаблон не содержал {dbl}, но файл дубликат — автоматически добавляем (старое_имя) DBL перед расширением
+            if (isDup && !hasDblVar) {
+                const lastDot = filename.lastIndexOf('.');
+                const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
+                const extPart = lastDot !== -1 ? filename.slice(lastDot) : `.${ext2}`;
+                filename = `${base}${dblSuffix}${extPart}`;
+            }
+        } else if (isDup) {
+            // Без шаблона: добавляем разметку дубликата перед расширением
             const lastDot = filename.lastIndexOf('.');
             const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
-            const extPart = lastDot !== -1 ? filename.slice(lastDot) : '';
-            const count = (_filenameCounter.get(base) || 0) + 1;
-            _filenameCounter.set(base, count);
-            if (count > 1) {
-                filename = `${base} (${String(count - 1).padStart(3, '0')})${extPart}`;
-            }
+            const extPart = lastDot !== -1 ? filename.slice(lastDot) : (media.type === 'video' ? '.mp4' : '.jpg');
+            filename = `${base}${dblSuffix}${extPart}`;
         }
 
         const urls = media.urls;
@@ -2966,7 +2995,7 @@ function findMediaForDownload() {
                         <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> Шаблон:
                     </label>
                     <input id="mossad-in-fn-tpl" type="text" placeholder="{title}_{date}.{ext}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
-                        title="Шаблон имени файла. Переменные: {title} {date} {time} {ext} {domain} {n}"
+                        title="Шаблон имени файла. Переменные: {title} {date} {time} {ext} {domain} {n} {dbl} {oldname}"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
