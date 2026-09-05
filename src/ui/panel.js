@@ -188,13 +188,16 @@
                         </div>
                     </div>
                     ` : `
-                    <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
-                        <button class="mossad-dpad" data-dir="up" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">▲</button>
-                        <div style="display: flex; gap: 2px;">
-                            <button class="mossad-dpad" data-dir="left" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">◀</button>
-                            <button class="mossad-dpad" data-dir="down" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">▼</button>
-                            <button class="mossad-dpad" data-dir="right" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">▶</button>
-                        </div>
+                    <div style="display: grid; grid-template-columns: 24px 24px 24px; grid-template-rows: 24px 24px 24px; gap: 2px; align-items: center; justify-items: center;">
+                        <div></div>
+                        <button class="mossad-dpad" data-dir="up" title="Листать вверх" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">▲</button>
+                        <div></div>
+                        <button class="mossad-dpad" data-dir="left" title="Листать влево" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">◀</button>
+                        <button id="mossad-dpad-loop" title="Повторять плейлист (R): перемотка на начало при конце ленты" style="background: ${config.loopFeed ? '#10b981' : '#1f2937'}; border: 1px solid ${config.loopFeed ? '#059669' : '#374151'}; color: ${config.loopFeed ? '#fff' : '#9ca3af'}; width:24px; height:24px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px; padding:0; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">R</button>
+                        <button class="mossad-dpad" data-dir="right" title="Листать вправо" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">▶</button>
+                        <div></div>
+                        <button class="mossad-dpad" data-dir="down" title="Листать вниз" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">▼</button>
+                        <div></div>
                     </div>
                     `}
                     <div style="display: flex; flex-direction: column; gap: 4px; min-width: 95px;">
@@ -257,6 +260,15 @@
             panel.querySelectorAll('.mossad-dpad').forEach(btn => {
                 btn.onclick = () => Settings.set('slideshowDirections', [btn.dataset.dir]);
             });
+            const btnLoop = panel.querySelector('#mossad-dpad-loop');
+            if (btnLoop) {
+                btnLoop.onclick = () => {
+                    const nextVal = !config.loopFeed;
+                    Settings.set('loopFeed', nextVal);
+                    showToast(nextVal ? '🔁 Повтор плейлиста включен (R)' : '➡️ Повтор плейлиста выключен');
+                    window.updateWidgetUI();
+                };
+            }
             const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
             if (isPinterest) {
@@ -378,26 +390,7 @@
             if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
             triggerDownload();
         };
-        const doRewind = () => {
-            let oppDir = 'down';
-            const d0 = (config.slideshowDirections || ['up'])[0];
-            if (d0 === 'up') oppDir = 'down';
-            else if (d0 === 'down') oppDir = 'up';
-            else if (d0 === 'left') oppDir = 'right';
-            else if (d0 === 'right') oppDir = 'left';
-            const key = getArrowKey(oppDir);
-            let lastUrl = location.href; let unchangedCount = 0;
-            const interval = setInterval(() => {
-                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                setTimeout(() => {
-                    if (location.href === lastUrl) {
-                        unchangedCount++;
-                        if (unchangedCount >= 4) clearInterval(interval);
-                    } else { lastUrl = location.href; unchangedCount = 0; }
-                }, 60);
-            }, 120);
-        };
-        btnReset.onclick = doRewind;
+        btnReset.onclick = () => doRewind();
 
         window.updateWidgetUI = () => {
             if (window.widgetState === 'hidden') {
@@ -488,7 +481,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-04</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-05</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>

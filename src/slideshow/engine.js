@@ -120,7 +120,7 @@
     let lastActiveVideo = null;
 
     setInterval(() => {
-        if (!slideshowActive) return;
+        if (!slideshowActive || _isRewinding) return;
         
         const currentUrl = location.href;
         const currentVideo = getActiveVideo();
@@ -212,24 +212,9 @@
     }
 
     function triggerNextSlide() {
-        if (!slideshowActive || slideshowPaused) return;
+        if (!slideshowActive || slideshowPaused || _isRewinding) return;
         const dirs = config.slideshowDirections;
         if (!dirs || dirs.length === 0) { stopSlideshow(); return; }
-
-        // Защита от зацикливания на конце ленты
-        const curUrl = location.href;
-        if (curUrl === _lastSlideUrl) {
-            _samePageSlideCount++;
-            if (_samePageSlideCount > SAME_PAGE_LIMIT) {
-                console.warn('[MOSSAD] Превышен лимит перелистываний без смены страницы, остановка.');
-                stopSlideshow();
-                showToast('⏹ Слайдшоу остановлен: конец ленты', true);
-                return;
-            }
-        } else {
-            _samePageSlideCount = 0;
-            _lastSlideUrl = curUrl;
-        }
 
         // Скачивание перед перелистыванием
         if (config.downloadType !== 'none') {
@@ -262,13 +247,58 @@
             return;
         }
 
-        // Листание
+        // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
+        const startUrl = location.href;
         const key = getArrowKey(dirs[0]);
-        document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-        triggerUniversalFullScreen();
+
+        const sendSlideKey = () => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+            document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+            triggerUniversalFullScreen();
+        };
+
+        // Попытка 1: исходное нажатие
+        sendSlideKey();
+
+        // Проверяем через 1 секунду
         setTimeout(() => {
-            scheduleNextSlideCycle(0);
-        }, 500);
+            if (!slideshowActive || slideshowPaused || _isRewinding) return;
+            if (location.href !== startUrl) return; // Успешно перелистнулось с 1-й попытки
+
+            // Попытка 2: URL не изменился через 1 секунду
+            console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
+            sendSlideKey();
+
+            // Проверяем через 3 секунды (на 4-й секунде от начала)
+            setTimeout(() => {
+                if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                if (location.href !== startUrl) return; // Успешно перелистнулось со 2-й попытки
+
+                // Попытка 3: URL всё ещё не изменился через 3 секунды
+                console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
+                sendSlideKey();
+
+                // Даем 1 секунду на завершение 3-й попытки
+                setTimeout(() => {
+                    if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                    if (location.href !== startUrl) return; // Успешно перелистнулось с 3-й попытки
+
+                    // URL так и не изменился после 3 попыток -> дошёл до конца ленты, упёрся
+                    console.warn('[MOSSAD] Достигнут конец ленты (3 попытки без смены URL)');
+                    if (config.loopFeed) {
+                        showToast('🔄 Конец ленты: повтор плейлиста (R)...');
+                        doRewind(() => {
+                            if (slideshowActive && !slideshowPaused) {
+                                scheduleNextSlideCycle(0);
+                            }
+                        });
+                    } else {
+                        stopSlideshow();
+                        showToast('⏹ Слайдшоу остановлен: конец ленты', true);
+                    }
+                }, 1000);
+            }, 3000);
+        }, 1000);
     }
 
     function getPinMediaType() {

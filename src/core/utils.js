@@ -115,5 +115,67 @@
         }
     }
 
+    /**
+     * Преобразует строковое направление в имя клавиши KeyboardEvent
+     */
+    function getArrowKey(dir) {
+        if (dir === 'up') return 'ArrowUp';
+        if (dir === 'down') return 'ArrowDown';
+        if (dir === 'left') return 'ArrowLeft';
+        return 'ArrowRight';
+    }
+
+    /**
+     * Флаг выполнения перемотки ленты
+     */
+    let _isRewinding = false;
+    window._isRewinding = false;
+
+    /**
+     * Мотает ленту в противоположную сторону от выбранного DPad направления до самого начала/конца.
+     * По завершении (когда URL перестает меняться 5 раз подряд) вызывает onComplete callback.
+     */
+    function doRewind(onComplete) {
+        if (_isRewinding) return;
+        _isRewinding = true;
+        window._isRewinding = true;
+
+        let oppDir = 'down';
+        const d0 = (config.slideshowDirections || ['up'])[0];
+        if (d0 === 'up') oppDir = 'down';
+        else if (d0 === 'down') oppDir = 'up';
+        else if (d0 === 'left') oppDir = 'right';
+        else if (d0 === 'right') oppDir = 'left';
+        const key = getArrowKey(oppDir);
+
+        showToast('↺ Перемотка на начало ленты...');
+        let lastUrl = location.href;
+        let unchangedCount = 0;
+
+        const interval = setInterval(() => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+            document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+
+            setTimeout(() => {
+                if (location.href === lastUrl) {
+                    unchangedCount++;
+                    if (unchangedCount >= 5) {
+                        clearInterval(interval);
+                        _isRewinding = false;
+                        window._isRewinding = false;
+                        showToast('🏁 Достигнуто начало ленты');
+                        if (typeof onComplete === 'function') {
+                            setTimeout(onComplete, 400);
+                        }
+                    }
+                } else {
+                    lastUrl = location.href;
+                    unchangedCount = 0;
+                }
+            }, 60);
+        }, 120);
+    }
+    window.doRewind = doRewind;
+
 
 

@@ -5,6 +5,7 @@
         slideshowMode: 'auto',
         slideshowOrientation: 'h',
         slideshowLoopMode: 'off',
+        loopFeed: false,              // R в D-pad: повторять текущий плейлист (перемотка в начало при конце ленты)
         slideshowDirections: ['up'],  // листание вверх по умолчанию
         videoLoops: 2,
         slideshowDelay: 3,           // фото 3 сек

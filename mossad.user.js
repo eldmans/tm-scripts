@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.50
+// @version      1.2.51
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.50';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.51';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -65,6 +65,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         slideshowMode: 'auto',
         slideshowOrientation: 'h',
         slideshowLoopMode: 'off',
+        loopFeed: false,              // R в D-pad: повторять текущий плейлист (перемотка в начало при конце ленты)
         slideshowDirections: ['up'],  // листание вверх по умолчанию
         videoLoops: 2,
         slideshowDelay: 3,           // фото 3 сек
@@ -448,6 +449,68 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }, 1000);
         }
     }
+
+    /**
+     * Преобразует строковое направление в имя клавиши KeyboardEvent
+     */
+    function getArrowKey(dir) {
+        if (dir === 'up') return 'ArrowUp';
+        if (dir === 'down') return 'ArrowDown';
+        if (dir === 'left') return 'ArrowLeft';
+        return 'ArrowRight';
+    }
+
+    /**
+     * Флаг выполнения перемотки ленты
+     */
+    let _isRewinding = false;
+    window._isRewinding = false;
+
+    /**
+     * Мотает ленту в противоположную сторону от выбранного DPad направления до самого начала/конца.
+     * По завершении (когда URL перестает меняться 5 раз подряд) вызывает onComplete callback.
+     */
+    function doRewind(onComplete) {
+        if (_isRewinding) return;
+        _isRewinding = true;
+        window._isRewinding = true;
+
+        let oppDir = 'down';
+        const d0 = (config.slideshowDirections || ['up'])[0];
+        if (d0 === 'up') oppDir = 'down';
+        else if (d0 === 'down') oppDir = 'up';
+        else if (d0 === 'left') oppDir = 'right';
+        else if (d0 === 'right') oppDir = 'left';
+        const key = getArrowKey(oppDir);
+
+        showToast('↺ Перемотка на начало ленты...');
+        let lastUrl = location.href;
+        let unchangedCount = 0;
+
+        const interval = setInterval(() => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+            document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+
+            setTimeout(() => {
+                if (location.href === lastUrl) {
+                    unchangedCount++;
+                    if (unchangedCount >= 5) {
+                        clearInterval(interval);
+                        _isRewinding = false;
+                        window._isRewinding = false;
+                        showToast('🏁 Достигнуто начало ленты');
+                        if (typeof onComplete === 'function') {
+                            setTimeout(onComplete, 400);
+                        }
+                    }
+                } else {
+                    lastUrl = location.href;
+                    unchangedCount = 0;
+                }
+            }, 60);
+        }, 120);
+    }
+    window.doRewind = doRewind;
 
 // ============================================
     // NOODLE MAGAZINE MODULE
@@ -2422,7 +2485,7 @@ function findMediaForDownload() {
     let lastActiveVideo = null;
 
     setInterval(() => {
-        if (!slideshowActive) return;
+        if (!slideshowActive || _isRewinding) return;
         
         const currentUrl = location.href;
         const currentVideo = getActiveVideo();
@@ -2514,24 +2577,9 @@ function findMediaForDownload() {
     }
 
     function triggerNextSlide() {
-        if (!slideshowActive || slideshowPaused) return;
+        if (!slideshowActive || slideshowPaused || _isRewinding) return;
         const dirs = config.slideshowDirections;
         if (!dirs || dirs.length === 0) { stopSlideshow(); return; }
-
-        // Защита от зацикливания на конце ленты
-        const curUrl = location.href;
-        if (curUrl === _lastSlideUrl) {
-            _samePageSlideCount++;
-            if (_samePageSlideCount > SAME_PAGE_LIMIT) {
-                console.warn('[MOSSAD] Превышен лимит перелистываний без смены страницы, остановка.');
-                stopSlideshow();
-                showToast('⏹ Слайдшоу остановлен: конец ленты', true);
-                return;
-            }
-        } else {
-            _samePageSlideCount = 0;
-            _lastSlideUrl = curUrl;
-        }
 
         // Скачивание перед перелистыванием
         if (config.downloadType !== 'none') {
@@ -2564,13 +2612,58 @@ function findMediaForDownload() {
             return;
         }
 
-        // Листание
+        // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
+        const startUrl = location.href;
         const key = getArrowKey(dirs[0]);
-        document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-        triggerUniversalFullScreen();
+
+        const sendSlideKey = () => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+            document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+            triggerUniversalFullScreen();
+        };
+
+        // Попытка 1: исходное нажатие
+        sendSlideKey();
+
+        // Проверяем через 1 секунду
         setTimeout(() => {
-            scheduleNextSlideCycle(0);
-        }, 500);
+            if (!slideshowActive || slideshowPaused || _isRewinding) return;
+            if (location.href !== startUrl) return; // Успешно перелистнулось с 1-й попытки
+
+            // Попытка 2: URL не изменился через 1 секунду
+            console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
+            sendSlideKey();
+
+            // Проверяем через 3 секунды (на 4-й секунде от начала)
+            setTimeout(() => {
+                if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                if (location.href !== startUrl) return; // Успешно перелистнулось со 2-й попытки
+
+                // Попытка 3: URL всё ещё не изменился через 3 секунды
+                console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
+                sendSlideKey();
+
+                // Даем 1 секунду на завершение 3-й попытки
+                setTimeout(() => {
+                    if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                    if (location.href !== startUrl) return; // Успешно перелистнулось с 3-й попытки
+
+                    // URL так и не изменился после 3 попыток -> дошёл до конца ленты, упёрся
+                    console.warn('[MOSSAD] Достигнут конец ленты (3 попытки без смены URL)');
+                    if (config.loopFeed) {
+                        showToast('🔄 Конец ленты: повтор плейлиста (R)...');
+                        doRewind(() => {
+                            if (slideshowActive && !slideshowPaused) {
+                                scheduleNextSlideCycle(0);
+                            }
+                        });
+                    } else {
+                        stopSlideshow();
+                        showToast('⏹ Слайдшоу остановлен: конец ленты', true);
+                    }
+                }, 1000);
+            }, 3000);
+        }, 1000);
     }
 
     function getPinMediaType() {
@@ -3113,13 +3206,16 @@ function findMediaForDownload() {
                         </div>
                     </div>
                     ` : `
-                    <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
-                        <button class="mossad-dpad" data-dir="up" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">▲</button>
-                        <div style="display: flex; gap: 2px;">
-                            <button class="mossad-dpad" data-dir="left" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">◀</button>
-                            <button class="mossad-dpad" data-dir="down" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">▼</button>
-                            <button class="mossad-dpad" data-dir="right" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer;">▶</button>
-                        </div>
+                    <div style="display: grid; grid-template-columns: 24px 24px 24px; grid-template-rows: 24px 24px 24px; gap: 2px; align-items: center; justify-items: center;">
+                        <div></div>
+                        <button class="mossad-dpad" data-dir="up" title="Листать вверх" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">▲</button>
+                        <div></div>
+                        <button class="mossad-dpad" data-dir="left" title="Листать влево" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">◀</button>
+                        <button id="mossad-dpad-loop" title="Повторять плейлист (R): перемотка на начало при конце ленты" style="background: ${config.loopFeed ? '#10b981' : '#1f2937'}; border: 1px solid ${config.loopFeed ? '#059669' : '#374151'}; color: ${config.loopFeed ? '#fff' : '#9ca3af'}; width:24px; height:24px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px; padding:0; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">R</button>
+                        <button class="mossad-dpad" data-dir="right" title="Листать вправо" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">▶</button>
+                        <div></div>
+                        <button class="mossad-dpad" data-dir="down" title="Листать вниз" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">▼</button>
+                        <div></div>
                     </div>
                     `}
                     <div style="display: flex; flex-direction: column; gap: 4px; min-width: 95px;">
@@ -3182,6 +3278,15 @@ function findMediaForDownload() {
             panel.querySelectorAll('.mossad-dpad').forEach(btn => {
                 btn.onclick = () => Settings.set('slideshowDirections', [btn.dataset.dir]);
             });
+            const btnLoop = panel.querySelector('#mossad-dpad-loop');
+            if (btnLoop) {
+                btnLoop.onclick = () => {
+                    const nextVal = !config.loopFeed;
+                    Settings.set('loopFeed', nextVal);
+                    showToast(nextVal ? '🔁 Повтор плейлиста включен (R)' : '➡️ Повтор плейлиста выключен');
+                    window.updateWidgetUI();
+                };
+            }
             const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
             if (isPinterest) {
@@ -3303,26 +3408,7 @@ function findMediaForDownload() {
             if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
             triggerDownload();
         };
-        const doRewind = () => {
-            let oppDir = 'down';
-            const d0 = (config.slideshowDirections || ['up'])[0];
-            if (d0 === 'up') oppDir = 'down';
-            else if (d0 === 'down') oppDir = 'up';
-            else if (d0 === 'left') oppDir = 'right';
-            else if (d0 === 'right') oppDir = 'left';
-            const key = getArrowKey(oppDir);
-            let lastUrl = location.href; let unchangedCount = 0;
-            const interval = setInterval(() => {
-                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                setTimeout(() => {
-                    if (location.href === lastUrl) {
-                        unchangedCount++;
-                        if (unchangedCount >= 4) clearInterval(interval);
-                    } else { lastUrl = location.href; unchangedCount = 0; }
-                }, 60);
-            }, 120);
-        };
-        btnReset.onclick = doRewind;
+        btnReset.onclick = () => doRewind();
 
         window.updateWidgetUI = () => {
             if (window.widgetState === 'hidden') {
@@ -3413,7 +3499,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-04</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-05</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
