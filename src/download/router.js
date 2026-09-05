@@ -136,9 +136,9 @@
         _lastDownloadTime = now;
 
         const currentDup = duplicateRecord || _activeDuplicateRecord;
-        const isDup = Boolean(currentDup && currentDup.filename);
-        const oldBase = isDup ? (currentDup.filename || '').replace(/\.[^/.]+$/, '').trim() : '';
-        const dblSuffix = isDup ? ` (${oldBase || 'original'}) DBL` : '';
+        const isDup = Boolean(currentDup && (currentDup.filename || currentDup.rootFilename));
+        const rootBase = isDup ? (currentDup.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(currentDup.filename) : (currentDup.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
+        const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL` : '';
         
         // Извлечение UUID / ID поста для короткого именования (первые 8 символов)
         let postId = '';
@@ -204,8 +204,9 @@
                 domain:  domainClean,
                 n:       nStr,
                 dbl:     dblSuffix,
-                oldname: oldBase,
-                copy:    oldBase,
+                oldname: rootBase,
+                copy:    rootBase,
+                root:    rootBase,
             };
 
             const tplStr = config.filenameTemplate.trim();

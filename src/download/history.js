@@ -174,8 +174,14 @@
                     if (targetUrl) {
                         const urlReq = urlIdx.get(targetUrl);
                         urlReq.onsuccess = () => {
-                            if (urlReq.result) addRecordToMemoryCache(urlReq.result);
-                            resolve(urlReq.result || null);
+                            const res = urlReq.result || null;
+                            if (res) {
+                                if (!res.rootFilename && typeof extractRootFilename === 'function') {
+                                    res.rootFilename = extractRootFilename(res.filename);
+                                }
+                                addRecordToMemoryCache(res);
+                            }
+                            resolve(res);
                         };
                         urlReq.onerror = () => resolve(null);
                     } else {
@@ -192,18 +198,20 @@
     /**
      * Сохранение информации о скачанном файле в IndexedDB и in-memory кеш.
      */
-    async function saveFileToHistory({ hash, filename, url, postUrl, path, size, type }) {
+    async function saveFileToHistory({ hash, filename, url, postUrl, path, size, type, rootFilename }) {
         try {
             const db = await getDownloadDB();
             const now = new Date();
             const pad = (n) => String(n).padStart(2, '0');
             const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
             const isVid = type === 'video' || (filename && /\.(mp4|webm|mov|mkv)$/i.test(filename));
+            const cleanRoot = rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(filename) : (filename || '').replace(/\.[^/.]+$/, '').trim());
 
             const record = {
                 id: hash || `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
                 hash: hash || '',
                 filename: filename || 'unknown',
+                rootFilename: cleanRoot,
                 type: isVid ? 'video' : 'photo',
                 url: url || postUrl || location.href,
                 postUrl: postUrl || location.href,

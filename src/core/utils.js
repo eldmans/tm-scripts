@@ -126,6 +126,51 @@
     }
 
     /**
+     * Извлекает чистое первоначальное (искомое) имя файла из истории или дубликата.
+     * Срезает любые уровни вложенных "(...) DBL", чтобы все дубли всегда ссылались
+     * на один общий исходный файл, а не порождали матрёшку из имен.
+     */
+    function extractRootFilename(rawName) {
+        if (!rawName || typeof rawName !== 'string') return 'original';
+        let name = rawName.replace(/\.[^/.]+$/, '').trim();
+        if (!name) return 'original';
+
+        if (name.includes('(')) {
+            // Разворачиваем вложенные DBL-матрёшки
+            while (/\bDBL\b/i.test(name)) {
+                const m = name.match(/\(([^()]+)\)\s*DBL/i);
+                if (m && m[1]) {
+                    name = m[1].trim();
+                } else {
+                    name = name.replace(/\s*[-_]?\s*DBL\b/gi, '').trim();
+                    break;
+                }
+            }
+
+            if (name.includes('(')) {
+                const parts = name.split('(').map(p => p.replace(/[()]/g, '').trim()).filter(Boolean);
+                if (parts.length > 1) {
+                    name = parts[1];
+                } else if (parts.length === 1) {
+                    name = parts[0];
+                }
+            }
+        }
+
+        name = name.replace(/\s*[-_]?\s*DBL\b/gi, '').trim();
+        name = name.replace(/^[()]+|[()]+$/g, '').trim();
+        name = name.replace(/[\s_-]+$/, '').trim();
+
+        // Ограничиваем длину исходного имени максимум 50 символов
+        if (name.length > 50) {
+            name = name.slice(0, 50).trim() + '…';
+        }
+
+        return name || 'original';
+    }
+    window.extractRootFilename = extractRootFilename;
+
+    /**
      * Флаг выполнения перемотки ленты
      */
     let _isRewinding = false;

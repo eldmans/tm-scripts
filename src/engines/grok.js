@@ -155,8 +155,8 @@
         const onDownloadTriggered = () => {
             const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
             const ext2 = hasVid ? 'mp4' : 'jpg';
-            const oldBase = duplicateRecord ? (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim() : '';
-            const dblSuffix = duplicateRecord ? ` (${oldBase || 'original'}) DBL` : '';
+            const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(duplicateRecord.filename) : (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
+            const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
 
             let grokFilename = `${shortId}-grok${dblSuffix}.${ext2}`;
 
@@ -180,8 +180,9 @@
                     ext:     ext2,
                     n:       String(Date.now()).slice(-6),
                     dbl:     dblSuffix,
-                    oldname: oldBase,
-                    copy:    oldBase
+                    oldname: rootBase,
+                    copy:    rootBase,
+                    root:    rootBase
                 };
                 const tplStr = config.filenameTemplate.trim();
                 const hasDblVar = /\{dbl\}/i.test(tplStr);
@@ -205,6 +206,7 @@
             saveFileToHistory({
                 hash: '',
                 filename: grokFilename,
+                rootFilename: rootBase || (typeof extractRootFilename === 'function' ? extractRootFilename(grokFilename) : grokFilename),
                 url: currentPostUrl,
                 postUrl: currentPostUrl,
                 domain: 'grok.com',
@@ -1163,6 +1165,7 @@
                 saveFileToHistory({
                     hash,
                     filename,
+                    rootFilename: (typeof extractRootFilename === 'function') ? extractRootFilename(filename) : '',
                     url: location.href,
                     postUrl: location.href,
                     size: blob.size,

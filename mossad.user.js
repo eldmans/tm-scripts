@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.53
+// @version      1.2.54
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.53';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.54';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -472,6 +472,51 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     /**
+     * Извлекает чистое первоначальное (искомое) имя файла из истории или дубликата.
+     * Срезает любые уровни вложенных "(...) DBL", чтобы все дубли всегда ссылались
+     * на один общий исходный файл, а не порождали матрёшку из имен.
+     */
+    function extractRootFilename(rawName) {
+        if (!rawName || typeof rawName !== 'string') return 'original';
+        let name = rawName.replace(/\.[^/.]+$/, '').trim();
+        if (!name) return 'original';
+
+        if (name.includes('(')) {
+            // Разворачиваем вложенные DBL-матрёшки
+            while (/\bDBL\b/i.test(name)) {
+                const m = name.match(/\(([^()]+)\)\s*DBL/i);
+                if (m && m[1]) {
+                    name = m[1].trim();
+                } else {
+                    name = name.replace(/\s*[-_]?\s*DBL\b/gi, '').trim();
+                    break;
+                }
+            }
+
+            if (name.includes('(')) {
+                const parts = name.split('(').map(p => p.replace(/[()]/g, '').trim()).filter(Boolean);
+                if (parts.length > 1) {
+                    name = parts[1];
+                } else if (parts.length === 1) {
+                    name = parts[0];
+                }
+            }
+        }
+
+        name = name.replace(/\s*[-_]?\s*DBL\b/gi, '').trim();
+        name = name.replace(/^[()]+|[()]+$/g, '').trim();
+        name = name.replace(/[\s_-]+$/, '').trim();
+
+        // Ограничиваем длину исходного имени максимум 50 символов
+        if (name.length > 50) {
+            name = name.slice(0, 50).trim() + '…';
+        }
+
+        return name || 'original';
+    }
+    window.extractRootFilename = extractRootFilename;
+
+    /**
      * Флаг выполнения перемотки ленты
      */
     let _isRewinding = false;
@@ -770,8 +815,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     if (targetUrl) {
                         const urlReq = urlIdx.get(targetUrl);
                         urlReq.onsuccess = () => {
-                            if (urlReq.result) addRecordToMemoryCache(urlReq.result);
-                            resolve(urlReq.result || null);
+                            const res = urlReq.result || null;
+                            if (res) {
+                                if (!res.rootFilename && typeof extractRootFilename === 'function') {
+                                    res.rootFilename = extractRootFilename(res.filename);
+                                }
+                                addRecordToMemoryCache(res);
+                            }
+                            resolve(res);
                         };
                         urlReq.onerror = () => resolve(null);
                     } else {
@@ -788,18 +839,20 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     /**
      * Сохранение информации о скачанном файле в IndexedDB и in-memory кеш.
      */
-    async function saveFileToHistory({ hash, filename, url, postUrl, path, size, type }) {
+    async function saveFileToHistory({ hash, filename, url, postUrl, path, size, type, rootFilename }) {
         try {
             const db = await getDownloadDB();
             const now = new Date();
             const pad = (n) => String(n).padStart(2, '0');
             const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
             const isVid = type === 'video' || (filename && /\.(mp4|webm|mov|mkv)$/i.test(filename));
+            const cleanRoot = rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(filename) : (filename || '').replace(/\.[^/.]+$/, '').trim());
 
             const record = {
                 id: hash || `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
                 hash: hash || '',
                 filename: filename || 'unknown',
+                rootFilename: cleanRoot,
                 type: isVid ? 'video' : 'photo',
                 url: url || postUrl || location.href,
                 postUrl: postUrl || location.href,
@@ -1121,8 +1174,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const onDownloadTriggered = () => {
             const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
             const ext2 = hasVid ? 'mp4' : 'jpg';
-            const oldBase = duplicateRecord ? (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim() : '';
-            const dblSuffix = duplicateRecord ? ` (${oldBase || 'original'}) DBL` : '';
+            const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(duplicateRecord.filename) : (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
+            const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
 
             let grokFilename = `${shortId}-grok${dblSuffix}.${ext2}`;
 
@@ -1146,8 +1199,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     ext:     ext2,
                     n:       String(Date.now()).slice(-6),
                     dbl:     dblSuffix,
-                    oldname: oldBase,
-                    copy:    oldBase
+                    oldname: rootBase,
+                    copy:    rootBase,
+                    root:    rootBase
                 };
                 const tplStr = config.filenameTemplate.trim();
                 const hasDblVar = /\{dbl\}/i.test(tplStr);
@@ -1171,6 +1225,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             saveFileToHistory({
                 hash: '',
                 filename: grokFilename,
+                rootFilename: rootBase || (typeof extractRootFilename === 'function' ? extractRootFilename(grokFilename) : grokFilename),
                 url: currentPostUrl,
                 postUrl: currentPostUrl,
                 domain: 'grok.com',
@@ -2129,6 +2184,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 saveFileToHistory({
                     hash,
                     filename,
+                    rootFilename: (typeof extractRootFilename === 'function') ? extractRootFilename(filename) : '',
                     url: location.href,
                     postUrl: location.href,
                     size: blob.size,
@@ -2964,9 +3020,9 @@ function findMediaForDownload() {
         _lastDownloadTime = now;
 
         const currentDup = duplicateRecord || _activeDuplicateRecord;
-        const isDup = Boolean(currentDup && currentDup.filename);
-        const oldBase = isDup ? (currentDup.filename || '').replace(/\.[^/.]+$/, '').trim() : '';
-        const dblSuffix = isDup ? ` (${oldBase || 'original'}) DBL` : '';
+        const isDup = Boolean(currentDup && (currentDup.filename || currentDup.rootFilename));
+        const rootBase = isDup ? (currentDup.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(currentDup.filename) : (currentDup.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
+        const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL` : '';
         
         // Извлечение UUID / ID поста для короткого именования (первые 8 символов)
         let postId = '';
@@ -3032,8 +3088,9 @@ function findMediaForDownload() {
                 domain:  domainClean,
                 n:       nStr,
                 dbl:     dblSuffix,
-                oldname: oldBase,
-                copy:    oldBase,
+                oldname: rootBase,
+                copy:    rootBase,
+                root:    rootBase,
             };
 
             const tplStr = config.filenameTemplate.trim();
