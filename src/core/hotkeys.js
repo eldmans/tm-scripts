@@ -85,9 +85,12 @@
             }
         }
 
-        // Принудительный следующий слайд (Пробел)
+        // Пробел: пауза/продолжить галерейное слайдшоу; или принудительный следующий слайд
         if (hotkeyMatches(e, config.hk.nextSlide)) {
-            if (slideshowActive) {
+            if (window._mossadGalleryActive && typeof toggleGalleryPause === 'function') {
+                e.preventDefault();
+                toggleGalleryPause();
+            } else if (slideshowActive) {
                 e.preventDefault();
                 showToast('⏭ Принудительный переход...');
                 triggerNextSlide();

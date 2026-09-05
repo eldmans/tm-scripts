@@ -70,6 +70,17 @@
         return target;
     }
     config = mergeDeep(JSON.parse(JSON.stringify(DEFAULT_CONFIG)), config);
+    // Для RedGifs дефолтное направление ленты — всегда вниз (down), а не вверх
+    if (rootDomain.includes('redgifs.com')) {
+        let storedHasDir = false;
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (raw && JSON.parse(raw).slideshowDirections) storedHasDir = true;
+        } catch(e) {}
+        if (!storedHasDir || (config.slideshowDirections && config.slideshowDirections[0] === 'up')) {
+            config.slideshowDirections = ['down'];
+        }
+    }
     // Сброс при рефреше страницы
     config.downloadType = 'none';
 

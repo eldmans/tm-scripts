@@ -31,8 +31,11 @@
             }
         }
 
-        // 1. Точная копия логики из старого скрипта (grok_hotkeys_plus_slideshow.user.js от 4 августа)
         if (rootDomain.includes('redgifs.com')) {
+            if (window.MOSSAD_ENGINES?.redgifs?.findMedia) {
+                const res = window.MOSSAD_ENGINES.redgifs.findMedia();
+                if (res) return res;
+            }
             const active = getActiveRedGifsItem();
             const urls = [];
             const itemId = active ? active.getAttribute('data-feed-item-id') : null;

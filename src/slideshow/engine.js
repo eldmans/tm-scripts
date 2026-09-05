@@ -26,6 +26,11 @@
     let _lastSlideUrl = '';          // URL во время последнего triggerNextSlide
     const SAME_PAGE_LIMIT = 3;       // сколько раз пробовать перед остановкой
     function getActiveVideo() {
+        if (rootDomain.includes('redgifs.com') && window.MOSSAD_ENGINES?.redgifs?.getActiveVideo) {
+            const rgVid = window.MOSSAD_ENGINES.redgifs.getActiveVideo();
+            if (rgVid) return rgVid;
+        }
+
         let videos = Array.from(document.querySelectorAll('video'));
         if (videos.length === 0) return null;
         
@@ -166,14 +171,10 @@
             _gSS.removeItem(GALLERY_SS_KEY);
             window._mossadGalleryActive = false;
             window._mossadGalleryNextFn = null;
+            window._mossadGalleryPaused = false;
             const ind = document.getElementById('mossad-gallery-indicator');
             if (ind) ind.remove();
-            const btnSS = document.getElementById('mossad-gallery-ss');
-            if (btnSS) {
-                btnSS.textContent = '🎲 Слайдшоу';
-                btnSS.style.background = '#1e3a5f';
-                btnSS.style.color = '#93c5fd';
-            }
+            if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('idle');
         }
         if (window.updateWidgetUI) window.updateWidgetUI();
     }
@@ -247,6 +248,17 @@
             return;
         }
 
+        // RedGifs навигация (изолирована от URL-детектора!)
+        if (rootDomain.includes('redgifs.com')) {
+            const dir = (dirs && dirs.length) ? dirs[0] : 'down';
+            if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
+                window.MOSSAD_ENGINES.redgifs.navigate(dir);
+            } else if (typeof redGifsNavigate === 'function') {
+                redGifsNavigate(dir);
+            }
+            return;
+        }
+
         // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
         const startUrl = location.href;
         const key = getArrowKey(dirs[0]);
@@ -302,6 +314,8 @@
     }
 
     function getPinMediaType() {
+        if (rootDomain.includes('redgifs.com')) return 'video';
+
         const expected = sessionStorage.getItem('mossad_expected_type');
         if (expected === 'video' || expected === 'image') return expected;
 

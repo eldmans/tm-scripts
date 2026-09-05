@@ -14,6 +14,7 @@ MODULES = [
     "src/download/history.js",
     "src/engines/grok.js",
     "src/engines/instagram.js",
+    "src/engines/redgifs.js",
     "src/download/router.js",
     "src/slideshow/engine.js",
     "src/engines/pinterest.js",
