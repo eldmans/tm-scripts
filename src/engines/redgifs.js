@@ -170,10 +170,12 @@
                            (location.pathname.match(/\/watch\/([^/?#]+)/) || [])[1] || null;
 
             if (active) {
-                const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]');
+                const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]')
+                            || (itemId ? document.querySelector(`img[src*="${itemId}"]`) : null)
+                            || document.querySelector('img[src*="media.redgifs.com"]');
                 if (poster && poster.src) {
-                    const mp4Hd = poster.src.replace(/-mobile\.(jpg|png|jpeg)/i, '.mp4').replace(/\.(jpg|png|jpeg)/i, '.mp4');
-                    const mp4Sd = poster.src.replace(/\.(jpg|png|jpeg)/i, '-mobile.mp4');
+                    const mp4Hd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '.mp4').replace(/\.(?:jpg|png|jpeg)/i, '.mp4');
+                    const mp4Sd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '-mobile.mp4').replace(/\.(?:jpg|png|jpeg)/i, '-mobile.mp4');
                     urls.push(mp4Hd, mp4Sd);
                 }
             }
@@ -181,14 +183,13 @@
             const v = getActiveVideo();
             if (v) {
                 const src = v.currentSrc || v.src || (v.querySelector('source') && v.querySelector('source').src);
-                if (src && !urls.includes(src)) urls.push(src);
+                if (src && !src.startsWith('blob:') && !urls.includes(src)) urls.push(src);
             }
 
             if (itemId) {
                 const capId = itemId.charAt(0).toUpperCase() + itemId.slice(1);
                 urls.push(`https://media.redgifs.com/${capId}.mp4`);
-                urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/hd.m3u8`);
-                urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/sd.m3u8`);
+                urls.push(`https://media.redgifs.com/${capId}-mobile.mp4`);
             }
 
             const cleanUrls = Array.from(new Set(urls.filter(Boolean)));

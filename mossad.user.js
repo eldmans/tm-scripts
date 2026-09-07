@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.55
+// @version      1.2.56
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.55';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.56';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -615,6 +615,16 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 method: 'GET',
                 url: url,
                 responseType: 'blob',
+                headers: {
+                    'Referer': location.origin + '/',
+                    'Origin': location.origin
+                },
+                onprogress: (p) => {
+                    if (p.total > 0) {
+                        const pct = Math.round((p.loaded / p.total) * 100);
+                        showToast(`⏳ Скачивание: ${pct}%`);
+                    }
+                },
                 onload: (res) => {
                     if (res.status === 200 && res.response) {
                         saveBlobToDisk(res.response, filename);
@@ -2670,10 +2680,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                            (location.pathname.match(/\/watch\/([^/?#]+)/) || [])[1] || null;
 
             if (active) {
-                const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]');
+                const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]')
+                            || (itemId ? document.querySelector(`img[src*="${itemId}"]`) : null)
+                            || document.querySelector('img[src*="media.redgifs.com"]');
                 if (poster && poster.src) {
-                    const mp4Hd = poster.src.replace(/-mobile\.(jpg|png|jpeg)/i, '.mp4').replace(/\.(jpg|png|jpeg)/i, '.mp4');
-                    const mp4Sd = poster.src.replace(/\.(jpg|png|jpeg)/i, '-mobile.mp4');
+                    const mp4Hd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '.mp4').replace(/\.(?:jpg|png|jpeg)/i, '.mp4');
+                    const mp4Sd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '-mobile.mp4').replace(/\.(?:jpg|png|jpeg)/i, '-mobile.mp4');
                     urls.push(mp4Hd, mp4Sd);
                 }
             }
@@ -2681,14 +2693,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const v = getActiveVideo();
             if (v) {
                 const src = v.currentSrc || v.src || (v.querySelector('source') && v.querySelector('source').src);
-                if (src && !urls.includes(src)) urls.push(src);
+                if (src && !src.startsWith('blob:') && !urls.includes(src)) urls.push(src);
             }
 
             if (itemId) {
                 const capId = itemId.charAt(0).toUpperCase() + itemId.slice(1);
                 urls.push(`https://media.redgifs.com/${capId}.mp4`);
-                urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/hd.m3u8`);
-                urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/sd.m3u8`);
+                urls.push(`https://media.redgifs.com/${capId}-mobile.mp4`);
             }
 
             const cleanUrls = Array.from(new Set(urls.filter(Boolean)));
@@ -3023,10 +3034,12 @@ function findMediaForDownload() {
 
             // Из картинки poster
             if (active) {
-                const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]');
+                const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]')
+                            || (itemId ? document.querySelector(`img[src*="${itemId}"]`) : null)
+                            || document.querySelector('img[src*="media.redgifs.com"]');
                 if (poster && poster.src) {
-                    const mp4Hd = poster.src.replace(/-mobile\.(jpg|png|jpeg)/i, '.mp4').replace(/\.(jpg|png|jpeg)/i, '.mp4');
-                    const mp4Sd = poster.src.replace(/\.(jpg|png|jpeg)/i, '-mobile.mp4');
+                    const mp4Hd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '.mp4').replace(/\.(?:jpg|png|jpeg)/i, '.mp4');
+                    const mp4Sd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '-mobile.mp4').replace(/\.(?:jpg|png|jpeg)/i, '-mobile.mp4');
                     urls.push(mp4Hd, mp4Sd);
                 }
             }
@@ -3034,14 +3047,13 @@ function findMediaForDownload() {
             const v = getRedGifsVideo();
             if (v) {
                 const src = v.currentSrc || v.src || (v.querySelector('source') && v.querySelector('source').src);
-                if (src && !urls.includes(src)) urls.push(src);
+                if (src && !src.startsWith('blob:') && !urls.includes(src)) urls.push(src);
             }
 
             if (itemId) {
                 const capId = itemId.charAt(0).toUpperCase() + itemId.slice(1);
                 urls.push(`https://media.redgifs.com/${capId}.mp4`);
-                urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/hd.m3u8`);
-                urls.push(`https://api.redgifs.com/v2/gifs/${itemId}/sd.m3u8`);
+                urls.push(`https://media.redgifs.com/${capId}-mobile.mp4`);
             }
 
             if (urls.length > 0) return { urls: Array.from(new Set(urls.filter(Boolean))), type: 'video', itemId: itemId || 'video' };
@@ -3246,32 +3258,10 @@ function findMediaForDownload() {
                 return;
             }
             const targetUrl = urls[attemptedIndex++];
-            const isM3u8 = targetUrl.includes('.m3u8');
-            const targetFilename = isM3u8 ? filename.replace('.mp4', '.m3u8') : filename;
-            
-            if (typeof GM_download === 'function' && targetUrl.endsWith('.m3u8')) {
-                try {
-                    GM_download({
-                        url: targetUrl,
-                        name: targetFilename,
-                        saveAs: false,
-                        onerror: (err) => {
-                            console.warn(`GM_download failed for ${targetUrl}:`, err);
-                            tryNext();
-                        }
-                    });
-                    if (typeof performPostDownloadAction === 'function') {
-                        performPostDownloadAction();
-                    }
-                } catch (e) {
-                    tryNext();
-                }
-            } else {
-                showToast('⏳ Запуск скачивания...');
-                triggerDirectBlobDownload(targetUrl, targetFilename, tryNext);
-                if (typeof performPostDownloadAction === 'function') {
-                    performPostDownloadAction();
-                }
+            showToast('⏳ Запуск скачивания...');
+            triggerDirectBlobDownload(targetUrl, filename, tryNext);
+            if (typeof performPostDownloadAction === 'function') {
+                performPostDownloadAction();
             }
         }
         

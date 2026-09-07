@@ -7,6 +7,16 @@
                 method: 'GET',
                 url: url,
                 responseType: 'blob',
+                headers: {
+                    'Referer': location.origin + '/',
+                    'Origin': location.origin
+                },
+                onprogress: (p) => {
+                    if (p.total > 0) {
+                        const pct = Math.round((p.loaded / p.total) * 100);
+                        showToast(`⏳ Скачивание: ${pct}%`);
+                    }
+                },
                 onload: (res) => {
                     if (res.status === 200 && res.response) {
                         saveBlobToDisk(res.response, filename);
