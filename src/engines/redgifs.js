@@ -73,8 +73,84 @@
             return bestVideo || videos[0];
         }
 
+        /** Извлекает имя автора (userName) на RedGifs */
+        function getUserName(targetEl = null) {
+            const active = targetEl || getActiveItem();
+            let name = '';
+
+            // 1. Поиск в активном элементе или его контейнерах
+            const searchRoots = [];
+            if (active) {
+                searchRoots.push(active);
+                const cardContainer = active.closest('[data-feed-item-id], .feed-item, .GifPreview, .PlayerWrapper, [role="dialog"], .previewModal, .preview-modal');
+                if (cardContainer && cardContainer !== active) searchRoots.push(cardContainer);
+                if (active.parentElement) searchRoots.push(active.parentElement);
+                if (active.parentElement?.parentElement) searchRoots.push(active.parentElement.parentElement);
+            }
+
+            const modal = document.querySelector('[role="dialog"], .PlayerWrapper, .previewModal, .preview-modal');
+            if (modal && !searchRoots.includes(modal)) searchRoots.push(modal);
+            searchRoots.push(document);
+
+            for (const root of searchRoots) {
+                if (!root) continue;
+
+                // а) span.userName или класс, содержащий userName
+                const uSpan = root.querySelector('.userName, [class*="userName"]');
+                if (uSpan && uSpan.textContent && uSpan.textContent.trim()) {
+                    name = uSpan.textContent.trim();
+                    break;
+                }
+
+                // б) a.userAvatar или ссылка на профиль /users/...
+                const uLink = root.querySelector('a.userAvatar, a[href*="/users/"], a[aria-label*="profile" i]');
+                if (uLink) {
+                    const href = uLink.getAttribute('href') || '';
+                    const mHref = href.match(/\/users\/([^/?#]+)/);
+                    if (mHref) {
+                        name = decodeURIComponent(mHref[1]).trim();
+                        break;
+                    }
+                    const aria = uLink.getAttribute('aria-label') || '';
+                    const mAria = aria.match(/Link to\s+(.+?)\s+profile/i) || aria.match(/profile of\s+(.+)/i);
+                    if (mAria) {
+                        name = mAria[1].trim();
+                        break;
+                    }
+                }
+            }
+
+            // 2. Если все еще пусто — проверяем URL страницы (если мы на /users/NAME)
+            if (!name) {
+                const urlMatch = location.pathname.match(/\/users\/([^/?#]+)/);
+                if (urlMatch) {
+                    name = decodeURIComponent(urlMatch[1]).trim();
+                }
+            }
+
+            // 3. Проверяем meta-теги страницы (на случай прямого перехода /watch/ID)
+            if (!name) {
+                const metaAuthor = document.querySelector('meta[name="author"], meta[property="article:author"], meta[property="og:author"]');
+                if (metaAuthor && metaAuthor.content) {
+                    name = metaAuthor.content.trim();
+                }
+            }
+
+            // 4. Очистка от спецсимволов и пробелов
+            if (name) {
+                name = name.replace(/^@+/, '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').trim();
+            }
+
+            return name || '';
+        }
+
         /** Генерирует безопасное имя файла */
         function getTitleFilename(itemId) {
+            const uName = getUserName();
+            const dPart = 'redg';
+            if (uName) {
+                return `${uName}-${dPart}.mp4`;
+            }
             let rawTitle = (document.title || '').trim();
             if (rawTitle.startsWith('"') && rawTitle.endsWith('"')) {
                 rawTitle = rawTitle.slice(1, -1).trim();
@@ -117,7 +193,7 @@
 
             const cleanUrls = Array.from(new Set(urls.filter(Boolean)));
             if (cleanUrls.length > 0) {
-                return { urls: cleanUrls, type: 'video', itemId: itemId || 'video' };
+                return { urls: cleanUrls, type: 'video', itemId: itemId || 'video', userName: getUserName() };
             }
             return null;
         }
@@ -363,6 +439,7 @@
             isSupported,
             getActiveItem,
             getActiveVideo,
+            getUserName,
             getTitleFilename,
             findMedia,
             navigate,
@@ -382,6 +459,10 @@
 
     function getRedGifsVideo() {
         return window.MOSSAD_ENGINES?.redgifs?.getActiveVideo() || null;
+    }
+
+    function getRedGifsUserName() {
+        return window.MOSSAD_ENGINES?.redgifs?.getUserName() || '';
     }
 
     function getRedGifsTitleFilename(itemId) {

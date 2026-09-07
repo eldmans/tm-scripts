@@ -90,14 +90,15 @@
                 }
             }
 
-            // 2. Grok: кнопка Full Screen
+            // 2. Grok: кнопка Full Screen (Expand video / lucide-expand)
             if (rootDomain === 'grok.com') {
-                const fsKeywords = ['во весь экран', 'полноэкран', 'full screen', 'fullscreen'];
-                const btn = (typeof findGrokButton === 'function' ? findGrokButton(fsKeywords) : null)
+                const fsKeywords = ['expand video', 'expand', 'во весь экран', 'полноэкран', 'full screen', 'fullscreen'];
+                const btn = document.querySelector('button[aria-label="Expand video"], button[aria-label*="Expand" i]')
+                    || (typeof findGrokButton === 'function' ? findGrokButton(fsKeywords) : null)
                     || Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
                         const aria = (b.getAttribute('aria-label') || '').toLowerCase();
                         const title = (b.getAttribute('title') || '').toLowerCase();
-                        return fsKeywords.some(k => aria.includes(k) || title.includes(k));
+                        return fsKeywords.some(k => aria.includes(k) || title.includes(k)) || b.querySelector('svg.lucide-expand');
                     });
                 if (btn) {
                     triggerClick(btn, 'Grok FullScreen');

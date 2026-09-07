@@ -70,15 +70,28 @@
         return target;
     }
     config = mergeDeep(JSON.parse(JSON.stringify(DEFAULT_CONFIG)), config);
-    // Для RedGifs дефолтное направление ленты — всегда вниз (down), а не вверх
+    // Для RedGifs дефолтные настройки сайта (направление down, шаблон {userName}-{domain[4]})
     if (rootDomain.includes('redgifs.com')) {
         let storedHasDir = false;
+        let storedHasTpl = false;
+        let storedHasTplEnabled = false;
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw && JSON.parse(raw).slideshowDirections) storedHasDir = true;
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed.slideshowDirections) storedHasDir = true;
+                if (parsed.filenameTemplate !== undefined) storedHasTpl = true;
+                if (parsed.filenameTemplateEnabled !== undefined) storedHasTplEnabled = true;
+            }
         } catch(e) {}
         if (!storedHasDir || (config.slideshowDirections && config.slideshowDirections[0] === 'up')) {
             config.slideshowDirections = ['down'];
+        }
+        if (!storedHasTpl) {
+            config.filenameTemplate = '{userName}-{domain[4]}';
+        }
+        if (!storedHasTplEnabled) {
+            config.filenameTemplateEnabled = true;
         }
     }
     // Сброс при рефреше страницы

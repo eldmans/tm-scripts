@@ -160,6 +160,17 @@
         const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
         const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
 
+        // Извлечение имени автора/пользователя (для RedGifs, Instagram и др.)
+        let authorName = '';
+        if (media && media.userName) {
+            authorName = media.userName;
+        } else if (rootDomain.includes('redgifs.com')) {
+            authorName = typeof getRedGifsUserName === 'function' ? getRedGifsUserName() : (window.MOSSAD_ENGINES?.redgifs?.getUserName ? window.MOSSAD_ENGINES.redgifs.getUserName() : '');
+        } else if (rootDomain.includes('instagram.com')) {
+            const m = location.pathname.match(/^\/([A-Za-z0-9_.]+)\//);
+            if (m && !['p', 'reel', 'stories', 'explore'].includes(m[1])) authorName = m[1];
+        }
+
         // --- Вспомогательная функция: применить {var[N]} синтаксис ---
         function applyTplVar(value, len) {
             return len > 0 ? value.slice(0, len) : value;
@@ -190,23 +201,26 @@
 
             // Словарь переменных (значение без обрезки)
             const vars = {
-                id:      postId,
-                uuid:    postId,
-                hash:    postId,
-                postid:  postId,
-                id8:     shortId,
-                hash8:   shortId,
-                uuid8:   shortId,
-                title:   titleClean2,
-                date:    dateStr,
-                time:    timeStr,
-                ext:     ext2,
-                domain:  domainClean,
-                n:       nStr,
-                dbl:     dblSuffix,
-                oldname: rootBase,
-                copy:    rootBase,
-                root:    rootBase,
+                id:       postId,
+                uuid:     postId,
+                hash:     postId,
+                postid:   postId,
+                id8:      shortId,
+                hash8:    shortId,
+                uuid8:    shortId,
+                title:    titleClean2,
+                date:     dateStr,
+                time:     timeStr,
+                ext:      ext2,
+                domain:   domainClean,
+                username: authorName || shortId,
+                user:     authorName || shortId,
+                author:   authorName || shortId,
+                n:        nStr,
+                dbl:      dblSuffix,
+                oldname:  rootBase,
+                copy:     rootBase,
+                root:     rootBase,
             };
 
             const tplStr = config.filenameTemplate.trim();

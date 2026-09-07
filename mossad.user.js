@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.54
+// @version      1.2.55
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.54';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.55';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -130,15 +130,28 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return target;
     }
     config = mergeDeep(JSON.parse(JSON.stringify(DEFAULT_CONFIG)), config);
-    // Для RedGifs дефолтное направление ленты — всегда вниз (down), а не вверх
+    // Для RedGifs дефолтные настройки сайта (направление down, шаблон {userName}-{domain[4]})
     if (rootDomain.includes('redgifs.com')) {
         let storedHasDir = false;
+        let storedHasTpl = false;
+        let storedHasTplEnabled = false;
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw && JSON.parse(raw).slideshowDirections) storedHasDir = true;
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed.slideshowDirections) storedHasDir = true;
+                if (parsed.filenameTemplate !== undefined) storedHasTpl = true;
+                if (parsed.filenameTemplateEnabled !== undefined) storedHasTplEnabled = true;
+            }
         } catch(e) {}
         if (!storedHasDir || (config.slideshowDirections && config.slideshowDirections[0] === 'up')) {
             config.slideshowDirections = ['down'];
+        }
+        if (!storedHasTpl) {
+            config.filenameTemplate = '{userName}-{domain[4]}';
+        }
+        if (!storedHasTplEnabled) {
+            config.filenameTemplateEnabled = true;
         }
     }
     // Сброс при рефреше страницы
@@ -1185,23 +1198,26 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
                 const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
                 const vars = {
-                    id:      currentPostId || '',
-                    uuid:    currentPostId || '',
-                    hash:    currentPostId || '',
-                    postid:  currentPostId || '',
-                    id8:     shortId,
-                    hash8:   shortId,
-                    uuid8:   shortId,
-                    domain:  'grok',
-                    title:   'Imagine - Grok',
-                    date:    dateStr,
-                    time:    timeStr,
-                    ext:     ext2,
-                    n:       String(Date.now()).slice(-6),
-                    dbl:     dblSuffix,
-                    oldname: rootBase,
-                    copy:    rootBase,
-                    root:    rootBase
+                    id:       currentPostId || '',
+                    uuid:     currentPostId || '',
+                    hash:     currentPostId || '',
+                    postid:   currentPostId || '',
+                    id8:      shortId,
+                    hash8:    shortId,
+                    uuid8:    shortId,
+                    domain:   'grok',
+                    title:    'Imagine - Grok',
+                    username: 'grok',
+                    user:     'grok',
+                    author:   'grok',
+                    date:     dateStr,
+                    time:     timeStr,
+                    ext:      ext2,
+                    n:        String(Date.now()).slice(-6),
+                    dbl:      dblSuffix,
+                    oldname:  rootBase,
+                    copy:     rootBase,
+                    root:     rootBase
                 };
                 const tplStr = config.filenameTemplate.trim();
                 const hasDblVar = /\{dbl\}/i.test(tplStr);
@@ -2557,8 +2573,84 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             return bestVideo || videos[0];
         }
 
+        /** Извлекает имя автора (userName) на RedGifs */
+        function getUserName(targetEl = null) {
+            const active = targetEl || getActiveItem();
+            let name = '';
+
+            // 1. Поиск в активном элементе или его контейнерах
+            const searchRoots = [];
+            if (active) {
+                searchRoots.push(active);
+                const cardContainer = active.closest('[data-feed-item-id], .feed-item, .GifPreview, .PlayerWrapper, [role="dialog"], .previewModal, .preview-modal');
+                if (cardContainer && cardContainer !== active) searchRoots.push(cardContainer);
+                if (active.parentElement) searchRoots.push(active.parentElement);
+                if (active.parentElement?.parentElement) searchRoots.push(active.parentElement.parentElement);
+            }
+
+            const modal = document.querySelector('[role="dialog"], .PlayerWrapper, .previewModal, .preview-modal');
+            if (modal && !searchRoots.includes(modal)) searchRoots.push(modal);
+            searchRoots.push(document);
+
+            for (const root of searchRoots) {
+                if (!root) continue;
+
+                // а) span.userName или класс, содержащий userName
+                const uSpan = root.querySelector('.userName, [class*="userName"]');
+                if (uSpan && uSpan.textContent && uSpan.textContent.trim()) {
+                    name = uSpan.textContent.trim();
+                    break;
+                }
+
+                // б) a.userAvatar или ссылка на профиль /users/...
+                const uLink = root.querySelector('a.userAvatar, a[href*="/users/"], a[aria-label*="profile" i]');
+                if (uLink) {
+                    const href = uLink.getAttribute('href') || '';
+                    const mHref = href.match(/\/users\/([^/?#]+)/);
+                    if (mHref) {
+                        name = decodeURIComponent(mHref[1]).trim();
+                        break;
+                    }
+                    const aria = uLink.getAttribute('aria-label') || '';
+                    const mAria = aria.match(/Link to\s+(.+?)\s+profile/i) || aria.match(/profile of\s+(.+)/i);
+                    if (mAria) {
+                        name = mAria[1].trim();
+                        break;
+                    }
+                }
+            }
+
+            // 2. Если все еще пусто — проверяем URL страницы (если мы на /users/NAME)
+            if (!name) {
+                const urlMatch = location.pathname.match(/\/users\/([^/?#]+)/);
+                if (urlMatch) {
+                    name = decodeURIComponent(urlMatch[1]).trim();
+                }
+            }
+
+            // 3. Проверяем meta-теги страницы (на случай прямого перехода /watch/ID)
+            if (!name) {
+                const metaAuthor = document.querySelector('meta[name="author"], meta[property="article:author"], meta[property="og:author"]');
+                if (metaAuthor && metaAuthor.content) {
+                    name = metaAuthor.content.trim();
+                }
+            }
+
+            // 4. Очистка от спецсимволов и пробелов
+            if (name) {
+                name = name.replace(/^@+/, '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').trim();
+            }
+
+            return name || '';
+        }
+
         /** Генерирует безопасное имя файла */
         function getTitleFilename(itemId) {
+            const uName = getUserName();
+            const dPart = 'redg';
+            if (uName) {
+                return `${uName}-${dPart}.mp4`;
+            }
             let rawTitle = (document.title || '').trim();
             if (rawTitle.startsWith('"') && rawTitle.endsWith('"')) {
                 rawTitle = rawTitle.slice(1, -1).trim();
@@ -2601,7 +2693,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
             const cleanUrls = Array.from(new Set(urls.filter(Boolean)));
             if (cleanUrls.length > 0) {
-                return { urls: cleanUrls, type: 'video', itemId: itemId || 'video' };
+                return { urls: cleanUrls, type: 'video', itemId: itemId || 'video', userName: getUserName() };
             }
             return null;
         }
@@ -2847,6 +2939,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             isSupported,
             getActiveItem,
             getActiveVideo,
+            getUserName,
             getTitleFilename,
             findMedia,
             navigate,
@@ -2866,6 +2959,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
     function getRedGifsVideo() {
         return window.MOSSAD_ENGINES?.redgifs?.getActiveVideo() || null;
+    }
+
+    function getRedGifsUserName() {
+        return window.MOSSAD_ENGINES?.redgifs?.getUserName() || '';
     }
 
     function getRedGifsTitleFilename(itemId) {
@@ -3044,6 +3141,17 @@ function findMediaForDownload() {
         const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
         const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
 
+        // Извлечение имени автора/пользователя (для RedGifs, Instagram и др.)
+        let authorName = '';
+        if (media && media.userName) {
+            authorName = media.userName;
+        } else if (rootDomain.includes('redgifs.com')) {
+            authorName = typeof getRedGifsUserName === 'function' ? getRedGifsUserName() : (window.MOSSAD_ENGINES?.redgifs?.getUserName ? window.MOSSAD_ENGINES.redgifs.getUserName() : '');
+        } else if (rootDomain.includes('instagram.com')) {
+            const m = location.pathname.match(/^\/([A-Za-z0-9_.]+)\//);
+            if (m && !['p', 'reel', 'stories', 'explore'].includes(m[1])) authorName = m[1];
+        }
+
         // --- Вспомогательная функция: применить {var[N]} синтаксис ---
         function applyTplVar(value, len) {
             return len > 0 ? value.slice(0, len) : value;
@@ -3074,23 +3182,26 @@ function findMediaForDownload() {
 
             // Словарь переменных (значение без обрезки)
             const vars = {
-                id:      postId,
-                uuid:    postId,
-                hash:    postId,
-                postid:  postId,
-                id8:     shortId,
-                hash8:   shortId,
-                uuid8:   shortId,
-                title:   titleClean2,
-                date:    dateStr,
-                time:    timeStr,
-                ext:     ext2,
-                domain:  domainClean,
-                n:       nStr,
-                dbl:     dblSuffix,
-                oldname: rootBase,
-                copy:    rootBase,
-                root:    rootBase,
+                id:       postId,
+                uuid:     postId,
+                hash:     postId,
+                postid:   postId,
+                id8:      shortId,
+                hash8:    shortId,
+                uuid8:    shortId,
+                title:    titleClean2,
+                date:     dateStr,
+                time:     timeStr,
+                ext:      ext2,
+                domain:   domainClean,
+                username: authorName || shortId,
+                user:     authorName || shortId,
+                author:   authorName || shortId,
+                n:        nStr,
+                dbl:      dblSuffix,
+                oldname:  rootBase,
+                copy:     rootBase,
+                root:     rootBase,
             };
 
             const tplStr = config.filenameTemplate.trim();
@@ -3259,14 +3370,15 @@ function findMediaForDownload() {
                 }
             }
 
-            // 2. Grok: кнопка Full Screen
+            // 2. Grok: кнопка Full Screen (Expand video / lucide-expand)
             if (rootDomain === 'grok.com') {
-                const fsKeywords = ['во весь экран', 'полноэкран', 'full screen', 'fullscreen'];
-                const btn = (typeof findGrokButton === 'function' ? findGrokButton(fsKeywords) : null)
+                const fsKeywords = ['expand video', 'expand', 'во весь экран', 'полноэкран', 'full screen', 'fullscreen'];
+                const btn = document.querySelector('button[aria-label="Expand video"], button[aria-label*="Expand" i]')
+                    || (typeof findGrokButton === 'function' ? findGrokButton(fsKeywords) : null)
                     || Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
                         const aria = (b.getAttribute('aria-label') || '').toLowerCase();
                         const title = (b.getAttribute('title') || '').toLowerCase();
-                        return fsKeywords.some(k => aria.includes(k) || title.includes(k));
+                        return fsKeywords.some(k => aria.includes(k) || title.includes(k)) || b.querySelector('svg.lucide-expand');
                     });
                 if (btn) {
                     triggerClick(btn, 'Grok FullScreen');
@@ -4053,8 +4165,8 @@ function findMediaForDownload() {
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
                         <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> Шаблон:
                     </label>
-                    <input id="mossad-in-fn-tpl" type="text" placeholder="{id8}-{domain}.{ext}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
-                        title="Шаблон имени файла. Переменные: {id8} {id} {domain} {title} {date} {time} {ext} {n} {dbl} {oldname}"
+                    <input id="mossad-in-fn-tpl" type="text" placeholder="${rootDomain.includes('redgifs.com') ? '{userName}-{domain[4]}' : '{id8}-{domain}.{ext}'}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
+                        title="Шаблон: {userName} {id8} {id} {domain} {title} {date} {time} {ext} {n} {dbl} {oldname}"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
@@ -4317,7 +4429,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-05</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-08</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>

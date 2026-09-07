@@ -166,23 +166,26 @@
                 const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
                 const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
                 const vars = {
-                    id:      currentPostId || '',
-                    uuid:    currentPostId || '',
-                    hash:    currentPostId || '',
-                    postid:  currentPostId || '',
-                    id8:     shortId,
-                    hash8:   shortId,
-                    uuid8:   shortId,
-                    domain:  'grok',
-                    title:   'Imagine - Grok',
-                    date:    dateStr,
-                    time:    timeStr,
-                    ext:     ext2,
-                    n:       String(Date.now()).slice(-6),
-                    dbl:     dblSuffix,
-                    oldname: rootBase,
-                    copy:    rootBase,
-                    root:    rootBase
+                    id:       currentPostId || '',
+                    uuid:     currentPostId || '',
+                    hash:     currentPostId || '',
+                    postid:   currentPostId || '',
+                    id8:      shortId,
+                    hash8:    shortId,
+                    uuid8:    shortId,
+                    domain:   'grok',
+                    title:    'Imagine - Grok',
+                    username: 'grok',
+                    user:     'grok',
+                    author:   'grok',
+                    date:     dateStr,
+                    time:     timeStr,
+                    ext:      ext2,
+                    n:        String(Date.now()).slice(-6),
+                    dbl:      dblSuffix,
+                    oldname:  rootBase,
+                    copy:     rootBase,
+                    root:     rootBase
                 };
                 const tplStr = config.filenameTemplate.trim();
                 const hasDblVar = /\{dbl\}/i.test(tplStr);
