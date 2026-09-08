@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.56
+// @version      1.2.57
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.56';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.57';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -350,7 +350,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (!hk) return false;
         if (Array.isArray(hk)) return hk.some(k => hotkeyMatches(e, k));
         if (!hk.key) return false;
-        return e.key === hk.key &&
+        const keyMatch = e.key === hk.key || (typeof e.key === 'string' && typeof hk.key === 'string' && e.key.toLowerCase() === hk.key.toLowerCase());
+        return keyMatch &&
             !!e.ctrlKey  === !!hk.ctrl &&
             !!e.altKey   === !!hk.alt &&
             !!e.shiftKey === !!hk.shift &&
@@ -4041,7 +4042,7 @@ function findMediaForDownload() {
         const btnReset = document.createElement('button');
         btnReset.id = 'mossad-btn-rewind-bar';
         btnReset.innerHTML = '↺';
-        btnReset.title = 'Перемотка (Alt+R)';
+        btnReset.title = `Мотать в начало (${formatHotkey(config.hk.rewind)})`;
         btnReset.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 15px; padding: 0 4px;`;
 
         const btnStart = document.createElement('button');
@@ -4188,7 +4189,7 @@ function findMediaForDownload() {
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⚙ Настройки</button>
                     <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py)">📥 База</button>
-                    <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Мотать до начала/конца ленты">↺</button>
+                    <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Мотать в начало (${formatHotkey(config.hk.rewind)})">↺</button>
                     <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">↺ Сброс</button>
                     <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
@@ -4358,6 +4359,7 @@ function findMediaForDownload() {
                 btnStart.style.color = '#e5e7eb';
                 btnStart.style.boxShadow = 'none';
             }
+            btnReset.title = `Мотать в начало (${formatHotkey(config.hk.rewind)})`;
         };
 
         window.updateWidgetUI();
@@ -4436,7 +4438,8 @@ function findMediaForDownload() {
             download: 'Скачать (DL)', upscale: 'Улучшить', deleteVid: 'Удалить видео', sound: 'Звук (вкл/выкл)',
             playPause: 'Пауза/Плей', help: 'Настройки клавиш', history: 'История (Grok)', 
             slideshowPanel: 'Меню слайдшоу', slideshowStart: 'Старт слайдшоу',
-            nextSlide: 'Следующий слайд (Пробел)', duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)'
+            nextSlide: 'Следующий слайд (Пробел)', duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
+            rewind: 'Мотать в начало'
         };
         
         Object.keys(keysMap).forEach(k => {
@@ -4633,14 +4636,13 @@ function findMediaForDownload() {
             window.location.href = 'https://grok.com/imagine/saved';
         }
 
-        // Alt+R: перемотка (Win+Alt+R: обновить скрипт)
-        if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+        // Обновить скрипт (Win+Alt+R) / Мотать в начало (Alt+R по умолчанию)
+        if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R'))) {
             e.preventDefault();
-            if (e.metaKey) {
-                window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
-            } else {
-                doRewind();
-            }
+            window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
+        } else if (hotkeyMatches(e, config.hk.rewind) && !e.metaKey) {
+            e.preventDefault();
+            doRewind();
         }
 
         // Пробел: пауза/продолжить галерейное слайдшоу; или принудительный следующий слайд

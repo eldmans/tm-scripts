@@ -75,14 +75,13 @@
             window.location.href = 'https://grok.com/imagine/saved';
         }
 
-        // Alt+R: перемотка (Win+Alt+R: обновить скрипт)
-        if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+        // Обновить скрипт (Win+Alt+R) / Мотать в начало (Alt+R по умолчанию)
+        if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R'))) {
             e.preventDefault();
-            if (e.metaKey) {
-                window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
-            } else {
-                doRewind();
-            }
+            window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
+        } else if (hotkeyMatches(e, config.hk.rewind) && !e.metaKey) {
+            e.preventDefault();
+            doRewind();
         }
 
         // Пробел: пауза/продолжить галерейное слайдшоу; или принудительный следующий слайд

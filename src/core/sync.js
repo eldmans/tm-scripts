@@ -163,7 +163,8 @@
         if (!hk) return false;
         if (Array.isArray(hk)) return hk.some(k => hotkeyMatches(e, k));
         if (!hk.key) return false;
-        return e.key === hk.key &&
+        const keyMatch = e.key === hk.key || (typeof e.key === 'string' && typeof hk.key === 'string' && e.key.toLowerCase() === hk.key.toLowerCase());
+        return keyMatch &&
             !!e.ctrlKey  === !!hk.ctrl &&
             !!e.altKey   === !!hk.alt &&
             !!e.shiftKey === !!hk.shift &&
