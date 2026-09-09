@@ -147,6 +147,15 @@
 
             if (urlChanged) {
                 triggerUniversalFullScreen();
+                if (rootDomain === 'grok.com' && typeof grokGallerySlideshowTick === 'function') {
+                    const raw = (typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss');
+                    if (raw) {
+                        try {
+                            const ss = JSON.parse(raw);
+                            if (ss.active) grokGallerySlideshowTick();
+                        } catch(e) {}
+                    }
+                }
             }
             
             // Ждем чуть-чуть, чтобы SPA успело обновить DOM

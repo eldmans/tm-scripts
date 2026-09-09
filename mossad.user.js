@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.57
+// @version      1.2.58
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.57';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.58';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1603,7 +1603,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const photos = existingItems.length - videos;
         _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({ date, items: existingItems }));
         if (btnEl) {
-            btnEl.textContent = `📋 Собрано (${existingItems.length})`;
+            btnEl.textContent = `📋 Список (${existingItems.length})`;
             btnEl.style.background = '#065f46';
             btnEl.style.color = '#e5e7eb';
             btnEl.dataset.collectedCount = String(existingItems.length);
@@ -1633,12 +1633,21 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
     /** Строит очередь с учётом режима ssMode / grpOrder / itemOrder */
     function grokBuildGalleryQueue(allItems, ssState) {
-        const ssMode   = ssState.ssMode   || 'rnd'; // 'rnd' | 'grp'
-        const grpOrder = ssState.grpOrder || 'rnd'; // 'rnd' | 'seq'
-        const itemOrder= ssState.itemOrder|| 'rev'; // 'fwd' | 'rev' | 'rnd'
+        // Поддерживаем как новые поля (grpMode/itemMode), так и старые (ssMode/grpOrder/itemOrder) для совместимости
+        const grpMode  = ssState.grpMode  || (ssState.ssMode === 'grp' ? 'seq' : (ssState.ssMode === 'rnd' ? 'off' : 'seq'));
+        const itemMode = ssState.itemMode || ssState.itemOrder || 'fwd';
 
-        if (ssMode === 'rnd') {
+        // Оба выключены → полный рандом по всей коллекции
+        if (grpMode === 'off' && itemMode === 'off') {
             return fisherYatesShuffle(allItems);
+        }
+
+        // grpMode выключен → не группируем, применяем itemMode ко всему списку
+        if (grpMode === 'off') {
+            let flat = allItems.slice();
+            if (itemMode === 'rev')      flat = flat.reverse();
+            else if (itemMode === 'rnd') flat = fisherYatesShuffle(flat);
+            return flat;
         }
 
         // GRP: группируем по convId
@@ -1650,22 +1659,72 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             groups[gid].push(item);
         }
 
-        // Порядок групп
-        const orderedGroups = grpOrder === 'rnd' ? fisherYatesShuffle(groupOrder) : groupOrder;
+        // Порядок групп (grpMode: seq / rev / rnd)
+        let orderedGroups = groupOrder.slice();
+        if (grpMode === 'rev')      orderedGroups = orderedGroups.reverse();
+        else if (grpMode === 'rnd') orderedGroups = fisherYatesShuffle(orderedGroups);
+        // seq = как собрали (оставляем)
 
         // Строим итоговую очередь
         const queue = [];
         for (const gid of orderedGroups) {
             let items = groups[gid].slice();
-            // itemOrder: fwd = порядок сбора (новые первые в DOM, т.е. старые в конце)
-            // rev = обратный (старые первые = "снизу вверх" из DOM = хронологический)
-            // rnd = случайно
-            if (itemOrder === 'rev') items = items.reverse();
-            else if (itemOrder === 'rnd') items = fisherYatesShuffle(items);
+            // itemMode: fwd / rev / rnd / off
+            if (itemMode === 'rev')      items = items.reverse();
+            else if (itemMode === 'rnd') items = fisherYatesShuffle(items);
+            else if (itemMode === 'off') items = fisherYatesShuffle(items);
             // fwd = как собрали (оставляем как есть)
             queue.push(...items);
         }
         return queue;
+    }
+
+    /**
+     * SPA-навигация на grok.com через Next.js router.push() — без перезагрузки страницы.
+     * Подтверждено: window.next.router доступен на grok.com.
+     * Fallback: клик по <a> или window.location.href (полный переход).
+     */
+    function grokSpaNavigate(url) {
+        if (!url) return;
+        try {
+            const urlObj = new URL(url, location.origin);
+            const path = urlObj.pathname + urlObj.search;
+
+            let navigated = false;
+
+            // 1. Next.js router.push — основной метод (SPA без перезагрузки)
+            if (window.next && window.next.router && typeof window.next.router.push === 'function') {
+                window.next.router.push(path);
+                navigated = true;
+            } else {
+                // 2. Клик по ссылке в DOM (если есть)
+                const anchor = document.querySelector(`a[href="${path}"]`)
+                            || document.querySelector(`a[href="${url}"]`);
+                if (anchor) {
+                    anchor.click();
+                    navigated = true;
+                }
+            }
+
+            if (navigated) {
+                // Ждём смены URL и перезапускаем/обновляем тик слайдшоу
+                let checks = 0;
+                const checkInterval = setInterval(() => {
+                    checks++;
+                    if (location.pathname === urlObj.pathname || checks >= 15) {
+                        clearInterval(checkInterval);
+                        if (typeof grokGallerySlideshowTick === 'function') {
+                            grokGallerySlideshowTick();
+                        }
+                    }
+                }, 40);
+                return;
+            }
+        } catch (e) {
+            console.error('[MOSSAD] grokSpaNavigate error:', e);
+        }
+        // 3. Fallback: полный переход
+        window.location.href = url;
     }
 
     /** Кнопка 2: запустить слайдшоу по коллекции (с учётом текущего режима) */
@@ -1680,11 +1739,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const allItems = data.items || [];
         if (allItems.length === 0) { showToast('⚠️ Коллекция пуста', true); return; }
 
-        // Читаем настройки режима из данных коллекции или дефолт
+        // Читаем настройки режима из данных коллекции или дефолт (новые поля grpMode/itemMode)
         const ssState = {
-            ssMode:    data.ssMode    || 'rnd',
-            grpOrder:  data.grpOrder  || 'rnd',
-            itemOrder: data.itemOrder || 'rev',
+            grpMode:  data.grpMode  || 'seq',
+            itemMode: data.itemMode || 'fwd',
         };
 
         const queue = grokBuildGalleryQueue(allItems, ssState);
@@ -1693,21 +1751,19 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             queue,
             circle: 1,
             total: allItems.length,
-            ssMode:    ssState.ssMode,
-            grpOrder:  ssState.grpOrder,
-            itemOrder: ssState.itemOrder,
+            grpMode:  ssState.grpMode,
+            itemMode: ssState.itemMode,
         };
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
 
-        const modeLabel = ssState.ssMode === 'grp'
-            ? `GRP·${ssState.grpOrder === 'rnd' ? 'GRn' : 'GSq'}·${ssState.itemOrder === 'rev' ? 'IRv' : ssState.itemOrder === 'rnd' ? 'IRn' : 'ISq'}`
-            : 'RND';
+        const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
+        const modeLabel = `Gr${grIcon[ssState.grpMode]||'↓'} Md${grIcon[ssState.itemMode]||'↓'}`;
         showToast(`▶ Слайдшоу [${modeLabel}]: ${allItems.length} генераций`);
         const next = queue.shift();
         ss.queue = queue;
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
         if (next && next.type) sessionStorage.setItem('mossad_expected_type', next.type);
-        setTimeout(() => { window.location.href = next.url; }, 300);
+        setTimeout(() => { grokSpaNavigate(next.url); }, 300);
     }
 
     /** Запускает GRP-слайдшоу с конкретной стартовой позиции (для плейлиста) */
@@ -1718,9 +1774,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         try { data = JSON.parse(raw); } catch { return; }
         const allItems = data.items || [];
         const ssState = {
-            ssMode:    data.ssMode    || 'rnd',
-            grpOrder:  data.grpOrder  || 'rnd',
-            itemOrder: data.itemOrder || 'rev',
+            grpMode:  data.grpMode  || 'seq',
+            itemMode: data.itemMode || 'fwd',
         };
         let queue = grokBuildGalleryQueue(allItems, ssState);
         // Переставляем startItem в начало очереди
@@ -1728,11 +1783,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const idx = queue.findIndex(i => (i.url || '').split('?')[0] === startBase);
         if (idx > 0) queue = [...queue.slice(idx), ...queue.slice(0, idx)];
         const ss = { active: true, queue: queue.slice(1), circle: 1, total: allItems.length,
-            ssMode: ssState.ssMode, grpOrder: ssState.grpOrder, itemOrder: ssState.itemOrder };
+            grpMode: ssState.grpMode, itemMode: ssState.itemMode };
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
         showToast(`▶ Слайдшоу с выбранного элемента`);
-        setTimeout(() => { window.location.href = startItem.url; }, 300);
+        setTimeout(() => { grokSpaNavigate(startItem.url); }, 300);
     }
 
     /** Останавливает Gallery Slideshow */
@@ -1817,7 +1872,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const cRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
             if (cRaw) savedCount = (JSON.parse(cRaw).items || []).length;
         } catch(e) {}
-        btnCollect.textContent = savedCount > 0 ? `📋 Собрано (${savedCount})` : '📋 Собрать';
+        btnCollect.textContent = savedCount > 0 ? `📋 Список (${savedCount})` : '📋 Собрать';
         btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
 
         // Клик: на /saved — собирать; иначе — открывать плейлист (если есть коллекция)
@@ -1841,7 +1896,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 if (currentCount !== sc) {
                     const diff = currentCount - sc;
                     const sign = diff > 0 ? '+' : '';
-                    btnCollect.textContent = `📋 Собрано (${sc}) 🔴${sign}${diff}`;
+                    btnCollect.textContent = `📋 Список (${sc}) 🔴${sign}${diff}`;
                     btnCollect.style.color = '#fca5a5';
                 }
             }, 2000);
@@ -1884,16 +1939,33 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             stopSlideshow();
         };
 
-        // ── 4. Режимы — тогл-кнопки ──
+        // ── 4. Режимы Gr / Md — 4 состояния: ↓ seq | ↑ rev | ↺ rnd | − off ──
+        // По умолчанию: grpMode=seq (прямой порядок групп), itemMode=fwd (прямой порядок файлов)
+        const GR_STATES  = ['seq', 'rev', 'rnd', 'off'];
+        const GR_ICONS   = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
+        const GR_TIPS    = {
+            seq: 'Gr↓ — группы по порядку',
+            rev: 'Gr↑ — группы в обратном порядке',
+            rnd: 'Gr↺ — случайный порядок групп (без повторов за круг)',
+            off: 'Gr− — без учёта групп (режим Md применяется ко всей коллекции)',
+        };
+        const MD_STATES  = ['fwd', 'rev', 'rnd', 'off'];
+        const MD_ICONS   = { fwd: '↓', rev: '↑', rnd: '↺', off: '−' };
+        const MD_TIPS    = {
+            fwd: 'Md↓ — файлы в прямом порядке',
+            rev: 'Md↑ — файлы в обратном порядке',
+            rnd: 'Md↺ — случайный порядок файлов (без повторов за круг)',
+            off: 'Md− — файлы в случайном порядке (оба − = полный хаос)',
+        };
+
         // Читаем текущие настройки из коллекции
-        let ssModeCfg = 'rnd', grpOrderCfg = 'rnd', itemOrderCfg = 'rev';
+        let grpModeCfg = 'seq', itemModeCfg = 'fwd';
         try {
             const colRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
             if (colRaw) {
                 const colData = JSON.parse(colRaw);
-                ssModeCfg    = colData.ssMode    || 'rnd';
-                grpOrderCfg  = colData.grpOrder  || 'rnd';
-                itemOrderCfg = colData.itemOrder  || 'rev';
+                grpModeCfg  = colData.grpMode  || 'seq';
+                itemModeCfg = colData.itemMode || 'fwd';
             }
         } catch(e) {}
 
@@ -1907,61 +1979,38 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             } catch(e) {}
         };
 
-        // Кнопка RND/GRP
-        const btnSsMode = mkBtn('mossad-gallery-ssmode', ssModeCfg === 'rnd' ? 'RND' : 'GRP',
-            'RND — случайный порядок из всей коллекции\nGRP — по группам (диалогам)',
-            `background:${ssModeCfg === 'rnd' ? '#1e3a5f' : '#1a3327'};color:${ssModeCfg === 'rnd' ? '#93c5fd' : '#6ee7b7'};`);
-        btnSsMode.onclick = () => {
-            ssModeCfg = ssModeCfg === 'rnd' ? 'grp' : 'rnd';
-            saveModeToCollection('ssMode', ssModeCfg);
-            btnSsMode.textContent = ssModeCfg === 'rnd' ? 'RND' : 'GRP';
-            btnSsMode.style.background = ssModeCfg === 'rnd' ? '#1e3a5f' : '#1a3327';
-            btnSsMode.style.color      = ssModeCfg === 'rnd' ? '#93c5fd' : '#6ee7b7';
-            // Показываем/прячем sub-опции
-            const grpBtns = document.getElementById('mossad-grp-opts');
-            if (grpBtns) grpBtns.style.display = ssModeCfg === 'grp' ? 'flex' : 'none';
+        // Helper: цвет кнопки по состоянию
+        const grBtnCss = (state) => state === 'off' ? 'background:#1a1a2e;color:#4b5563;' : 'background:#1a2e3a;color:#7dd3fc;';
+        const mdBtnCss = (state) => state === 'off' ? 'background:#1a1a2e;color:#4b5563;' : 'background:#1e1a3a;color:#c4b5fd;';
+        const BASE_BTN = 'cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;transition:all 0.2s;';
+
+        // Кнопка Gr (порядок групп)
+        const btnGr = mkBtn('mossad-gallery-grmode',
+            `Gr${GR_ICONS[grpModeCfg]}`,
+            GR_TIPS[grpModeCfg] || '',
+            grBtnCss(grpModeCfg));
+        btnGr.onclick = () => {
+            const idx = GR_STATES.indexOf(grpModeCfg);
+            grpModeCfg = GR_STATES[(idx + 1) % GR_STATES.length];
+            saveModeToCollection('grpMode', grpModeCfg);
+            btnGr.textContent = `Gr${GR_ICONS[grpModeCfg]}`;
+            btnGr.title       = GR_TIPS[grpModeCfg];
+            btnGr.style.cssText = BASE_BTN + grBtnCss(grpModeCfg);
         };
 
-        // Sub-опции для GRP (видны только когда GRP активен)
-        const grpOpts = document.createElement('span');
-        grpOpts.id = 'mossad-grp-opts';
-        grpOpts.style.cssText = `display:${ssModeCfg === 'grp' ? 'flex' : 'none'};gap:4px;align-items:center;`;
-
-        // Порядок групп: GSq (seq) / GRn (rnd)
-        const grpOrderLabels = { seq: 'GSq', rnd: 'GRn' };
-        const grpOrderTips   = { seq: 'GSq — группы по порядку', rnd: 'GRn — случайная группа' };
-        const btnGrpOrder = mkBtn('mossad-gallery-grporder',
-            grpOrderLabels[grpOrderCfg] || 'GRn',
-            grpOrderTips[grpOrderCfg]   || '',
-            'background:#1a2e3a;color:#7dd3fc;');
-        btnGrpOrder.onclick = () => {
-            grpOrderCfg = grpOrderCfg === 'rnd' ? 'seq' : 'rnd';
-            saveModeToCollection('grpOrder', grpOrderCfg);
-            btnGrpOrder.textContent = grpOrderLabels[grpOrderCfg];
-            btnGrpOrder.title       = grpOrderTips[grpOrderCfg];
+        // Кнопка Md (порядок внутри группы)
+        const btnMd = mkBtn('mossad-gallery-mdmode',
+            `Md${MD_ICONS[itemModeCfg]}`,
+            MD_TIPS[itemModeCfg] || '',
+            mdBtnCss(itemModeCfg));
+        btnMd.onclick = () => {
+            const idx = MD_STATES.indexOf(itemModeCfg);
+            itemModeCfg = MD_STATES[(idx + 1) % MD_STATES.length];
+            saveModeToCollection('itemMode', itemModeCfg);
+            btnMd.textContent = `Md${MD_ICONS[itemModeCfg]}`;
+            btnMd.title       = MD_TIPS[itemModeCfg];
+            btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
         };
-
-        // Порядок внутри группы: ISq / IRv / IRn
-        const itemOrderSeq = ['fwd', 'rev', 'rnd'];
-        const itemOrderLabels = { fwd: 'ISq', rev: 'IRv', rnd: 'IRn' };
-        const itemOrderTips   = {
-            fwd: 'ISq — в порядке сбора (новые первые)',
-            rev: 'IRv — обратный порядок (старые первые / хронологический)',
-            rnd: 'IRn — случайный порядок внутри группы',
-        };
-        const btnItemOrder = mkBtn('mossad-gallery-itemorder',
-            itemOrderLabels[itemOrderCfg] || 'IRv',
-            itemOrderTips[itemOrderCfg]   || '',
-            'background:#1a2e3a;color:#c4b5fd;');
-        btnItemOrder.onclick = () => {
-            const idx = itemOrderSeq.indexOf(itemOrderCfg);
-            itemOrderCfg = itemOrderSeq[(idx + 1) % 3];
-            saveModeToCollection('itemOrder', itemOrderCfg);
-            btnItemOrder.textContent = itemOrderLabels[itemOrderCfg];
-            btnItemOrder.title       = itemOrderTips[itemOrderCfg];
-        };
-
-        grpOpts.append(btnGrpOrder, btnItemOrder);
 
         // ── 5. Кнопка скачать коллекцию .txt ──
         const btnDl = mkBtn('mossad-gallery-dl', '★', 'Скачать коллекцию .txt', 'background:#1f2937;color:#fbbf24;');
@@ -1978,7 +2027,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             if (window.updateWidgetUI) window.updateWidgetUI();
         };
 
-        row.append(btnCollect, btnStatus, btnStop, btnSsMode, grpOpts, btnDl, btnToggleTop);
+        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd, btnDl, btnToggleTop);
         container.insertBefore(row, container.firstChild);
 
         if (typeof window.makeWidgetDraggable === 'function') {
@@ -1995,22 +2044,26 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         try { ss = JSON.parse(raw); } catch { return; }
         if (!ss.active) return;
 
-        // Показываем компактный индикатор
-        const indicator = document.createElement('div');
-        indicator.id = 'mossad-gallery-indicator';
+        // Показываем компактный индикатор (или обновляем существующий)
+        let indicator = document.getElementById('mossad-gallery-indicator');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'mossad-gallery-indicator';
+            indicator.style.cssText = `
+                position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
+                z-index:999999; background:rgba(15,15,15,0.88); backdrop-filter:blur(12px);
+                border:1px solid rgba(255,255,255,0.1); border-radius:10px;
+                padding:5px 14px; font-family:system-ui,sans-serif; font-size:11px;
+                color:#9ca3af; display:flex; align-items:center; gap:8px;
+                box-shadow:0 4px 20px rgba(0,0,0,0.5);
+            `;
+            document.body.appendChild(indicator);
+        }
         const qLeft  = (ss.queue || []).length;
         const showed = (ss.total || 0) - qLeft;
-        const modeTag = ss.ssMode === 'grp' ? `GRP` : 'RND';
-        indicator.style.cssText = `
-            position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
-            z-index:999999; background:rgba(15,15,15,0.88); backdrop-filter:blur(12px);
-            border:1px solid rgba(255,255,255,0.1); border-radius:10px;
-            padding:5px 14px; font-family:system-ui,sans-serif; font-size:11px;
-            color:#9ca3af; display:flex; align-items:center; gap:8px;
-            box-shadow:0 4px 20px rgba(0,0,0,0.5);
-        `;
+        const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
+        const modeTag = `Gr${grIcon[ss.grpMode]||'↓'} Md${grIcon[ss.itemMode]||'↓'}`;
         indicator.innerHTML = `<span id="mgi-status">▶ ${modeTag} · ${showed}/${ss.total} · Круг ${ss.circle}</span>`;
-        document.body.appendChild(indicator);
 
         // Обновляем статус-кнопку в галерейной строке
         updateGalleryStatusBtn('playing');
@@ -2019,7 +2072,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         // Устанавливаем функцию перехода: её вызовет triggerNextSlide
         window._mossadGalleryActive = true;
         window._mossadGalleryNextFn = () => {
-            indicator.remove();
+            const statusEl = document.getElementById('mgi-status');
+            if (statusEl) statusEl.textContent = '⏳ Переход...';
             window._mossadGalleryActive = false;
             window._mossadGalleryNextFn = null;
 
@@ -2033,9 +2087,46 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 let allItems = [];
                 if (colRaw) { try { allItems = JSON.parse(colRaw).items || []; } catch {} }
                 // Новый круг — снова строим очередь с теми же настройками
-                const ssState = { ssMode: ss.ssMode || 'rnd', grpOrder: ss.grpOrder || 'rnd', itemOrder: ss.itemOrder || 'rev' };
+                const ssState = {
+                    grpMode:   ss.grpMode   || ss.ssMode    || 'seq',
+                    itemMode:  ss.itemMode  || ss.itemOrder || 'fwd',
+                };
                 queue = grokBuildGalleryQueue(allItems, ssState);
                 showToast(`🔄 Круг ${circle} начался! (${queue.length} генераций)`);
+            }
+
+            // ── Проверяем loop (R): зациклен ли один/несколько элементов ──
+            const loopRaw = _gSS.getItem('mossad_grok_loop_set');
+            if (loopRaw) {
+                try {
+                    const loopSet = JSON.parse(loopRaw);
+                    const loopUrls = loopSet.urls || [];
+                    const loopGroupIds = loopSet.groupIds || [];
+                    if (loopUrls.length > 0 || loopGroupIds.length > 0) {
+                        let loopItems = [];
+                        const colRaw2 = _gSS.getItem(GALLERY_COLLECTION_KEY);
+                        if (colRaw2) {
+                            const allCol = JSON.parse(colRaw2).items || [];
+                            for (const item of allCol) {
+                                const baseUrl = (item.url || '').split('?')[0];
+                                const inUrls = loopUrls.some(u => u.split('?')[0] === baseUrl);
+                                const inGroups = loopGroupIds.includes(item.convId || '__noconv__');
+                                if (inUrls || inGroups) loopItems.push(item);
+                            }
+                        }
+                        if (loopItems.length > 0) {
+                            const loopIdx = (ss.loopIdx || 0) % loopItems.length;
+                            const loopNext = loopItems[loopIdx];
+                            ss.loopIdx = loopIdx + 1;
+                            ss.queue  = queue;
+                            ss.circle = circle;
+                            _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+                            if (loopNext.type) sessionStorage.setItem('mossad_expected_type', loopNext.type);
+                            grokSpaNavigate(loopNext.url);
+                            return;
+                        }
+                    }
+                } catch(e) {}
             }
 
             const next = queue.shift();
@@ -2043,7 +2134,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             ss.circle = circle;
             _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
             if (next && next.type) sessionStorage.setItem('mossad_expected_type', next.type);
-            window.location.href = next.url || next;
+            grokSpaNavigate(next.url || next);
         };
 
         // Запускаем стандартный движок — он сам разберётся фото/видео/циклы/паузы
@@ -2055,7 +2146,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         setTimeout(() => scheduleNextSlideCycle(0), 300);
     }
 
-    /** Плейлист-панель: открыть/закрыть */
+    /** Список (плейлист): открыть/закрыть. Кнопка R — зациклить группу или файл */
     function grokTogglePlaylistPanel() {
         const existing = document.getElementById('mossad-playlist-panel');
         if (existing) { existing.remove(); return; }
@@ -2067,41 +2158,85 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const items = data.items || [];
         if (!items.length) { showToast('⚠️ Коллекция пуста', true); return; }
 
+        // Читаем текущий loop-set
+        let loopSet = { urls: [], groupIds: [] };
+        try {
+            const lr = _gSS.getItem('mossad_grok_loop_set');
+            if (lr) loopSet = JSON.parse(lr);
+        } catch(e) {}
+        const saveLoopSet = () => _gSS.setItem('mossad_grok_loop_set', JSON.stringify(loopSet));
+
         const panel = document.createElement('div');
         panel.id = 'mossad-playlist-panel';
         panel.style.cssText = `
             position:fixed; top:70px; right:16px; z-index:9999999;
-            width:300px; max-height:70vh; overflow-y:auto;
+            width:320px; max-height:75vh; overflow-y:auto;
             background:rgba(12,12,16,0.96); backdrop-filter:blur(20px);
             border:1px solid rgba(255,255,255,0.12); border-radius:14px;
             font-family:system-ui,sans-serif; font-size:12px; color:#d1d5db;
             box-shadow:0 20px 60px rgba(0,0,0,0.7);
         `;
 
+        // ── Заголовок ──
         const header = document.createElement('div');
-        header.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.08);`;
-        header.innerHTML = `<span style="font-weight:700;font-size:13px;">📋 Плейлист (${items.length})</span>`;
+        header.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.08);gap:6px;`;
+
+        const titleEl = document.createElement('span');
+        titleEl.style.cssText = `font-weight:700;font-size:13px;flex:1;`;
+        titleEl.textContent = `📋 Список (${items.length})`;
+
+        // Кнопка «отключить все R» — появляется если зациклено 2+ элементов
+        const btnClearLoop = document.createElement('button');
+        btnClearLoop.textContent = 'R ✕';
+        btnClearLoop.title = 'Отключить все зацикленные';
+        btnClearLoop.style.cssText = `background:#7f1d1d;border:none;border-radius:4px;color:#fca5a5;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer;display:${(loopSet.urls.length + loopSet.groupIds.length) > 1 ? 'inline-block' : 'none'};`;
+        btnClearLoop.onclick = () => {
+            loopSet = { urls: [], groupIds: [] };
+            saveLoopSet();
+            panel.remove();
+            grokTogglePlaylistPanel();
+        };
+
         const btnClose = document.createElement('button');
         btnClose.textContent = '×';
         btnClose.style.cssText = `background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0;`;
         btnClose.onclick = () => panel.remove();
-        header.appendChild(btnClose);
+
+        header.append(titleEl, btnClearLoop, btnClose);
         panel.appendChild(header);
 
         const body = document.createElement('div');
         body.style.cssText = `padding:8px;`;
 
-        const ssMode = data.ssMode || 'rnd';
+        // ── Утилита: кнопка R ──
+        const makeRBtn = (isActive, onToggle) => {
+            const btn = document.createElement('button');
+            btn.textContent = 'R';
+            btn.style.cssText = `
+                background:none;border:none;cursor:pointer;font-weight:700;font-size:11px;
+                padding:0 4px;flex-shrink:0;transition:color 0.15s;
+                color:${isActive ? '#f87171' : '#374151'};
+            `;
+            btn.title = isActive ? 'Зациклено — клик для отмены' : 'Зациклить';
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                onToggle(btn);
+            };
+            return btn;
+        };
 
-        if (ssMode === 'grp') {
-            // Группируем по convId
-            const groups = {};
-            const groupOrder = [];
-            for (const item of items) {
-                const gid = item.convId || '__noconv__';
-                if (!groups[gid]) { groups[gid] = []; groupOrder.push(gid); }
-                groups[gid].push(item);
-            }
+        // ── Группируем по convId ──
+        const groups = {};
+        const groupOrder = [];
+        for (const item of items) {
+            const gid = item.convId || '__noconv__';
+            if (!groups[gid]) { groups[gid] = []; groupOrder.push(gid); }
+            groups[gid].push(item);
+        }
+
+        const hasGroups = groupOrder.length > 1 || (groupOrder.length === 1 && groupOrder[0] !== '__noconv__');
+
+        if (hasGroups) {
             for (const gid of groupOrder) {
                 const gItems = groups[gid];
                 const grpEl = document.createElement('div');
@@ -2109,47 +2244,87 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
                 const grpHeader = document.createElement('div');
                 const shortId = gid === '__noconv__' ? 'Без группы' : gid.slice(0, 8) + '…';
-                grpHeader.style.cssText = `display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(255,255,255,0.04);cursor:pointer;`;
-                grpHeader.innerHTML = `<span style="flex:1;font-weight:600;font-size:11px;color:#7dd3fc;">${shortId}</span><span style="color:#6b7280;font-size:10px;">${gItems.length} ген.</span>`;
-                grpHeader.title = `Группа: ${gid}\nКликни чтобы начать SS с этой группы`;
-                grpHeader.onclick = () => {
-                    // Запускаем с первого элемента этой группы (с учётом itemOrder)
-                    const itemOrderLocal = data.itemOrder || 'rev';
-                    let startItem = gItems[0];
-                    if (itemOrderLocal === 'rev') startItem = gItems[gItems.length - 1];
-                    else if (itemOrderLocal === 'rnd') startItem = gItems[Math.floor(Math.random() * gItems.length)];
-                    panel.remove();
-                    grokStartGallerySlideshowFrom(startItem);
-                };
+                grpHeader.style.cssText = `display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.04);`;
+                grpHeader.title = `Группа: ${gid}`;
 
+                const isGrpLooped = loopSet.groupIds.includes(gid);
+                const rGrp = makeRBtn(isGrpLooped, (btn) => {
+                    const i = loopSet.groupIds.indexOf(gid);
+                    if (i >= 0) { loopSet.groupIds.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
+                    else { loopSet.groupIds.push(gid); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
+                    saveLoopSet();
+                    const total = loopSet.urls.length + loopSet.groupIds.length;
+                    btnClearLoop.style.display = total > 1 ? 'inline-block' : 'none';
+                });
+
+                const grpLabel = document.createElement('span');
+                grpLabel.style.cssText = `flex:1;font-weight:600;font-size:11px;color:#7dd3fc;cursor:pointer;`;
+                grpLabel.textContent = shortId;
+                grpLabel.onclick = () => { panel.remove(); grokStartGallerySlideshowFrom(gItems[0]); };
+
+                const grpCount = document.createElement('span');
+                grpCount.style.cssText = `color:#6b7280;font-size:10px;`;
+                grpCount.textContent = `${gItems.length} ген.`;
+
+                grpHeader.append(rGrp, grpLabel, grpCount);
                 grpEl.appendChild(grpHeader);
 
-                // Список постов внутри группы (компактный)
                 const listEl = document.createElement('div');
-                listEl.style.cssText = `padding:4px 8px;`;
+                listEl.style.cssText = `padding:3px 8px;`;
                 gItems.forEach((item, idx) => {
                     const li = document.createElement('div');
-                    li.style.cssText = `padding:2px 4px;cursor:pointer;border-radius:4px;color:#9ca3af;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
-                    li.textContent = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${item.url.split('/').pop().split('?')[0].slice(0, 24)}`;
-                    li.title = item.url;
-                    li.onmouseover = () => li.style.background = 'rgba(255,255,255,0.05)';
-                    li.onmouseout  = () => li.style.background = 'transparent';
-                    li.onclick = () => { panel.remove(); grokStartGallerySlideshowFrom(item); };
+                    li.style.cssText = `display:flex;align-items:center;gap:4px;padding:2px 2px;border-radius:4px;font-size:10px;`;
+
+                    const baseUrl = (item.url || '').split('?')[0];
+                    const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
+                    const rItem = makeRBtn(isLooped, (btn) => {
+                        const i = loopSet.urls.findIndex(u => u.split('?')[0] === baseUrl);
+                        if (i >= 0) { loopSet.urls.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
+                        else { loopSet.urls.push(item.url); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
+                        saveLoopSet();
+                        const total = loopSet.urls.length + loopSet.groupIds.length;
+                        btnClearLoop.style.display = total > 1 ? 'inline-block' : 'none';
+                    });
+
+                    const label = document.createElement('span');
+                    label.style.cssText = `flex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+                    label.textContent = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${item.url.split('/').pop().split('?')[0].slice(0, 22)}`;
+                    label.title = item.url;
+                    label.onmouseover = () => li.style.background = 'rgba(255,255,255,0.04)';
+                    label.onmouseout  = () => li.style.background = 'transparent';
+                    label.onclick = () => { panel.remove(); grokStartGallerySlideshowFrom(item); };
+
+                    li.append(rItem, label);
                     listEl.appendChild(li);
                 });
                 grpEl.appendChild(listEl);
                 body.appendChild(grpEl);
             }
         } else {
-            // RND: линейный список
             items.forEach((item, idx) => {
                 const li = document.createElement('div');
-                li.style.cssText = `padding:4px 8px;cursor:pointer;border-radius:6px;color:#9ca3af;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
-                li.textContent = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${item.url.split('/').pop().split('?')[0].slice(0, 28)}`;
-                li.title = item.url;
-                li.onmouseover = () => li.style.background = 'rgba(255,255,255,0.06)';
-                li.onmouseout  = () => li.style.background = 'transparent';
-                li.onclick = () => { panel.remove(); grokStartGallerySlideshowFrom(item); };
+                li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 4px;border-radius:6px;font-size:11px;`;
+
+                const baseUrl = (item.url || '').split('?')[0];
+                const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
+                const rItem = makeRBtn(isLooped, (btn) => {
+                    const i = loopSet.urls.findIndex(u => u.split('?')[0] === baseUrl);
+                    if (i >= 0) { loopSet.urls.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
+                    else { loopSet.urls.push(item.url); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
+                    saveLoopSet();
+                    const total = loopSet.urls.length + loopSet.groupIds.length;
+                    btnClearLoop.style.display = total > 1 ? 'inline-block' : 'none';
+                });
+
+                const label = document.createElement('span');
+                label.style.cssText = `flex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+                label.textContent = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${item.url.split('/').pop().split('?')[0].slice(0, 26)}`;
+                label.title = item.url;
+                label.onmouseover = () => li.style.background = 'rgba(255,255,255,0.06)';
+                label.onmouseout  = () => li.style.background = 'transparent';
+                label.onclick = () => { panel.remove(); grokStartGallerySlideshowFrom(item); };
+
+                li.append(rItem, label);
                 body.appendChild(li);
             });
         }
@@ -2157,6 +2332,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         panel.appendChild(body);
         document.body.appendChild(panel);
     }
+
 
     /** Клавиши ←→ по коллекции (только если текущий пост есть в списке) */
     function grokGalleryKeyboardNav() {
@@ -2193,7 +2369,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const next = items[nextIdx];
             if (next.type) sessionStorage.setItem('mossad_expected_type', next.type);
             showToast(`←→ ${nextIdx + 1}/${items.length} • ${next.type === 'video' ? '📹' : '🖼'}`);
-            window.location.href = next.url;
+            grokSpaNavigate(next.url);
         }, true); // capture — раньше страницы
     }
 
@@ -3418,6 +3594,15 @@ function findMediaForDownload() {
 
             if (urlChanged) {
                 triggerUniversalFullScreen();
+                if (rootDomain === 'grok.com' && typeof grokGallerySlideshowTick === 'function') {
+                    const raw = (typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss');
+                    if (raw) {
+                        try {
+                            const ss = JSON.parse(raw);
+                            if (ss.active) grokGallerySlideshowTick();
+                        } catch(e) {}
+                    }
+                }
             }
             
             // Ждем чуть-чуть, чтобы SPA успело обновить DOM
@@ -3965,11 +4150,12 @@ function findMediaForDownload() {
         const defTop = isGrokSavedPage() ? '72px' : '20px';
         const initTop = (savedPos && savedPos.top) ? savedPos.top : defTop;
         const initLeft = (savedPos && savedPos.left) ? savedPos.left : null;
+        const initRight = (savedPos && savedPos.right) ? savedPos.right : null;
 
         container.style.cssText = `
             position: fixed;
             top: ${initTop};
-            ${initLeft ? `left: ${initLeft};` : 'right: 20px;'}
+            ${initRight ? `right: ${initRight}; left: auto;` : initLeft ? `left: ${initLeft};` : 'right: 20px;'}
             z-index: 999998;
             font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; user-select: none;
             display: flex; flex-direction: column; gap: 4px;
@@ -4071,8 +4257,23 @@ function findMediaForDownload() {
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
-        // Порядок: ✕ | …таймер… | 🚀Пуск | ⚙▼ | 💾 | ↺ | 🔄
-        topBar.append(btnClose, timerEl, btnStart, btnGear, btnDL, btnReset, btnUpdate);
+        const btnSnap = document.createElement('button');
+        btnSnap.innerHTML = '⤢';
+        btnSnap.title = 'Привязать к правому верхнему углу (-50px)';
+        btnSnap.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 3px; line-height: 1; transition: color 0.2s;`;
+        btnSnap.onmouseenter = () => { btnSnap.style.color = '#60a5fa'; };
+        btnSnap.onmouseleave = () => { btnSnap.style.color = '#6b7280'; };
+        btnSnap.onclick = () => {
+            container.style.right = '50px';
+            container.style.top = '50px';
+            container.style.left = 'auto';
+            try {
+                localStorage.setItem('mossad_widget_pos', JSON.stringify({ right: '50px', top: '50px' }));
+            } catch(err) {}
+        };
+
+        // Порядок: ✕ | ⤢ | …таймер… | 🚀Пуск | ⚙▼ | 💾 | ↺ | 🔄
+        topBar.append(btnClose, btnSnap, timerEl, btnStart, btnGear, btnDL, btnReset, btnUpdate);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -4421,7 +4622,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-08</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-09</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>

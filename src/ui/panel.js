@@ -26,11 +26,12 @@
         const defTop = isGrokSavedPage() ? '72px' : '20px';
         const initTop = (savedPos && savedPos.top) ? savedPos.top : defTop;
         const initLeft = (savedPos && savedPos.left) ? savedPos.left : null;
+        const initRight = (savedPos && savedPos.right) ? savedPos.right : null;
 
         container.style.cssText = `
             position: fixed;
             top: ${initTop};
-            ${initLeft ? `left: ${initLeft};` : 'right: 20px;'}
+            ${initRight ? `right: ${initRight}; left: auto;` : initLeft ? `left: ${initLeft};` : 'right: 20px;'}
             z-index: 999998;
             font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; user-select: none;
             display: flex; flex-direction: column; gap: 4px;
@@ -132,8 +133,23 @@
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
-        // Порядок: ✕ | …таймер… | 🚀Пуск | ⚙▼ | 💾 | ↺ | 🔄
-        topBar.append(btnClose, timerEl, btnStart, btnGear, btnDL, btnReset, btnUpdate);
+        const btnSnap = document.createElement('button');
+        btnSnap.innerHTML = '⤢';
+        btnSnap.title = 'Привязать к правому верхнему углу (-50px)';
+        btnSnap.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 3px; line-height: 1; transition: color 0.2s;`;
+        btnSnap.onmouseenter = () => { btnSnap.style.color = '#60a5fa'; };
+        btnSnap.onmouseleave = () => { btnSnap.style.color = '#6b7280'; };
+        btnSnap.onclick = () => {
+            container.style.right = '50px';
+            container.style.top = '50px';
+            container.style.left = 'auto';
+            try {
+                localStorage.setItem('mossad_widget_pos', JSON.stringify({ right: '50px', top: '50px' }));
+            } catch(err) {}
+        };
+
+        // Порядок: ✕ | ⤢ | …таймер… | 🚀Пуск | ⚙▼ | 💾 | ↺ | 🔄
+        topBar.append(btnClose, btnSnap, timerEl, btnStart, btnGear, btnDL, btnReset, btnUpdate);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -482,7 +498,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-08</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-09</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
