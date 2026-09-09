@@ -196,5 +196,14 @@
         if (typeof window.makeWidgetDraggable === 'function') {
             window.makeWidgetDraggable(row);
         }
+
+        // Если список был открыт ранее — восстанавливаем его монолитно в контейнере виджета
+        if (_gSS.getItem('mossad_playlist_open') === 'true' && (savedCount > 0 || parseInt(btnCollect.dataset.collectedCount || '0') > 0)) {
+            setTimeout(() => {
+                if (typeof grokTogglePlaylistPanel === 'function') {
+                    grokTogglePlaylistPanel(true);
+                }
+            }, 60);
+        }
     }
 

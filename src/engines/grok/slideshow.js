@@ -132,6 +132,9 @@
         const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
         const modeLabel = `Gr${grIcon[ssState.grpMode]||'↓'} Md${grIcon[ssState.itemMode]||'↓'}`;
         showToast(`▶ Слайдшоу [${modeLabel}]: ${allItems.length} генераций`);
+        if (typeof grokTogglePlaylistPanel === 'function') {
+            grokTogglePlaylistPanel(true);
+        }
         const next = queue.shift();
         ss.queue = queue;
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
@@ -160,6 +163,12 @@
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
         showToast(`▶ Слайдшоу с выбранного элемента`);
+        if (typeof grokTogglePlaylistPanel === 'function') {
+            grokTogglePlaylistPanel(true);
+        }
+        if (typeof grokHighlightActivePlaylistItem === 'function') {
+            grokHighlightActivePlaylistItem(startItem.url);
+        }
         setTimeout(() => { grokSpaNavigate(startItem.url); }, 300);
     }
 
@@ -246,6 +255,11 @@
         // Обновляем статус-кнопку в галерейной строке
         updateGalleryStatusBtn('playing');
         window._mossadGalleryPaused = false;
+
+        // Подсвечиваем активный файл в открытом монолитном списке (плейлисте)
+        if (typeof grokHighlightActivePlaylistItem === 'function') {
+            grokHighlightActivePlaylistItem();
+        }
 
         // Устанавливаем функцию перехода: её вызовет triggerNextSlide
         window._mossadGalleryActive = true;
@@ -372,6 +386,11 @@
             if (next.type) sessionStorage.setItem('mossad_expected_type', next.type);
             showToast(`${isNext ? '→' : '←'} ${nextIdx + 1}/${items.length} • ${next.type === 'video' ? '📹' : '🖼'}`);
             grokSpaNavigate(next.url);
+            setTimeout(() => {
+                if (typeof grokHighlightActivePlaylistItem === 'function') {
+                    grokHighlightActivePlaylistItem(next.url);
+                }
+            }, 120);
         }, true); // capture — раньше страницы
     }
 
@@ -386,5 +405,7 @@
         },
         pause: toggleGalleryPause,
         stop: grokStopGallerySlideshow,
-        start: grokStartGallerySlideshow
+        start: grokStartGallerySlideshow,
+        highlightActive: (url) => (typeof grokHighlightActivePlaylistItem === 'function' ? grokHighlightActivePlaylistItem(url) : null),
+        togglePlaylist: (force) => (typeof grokTogglePlaylistPanel === 'function' ? grokTogglePlaylistPanel(force) : null)
     };

@@ -327,5 +327,10 @@
         const nextIdx = isNext ? curIdx + 1 : curIdx - 1;
         if (nextIdx < 0 || nextIdx >= items.length) return false;
         items[nextIdx].click();
+        setTimeout(() => {
+            if (typeof grokHighlightActivePlaylistItem === 'function') {
+                grokHighlightActivePlaylistItem();
+            }
+        }, 120);
         return true;
     }
