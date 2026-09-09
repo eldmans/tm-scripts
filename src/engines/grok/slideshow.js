@@ -1,28 +1,58 @@
-﻿    // ============================================================
+// ============================================================
     // GROK ENGINE: Gallery Slideshow (SPA Navigation, Tick, Loop)
     // ============================================================
 
     /**
-     * SPA-навигация на grok.com через Next.js router.push() — без перезагрузки страницы.
-     * Подтверждено: window.next.router доступен на grok.com.
-     * Fallback: клик по <a> или window.location.href (полный переход).
+     * Бесшовная SPA-навигация на grok.com:
+     * 1. Внутри одной группы — поиск кадра в киноплёнке (filmstrip) и клик без перезагрузки страницы.
+     * 2. Next.js router.push (если доступен в рантайме).
+     * 3. Fallback: межпостовой переход по location.href (только для перехода на ДРУГУЮ группу/пост).
      */
     function grokSpaNavigate(url) {
         if (!url) return;
         try {
             const urlObj = new URL(url, location.origin);
             const path = urlObj.pathname + urlObj.search;
+            const targetUuid = (typeof grokExtractUuid === 'function')
+                ? grokExtractUuid(urlObj.pathname)
+                : (urlObj.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
+
+            // 1. Приоритет: поиск в полосе киноплёнки (filmstrip) на текущей странице
+            if (targetUuid && typeof grokFindFilmstripItemByUuid === 'function') {
+                const filmstripBtn = grokFindFilmstripItemByUuid(targetUuid);
+                if (filmstripBtn) {
+                    console.log(`[MOSSAD] grokSpaNavigate: кадр ${targetUuid.slice(0, 8)} найден в filmstrip — кликаем без перезагрузки!`);
+                    filmstripBtn.click();
+
+                    // Ожидаем обновления URL (через history.replaceState Грока) и возобновляем тик слайдшоу
+                    let checks = 0;
+                    const checkInterval = setInterval(() => {
+                        checks++;
+                        const curUuid = (typeof grokExtractUuid === 'function')
+                            ? grokExtractUuid(location.pathname)
+                            : (location.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
+                        if ((curUuid && curUuid === targetUuid.toLowerCase()) || checks >= 12) {
+                            clearInterval(checkInterval);
+                            if (typeof grokGallerySlideshowTick === 'function') {
+                                grokGallerySlideshowTick();
+                            }
+                        }
+                    }, 50);
+                    return;
+                }
+            }
 
             let navigated = false;
 
-            // 1. Next.js router.push — основной метод (SPA без перезагрузки)
-            if (window.next && window.next.router && typeof window.next.router.push === 'function') {
-                window.next.router.push(path);
+            // 2. Next.js router.push — если доступен в контексте страницы
+            const nextRouter = (window.next && window.next.router) || (typeof unsafeWindow !== 'undefined' && unsafeWindow.next && unsafeWindow.next.router);
+            if (nextRouter && typeof nextRouter.push === 'function') {
+                nextRouter.push(path);
                 navigated = true;
             } else {
-                // 2. Клик по ссылке в DOM (если есть)
-                const anchor = document.querySelector([href=""])
-                            || document.querySelector([href=""]);
+                // 3. Клик по ссылке в DOM (если есть)
+                const anchor = document.querySelector(`a[href="${path}"]`)
+                            || document.querySelector(`a[href="${urlObj.pathname}"]`);
                 if (anchor) {
                     anchor.click();
                     navigated = true;
@@ -46,7 +76,9 @@
         } catch (e) {
             console.error('[MOSSAD] grokSpaNavigate error:', e);
         }
-        // 3. Fallback: полный переход
+
+        // 4. Межпостовой переход (только если кадр из ДРУГУЙ группы/поста)
+        console.log('[MOSSAD] grokSpaNavigate: пост не в текущей группе, открываем URL:', url);
         window.location.href = url;
     }
 
@@ -273,41 +305,51 @@
         setTimeout(() => scheduleNextSlideCycle(0), 300);
     }
 
-    /** Клавиши ←→ по коллекции (только если текущий пост есть в списке) */
+    /** Клавиши ←→ и ↑↓ по коллекции и полосе киноплёнки (filmstrip) */
     function grokGalleryKeyboardNav() {
         if (!isGrokPostPage()) return;
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-        if (!raw) return;
-        let data;
-        try { data = JSON.parse(raw); } catch { return; }
-        const items = data.items || [];
-        if (items.length === 0) return;
-
-        // UUID текущего поста
-        const currentId = location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
-        if (!currentId) return;
-        if (!items.some(it => it.url.includes(currentId))) return; // не наш пост — не перехватываем
+        let items = [];
+        if (raw) {
+            try { items = JSON.parse(raw).items || []; } catch {}
+        }
 
         document.addEventListener('keydown', function _gNav(e) {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
 
-            // Перепроверяем по актуальному URL
-            const curId = location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
-            const curIdx = curId ? items.findIndex(it => it.url.includes(curId)) : -1;
+            // Игнорируем нажатия внутри текстовых полей ввода промпта
+            const tag = (document.activeElement?.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || document.activeElement?.isContentEditable) return;
+
+            const isNext = (e.key === 'ArrowRight' || e.key === 'ArrowDown');
+
+            // UUID текущего поста
+            const curId = (typeof grokExtractUuid === 'function')
+                ? grokExtractUuid(location.pathname)
+                : location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
+
+            const curIdx = (curId && items.length > 0)
+                ? items.findIndex(it => it.url.toLowerCase().includes(curId.toLowerCase()))
+                : -1;
+
             if (curIdx === -1) {
-                document.removeEventListener('keydown', _gNav, true);
+                // Если текущего поста нет в собранной коллекции — шагаем по полосе киноплёнки (filmstrip)
+                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isNext)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
                 return;
             }
 
             e.preventDefault();
             e.stopPropagation();
 
-            const nextIdx = e.key === 'ArrowRight'
+            const nextIdx = isNext
                 ? (curIdx + 1) % items.length
                 : (curIdx - 1 + items.length) % items.length;
             const next = items[nextIdx];
             if (next.type) sessionStorage.setItem('mossad_expected_type', next.type);
-            showToast(←→ / • );
+            showToast(`${isNext ? '→' : '←'} ${nextIdx + 1}/${items.length} • ${next.type === 'video' ? '📹' : '🖼'}`);
             grokSpaNavigate(next.url);
         }, true); // capture — раньше страницы
     }

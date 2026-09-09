@@ -269,6 +269,14 @@
             return;
         }
 
+        // Grok навигация по киноплёнке (filmstrip) на странице поста
+        if (rootDomain === 'grok.com' && isGrokPostPage()) {
+            const isFwd = ['down', 'right'].includes((dirs && dirs.length) ? dirs[0] : 'down');
+            if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
+                return;
+            }
+        }
+
         // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
         const startUrl = location.href;
         const key = getArrowKey(dirs[0]);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.59
+// @version      1.3.0
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.2.59';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.0';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1089,7 +1089,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return rootDomain === 'grok.com' && /\/imagine\/saved/.test(location.pathname);
     }
 
-﻿// ============================================================
+// ============================================================
     // GROK HELPERS: Button Finders & Actions
     // ============================================================
 
@@ -1346,6 +1346,78 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
 
         return false;
+    }
+
+    // ============================================================
+    // GROK: Filmstrip (Киноплёнка) & Intra-group Navigation Helpers
+    // ============================================================
+
+    /**
+     * Извлекает 36-значный UUID генерации из URL или пути к ассету.
+     */
+    function grokExtractUuid(urlOrStr) {
+        if (!urlOrStr) return '';
+        const m = urlOrStr.match(/(?:post|generated)\/([a-f0-9-]{36})/i);
+        return m ? m[1].toLowerCase() : '';
+    }
+
+    /**
+     * Возвращает массив кнопок кадров на полосе киноплёнки (filmstrip).
+     */
+    function grokGetFilmstripItems() {
+        return Array.from(document.querySelectorAll('[data-filmstrip-item="true"], button[aria-label*="Thumbnail"], button[aria-label*="thumbnail"]'));
+    }
+
+    /**
+     * Находит кнопку в киноплёнке по UUID генерации.
+     */
+    function grokFindFilmstripItemByUuid(uuid) {
+        if (!uuid) return null;
+        const cleanUuid = uuid.toLowerCase();
+        const items = grokGetFilmstripItems();
+        return items.find(btn => {
+            const img = btn.querySelector('img, video, source');
+            if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
+            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+            if (aria.includes(cleanUuid)) return true;
+            return false;
+        }) || null;
+    }
+
+    /**
+     * Находит индекс активного (выбранного) кадра на киноплёнке.
+     */
+    function grokGetActiveFilmstripIndex() {
+        const items = grokGetFilmstripItems();
+        if (items.length === 0) return -1;
+        const curUuid = grokExtractUuid(location.pathname);
+        // 1. По классу выделения (ring-white)
+        const activeByClass = items.findIndex(btn => btn.className.includes('ring-white'));
+        if (activeByClass !== -1) return activeByClass;
+        // 2. По совпадению UUID ассета с текущим URL
+        if (curUuid) {
+            const activeByUuid = items.findIndex(btn => {
+                const img = btn.querySelector('img, video, source');
+                return img && img.src && img.src.toLowerCase().includes(curUuid);
+            });
+            if (activeByUuid !== -1) return activeByUuid;
+        }
+        return 0;
+    }
+
+    /**
+     * Шаг по киноплёнке (вперёд: down/right, назад: up/left).
+     * Возвращает true, если клик выполнен, false — если край или нет киноплёнки.
+     */
+    function grokStepFilmstrip(isNext = true) {
+        const items = grokGetFilmstripItems();
+        if (items.length <= 1) return false;
+        const curIdx = grokGetActiveFilmstripIndex();
+        if (curIdx === -1) return false;
+        const nextIdx = isNext ? curIdx + 1 : curIdx - 1;
+        if (nextIdx < 0 || nextIdx >= items.length) return false;
+        items[nextIdx].click();
+        return true;
     }
 
 ﻿// ============================================================
@@ -1815,31 +1887,61 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return loopItems;
     }
 
-﻿    // ============================================================
+// ============================================================
     // GROK ENGINE: Gallery Slideshow (SPA Navigation, Tick, Loop)
     // ============================================================
 
     /**
-     * SPA-навигация на grok.com через Next.js router.push() — без перезагрузки страницы.
-     * Подтверждено: window.next.router доступен на grok.com.
-     * Fallback: клик по <a> или window.location.href (полный переход).
+     * Бесшовная SPA-навигация на grok.com:
+     * 1. Внутри одной группы — поиск кадра в киноплёнке (filmstrip) и клик без перезагрузки страницы.
+     * 2. Next.js router.push (если доступен в рантайме).
+     * 3. Fallback: межпостовой переход по location.href (только для перехода на ДРУГУЮ группу/пост).
      */
     function grokSpaNavigate(url) {
         if (!url) return;
         try {
             const urlObj = new URL(url, location.origin);
             const path = urlObj.pathname + urlObj.search;
+            const targetUuid = (typeof grokExtractUuid === 'function')
+                ? grokExtractUuid(urlObj.pathname)
+                : (urlObj.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
+
+            // 1. Приоритет: поиск в полосе киноплёнки (filmstrip) на текущей странице
+            if (targetUuid && typeof grokFindFilmstripItemByUuid === 'function') {
+                const filmstripBtn = grokFindFilmstripItemByUuid(targetUuid);
+                if (filmstripBtn) {
+                    console.log(`[MOSSAD] grokSpaNavigate: кадр ${targetUuid.slice(0, 8)} найден в filmstrip — кликаем без перезагрузки!`);
+                    filmstripBtn.click();
+
+                    // Ожидаем обновления URL (через history.replaceState Грока) и возобновляем тик слайдшоу
+                    let checks = 0;
+                    const checkInterval = setInterval(() => {
+                        checks++;
+                        const curUuid = (typeof grokExtractUuid === 'function')
+                            ? grokExtractUuid(location.pathname)
+                            : (location.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
+                        if ((curUuid && curUuid === targetUuid.toLowerCase()) || checks >= 12) {
+                            clearInterval(checkInterval);
+                            if (typeof grokGallerySlideshowTick === 'function') {
+                                grokGallerySlideshowTick();
+                            }
+                        }
+                    }, 50);
+                    return;
+                }
+            }
 
             let navigated = false;
 
-            // 1. Next.js router.push — основной метод (SPA без перезагрузки)
-            if (window.next && window.next.router && typeof window.next.router.push === 'function') {
-                window.next.router.push(path);
+            // 2. Next.js router.push — если доступен в контексте страницы
+            const nextRouter = (window.next && window.next.router) || (typeof unsafeWindow !== 'undefined' && unsafeWindow.next && unsafeWindow.next.router);
+            if (nextRouter && typeof nextRouter.push === 'function') {
+                nextRouter.push(path);
                 navigated = true;
             } else {
-                // 2. Клик по ссылке в DOM (если есть)
-                const anchor = document.querySelector([href=""])
-                            || document.querySelector([href=""]);
+                // 3. Клик по ссылке в DOM (если есть)
+                const anchor = document.querySelector(`a[href="${path}"]`)
+                            || document.querySelector(`a[href="${urlObj.pathname}"]`);
                 if (anchor) {
                     anchor.click();
                     navigated = true;
@@ -1863,7 +1965,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         } catch (e) {
             console.error('[MOSSAD] grokSpaNavigate error:', e);
         }
-        // 3. Fallback: полный переход
+
+        // 4. Межпостовой переход (только если кадр из ДРУГУЙ группы/поста)
+        console.log('[MOSSAD] grokSpaNavigate: пост не в текущей группе, открываем URL:', url);
         window.location.href = url;
     }
 
@@ -2090,41 +2194,51 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         setTimeout(() => scheduleNextSlideCycle(0), 300);
     }
 
-    /** Клавиши ←→ по коллекции (только если текущий пост есть в списке) */
+    /** Клавиши ←→ и ↑↓ по коллекции и полосе киноплёнки (filmstrip) */
     function grokGalleryKeyboardNav() {
         if (!isGrokPostPage()) return;
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-        if (!raw) return;
-        let data;
-        try { data = JSON.parse(raw); } catch { return; }
-        const items = data.items || [];
-        if (items.length === 0) return;
-
-        // UUID текущего поста
-        const currentId = location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
-        if (!currentId) return;
-        if (!items.some(it => it.url.includes(currentId))) return; // не наш пост — не перехватываем
+        let items = [];
+        if (raw) {
+            try { items = JSON.parse(raw).items || []; } catch {}
+        }
 
         document.addEventListener('keydown', function _gNav(e) {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
 
-            // Перепроверяем по актуальному URL
-            const curId = location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
-            const curIdx = curId ? items.findIndex(it => it.url.includes(curId)) : -1;
+            // Игнорируем нажатия внутри текстовых полей ввода промпта
+            const tag = (document.activeElement?.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || document.activeElement?.isContentEditable) return;
+
+            const isNext = (e.key === 'ArrowRight' || e.key === 'ArrowDown');
+
+            // UUID текущего поста
+            const curId = (typeof grokExtractUuid === 'function')
+                ? grokExtractUuid(location.pathname)
+                : location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
+
+            const curIdx = (curId && items.length > 0)
+                ? items.findIndex(it => it.url.toLowerCase().includes(curId.toLowerCase()))
+                : -1;
+
             if (curIdx === -1) {
-                document.removeEventListener('keydown', _gNav, true);
+                // Если текущего поста нет в собранной коллекции — шагаем по полосе киноплёнки (filmstrip)
+                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isNext)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
                 return;
             }
 
             e.preventDefault();
             e.stopPropagation();
 
-            const nextIdx = e.key === 'ArrowRight'
+            const nextIdx = isNext
                 ? (curIdx + 1) % items.length
                 : (curIdx - 1 + items.length) % items.length;
             const next = items[nextIdx];
             if (next.type) sessionStorage.setItem('mossad_expected_type', next.type);
-            showToast(←→ / • );
+            showToast(`${isNext ? '→' : '←'} ${nextIdx + 1}/${items.length} • ${next.type === 'video' ? '📹' : '🖼'}`);
             grokSpaNavigate(next.url);
         }, true); // capture — раньше страницы
     }
@@ -3702,6 +3816,14 @@ function findMediaForDownload() {
                 redGifsNavigate(dir);
             }
             return;
+        }
+
+        // Grok навигация по киноплёнке (filmstrip) на странице поста
+        if (rootDomain === 'grok.com' && isGrokPostPage()) {
+            const isFwd = ['down', 'right'].includes((dirs && dirs.length) ? dirs[0] : 'down');
+            if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
+                return;
+            }
         }
 
         // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)

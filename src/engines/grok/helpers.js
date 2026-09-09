@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
     // GROK HELPERS: Button Finders & Actions
     // ============================================================
 
@@ -256,3 +256,76 @@
 
         return false;
     }
+
+    // ============================================================
+    // GROK: Filmstrip (Киноплёнка) & Intra-group Navigation Helpers
+    // ============================================================
+
+    /**
+     * Извлекает 36-значный UUID генерации из URL или пути к ассету.
+     */
+    function grokExtractUuid(urlOrStr) {
+        if (!urlOrStr) return '';
+        const m = urlOrStr.match(/(?:post|generated)\/([a-f0-9-]{36})/i);
+        return m ? m[1].toLowerCase() : '';
+    }
+
+    /**
+     * Возвращает массив кнопок кадров на полосе киноплёнки (filmstrip).
+     */
+    function grokGetFilmstripItems() {
+        return Array.from(document.querySelectorAll('[data-filmstrip-item="true"], button[aria-label*="Thumbnail"], button[aria-label*="thumbnail"]'));
+    }
+
+    /**
+     * Находит кнопку в киноплёнке по UUID генерации.
+     */
+    function grokFindFilmstripItemByUuid(uuid) {
+        if (!uuid) return null;
+        const cleanUuid = uuid.toLowerCase();
+        const items = grokGetFilmstripItems();
+        return items.find(btn => {
+            const img = btn.querySelector('img, video, source');
+            if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
+            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+            if (aria.includes(cleanUuid)) return true;
+            return false;
+        }) || null;
+    }
+
+    /**
+     * Находит индекс активного (выбранного) кадра на киноплёнке.
+     */
+    function grokGetActiveFilmstripIndex() {
+        const items = grokGetFilmstripItems();
+        if (items.length === 0) return -1;
+        const curUuid = grokExtractUuid(location.pathname);
+        // 1. По классу выделения (ring-white)
+        const activeByClass = items.findIndex(btn => btn.className.includes('ring-white'));
+        if (activeByClass !== -1) return activeByClass;
+        // 2. По совпадению UUID ассета с текущим URL
+        if (curUuid) {
+            const activeByUuid = items.findIndex(btn => {
+                const img = btn.querySelector('img, video, source');
+                return img && img.src && img.src.toLowerCase().includes(curUuid);
+            });
+            if (activeByUuid !== -1) return activeByUuid;
+        }
+        return 0;
+    }
+
+    /**
+     * Шаг по киноплёнке (вперёд: down/right, назад: up/left).
+     * Возвращает true, если клик выполнен, false — если край или нет киноплёнки.
+     */
+    function grokStepFilmstrip(isNext = true) {
+        const items = grokGetFilmstripItems();
+        if (items.length <= 1) return false;
+        const curIdx = grokGetActiveFilmstripIndex();
+        if (curIdx === -1) return false;
+        const nextIdx = isNext ? curIdx + 1 : curIdx - 1;
+        if (nextIdx < 0 || nextIdx >= items.length) return false;
+        items[nextIdx].click();
+        return true;
+    }
+
