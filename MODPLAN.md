@@ -28,10 +28,20 @@ tm-scripts/grok/
 │   │   ├── blob.js           # Скачивание blob/прямых ссылок и фолбэки
 │   │   └── router.js         # Маршрутизация поиска медиа и шаблоны имен файлов
 │   ├── engines/              # Изолированная логика по каждому сайту
-│   │   ├── grok.js           # Grok Imagine: галерея, smart delete, плеер
+│   │   ├── grok/             # Grok Imagine модули:
+│   │   │   ├── constants.js  # Ключи sessionStorage, предикаты страниц
+│   │   │   ├── helpers.js    # Поиск кнопок DOM, звук, апскейл, прямой DL
+│   │   │   ├── delete.js     # Smart delete, hold post, подтверждение
+│   │   │   ├── collect.js    # Сбор ссылок DOM, email scrape, экспорт .txt
+│   │   │   ├── queue.js      # Fisher-Yates, построение очередей (Gr/Md)
+│   │   │   ├── loop.js       # Единый менеджер зацикливания (R)
+│   │   │   ├── slideshow.js  # SPA-навигация, start/stop/tick, индикатор
+│   │   │   ├── ui-bar.js     # Тулбар галереи в виджете MOSSAD
+│   │   │   └── ui-playlist.js# Модальное окно плейлиста со списком
 │   │   ├── pinterest.js      # Pinterest: сетка пинов, история, авто-фулскрин
 │   │   ├── instagram.js      # Instagram: JSON scrape, перехват URL
-│   │   └── noodle.js         # NoodleMagazine: очистка рекламы
+│   │   ├── noodle.js         # NoodleMagazine: очистка рекламы
+│   │   └── redgifs.js        # RedGifs: плеер, скачивание, навигация
 │   ├── slideshow/
 │   │   └── engine.js         # Движок авто-слайдшоу, таймеры фото/видео, D-pad
 │   └── ui/
