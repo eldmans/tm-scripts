@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.0
+// @version      1.3.1
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.0';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.1';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1071,7 +1071,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
     }
 
-﻿    // ============================================================
+// ============================================================
     // GROK ENGINE: Constants & Page Predicates
     // ============================================================
     const GALLERY_COLLECTION_KEY = 'mossad_grok_imagine_collection';
@@ -1348,6 +1348,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return false;
     }
 
+
     // ============================================================
     // GROK: Filmstrip (Киноплёнка) & Intra-group Navigation Helpers
     // ============================================================
@@ -1420,7 +1421,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return true;
     }
 
-﻿// ============================================================
+// ============================================================
     // GROK: Smart Delete (3-dots fallback, a.confirm, hold-post)
     // ============================================================
     function getGrokNeighborPostUrl() {
@@ -1611,7 +1612,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
     }
 
-﻿    // ============================================================
+    // Граница: только на странице поста grok.com/imagine/post/... работают DL, Delete, слайдшоу и т.д.
+    const isGrokPostPage  = () => rootDomain === 'grok.com' && /\/imagine\/post\//.test(location.pathname);
+    const isGrokSavedPage = () => rootDomain === 'grok.com' && /\/imagine\/saved/.test(location.pathname);
+
+// ============================================================
     // GROK ENGINE: Collection Management (Scraping, Saving, Export)
     // ============================================================
 
@@ -1658,6 +1663,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return items;
     }
 
+
+
     /** Кнопка 1: сохранить коллекцию в sessionStorage — МЕРЖИТ с уже собранными */
     function grokSaveCollection(btnEl) {
         const newItems = grokCollectLinks();
@@ -1687,13 +1694,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const photos = existingItems.length - videos;
         _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({ date, items: existingItems }));
         if (btnEl) {
-            btnEl.textContent = 📋 Список ();
+            btnEl.textContent = `📋 Список (${existingItems.length})`;
             btnEl.style.background = '#065f46';
             btnEl.style.color = '#e5e7eb';
             btnEl.dataset.collectedCount = String(existingItems.length);
         }
-        const addMsg = addedCount > 0 ?  (+ новых) : ' (нет новых)';
-        showToast(✅ Итого:  → 📹 видео, 🖼 фото);
+        const addMsg = addedCount > 0 ? ` (+${addedCount} новых)` : ' (нет новых)';
+        showToast(`✅ Итого: ${existingItems.length}${addMsg} → 📹${videos} видео, 🖼${photos} фото`);
     }
 
     /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */
@@ -1705,18 +1712,18 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const items = data.items || [];
         const email = grokExtractEmail();
         const date  = data.date || new Date().toISOString().slice(0, 10);
-        const filename = ${email}___links.txt;
-        const blob = new Blob([items.map(i => ${i.url}\t).join('\n')], { type: 'text/plain' });
+        const filename = `${email}_${date}_${items.length}_links.txt`;
+        const blob = new Blob([items.map(i => `${i.url}\t${i.type}`).join('\n')], { type: 'text/plain' });
         const bUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = bUrl; a.download = filename;
         document.body.appendChild(a); a.click();
         setTimeout(() => { a.remove(); URL.revokeObjectURL(bUrl); }, 2000);
-        showToast(📥 Скачано: );
+        showToast(`📥 Скачано: ${filename}`);
     }
 
-﻿    // ============================================================
-    // GROK ENGINE: Queue Builder & Shuffle
+// ============================================================
+    // GROK ENGINE: Gallery Queue Builder & Shuffling
     // ============================================================
 
     /** Fisher-Yates перемешивание */
@@ -1728,6 +1735,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
         return a;
     }
+
+
 
     /** Строит очередь с учётом режима ssMode / grpOrder / itemOrder */
     function grokBuildGalleryQueue(allItems, ssState) {
@@ -1777,118 +1786,64 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return queue;
     }
 
-﻿    // ============================================================
-    // GROK ENGINE: Loop State Manager (R button in playlist & tick)
+    /**
+     * SPA-навигация на grok.com через Next.js router.push() — без перезагрузки страницы.
+     * Подтверждено: window.next.router доступен на grok.com.
+     * Fallback: клик по <a> или window.location.href (полный переход).
+     */
+
+// ============================================================
+    // GROK ENGINE: Loop R State Manager (Unified Storage & Lookup)
     // ============================================================
 
-    /** Читает текущий объект loopSet из sessionStorage */
     function getGrokLoopSet() {
+        const raw = _gSS.getItem(GALLERY_LOOP_KEY);
+        if (!raw) return { urls: [], groupIds: [] };
         try {
-            const lr = _gSS.getItem(GALLERY_LOOP_KEY);
-            if (lr) {
-                const parsed = JSON.parse(lr);
-                return {
-                    urls: Array.isArray(parsed.urls) ? parsed.urls : [],
-                    groupIds: Array.isArray(parsed.groupIds) ? parsed.groupIds : []
-                };
-            }
-        } catch (e) {
-            console.error('[MOSSAD] Failed to parse loop set:', e);
+            const parsed = JSON.parse(raw);
+            return {
+                urls: Array.isArray(parsed.urls) ? parsed.urls : [],
+                groupIds: Array.isArray(parsed.groupIds) ? parsed.groupIds : []
+            };
+        } catch {
+            return { urls: [], groupIds: [] };
         }
-        return { urls: [], groupIds: [] };
     }
 
-    /** Сохраняет объект loopSet в sessionStorage */
     function saveGrokLoopSet(loopSet) {
-        try {
-            _gSS.setItem(GALLERY_LOOP_KEY, JSON.stringify(loopSet || { urls: [], groupIds: [] }));
-        } catch (e) {
-            console.error('[MOSSAD] Failed to save loop set:', e);
-        }
+        _gSS.setItem(GALLERY_LOOP_KEY, JSON.stringify(loopSet));
     }
 
-    /** Полная очистка всех зацикленных элементов */
     function clearGrokLoopSet() {
-        saveGrokLoopSet({ urls: [], groupIds: [] });
+        _gSS.removeItem(GALLERY_LOOP_KEY);
     }
 
-    /** Проверяет, зациклен ли URL поста */
-    function isGrokUrlLooped(url, loopSet = null) {
+    function isGrokItemLooped(url, loopSet = null) {
         if (!url) return false;
-        const ls = loopSet || getGrokLoopSet();
-        const base = url.split('?')[0];
-        return ls.urls.some(u => u.split('?')[0] === base);
+        const set = loopSet || getGrokLoopSet();
+        const baseUrl = url.split('?')[0];
+        return set.urls.some(u => (u || '').split('?')[0] === baseUrl);
     }
 
-    /** Проверяет, зациклена ли группа */
-    function isGrokGroupLooped(gid, loopSet = null) {
-        if (!gid) return false;
-        const ls = loopSet || getGrokLoopSet();
-        return ls.groupIds.includes(gid);
+    function isGrokGroupLooped(convId, loopSet = null) {
+        if (!convId || convId === '__noconv__') return false;
+        const set = loopSet || getGrokLoopSet();
+        return set.groupIds.includes(convId);
     }
 
-    /** Переключает зацикливание для URL. Возвращает новое состояние (true/false) */
-    function toggleGrokUrlLoop(url) {
-        const ls = getGrokLoopSet();
-        const base = (url || '').split('?')[0];
-        const idx = ls.urls.findIndex(u => u.split('?')[0] === base);
-        let isActive = false;
-        if (idx >= 0) {
-            ls.urls.splice(idx, 1);
-            isActive = false;
-        } else {
-            ls.urls.push(url);
-            isActive = true;
-        }
-        saveGrokLoopSet(ls);
-        return isActive;
-    }
-
-    /** Переключает зацикливание для группы (convId). Возвращает новое состояние (true/false) */
-    function toggleGrokGroupLoop(gid) {
-        const ls = getGrokLoopSet();
-        const idx = ls.groupIds.indexOf(gid);
-        let isActive = false;
-        if (idx >= 0) {
-            ls.groupIds.splice(idx, 1);
-            isActive = false;
-        } else {
-            ls.groupIds.push(gid);
-            isActive = true;
-        }
-        saveGrokLoopSet(ls);
-        return isActive;
-    }
-
-    /** Возвращает количество всех активных зацикленных правил (url + groups) */
-    function getGrokLoopCount(loopSet = null) {
-        const ls = loopSet || getGrokLoopSet();
-        return ls.urls.length + ls.groupIds.length;
-    }
-
-    /**
-     * Извлекает список зацикленных элементов из полной коллекции.
-     * Если ничего не зациклено — возвращает пустой массив.
-     */
-    function getGrokActiveLoopItems(allItems, loopSet = null) {
-        const ls = loopSet || getGrokLoopSet();
-        if (ls.urls.length === 0 && ls.groupIds.length === 0) return [];
-        if (!Array.isArray(allItems) || allItems.length === 0) return [];
-
-        const loopItems = [];
-        for (const item of allItems) {
-            const baseUrl = (item.url || '').split('?')[0];
-            const inUrls = ls.urls.some(u => u.split('?')[0] === baseUrl);
-            const inGroups = ls.groupIds.includes(item.convId || '__noconv__');
-            if (inUrls || inGroups) {
-                loopItems.push(item);
-            }
-        }
-        return loopItems;
+    function getGrokActiveLoopItems(allItems) {
+        const set = getGrokLoopSet();
+        if (set.urls.length === 0 && set.groupIds.length === 0) return [];
+        return allItems.filter(it => {
+            const baseUrl = (it.url || '').split('?')[0];
+            const inUrls = set.urls.some(u => (u || '').split('?')[0] === baseUrl);
+            const inGrps = it.convId && set.groupIds.includes(it.convId);
+            return inUrls || inGrps;
+        });
     }
 
 // ============================================================
-    // GROK ENGINE: Gallery Slideshow (SPA Navigation, Tick, Loop)
+    // GROK ENGINE: Gallery Slideshow (Filmstrip & SPA Navigation, Tick, Loop)
     // ============================================================
 
     /**
@@ -1949,7 +1904,6 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
 
             if (navigated) {
-                // Ждём смены URL и перезапускаем/обновляем тик слайдшоу
                 let checks = 0;
                 const checkInterval = setInterval(() => {
                     checks++;
@@ -1966,7 +1920,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             console.error('[MOSSAD] grokSpaNavigate error:', e);
         }
 
-        // 4. Межпостовой переход (только если кадр из ДРУГУЙ группы/поста)
+        // 4. Межпостовой переход (только если кадр из ДРУГОЙ группы/поста)
         console.log('[MOSSAD] grokSpaNavigate: пост не в текущей группе, открываем URL:', url);
         window.location.href = url;
     }
@@ -1988,6 +1942,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             });
         } catch(e) { /* AudioContext может быть заблокирован */ }
     }
+
 
     /** Кнопка 2: запустить слайдшоу по коллекции (с учётом текущего режима) */
     function grokStartGallerySlideshow() {
@@ -2019,8 +1974,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
 
         const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
-        const modeLabel = Gr Md;
-        showToast(▶ Слайдшоу []:  генераций);
+        const modeLabel = `Gr${grIcon[ssState.grpMode]||'↓'} Md${grIcon[ssState.itemMode]||'↓'}`;
+        showToast(`▶ Слайдшоу [${modeLabel}]: ${allItems.length} генераций`);
         const next = queue.shift();
         ss.queue = queue;
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
@@ -2048,7 +2003,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             grpMode: ssState.grpMode, itemMode: ssState.itemMode };
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
-        showToast(▶ Слайдшоу с выбранного элемента);
+        showToast(`▶ Слайдшоу с выбранного элемента`);
         setTimeout(() => { grokSpaNavigate(startItem.url); }, 300);
     }
 
@@ -2101,6 +2056,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
     }
 
+
     /** На странице поста — продолжение Gallery Slideshow через стандартный движок MOSSAD */
     function grokGallerySlideshowTick() {
         if (!isGrokPostPage()) return;
@@ -2115,21 +2071,21 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (!indicator) {
             indicator = document.createElement('div');
             indicator.id = 'mossad-gallery-indicator';
-            indicator.style.cssText = 
+            indicator.style.cssText = `
                 position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
                 z-index:999999; background:rgba(15,15,15,0.88); backdrop-filter:blur(12px);
                 border:1px solid rgba(255,255,255,0.1); border-radius:10px;
                 padding:5px 14px; font-family:system-ui,sans-serif; font-size:11px;
                 color:#9ca3af; display:flex; align-items:center; gap:8px;
                 box-shadow:0 4px 20px rgba(0,0,0,0.5);
-            ;
+            `;
             document.body.appendChild(indicator);
         }
         const qLeft  = (ss.queue || []).length;
         const showed = (ss.total || 0) - qLeft;
         const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
-        const modeTag = Gr Md;
-        indicator.innerHTML = <span id="mgi-status">▶  · / · Круг </span>;
+        const modeTag = `Gr${grIcon[ss.grpMode]||'↓'} Md${grIcon[ss.itemMode]||'↓'}`;
+        indicator.innerHTML = `<span id="mgi-status">▶ ${modeTag} · ${showed}/${ss.total} · Круг ${ss.circle}</span>`;
 
         // Обновляем статус-кнопку в галерейной строке
         updateGalleryStatusBtn('playing');
@@ -2158,23 +2114,41 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     itemMode:  ss.itemMode  || ss.itemOrder || 'fwd',
                 };
                 queue = grokBuildGalleryQueue(allItems, ssState);
-                showToast(🔄 Круг  начался! ( генераций));
+                showToast(`🔄 Круг ${circle} начался! (${queue.length} генераций)`);
             }
 
             // ── Проверяем loop (R): зациклен ли один/несколько элементов ──
-            const colRaw2 = _gSS.getItem(GALLERY_COLLECTION_KEY);
-            const allCol = colRaw2 ? (JSON.parse(colRaw2).items || []) : [];
-            const loopItems = getGrokActiveLoopItems(allCol);
-            if (loopItems.length > 0) {
-                const loopIdx = (ss.loopIdx || 0) % loopItems.length;
-                const loopNext = loopItems[loopIdx];
-                ss.loopIdx = loopIdx + 1;
-                ss.queue  = queue;
-                ss.circle = circle;
-                _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
-                if (loopNext.type) sessionStorage.setItem('mossad_expected_type', loopNext.type);
-                grokSpaNavigate(loopNext.url);
-                return;
+            const loopRaw = _gSS.getItem('mossad_grok_loop_set');
+            if (loopRaw) {
+                try {
+                    const loopSet = JSON.parse(loopRaw);
+                    const loopUrls = loopSet.urls || [];
+                    const loopGroupIds = loopSet.groupIds || [];
+                    if (loopUrls.length > 0 || loopGroupIds.length > 0) {
+                        let loopItems = [];
+                        const colRaw2 = _gSS.getItem(GALLERY_COLLECTION_KEY);
+                        if (colRaw2) {
+                            const allCol = JSON.parse(colRaw2).items || [];
+                            for (const item of allCol) {
+                                const baseUrl = (item.url || '').split('?')[0];
+                                const inUrls = loopUrls.some(u => u.split('?')[0] === baseUrl);
+                                const inGroups = loopGroupIds.includes(item.convId || '__noconv__');
+                                if (inUrls || inGroups) loopItems.push(item);
+                            }
+                        }
+                        if (loopItems.length > 0) {
+                            const loopIdx = (ss.loopIdx || 0) % loopItems.length;
+                            const loopNext = loopItems[loopIdx];
+                            ss.loopIdx = loopIdx + 1;
+                            ss.queue  = queue;
+                            ss.circle = circle;
+                            _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+                            if (loopNext.type) sessionStorage.setItem('mossad_expected_type', loopNext.type);
+                            grokSpaNavigate(loopNext.url);
+                            return;
+                        }
+                    }
+                } catch(e) {}
             }
 
             const next = queue.shift();
@@ -2193,6 +2167,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (window.updateWidgetUI) window.updateWidgetUI();
         setTimeout(() => scheduleNextSlideCycle(0), 300);
     }
+
+
 
     /** Клавиши ←→ и ↑↓ по коллекции и полосе киноплёнки (filmstrip) */
     function grokGalleryKeyboardNav() {
@@ -2257,8 +2233,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         start: grokStartGallerySlideshow
     };
 
-﻿    // ============================================================
-    // GROK ENGINE: UI Gallery Bar (MOSSAD Widget Toolbar)
+// ============================================================
+    // GROK ENGINE: UI Gallery Bar (Main Widget Sub-panel)
     // ============================================================
 
     /** Инициализация строки галереи внутри виджета MOSSAD (для всех страниц grok.com) */
@@ -2271,18 +2247,18 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         const row = document.createElement('div');
         row.id = 'mossad-gallery-row';
-        row.style.cssText = 
+        row.style.cssText = `
             background: rgba(20,20,20,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 6px 10px;
             display: flex; align-items: center; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             font-family: system-ui,-apple-system,sans-serif; cursor: grab; flex-wrap: wrap;
-        ;
+        `;
 
         // ── Утилита создания маленьких кнопок ──
         const mkBtn = (id, text, title, css) => {
             const b = document.createElement('button');
             b.id = id; b.textContent = text; b.title = title;
-            b.style.cssText = cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;transition:all 0.2s;;
+            b.style.cssText = `cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;transition:all 0.2s;${css}`;
             return b;
         };
 
@@ -2294,8 +2270,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const cRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
             if (cRaw) savedCount = (JSON.parse(cRaw).items || []).length;
         } catch(e) {}
-        btnCollect.textContent = savedCount > 0 ? 📋 Список () : '📋 Собрать';
-        btnCollect.style.cssText = cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;;
+        btnCollect.textContent = savedCount > 0 ? `📋 Список (${savedCount})` : '📋 Собрать';
+        btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
 
         // Клик: на /saved — собирать; иначе — открывать плейлист (если есть коллекция)
         btnCollect.onclick = () => {
@@ -2318,7 +2294,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 if (currentCount !== sc) {
                     const diff = currentCount - sc;
                     const sign = diff > 0 ? '+' : '';
-                    btnCollect.textContent = 📋 Список () 🔴;
+                    btnCollect.textContent = `📋 Список (${sc}) 🔴${sign}${diff}`;
                     btnCollect.style.color = '#fca5a5';
                 }
             }, 2000);
@@ -2335,7 +2311,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         const btnStatus = document.createElement('button');
         btnStatus.id = 'mossad-gallery-status';
-        btnStatus.style.cssText = cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;transition:all 0.2s;;
+        btnStatus.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;transition:all 0.2s;`;
         if (_ssActive) {
             btnStatus.textContent = '▶ Идёт'; btnStatus.style.background = '#064e3b'; btnStatus.style.color = '#34d399';
         } else {
@@ -2408,28 +2384,28 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         // Кнопка Gr (порядок групп)
         const btnGr = mkBtn('mossad-gallery-grmode',
-            Gr,
+            `Gr${GR_ICONS[grpModeCfg]}`,
             GR_TIPS[grpModeCfg] || '',
             grBtnCss(grpModeCfg));
         btnGr.onclick = () => {
             const idx = GR_STATES.indexOf(grpModeCfg);
             grpModeCfg = GR_STATES[(idx + 1) % GR_STATES.length];
             saveModeToCollection('grpMode', grpModeCfg);
-            btnGr.textContent = Gr;
+            btnGr.textContent = `Gr${GR_ICONS[grpModeCfg]}`;
             btnGr.title       = GR_TIPS[grpModeCfg];
             btnGr.style.cssText = BASE_BTN + grBtnCss(grpModeCfg);
         };
 
         // Кнопка Md (порядок внутри группы)
         const btnMd = mkBtn('mossad-gallery-mdmode',
-            Md,
+            `Md${MD_ICONS[itemModeCfg]}`,
             MD_TIPS[itemModeCfg] || '',
             mdBtnCss(itemModeCfg));
         btnMd.onclick = () => {
             const idx = MD_STATES.indexOf(itemModeCfg);
             itemModeCfg = MD_STATES[(idx + 1) % MD_STATES.length];
             saveModeToCollection('itemMode', itemModeCfg);
-            btnMd.textContent = Md;
+            btnMd.textContent = `Md${MD_ICONS[itemModeCfg]}`;
             btnMd.title       = MD_TIPS[itemModeCfg];
             btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
         };
@@ -2443,7 +2419,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         btnToggleTop.id = 'mossad-gallery-toggle-top';
         btnToggleTop.innerHTML = '▼';
         btnToggleTop.title = 'Показать / скрыть панель управления';
-        btnToggleTop.style.cssText = ackground:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 4px;transition:color 0.2s;;
+        btnToggleTop.style.cssText = `background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 4px;transition:color 0.2s;`;
         btnToggleTop.onclick = () => {
             window.widgetState = window.widgetState === 'hidden' ? 'bar' : 'hidden';
             if (window.updateWidgetUI) window.updateWidgetUI();
@@ -2457,7 +2433,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
     }
 
-﻿    // ============================================================
+// ============================================================
     // GROK ENGINE: UI Playlist Panel (Modal List with Loop R controls)
     // ============================================================
 
@@ -2473,59 +2449,65 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const items = data.items || [];
         if (!items.length) { showToast('⚠️ Коллекция пуста', true); return; }
 
-        // Читаем текущий loop-set через единый менеджер
-        let loopSet = getGrokLoopSet();
+        // Читаем текущий loop-set
+        let loopSet = { urls: [], groupIds: [] };
+        try {
+            const lr = _gSS.getItem('mossad_grok_loop_set');
+            if (lr) loopSet = JSON.parse(lr);
+        } catch(e) {}
+        const saveLoopSet = () => _gSS.setItem('mossad_grok_loop_set', JSON.stringify(loopSet));
 
         const panel = document.createElement('div');
         panel.id = 'mossad-playlist-panel';
-        panel.style.cssText = 
+        panel.style.cssText = `
             position:fixed; top:70px; right:16px; z-index:9999999;
             width:320px; max-height:75vh; overflow-y:auto;
             background:rgba(12,12,16,0.96); backdrop-filter:blur(20px);
             border:1px solid rgba(255,255,255,0.12); border-radius:14px;
             font-family:system-ui,sans-serif; font-size:12px; color:#d1d5db;
             box-shadow:0 20px 60px rgba(0,0,0,0.7);
-        ;
+        `;
 
         // ── Заголовок ──
         const header = document.createElement('div');
-        header.style.cssText = display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.08);gap:6px;;
+        header.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.08);gap:6px;`;
 
         const titleEl = document.createElement('span');
-        titleEl.style.cssText = ont-weight:700;font-size:13px;flex:1;;
-        titleEl.textContent = 📋 Список ();
+        titleEl.style.cssText = `font-weight:700;font-size:13px;flex:1;`;
+        titleEl.textContent = `📋 Список (${items.length})`;
 
         // Кнопка «отключить все R» — появляется если зациклено 2+ элементов
         const btnClearLoop = document.createElement('button');
         btnClearLoop.textContent = 'R ✕';
         btnClearLoop.title = 'Отключить все зацикленные';
-        btnClearLoop.style.cssText = ackground:#7f1d1d;border:none;border-radius:4px;color:#fca5a5;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer;display:;;
+        btnClearLoop.style.cssText = `background:#7f1d1d;border:none;border-radius:4px;color:#fca5a5;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer;display:${(loopSet.urls.length + loopSet.groupIds.length) > 1 ? 'inline-block' : 'none'};`;
         btnClearLoop.onclick = () => {
-            clearGrokLoopSet();
+            loopSet = { urls: [], groupIds: [] };
+            saveLoopSet();
             panel.remove();
             grokTogglePlaylistPanel();
         };
 
         const btnClose = document.createElement('button');
         btnClose.textContent = '×';
-        btnClose.style.cssText = ackground:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0;;
+        btnClose.style.cssText = `background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0;`;
         btnClose.onclick = () => panel.remove();
 
         header.append(titleEl, btnClearLoop, btnClose);
         panel.appendChild(header);
 
         const body = document.createElement('div');
-        body.style.cssText = padding:8px;;
+        body.style.cssText = `padding:8px;`;
 
         // ── Утилита: кнопка R ──
         const makeRBtn = (isActive, onToggle) => {
             const btn = document.createElement('button');
             btn.textContent = 'R';
-            btn.style.cssText = 
+            btn.style.cssText = `
                 background:none;border:none;cursor:pointer;font-weight:700;font-size:11px;
                 padding:0 4px;flex-shrink:0;transition:color 0.15s;
-                color:;
-            ;
+                color:${isActive ? '#f87171' : '#374151'};
+            `;
             btn.title = isActive ? 'Зациклено — клик для отмены' : 'Зациклить';
             btn.onclick = (e) => {
                 e.stopPropagation();
@@ -2549,52 +2531,55 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             for (const gid of groupOrder) {
                 const gItems = groups[gid];
                 const grpEl = document.createElement('div');
-                grpEl.style.cssText = margin-bottom:8px;border:1px solid rgba(255,255,255,0.07);border-radius:8px;overflow:hidden;;
+                grpEl.style.cssText = `margin-bottom:8px;border:1px solid rgba(255,255,255,0.07);border-radius:8px;overflow:hidden;`;
 
                 const grpHeader = document.createElement('div');
                 const shortId = gid === '__noconv__' ? 'Без группы' : gid.slice(0, 8) + '…';
-                grpHeader.style.cssText = display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.04);;
-                grpHeader.title = Группа: ;
+                grpHeader.style.cssText = `display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.04);`;
+                grpHeader.title = `Группа: ${gid}`;
 
-                const isGrpLooped = isGrokGroupLooped(gid, loopSet);
+                const isGrpLooped = loopSet.groupIds.includes(gid);
                 const rGrp = makeRBtn(isGrpLooped, (btn) => {
-                    const active = toggleGrokGroupLoop(gid);
-                    loopSet = getGrokLoopSet();
-                    btn.style.color = active ? '#f87171' : '#374151';
-                    btn.title = active ? 'Зациклено — клик для отмены' : 'Зациклить';
-                    btnClearLoop.style.display = getGrokLoopCount(loopSet) > 1 ? 'inline-block' : 'none';
+                    const i = loopSet.groupIds.indexOf(gid);
+                    if (i >= 0) { loopSet.groupIds.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
+                    else { loopSet.groupIds.push(gid); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
+                    saveLoopSet();
+                    const total = loopSet.urls.length + loopSet.groupIds.length;
+                    btnClearLoop.style.display = total > 1 ? 'inline-block' : 'none';
                 });
 
                 const grpLabel = document.createElement('span');
-                grpLabel.style.cssText = lex:1;font-weight:600;font-size:11px;color:#7dd3fc;cursor:pointer;;
+                grpLabel.style.cssText = `flex:1;font-weight:600;font-size:11px;color:#7dd3fc;cursor:pointer;`;
                 grpLabel.textContent = shortId;
                 grpLabel.onclick = () => { panel.remove(); grokStartGallerySlideshowFrom(gItems[0]); };
 
                 const grpCount = document.createElement('span');
-                grpCount.style.cssText = color:#6b7280;font-size:10px;;
-                grpCount.textContent = ${gItems.length} ген.;
+                grpCount.style.cssText = `color:#6b7280;font-size:10px;`;
+                grpCount.textContent = `${gItems.length} ген.`;
 
                 grpHeader.append(rGrp, grpLabel, grpCount);
                 grpEl.appendChild(grpHeader);
 
                 const listEl = document.createElement('div');
-                listEl.style.cssText = padding:3px 8px;;
+                listEl.style.cssText = `padding:3px 8px;`;
                 gItems.forEach((item, idx) => {
                     const li = document.createElement('div');
-                    li.style.cssText = display:flex;align-items:center;gap:4px;padding:2px 2px;border-radius:4px;font-size:10px;;
+                    li.style.cssText = `display:flex;align-items:center;gap:4px;padding:2px 2px;border-radius:4px;font-size:10px;`;
 
-                    const isLooped = isGrokUrlLooped(item.url, loopSet);
+                    const baseUrl = (item.url || '').split('?')[0];
+                    const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
                     const rItem = makeRBtn(isLooped, (btn) => {
-                        const active = toggleGrokUrlLoop(item.url);
-                        loopSet = getGrokLoopSet();
-                        btn.style.color = active ? '#f87171' : '#374151';
-                        btn.title = active ? 'Зациклено — клик для отмены' : 'Зациклить';
-                        btnClearLoop.style.display = getGrokLoopCount(loopSet) > 1 ? 'inline-block' : 'none';
+                        const i = loopSet.urls.findIndex(u => u.split('?')[0] === baseUrl);
+                        if (i >= 0) { loopSet.urls.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
+                        else { loopSet.urls.push(item.url); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
+                        saveLoopSet();
+                        const total = loopSet.urls.length + loopSet.groupIds.length;
+                        btnClearLoop.style.display = total > 1 ? 'inline-block' : 'none';
                     });
 
                     const label = document.createElement('span');
-                    label.style.cssText = lex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;;
-                    label.textContent = ${idx + 1}.  ;
+                    label.style.cssText = `flex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+                    label.textContent = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${item.url.split('/').pop().split('?')[0].slice(0, 22)}`;
                     label.title = item.url;
                     label.onmouseover = () => li.style.background = 'rgba(255,255,255,0.04)';
                     label.onmouseout  = () => li.style.background = 'transparent';
@@ -2609,20 +2594,22 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         } else {
             items.forEach((item, idx) => {
                 const li = document.createElement('div');
-                li.style.cssText = display:flex;align-items:center;gap:4px;padding:3px 4px;border-radius:6px;font-size:11px;;
+                li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 4px;border-radius:6px;font-size:11px;`;
 
-                const isLooped = isGrokUrlLooped(item.url, loopSet);
+                const baseUrl = (item.url || '').split('?')[0];
+                const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
                 const rItem = makeRBtn(isLooped, (btn) => {
-                    const active = toggleGrokUrlLoop(item.url);
-                    loopSet = getGrokLoopSet();
-                    btn.style.color = active ? '#f87171' : '#374151';
-                    btn.title = active ? 'Зациклено — клик для отмены' : 'Зациклить';
-                    btnClearLoop.style.display = getGrokLoopCount(loopSet) > 1 ? 'inline-block' : 'none';
+                    const i = loopSet.urls.findIndex(u => u.split('?')[0] === baseUrl);
+                    if (i >= 0) { loopSet.urls.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
+                    else { loopSet.urls.push(item.url); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
+                    saveLoopSet();
+                    const total = loopSet.urls.length + loopSet.groupIds.length;
+                    btnClearLoop.style.display = total > 1 ? 'inline-block' : 'none';
                 });
 
                 const label = document.createElement('span');
-                label.style.cssText = lex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;;
-                label.textContent = ${idx + 1}.  ;
+                label.style.cssText = `flex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+                label.textContent = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${item.url.split('/').pop().split('?')[0].slice(0, 26)}`;
                 label.title = item.url;
                 label.onmouseover = () => li.style.background = 'rgba(255,255,255,0.06)';
                 label.onmouseout  = () => li.style.background = 'transparent';

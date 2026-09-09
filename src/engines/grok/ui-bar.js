@@ -1,5 +1,5 @@
-﻿    // ============================================================
-    // GROK ENGINE: UI Gallery Bar (MOSSAD Widget Toolbar)
+    // ============================================================
+    // GROK ENGINE: UI Gallery Bar (Main Widget Sub-panel)
     // ============================================================
 
     /** Инициализация строки галереи внутри виджета MOSSAD (для всех страниц grok.com) */
@@ -12,18 +12,18 @@
 
         const row = document.createElement('div');
         row.id = 'mossad-gallery-row';
-        row.style.cssText = 
+        row.style.cssText = `
             background: rgba(20,20,20,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 6px 10px;
             display: flex; align-items: center; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             font-family: system-ui,-apple-system,sans-serif; cursor: grab; flex-wrap: wrap;
-        ;
+        `;
 
         // ── Утилита создания маленьких кнопок ──
         const mkBtn = (id, text, title, css) => {
             const b = document.createElement('button');
             b.id = id; b.textContent = text; b.title = title;
-            b.style.cssText = cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;transition:all 0.2s;;
+            b.style.cssText = `cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;transition:all 0.2s;${css}`;
             return b;
         };
 
@@ -35,8 +35,8 @@
             const cRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
             if (cRaw) savedCount = (JSON.parse(cRaw).items || []).length;
         } catch(e) {}
-        btnCollect.textContent = savedCount > 0 ? 📋 Список () : '📋 Собрать';
-        btnCollect.style.cssText = cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;;
+        btnCollect.textContent = savedCount > 0 ? `📋 Список (${savedCount})` : '📋 Собрать';
+        btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
 
         // Клик: на /saved — собирать; иначе — открывать плейлист (если есть коллекция)
         btnCollect.onclick = () => {
@@ -59,7 +59,7 @@
                 if (currentCount !== sc) {
                     const diff = currentCount - sc;
                     const sign = diff > 0 ? '+' : '';
-                    btnCollect.textContent = 📋 Список () 🔴;
+                    btnCollect.textContent = `📋 Список (${sc}) 🔴${sign}${diff}`;
                     btnCollect.style.color = '#fca5a5';
                 }
             }, 2000);
@@ -76,7 +76,7 @@
 
         const btnStatus = document.createElement('button');
         btnStatus.id = 'mossad-gallery-status';
-        btnStatus.style.cssText = cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;transition:all 0.2s;;
+        btnStatus.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;transition:all 0.2s;`;
         if (_ssActive) {
             btnStatus.textContent = '▶ Идёт'; btnStatus.style.background = '#064e3b'; btnStatus.style.color = '#34d399';
         } else {
@@ -149,28 +149,28 @@
 
         // Кнопка Gr (порядок групп)
         const btnGr = mkBtn('mossad-gallery-grmode',
-            Gr,
+            `Gr${GR_ICONS[grpModeCfg]}`,
             GR_TIPS[grpModeCfg] || '',
             grBtnCss(grpModeCfg));
         btnGr.onclick = () => {
             const idx = GR_STATES.indexOf(grpModeCfg);
             grpModeCfg = GR_STATES[(idx + 1) % GR_STATES.length];
             saveModeToCollection('grpMode', grpModeCfg);
-            btnGr.textContent = Gr;
+            btnGr.textContent = `Gr${GR_ICONS[grpModeCfg]}`;
             btnGr.title       = GR_TIPS[grpModeCfg];
             btnGr.style.cssText = BASE_BTN + grBtnCss(grpModeCfg);
         };
 
         // Кнопка Md (порядок внутри группы)
         const btnMd = mkBtn('mossad-gallery-mdmode',
-            Md,
+            `Md${MD_ICONS[itemModeCfg]}`,
             MD_TIPS[itemModeCfg] || '',
             mdBtnCss(itemModeCfg));
         btnMd.onclick = () => {
             const idx = MD_STATES.indexOf(itemModeCfg);
             itemModeCfg = MD_STATES[(idx + 1) % MD_STATES.length];
             saveModeToCollection('itemMode', itemModeCfg);
-            btnMd.textContent = Md;
+            btnMd.textContent = `Md${MD_ICONS[itemModeCfg]}`;
             btnMd.title       = MD_TIPS[itemModeCfg];
             btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
         };
@@ -184,7 +184,7 @@
         btnToggleTop.id = 'mossad-gallery-toggle-top';
         btnToggleTop.innerHTML = '▼';
         btnToggleTop.title = 'Показать / скрыть панель управления';
-        btnToggleTop.style.cssText = ackground:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 4px;transition:color 0.2s;;
+        btnToggleTop.style.cssText = `background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 4px;transition:color 0.2s;`;
         btnToggleTop.onclick = () => {
             window.widgetState = window.widgetState === 'hidden' ? 'bar' : 'hidden';
             if (window.updateWidgetUI) window.updateWidgetUI();
@@ -197,3 +197,4 @@
             window.makeWidgetDraggable(row);
         }
     }
+

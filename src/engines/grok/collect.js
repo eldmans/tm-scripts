@@ -1,4 +1,4 @@
-﻿    // ============================================================
+    // ============================================================
     // GROK ENGINE: Collection Management (Scraping, Saving, Export)
     // ============================================================
 
@@ -45,6 +45,8 @@
         return items;
     }
 
+
+
     /** Кнопка 1: сохранить коллекцию в sessionStorage — МЕРЖИТ с уже собранными */
     function grokSaveCollection(btnEl) {
         const newItems = grokCollectLinks();
@@ -74,13 +76,13 @@
         const photos = existingItems.length - videos;
         _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({ date, items: existingItems }));
         if (btnEl) {
-            btnEl.textContent = 📋 Список ();
+            btnEl.textContent = `📋 Список (${existingItems.length})`;
             btnEl.style.background = '#065f46';
             btnEl.style.color = '#e5e7eb';
             btnEl.dataset.collectedCount = String(existingItems.length);
         }
-        const addMsg = addedCount > 0 ?  (+ новых) : ' (нет новых)';
-        showToast(✅ Итого:  → 📹 видео, 🖼 фото);
+        const addMsg = addedCount > 0 ? ` (+${addedCount} новых)` : ' (нет новых)';
+        showToast(`✅ Итого: ${existingItems.length}${addMsg} → 📹${videos} видео, 🖼${photos} фото`);
     }
 
     /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */
@@ -92,12 +94,13 @@
         const items = data.items || [];
         const email = grokExtractEmail();
         const date  = data.date || new Date().toISOString().slice(0, 10);
-        const filename = ${email}___links.txt;
-        const blob = new Blob([items.map(i => ${i.url}\t).join('\n')], { type: 'text/plain' });
+        const filename = `${email}_${date}_${items.length}_links.txt`;
+        const blob = new Blob([items.map(i => `${i.url}\t${i.type}`).join('\n')], { type: 'text/plain' });
         const bUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = bUrl; a.download = filename;
         document.body.appendChild(a); a.click();
         setTimeout(() => { a.remove(); URL.revokeObjectURL(bUrl); }, 2000);
-        showToast(📥 Скачано: );
+        showToast(`📥 Скачано: ${filename}`);
     }
+

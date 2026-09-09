@@ -1,5 +1,5 @@
-// ============================================================
-    // GROK ENGINE: Gallery Slideshow (SPA Navigation, Tick, Loop)
+    // ============================================================
+    // GROK ENGINE: Gallery Slideshow (Filmstrip & SPA Navigation, Tick, Loop)
     // ============================================================
 
     /**
@@ -60,7 +60,6 @@
             }
 
             if (navigated) {
-                // Ждём смены URL и перезапускаем/обновляем тик слайдшоу
                 let checks = 0;
                 const checkInterval = setInterval(() => {
                     checks++;
@@ -77,7 +76,7 @@
             console.error('[MOSSAD] grokSpaNavigate error:', e);
         }
 
-        // 4. Межпостовой переход (только если кадр из ДРУГУЙ группы/поста)
+        // 4. Межпостовой переход (только если кадр из ДРУГОЙ группы/поста)
         console.log('[MOSSAD] grokSpaNavigate: пост не в текущей группе, открываем URL:', url);
         window.location.href = url;
     }
@@ -99,6 +98,7 @@
             });
         } catch(e) { /* AudioContext может быть заблокирован */ }
     }
+
 
     /** Кнопка 2: запустить слайдшоу по коллекции (с учётом текущего режима) */
     function grokStartGallerySlideshow() {
@@ -130,8 +130,8 @@
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
 
         const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
-        const modeLabel = Gr Md;
-        showToast(▶ Слайдшоу []:  генераций);
+        const modeLabel = `Gr${grIcon[ssState.grpMode]||'↓'} Md${grIcon[ssState.itemMode]||'↓'}`;
+        showToast(`▶ Слайдшоу [${modeLabel}]: ${allItems.length} генераций`);
         const next = queue.shift();
         ss.queue = queue;
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
@@ -159,7 +159,7 @@
             grpMode: ssState.grpMode, itemMode: ssState.itemMode };
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
-        showToast(▶ Слайдшоу с выбранного элемента);
+        showToast(`▶ Слайдшоу с выбранного элемента`);
         setTimeout(() => { grokSpaNavigate(startItem.url); }, 300);
     }
 
@@ -212,6 +212,7 @@
         }
     }
 
+
     /** На странице поста — продолжение Gallery Slideshow через стандартный движок MOSSAD */
     function grokGallerySlideshowTick() {
         if (!isGrokPostPage()) return;
@@ -226,21 +227,21 @@
         if (!indicator) {
             indicator = document.createElement('div');
             indicator.id = 'mossad-gallery-indicator';
-            indicator.style.cssText = 
+            indicator.style.cssText = `
                 position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
                 z-index:999999; background:rgba(15,15,15,0.88); backdrop-filter:blur(12px);
                 border:1px solid rgba(255,255,255,0.1); border-radius:10px;
                 padding:5px 14px; font-family:system-ui,sans-serif; font-size:11px;
                 color:#9ca3af; display:flex; align-items:center; gap:8px;
                 box-shadow:0 4px 20px rgba(0,0,0,0.5);
-            ;
+            `;
             document.body.appendChild(indicator);
         }
         const qLeft  = (ss.queue || []).length;
         const showed = (ss.total || 0) - qLeft;
         const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
-        const modeTag = Gr Md;
-        indicator.innerHTML = <span id="mgi-status">▶  · / · Круг </span>;
+        const modeTag = `Gr${grIcon[ss.grpMode]||'↓'} Md${grIcon[ss.itemMode]||'↓'}`;
+        indicator.innerHTML = `<span id="mgi-status">▶ ${modeTag} · ${showed}/${ss.total} · Круг ${ss.circle}</span>`;
 
         // Обновляем статус-кнопку в галерейной строке
         updateGalleryStatusBtn('playing');
@@ -269,23 +270,41 @@
                     itemMode:  ss.itemMode  || ss.itemOrder || 'fwd',
                 };
                 queue = grokBuildGalleryQueue(allItems, ssState);
-                showToast(🔄 Круг  начался! ( генераций));
+                showToast(`🔄 Круг ${circle} начался! (${queue.length} генераций)`);
             }
 
             // ── Проверяем loop (R): зациклен ли один/несколько элементов ──
-            const colRaw2 = _gSS.getItem(GALLERY_COLLECTION_KEY);
-            const allCol = colRaw2 ? (JSON.parse(colRaw2).items || []) : [];
-            const loopItems = getGrokActiveLoopItems(allCol);
-            if (loopItems.length > 0) {
-                const loopIdx = (ss.loopIdx || 0) % loopItems.length;
-                const loopNext = loopItems[loopIdx];
-                ss.loopIdx = loopIdx + 1;
-                ss.queue  = queue;
-                ss.circle = circle;
-                _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
-                if (loopNext.type) sessionStorage.setItem('mossad_expected_type', loopNext.type);
-                grokSpaNavigate(loopNext.url);
-                return;
+            const loopRaw = _gSS.getItem('mossad_grok_loop_set');
+            if (loopRaw) {
+                try {
+                    const loopSet = JSON.parse(loopRaw);
+                    const loopUrls = loopSet.urls || [];
+                    const loopGroupIds = loopSet.groupIds || [];
+                    if (loopUrls.length > 0 || loopGroupIds.length > 0) {
+                        let loopItems = [];
+                        const colRaw2 = _gSS.getItem(GALLERY_COLLECTION_KEY);
+                        if (colRaw2) {
+                            const allCol = JSON.parse(colRaw2).items || [];
+                            for (const item of allCol) {
+                                const baseUrl = (item.url || '').split('?')[0];
+                                const inUrls = loopUrls.some(u => u.split('?')[0] === baseUrl);
+                                const inGroups = loopGroupIds.includes(item.convId || '__noconv__');
+                                if (inUrls || inGroups) loopItems.push(item);
+                            }
+                        }
+                        if (loopItems.length > 0) {
+                            const loopIdx = (ss.loopIdx || 0) % loopItems.length;
+                            const loopNext = loopItems[loopIdx];
+                            ss.loopIdx = loopIdx + 1;
+                            ss.queue  = queue;
+                            ss.circle = circle;
+                            _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+                            if (loopNext.type) sessionStorage.setItem('mossad_expected_type', loopNext.type);
+                            grokSpaNavigate(loopNext.url);
+                            return;
+                        }
+                    }
+                } catch(e) {}
             }
 
             const next = queue.shift();
@@ -304,6 +323,8 @@
         if (window.updateWidgetUI) window.updateWidgetUI();
         setTimeout(() => scheduleNextSlideCycle(0), 300);
     }
+
+
 
     /** Клавиши ←→ и ↑↓ по коллекции и полосе киноплёнки (filmstrip) */
     function grokGalleryKeyboardNav() {

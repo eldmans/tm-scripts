@@ -1,5 +1,5 @@
-﻿    // ============================================================
-    // GROK ENGINE: Queue Builder & Shuffle
+    // ============================================================
+    // GROK ENGINE: Gallery Queue Builder & Shuffling
     // ============================================================
 
     /** Fisher-Yates перемешивание */
@@ -11,6 +11,8 @@
         }
         return a;
     }
+
+
 
     /** Строит очередь с учётом режима ssMode / grpOrder / itemOrder */
     function grokBuildGalleryQueue(allItems, ssState) {
@@ -59,3 +61,9 @@
         }
         return queue;
     }
+
+    /**
+     * SPA-навигация на grok.com через Next.js router.push() — без перезагрузки страницы.
+     * Подтверждено: window.next.router доступен на grok.com.
+     * Fallback: клик по <a> или window.location.href (полный переход).
+     */
