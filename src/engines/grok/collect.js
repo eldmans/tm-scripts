@@ -76,10 +76,13 @@
         const photos = existingItems.length - videos;
         _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({ date, items: existingItems }));
         if (btnEl) {
-            btnEl.textContent = `📋 Список (${existingItems.length})`;
+            btnEl.textContent = String(existingItems.length);
+            btnEl.title = `Коллекция (${existingItems.length}): открыть список`;
             btnEl.style.background = '#065f46';
             btnEl.style.color = '#e5e7eb';
             btnEl.dataset.collectedCount = String(existingItems.length);
+            const dlBtn = document.getElementById('mossad-gallery-dl');
+            if (dlBtn) dlBtn.style.display = 'inline-block';
         }
         const addMsg = addedCount > 0 ? ` (+${addedCount} новых)` : ' (нет новых)';
         showToast(`✅ Итого: ${existingItems.length}${addMsg} → 📹${videos} видео, 🖼${photos} фото`);

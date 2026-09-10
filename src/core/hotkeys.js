@@ -16,7 +16,7 @@
 
         if (hotkeyMatches(e, config.hk.slideshowPanel)) {
             e.preventDefault();
-            window.widgetState = window.widgetState === 'hidden' ? 'panel' : 'hidden';
+            window.widgetState = (window.widgetState === 'hidden') ? 'bar' : 'hidden';
             window.updateWidgetUI();
         }
 
@@ -129,11 +129,19 @@
     }
 
     // Возобновление слайдшоу после перехода/перезагрузки страницы
+    const _isPausedOnResume = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
+                              sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true' ||
+                              sessionStorage.getItem('mossad_gallery_paused') === 'true';
+
     if (slideshowActive) {
-        showToast('▶ Слайдшоу возобновлено');
-        setTimeout(() => {
-            scheduleNextSlideCycle(0);
-        }, 500);
+        if (!_isPausedOnResume) {
+            showToast('▶ Слайдшоу возобновлено');
+            setTimeout(() => {
+                scheduleNextSlideCycle(0);
+            }, 500);
+        } else {
+            showToast('⏸ Слайдшоу на паузе');
+        }
     }
 
     // Проверяем GitHub при старте (с задержкой чтобы не мешать загрузке)

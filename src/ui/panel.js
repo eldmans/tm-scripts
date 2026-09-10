@@ -34,7 +34,7 @@
             ${initRight ? `right: ${initRight}; left: auto;` : initLeft ? `left: ${initLeft};` : 'right: 20px;'}
             z-index: 999998;
             font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; user-select: none;
-            display: flex; flex-direction: column; gap: 4px;
+            display: flex; flex-direction: column; gap: 4px; pointer-events: none;
         `;
 
         window.makeWidgetDraggable = function(handleEl) {
@@ -82,30 +82,13 @@
             background: rgba(20, 20, 20, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 6px 12px;
             display: flex; align-items: center; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            transition: all 0.3s ease; cursor: grab;
+            transition: all 0.3s ease; cursor: grab; pointer-events: auto;
         `;
         window.makeWidgetDraggable(topBar);
         
         const timerEl = document.createElement('div');
         timerEl.id = 'mossad-timer';
         timerEl.style.cssText = `font-family: monospace; font-size: 13px; min-width: 95px; width: auto; white-space: nowrap; text-align: center; color: #9ca3af; padding: 0 4px;`;
-        
-        const btnClose = document.createElement('button');
-        btnClose.innerHTML = '✕';
-        btnClose.title = 'Скрыть виджет';
-        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1; transition: color 0.2s;`;
-        btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
-        btnClose.onmouseleave = () => { btnClose.style.color = '#6b7280'; };
-        btnClose.onclick = () => {
-            window.widgetState = 'hidden';
-            window.updateWidgetUI();
-        };
-
-        const btnReset = document.createElement('button');
-        btnReset.id = 'mossad-btn-rewind-bar';
-        btnReset.innerHTML = '↺';
-        btnReset.title = `Мотать в начало (${formatHotkey(config.hk.rewind)})`;
-        btnReset.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 15px; padding: 0 4px;`;
 
         const btnStart = document.createElement('button');
         btnStart.id = 'mossad-btn-start';
@@ -115,15 +98,17 @@
             font-weight: 700; font-size: 13px; transition: all 0.2s ease;
             background: #1f2937; color: #e5e7eb;
         `;
-        
-        const btnGear = document.createElement('button');
-        btnGear.innerHTML = '⚙▼';
-        btnGear.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 14px; padding: 0 4px; transition: color 0.2s ease;`;
-        
+
         const btnDL = document.createElement('button');
         btnDL.innerHTML = '💾';
         btnDL.title = 'Скачать';
         btnDL.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #10b981; cursor: pointer; font-size: 14px; padding: 4px 8px;`;
+
+        const btnReset = document.createElement('button');
+        btnReset.id = 'mossad-btn-rewind-bar';
+        btnReset.innerHTML = '↺';
+        btnReset.title = `Мотать в начало (${formatHotkey(config.hk.rewind)})`;
+        btnReset.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 15px; padding: 0 4px;`;
 
         const btnUpdate = document.createElement('button');
         btnUpdate.innerHTML = '🔄';
@@ -148,8 +133,31 @@
             } catch(err) {}
         };
 
-        // Порядок: ✕ | ⤢ | …таймер… | 🚀Пуск | ⚙▼ | 💾 | ↺ | 🔄
-        topBar.append(btnClose, btnSnap, timerEl, btnStart, btnGear, btnDL, btnReset, btnUpdate);
+        const btnTogglePanel = document.createElement('button');
+        btnTogglePanel.id = 'mossad-btn-toggle-panel';
+        btnTogglePanel.innerHTML = '▼';
+        btnTogglePanel.title = 'Меню настроек';
+        btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: transform 0.2s, color 0.2s;`;
+        btnTogglePanel.onmouseenter = () => { btnTogglePanel.style.color = '#fff'; };
+        btnTogglePanel.onmouseleave = () => { btnTogglePanel.style.color = '#9ca3af'; };
+        btnTogglePanel.onclick = () => {
+            window.widgetState = window.widgetState === 'panel' ? 'bar' : 'panel';
+            window.updateWidgetUI();
+        };
+
+        const btnClose = document.createElement('button');
+        btnClose.innerHTML = '✕';
+        btnClose.title = 'Скрыть виджет (Ctrl+Insert)';
+        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1; transition: color 0.2s;`;
+        btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
+        btnClose.onmouseleave = () => { btnClose.style.color = '#6b7280'; };
+        btnClose.onclick = () => {
+            window.widgetState = 'hidden';
+            window.updateWidgetUI();
+        };
+
+        // Порядок: …таймер… | 🚀Пуск | 💾 | ↺ | 🔄 | ⤢ | ▼ | ✕
+        topBar.append(timerEl, btnStart, btnDL, btnReset, btnUpdate, btnSnap, btnTogglePanel, btnClose);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -157,8 +165,8 @@
         panel.style.cssText = `
             background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 12px;
-            display: flex; flex-direction: column; gap: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            font-size: 12px; transition: all 0.3s ease; opacity: 0; pointer-events: none; transform: translateY(-10px);
+            display: none; flex-direction: column; gap: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            font-size: 12px; transition: opacity 0.2s ease, transform 0.2s ease; opacity: 0; pointer-events: auto; transform: translateY(-10px);
         `;
 
         const renderPanel = () => {
@@ -258,8 +266,7 @@
                     <label title="Авто Full Screen при переходе"><input id="mossad-cb-universal-fs" type="checkbox" style="accent-color:#3b82f6;" ${(config.autoFS !== undefined ? config.autoFS : config.pinterestAutoFS) ? 'checked' : ''}> FS</label>
                     <label title="Качать дубликаты сразу без подтверждения"><input id="mossad-cb-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}> Дубли</label>
                     ${rootDomain === 'grok.com' ? `
-                    <label title="Автоподтверждение удаления"><input id="mossad-cb-aconfirm" type="checkbox" style="accent-color:#3b82f6;" ${config.deleteAutoconfirm ? 'checked' : ''}> a.confirm</label>
-                    <label title="Умный возврат к посту"><input id="mossad-cb-holdpost" type="checkbox" style="accent-color:#3b82f6;" ${config.deleteHoldpost ? 'checked' : ''}> hold post</label>
+                    <label title="Удержание позиции + автоподтверждение удаления"><input id="mossad-cb-holdpost" type="checkbox" style="accent-color:#3b82f6;" ${(config.deleteHoldpost || config.deleteAutoconfirm) ? 'checked' : ''}> hold post</label>
                     ` : ''}
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
@@ -353,8 +360,13 @@
                 cbAllowDup.onchange = (e) => Settings.set('allowDuplicates', e.target.checked);
             }
             if (rootDomain === 'grok.com') {
-                panel.querySelector('#mossad-cb-aconfirm').onchange = (e) => Settings.set('deleteAutoconfirm', e.target.checked);
-                panel.querySelector('#mossad-cb-holdpost').onchange = (e) => Settings.set('deleteHoldpost', e.target.checked);
+                const cbHold = panel.querySelector('#mossad-cb-holdpost');
+                if (cbHold) {
+                    cbHold.onchange = (e) => {
+                        Settings.set('deleteHoldpost', e.target.checked);
+                        Settings.set('deleteAutoconfirm', e.target.checked);
+                    };
+                }
             }
             panel.querySelector('#mossad-btn-rewind').onclick = doRewind;
             const btnImportDb = panel.querySelector('#mossad-btn-import-db');
@@ -397,10 +409,6 @@
 
         // Actions
         btnStart.onclick = startSlideshow;
-        btnGear.onclick = () => {
-            window.widgetState = window.widgetState === 'panel' ? 'bar' : 'panel';
-            window.updateWidgetUI();
-        };
         // Скачать и удалить: работает только на страницах постов grok.com
         btnDL.onclick = () => {
             if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
@@ -409,22 +417,52 @@
         btnReset.onclick = () => doRewind();
 
         window.updateWidgetUI = () => {
+            const galleryRow = document.getElementById('mossad-gallery-row');
+            const playlistPanel = document.getElementById('mossad-playlist-panel');
+
             if (window.widgetState === 'hidden') {
+                container.style.display = 'none';
                 topBar.style.display = 'none';
-                panel.style.opacity = '0';
+                panel.style.display = 'none';
                 panel.style.pointerEvents = 'none';
-                panel.style.transform = 'translateY(-10px)';
+                if (galleryRow) galleryRow.style.display = 'none';
+                if (playlistPanel) playlistPanel.style.display = 'none';
             } else if (window.widgetState === 'bar') {
+                container.style.display = 'flex';
                 topBar.style.display = 'flex';
-                panel.style.opacity = '0';
+                topBar.style.pointerEvents = 'auto';
+                panel.style.display = 'none';
                 panel.style.pointerEvents = 'none';
-                panel.style.transform = 'translateY(-10px)';
+                panel.style.opacity = '0';
+                if (galleryRow) {
+                    galleryRow.style.display = 'flex';
+                    galleryRow.style.pointerEvents = 'auto';
+                }
+                if (playlistPanel) {
+                    playlistPanel.style.display = 'block';
+                    playlistPanel.style.pointerEvents = 'auto';
+                }
+                btnTogglePanel.style.transform = 'rotate(0deg)';
+                btnTogglePanel.style.color = '#9ca3af';
             } else if (window.widgetState === 'panel') {
+                container.style.display = 'flex';
                 topBar.style.display = 'flex';
+                topBar.style.pointerEvents = 'auto';
+                if (galleryRow) {
+                    galleryRow.style.display = 'flex';
+                    galleryRow.style.pointerEvents = 'auto';
+                }
+                if (playlistPanel) {
+                    playlistPanel.style.display = 'block';
+                    playlistPanel.style.pointerEvents = 'auto';
+                }
                 renderPanel(); // re-render to reflect settings
-                panel.style.opacity = '1';
+                panel.style.display = 'flex';
                 panel.style.pointerEvents = 'auto';
+                panel.style.opacity = '1';
                 panel.style.transform = 'translateY(0)';
+                btnTogglePanel.style.transform = 'rotate(180deg)';
+                btnTogglePanel.style.color = '#3b82f6';
             }
             
             if (slideshowActive) {

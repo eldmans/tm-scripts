@@ -161,6 +161,7 @@
                 font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #d1d5db;
                 box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
                 scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+                pointer-events: auto;
             `;
         } else {
             // Fallback (если виджет ещё не создан)

@@ -71,7 +71,18 @@
                         location.pathname.includes(btn.querySelector('img')?.src.match(/generated\/([a-f0-9-]+)\//)?.[1] || '---')
                     );
                     const safeCurIdx = currentIdx !== -1 ? currentIdx : ((typeof grokGetActiveFilmstripIndex === 'function') ? grokGetActiveFilmstripIndex() : 0);
-                    const nextIdx = (safeCurIdx + 1) % items.length;
+                    const dirs = config.slideshowDirections;
+                    const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
+                    const isFwd = (dPadDir === 'down' || dPadDir === 'right');
+
+                    let nextIdx;
+                    if (isFwd) {
+                        // Д-пад вниз/вправо: шагаем на следующее видео вниз по ленте
+                        nextIdx = (safeCurIdx + 1 < items.length) ? safeCurIdx + 1 : (safeCurIdx > 0 ? safeCurIdx - 1 : 0);
+                    } else {
+                        // Д-пад вверх/влево: шагаем на предыдущее видео вверх по ленте (на 4-е от 5-го)
+                        nextIdx = (safeCurIdx > 0) ? safeCurIdx - 1 : (items.length > 1 ? 1 : 0);
+                    }
                     targetFilmstripBtn = items[nextIdx];
 
                     const nextImgSrc = targetFilmstripBtn?.querySelector('img, video, source')?.src || '';
@@ -80,7 +91,7 @@
                     if (targetFilmstripUuid) {
                         finalTargetUrl = `/imagine/post/${targetFilmstripUuid}`;
                     }
-                    console.log(`[MOSSAD] hold post: найден целевой кадр киноплёнки ${safeCurIdx + 1} -> ${nextIdx + 1} (UUID: ${targetFilmstripUuid || 'н/д'})`);
+                    console.log(`[MOSSAD] hold post: DPad=${dPadDir} (${isFwd ? 'вниз' : 'вверх'}), целевой кадр: ${safeCurIdx + 1} -> ${nextIdx + 1} (UUID: ${targetFilmstripUuid || 'н/д'})`);
                 } else {
                     // Б. Киноплёнка из 1 кадра или не найдена — ищем URL соседа по коллекции / DOM
                     finalTargetUrl = getGrokNeighborPostUrl();

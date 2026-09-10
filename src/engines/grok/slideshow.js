@@ -128,6 +128,11 @@
             itemMode: ssState.itemMode,
         };
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+        sessionStorage.removeItem('mossad_gallery_paused');
+        window._mossadGalleryPaused = false;
+        // Закрываем большое меню с D-Pad
+        window.widgetState = 'bar';
+        if (window.updateWidgetUI) window.updateWidgetUI();
 
         const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
         const modeLabel = `Gr${grIcon[ssState.grpMode]||'↓'} Md${grIcon[ssState.itemMode]||'↓'}`;
@@ -161,6 +166,12 @@
         const ss = { active: true, queue: queue.slice(1), circle: 1, total: allItems.length,
             grpMode: ssState.grpMode, itemMode: ssState.itemMode };
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+        sessionStorage.removeItem('mossad_gallery_paused');
+        window._mossadGalleryPaused = false;
+        // Закрываем большое меню с D-Pad
+        window.widgetState = 'bar';
+        if (window.updateWidgetUI) window.updateWidgetUI();
+
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
         showToast(`▶ Слайдшоу с выбранного элемента`);
         if (typeof grokTogglePlaylistPanel === 'function') {
@@ -175,6 +186,7 @@
     /** Останавливает Gallery Slideshow */
     function grokStopGallerySlideshow() {
         _gSS.removeItem(GALLERY_SS_KEY);
+        sessionStorage.removeItem('mossad_gallery_paused');
         window._mossadGalleryActive = false;
         window._mossadGalleryNextFn = null;
         window._mossadGalleryPaused = false;
@@ -184,23 +196,36 @@
         showToast('⏹ Gallery слайдшоу остановлено');
     }
 
-    /** Обновляет текст/цвет кнопки статуса слайдшоу */
+    /** Обновляет текст/цвет кнопки статуса слайдшоу и видимость кнопки стоп */
     function updateGalleryStatusBtn(state) {
         // state: 'idle' | 'playing' | 'paused'
         const btn = document.getElementById('mossad-gallery-status');
+        const btnStop = document.getElementById('mossad-gallery-stop');
         if (!btn) return;
+
         if (state === 'playing') {
-            btn.textContent = '▶ Идёт';
-            btn.style.background = '#064e3b';
-            btn.style.color = '#34d399';
+            btn.textContent = '❚❚';
+            btn.title = 'Пауза';
+            btn.style.background = '#059669'; // Зеленая кнопка без слов
+            btn.style.color = '#ffffff';
+            btn.style.fontSize = '12px';
+            btn.style.letterSpacing = '1px';
+            if (btnStop) btnStop.style.display = 'inline-block';
         } else if (state === 'paused') {
-            btn.textContent = '⏸ Пауза';
-            btn.style.background = '#451a03';
-            btn.style.color = '#fbbf24';
+            btn.textContent = '▶';
+            btn.title = 'Продолжить';
+            btn.style.background = '#d97706'; // Янтарная при паузе
+            btn.style.color = '#ffffff';
+            btn.style.fontSize = '12px';
+            if (btnStop) btnStop.style.display = 'inline-block';
         } else {
-            btn.textContent = '🎲 Слайдшоу';
+            btn.textContent = 'Слайдшоу';
+            btn.title = 'Запустить слайдшоу по генерациям';
             btn.style.background = '#1e3a5f';
             btn.style.color = '#93c5fd';
+            btn.style.fontSize = '12px';
+            btn.style.letterSpacing = 'normal';
+            if (btnStop) btnStop.style.display = 'none';
         }
     }
 
@@ -209,18 +234,19 @@
         if (!window._mossadGalleryActive) return;
         window._mossadGalleryPaused = !window._mossadGalleryPaused;
         if (window._mossadGalleryPaused) {
-            slideshowPaused = true;
+            if (typeof setSlideshowPaused === 'function') setSlideshowPaused(true);
+            sessionStorage.setItem('mossad_gallery_paused', 'true');
             updateGalleryStatusBtn('paused');
             showToast('⏸ Пауза');
         } else {
-            slideshowPaused = false;
+            if (typeof setSlideshowPaused === 'function') setSlideshowPaused(false);
+            sessionStorage.removeItem('mossad_gallery_paused');
             updateGalleryStatusBtn('playing');
             showToast('▶ Продолжаем');
             // Если был фото-таймер, перезапускаем
             if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
         }
     }
-
 
     /** На странице поста — продолжение Gallery Slideshow через стандартный движок MOSSAD */
     function grokGallerySlideshowTick() {
@@ -230,6 +256,12 @@
         let ss;
         try { ss = JSON.parse(raw); } catch { return; }
         if (!ss.active) return;
+
+        // Проверяем, стояло ли слайдшоу на паузе до перехода
+        const isPaused = sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
+                         (typeof SESSION_PAUSED_KEY !== 'undefined' && sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true');
+        window._mossadGalleryPaused = isPaused;
+        if (typeof setSlideshowPaused === 'function') setSlideshowPaused(isPaused);
 
         // Показываем компактный индикатор (или обновляем существующий)
         let indicator = document.getElementById('mossad-gallery-indicator');
@@ -250,11 +282,11 @@
         const showed = (ss.total || 0) - qLeft;
         const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
         const modeTag = `Gr${grIcon[ss.grpMode]||'↓'} Md${grIcon[ss.itemMode]||'↓'}`;
-        indicator.innerHTML = `<span id="mgi-status">▶ ${modeTag} · ${showed}/${ss.total} · Круг ${ss.circle}</span>`;
+        const statusPrefix = isPaused ? '⏸' : '▶';
+        indicator.innerHTML = `<span id="mgi-status">${statusPrefix} ${modeTag} · ${showed}/${ss.total} · Круг ${ss.circle}</span>`;
 
         // Обновляем статус-кнопку в галерейной строке
-        updateGalleryStatusBtn('playing');
-        window._mossadGalleryPaused = false;
+        updateGalleryStatusBtn(isPaused ? 'paused' : 'playing');
 
         // Подсвечиваем активный файл в открытом монолитном списке (плейлисте)
         if (typeof grokHighlightActivePlaylistItem === 'function') {

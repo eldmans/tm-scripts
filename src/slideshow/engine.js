@@ -2,14 +2,25 @@
     // SLIDESHOW LOGIC (AUTO) & SESSION PERSISTENCE
     // ============================================
     const SESSION_ACTIVE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`;
-    const SESSION_STATE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_wstate`;
+    const SESSION_STATE_KEY  = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_wstate`;
+    const SESSION_PAUSED_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_paused`;
 
     let slideshowActive = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true';
-    let slideshowPaused = false;
+    let slideshowPaused = sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
     let slideshowTimeoutId = null;
     let downloadTimeoutId = null;
     let countdownSeconds = 0;
     let isCountingDown = false; // Отсчет времени после видео или для фото
+
+    function setSlideshowPaused(val) {
+        slideshowPaused = !!val;
+        if (slideshowPaused) {
+            sessionStorage.setItem(SESSION_PAUSED_KEY, 'true');
+        } else {
+            sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        }
+        if (window.updateWidgetUI) window.updateWidgetUI();
+    }
     
     // Вспомогательные переменные для циклов
     let currentVideoNode = null;
@@ -170,15 +181,17 @@
 
     function stopSlideshow() {
         slideshowActive = false;
-        slideshowPaused = false;
+        setSlideshowPaused(false);
         isCountingDown = false;
         sessionStorage.removeItem(SESSION_ACTIVE_KEY);
         sessionStorage.removeItem(SESSION_STATE_KEY);
+        sessionStorage.removeItem(SESSION_PAUSED_KEY);
         if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         if (downloadTimeoutId) clearTimeout(downloadTimeoutId);
         if (rafId) cancelAnimationFrame(rafId);
         if (rootDomain === 'grok.com') {
             _gSS.removeItem(GALLERY_SS_KEY);
+            sessionStorage.removeItem('mossad_gallery_paused');
             window._mossadGalleryActive = false;
             window._mossadGalleryNextFn = null;
             window._mossadGalleryPaused = false;
@@ -196,17 +209,18 @@
                 window._mossadGalleryActive = false;
                 window._mossadGalleryNextFn = null;
                 _gSS.removeItem(GALLERY_SS_KEY);
+                sessionStorage.removeItem('mossad_gallery_paused');
                 const ind = document.getElementById('mossad-gallery-indicator');
                 if (ind) ind.remove();
             }
             slideshowActive = true;
-            slideshowPaused = false;
+            setSlideshowPaused(false);
             sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
             sessionStorage.setItem(SESSION_STATE_KEY, 'bar');
             // Закрываем модальное окно настроек горячих клавиш (если открыто)
             const hkModal = document.getElementById('mossad-hk-modal');
             if (hkModal) hkModal.remove();
-            // Сворачиваем виджет в компактную полоску (bar)
+            // Сворачиваем большое меню с D-Pad в компактную полоску (bar)
             window.widgetState = 'bar';
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleNextSlideCycle(0);
@@ -502,4 +516,76 @@
             runPhotoTimer();
         }, 1000);
     }
+
+    // ============================================
+    // TAB SWITCH & BROWSER FOCUS LISTENERS (Tab / Brsr)
+    // ============================================
+    let _pausedByTab = false;
+    let _pausedByBrsr = false;
+
+    function pauseAllSlideshows(reason) {
+        let anyPaused = false;
+        if (slideshowActive && !slideshowPaused) {
+            setSlideshowPaused(true);
+            anyPaused = true;
+        }
+        if (window._mossadGalleryActive && !window._mossadGalleryPaused) {
+            window._mossadGalleryPaused = true;
+            sessionStorage.setItem('mossad_gallery_paused', 'true');
+            if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('paused');
+            anyPaused = true;
+        }
+        if (anyPaused) {
+            if (reason === 'tab') _pausedByTab = true;
+            if (reason === 'brsr') _pausedByBrsr = true;
+            if (window.updateWidgetUI) window.updateWidgetUI();
+        }
+    }
+
+    function resumeAllSlideshows(reason) {
+        if (reason === 'tab' && _pausedByTab) {
+            _pausedByTab = false;
+            if (_pausedByBrsr) return;
+        } else if (reason === 'brsr' && _pausedByBrsr) {
+            _pausedByBrsr = false;
+            if (_pausedByTab) return;
+        } else {
+            return;
+        }
+
+        // Если пауза была установлена пользователем вручную — не снимаем
+        const manualPaused = sessionStorage.getItem('mossad_gallery_paused') === 'true' || sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
+        if (manualPaused && !_pausedByTab && !_pausedByBrsr) return;
+
+        if (slideshowActive) {
+            setSlideshowPaused(false);
+            if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
+        }
+        if (window._mossadGalleryActive) {
+            window._mossadGalleryPaused = false;
+            sessionStorage.removeItem('mossad_gallery_paused');
+            if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('playing');
+            if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
+        }
+        if (window.updateWidgetUI) window.updateWidgetUI();
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (!config.stopOnTabSwitch) return;
+        if (document.hidden) {
+            pauseAllSlideshows('tab');
+        } else {
+            resumeAllSlideshows('tab');
+        }
+    });
+
+    window.addEventListener('blur', () => {
+        if (!config.stopOnBrsrSwitch) return;
+        pauseAllSlideshows('brsr');
+    });
+
+    window.addEventListener('focus', () => {
+        if (!config.stopOnBrsrSwitch) return;
+        resumeAllSlideshows('brsr');
+    });
 
