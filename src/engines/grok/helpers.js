@@ -305,13 +305,14 @@
         const activeByClass = items.findIndex(btn => btn.className.includes('ring-white'));
         if (activeByClass !== -1) return activeByClass;
         // 2. По совпадению UUID ассета с текущим URL
-        if (curUuid) {
-            const activeByUuid = items.findIndex(btn => {
-                const img = btn.querySelector('img, video, source');
-                return img && img.src && img.src.toLowerCase().includes(curUuid);
-            });
-            if (activeByUuid !== -1) return activeByUuid;
-        }
+        const activeByMatch = items.findIndex(btn => {
+            const imgSrc = btn.querySelector('img, video, source')?.src || '';
+            const genMatch = imgSrc.match(/generated\/([a-f0-9-]+)\//)?.[1];
+            if (genMatch && location.pathname.includes(genMatch)) return true;
+            if (curUuid && imgSrc.toLowerCase().includes(curUuid)) return true;
+            return false;
+        });
+        if (activeByMatch !== -1) return activeByMatch;
         return 0;
     }
 
@@ -324,8 +325,7 @@
         if (items.length <= 1) return false;
         const curIdx = grokGetActiveFilmstripIndex();
         if (curIdx === -1) return false;
-        const nextIdx = isNext ? curIdx + 1 : curIdx - 1;
-        if (nextIdx < 0 || nextIdx >= items.length) return false;
+        const nextIdx = isNext ? (curIdx + 1) % items.length : (curIdx - 1 + items.length) % items.length;
         items[nextIdx].click();
         setTimeout(() => {
             if (typeof grokHighlightActivePlaylistItem === 'function') {
