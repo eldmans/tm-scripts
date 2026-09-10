@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.5
+// @version      1.3.6
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.5';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.6';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -94,11 +94,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         pinterestHistoryIdx: -1,           // текущий индекс в истории (как в Проводнике)
         
         hk: {
-            download:       [
-                { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
-                { key: 'PageDown',   ctrl: false, alt: false, shift: false }  // PageDown (резерв)
-            ],
-            upscale:        { key: 'PageUp',     ctrl: false, alt: false, shift: false },
+            download:       { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
+            upscale:        { key: 'PageUp',     ctrl: true,  alt: false, shift: false }, // Ctrl+PageUp
             deleteVid:      { key: 'Delete',     ctrl: false, alt: false, shift: false },
             sound:          { key: 'ScrollLock', ctrl: false, alt: false, shift: false },
             playPause:      { key: 'Pause',      ctrl: false, alt: false, shift: false },
@@ -107,7 +104,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             slideshowPanel: { key: 'Insert',     ctrl: true,  alt: false, shift: false },
             slideshowStart: { key: 'Insert',     ctrl: false, alt: false, shift: false },
             focusWidget:    { key: 'F7',         ctrl: false, alt: false, shift: false },
-            nextSlide:      { key: ' ',          ctrl: false, alt: false, shift: false }, // Пробел — сдвинуть слайд
+            nextSlide:      [
+                { key: 'PageDown',   ctrl: false, alt: false, shift: false },
+                { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)
+            ],
+            prevSlide:      { key: 'PageUp',     ctrl: false, alt: false, shift: false },
             duplicateNext:  { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:         { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
             updateScript:   { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
@@ -157,10 +158,28 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     // Сброс при рефреше страницы
     config.downloadType = 'none';
 
-    // Миграция старых настроек скачивания (если там был объект)
-    if (!Array.isArray(config.hk.download)) {
-        config.hk.download = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk.download));
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    // Миграция старых настроек скачивания (если там был объект или дублирующий PageDown)
+    if (Array.isArray(config.hk.download)) {
+        config.hk.download = config.hk.download.filter(h => !(h && h.key === 'PageDown' && !h.ctrl && !h.alt && !h.shift));
+        if (config.hk.download.length === 0) {
+            config.hk.download = [{ key: 'PageDown', ctrl: false, alt: false, shift: true }];
+        }
+    } else if (!config.hk.download || (config.hk.download.key === 'PageDown' && !config.hk.download.ctrl && !config.hk.download.alt && !config.hk.download.shift)) {
+        config.hk.download = { key: 'PageDown', ctrl: false, alt: false, shift: true };
+    }
+
+    // Миграция: переносим upscale с PageUp на Ctrl+PageUp во избежание конфликта со слайдером
+    if (config.hk.upscale && config.hk.upscale.key === 'PageUp' && !config.hk.upscale.ctrl && !config.hk.upscale.alt && !config.hk.upscale.shift) {
+        config.hk.upscale = { key: 'PageUp', ctrl: true, alt: false, shift: false };
+    }
+
+    // Миграция: инициализация prevSlide (PageUp) и nextSlide (PageDown)
+    if (!config.hk.prevSlide) {
+        config.hk.prevSlide = { key: 'PageUp', ctrl: false, alt: false, shift: false };
+    }
+    if (!config.hk.nextSlide || (Array.isArray(config.hk.nextSlide) && !config.hk.nextSlide.some(h => h && h.key === 'PageDown'))) {
+        const spaceHk = { key: ' ', ctrl: false, alt: false, shift: false };
+        config.hk.nextSlide = [{ key: 'PageDown', ctrl: false, alt: false, shift: false }, spaceHk];
     }
 
     const Settings = {
@@ -2301,67 +2320,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         // Запускаем стандартный движок — он сам разберётся фото/видео/циклы/паузы
         slideshowActive = true;
-        slideshowPaused = false;
+        slideshowPaused = isPaused;
         sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
         window.widgetState = 'bar';
         if (window.updateWidgetUI) window.updateWidgetUI();
-        setTimeout(() => scheduleNextSlideCycle(0), 300);
-    }
-
-
-
-    /** Клавиши ←→ и ↑↓ по коллекции и полосе киноплёнки (filmstrip) */
-    function grokGalleryKeyboardNav() {
-        if (!isGrokPostPage()) return;
-        const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-        let items = [];
-        if (raw) {
-            try { items = JSON.parse(raw).items || []; } catch {}
+        if (!isPaused) {
+            setTimeout(() => scheduleNextSlideCycle(0), 300);
         }
-
-        document.addEventListener('keydown', function _gNav(e) {
-            if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
-
-            // Игнорируем нажатия внутри текстовых полей ввода промпта
-            const tag = (document.activeElement?.tagName || '').toLowerCase();
-            if (tag === 'input' || tag === 'textarea' || document.activeElement?.isContentEditable) return;
-
-            const isNext = (e.key === 'ArrowRight' || e.key === 'ArrowDown');
-
-            // UUID текущего поста
-            const curId = (typeof grokExtractUuid === 'function')
-                ? grokExtractUuid(location.pathname)
-                : location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
-
-            const curIdx = (curId && items.length > 0)
-                ? items.findIndex(it => it.url.toLowerCase().includes(curId.toLowerCase()))
-                : -1;
-
-            if (curIdx === -1) {
-                // Если текущего поста нет в собранной коллекции — шагаем по полосе киноплёнки (filmstrip)
-                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isNext)) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-                return;
-            }
-
-            e.preventDefault();
-            e.stopPropagation();
-
-            const nextIdx = isNext
-                ? (curIdx + 1) % items.length
-                : (curIdx - 1 + items.length) % items.length;
-            const next = items[nextIdx];
-            if (next.type) sessionStorage.setItem('mossad_expected_type', next.type);
-            showToast(`${isNext ? '→' : '←'} ${nextIdx + 1}/${items.length} • ${next.type === 'video' ? '📹' : '🖼'}`);
-            grokSpaNavigate(next.url);
-            setTimeout(() => {
-                if (typeof grokHighlightActivePlaylistItem === 'function') {
-                    grokHighlightActivePlaylistItem(next.url);
-                }
-            }, 120);
-        }, true); // capture — раньше страницы
     }
 
     // Фасад для явного контракта MOSSAD GALLERY
@@ -5275,12 +5240,11 @@ function findMediaForDownload() {
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { initWidget(); initGrokGalleryBar(); grokGallerySlideshowTick(); grokGalleryKeyboardNav(); });
+        document.addEventListener('DOMContentLoaded', () => { initWidget(); initGrokGalleryBar(); grokGallerySlideshowTick(); });
     } else {
         initWidget();
         initGrokGalleryBar();
         grokGallerySlideshowTick();
-        grokGalleryKeyboardNav();
     }
 
     function openHotkeySettings() {
@@ -5321,10 +5285,18 @@ function findMediaForDownload() {
         
         const list = modal.querySelector('#mossad-hk-list');
         const keysMap = {
-            download: 'Скачать (DL)', upscale: 'Улучшить', deleteVid: 'Удалить видео', sound: 'Звук (вкл/выкл)',
-            playPause: 'Пауза/Плей', help: 'Настройки клавиш', history: 'История (Grok)', 
-            slideshowPanel: 'Меню слайдшоу', slideshowStart: 'Старт слайдшоу',
-            nextSlide: 'Следующий слайд (Пробел)', duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
+            nextSlide: 'Следующий слайд (PageDown)',
+            prevSlide: 'Предыдущий слайд (PageUp)',
+            download: 'Скачать (DL)',
+            upscale: 'Улучшить',
+            deleteVid: 'Удалить видео',
+            sound: 'Звук (вкл/выкл)',
+            playPause: 'Пауза/Плей',
+            help: 'Настройки клавиш',
+            history: 'История (Grok)', 
+            slideshowPanel: 'Меню слайдшоу',
+            slideshowStart: 'Старт слайдшоу',
+            duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             rewind: 'Мотать в начало'
         };
         
@@ -5448,7 +5420,227 @@ function findMediaForDownload() {
 // ============================================
     // GLOBAL HOTKEYS & LISTENERS
     // ============================================
-    window.capturingFor = null; 
+    window.capturingFor = null;
+
+    function isSlideshowActiveOrPaused() {
+        if (typeof slideshowActive !== 'undefined' && slideshowActive) return true;
+        if (typeof slideshowPaused !== 'undefined' && slideshowPaused) return true;
+        if (window._mossadGalleryActive || window._mossadGalleryPaused) return true;
+        if (sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true') return true;
+        if (sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true') return true;
+        if (sessionStorage.getItem('mossad_gallery_paused') === 'true') return true;
+        const rawSs = (typeof _gSS !== 'undefined' && _gSS.getItem)
+            ? _gSS.getItem(GALLERY_SS_KEY)
+            : sessionStorage.getItem('mossad_grok_gallery_ss');
+        if (rawSs) {
+            try {
+                const ss = JSON.parse(rawSs);
+                if (ss && ss.active) return true;
+            } catch(e) {}
+        }
+        return false;
+    }
+
+    function _postPlayerNav(wasPaused) {
+        if (wasPaused) {
+            if (typeof setSlideshowPaused === 'function') setSlideshowPaused(true);
+            sessionStorage.setItem('mossad_gallery_paused', 'true');
+            window._mossadGalleryPaused = true;
+            if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('paused');
+            if (typeof rafId !== 'undefined' && rafId) cancelAnimationFrame(rafId);
+            if (typeof slideshowTimeoutId !== 'undefined' && slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
+        } else {
+            setTimeout(() => {
+                if (slideshowActive && !slideshowPaused) {
+                    if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
+                }
+            }, 300);
+        }
+    }
+
+    function playerStepSlide(dir) {
+        const isFwd = (dir === 'next');
+        const wasPaused = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
+                          sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true' ||
+                          sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
+                          !!window._mossadGalleryPaused;
+
+        // 1. GROK ENGINE
+        if (rootDomain === 'grok.com') {
+            const rawCol = (typeof _gSS !== 'undefined' && _gSS.getItem)
+                ? _gSS.getItem(GALLERY_COLLECTION_KEY)
+                : sessionStorage.getItem('mossad_grok_collection');
+            let colData = null;
+            if (rawCol) { try { colData = JSON.parse(rawCol); } catch(e) {} }
+            const items = colData?.items || [];
+
+            const curId = (typeof grokExtractUuid === 'function')
+                ? grokExtractUuid(location.pathname)
+                : (location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1] ||
+                   location.search.match(/[?&]post=([^&]+)/)?.[1]);
+
+            const curIdx = (curId && items.length > 0)
+                ? items.findIndex(it => (it.url || '').toLowerCase().includes(curId.toLowerCase()))
+                : -1;
+
+            if (curIdx === -1) {
+                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
+                    _postPlayerNav(wasPaused);
+                    return;
+                }
+            } else {
+                const loopItems = (typeof getGrokActiveLoopItems === 'function') ? getGrokActiveLoopItems(items) : [];
+                let targetItem = null;
+                let targetIdx = -1;
+
+                if (loopItems.length > 0) {
+                    const curLoopIdx = loopItems.findIndex(it => (it.url || '').toLowerCase().includes(curId.toLowerCase()));
+                    let nextLoopIdx = 0;
+                    if (curLoopIdx !== -1) {
+                        nextLoopIdx = isFwd
+                            ? (curLoopIdx + 1) % loopItems.length
+                            : (curLoopIdx - 1 + loopItems.length) % loopItems.length;
+                    }
+                    targetItem = loopItems[nextLoopIdx];
+                    targetIdx = items.indexOf(targetItem);
+                } else {
+                    const grpMode = colData.grpMode || 'seq';
+                    const itemMode = colData.itemMode || 'fwd';
+                    const isRandom = (grpMode === 'rnd' || itemMode === 'rnd' || config.slideshowMode === 'random');
+
+                    if (isRandom) {
+                        let hist = [];
+                        try { hist = JSON.parse(sessionStorage.getItem('mossad_player_hist') || '[]'); } catch(e) {}
+                        if (isFwd) {
+                            hist.push(curIdx);
+                            if (hist.length > 50) hist.shift();
+                            sessionStorage.setItem('mossad_player_hist', JSON.stringify(hist));
+
+                            let rnd = Math.floor(Math.random() * (items.length - 1));
+                            if (rnd >= curIdx) rnd++;
+                            targetIdx = rnd;
+                        } else {
+                            if (hist.length > 0) {
+                                targetIdx = hist.pop();
+                                sessionStorage.setItem('mossad_player_hist', JSON.stringify(hist));
+                            } else {
+                                targetIdx = (curIdx - 1 + items.length) % items.length;
+                            }
+                        }
+                    } else if (itemMode === 'rev') {
+                        targetIdx = isFwd ? (curIdx - 1) : (curIdx + 1);
+                        if (targetIdx < 0) {
+                            if (config.loopFeed || true) targetIdx = items.length - 1;
+                            else { showToast('⚠️ Начало коллекции', true); return; }
+                        } else if (targetIdx >= items.length) {
+                            if (config.loopFeed || true) targetIdx = 0;
+                            else { showToast('⚠️ Конец коллекции', true); return; }
+                        }
+                    } else {
+                        targetIdx = isFwd ? (curIdx + 1) : (curIdx - 1);
+                        if (targetIdx >= items.length) {
+                            if (config.loopFeed || true) {
+                                targetIdx = 0;
+                                showToast('🔄 Новый круг коллекции');
+                            } else {
+                                showToast('⚠️ Конец коллекции', true);
+                                return;
+                            }
+                        } else if (targetIdx < 0) {
+                            if (config.loopFeed || true) {
+                                targetIdx = items.length - 1;
+                            } else {
+                                showToast('⚠️ Начало коллекции', true);
+                                return;
+                            }
+                        }
+                    }
+                    targetItem = items[targetIdx];
+                }
+
+                if (targetItem) {
+                    const rawSs = (typeof _gSS !== 'undefined' && _gSS.getItem)
+                        ? _gSS.getItem(GALLERY_SS_KEY)
+                        : sessionStorage.getItem('mossad_grok_gallery_ss');
+                    if (rawSs) {
+                        try {
+                            const ss = JSON.parse(rawSs);
+                            if (targetIdx >= 0) {
+                                ss.queue = [...items.slice(targetIdx + 1), ...items.slice(0, targetIdx)];
+                                _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+                            }
+                        } catch(e) {}
+                    }
+
+                    if (targetItem.type) sessionStorage.setItem('mossad_expected_type', targetItem.type);
+                    const dispIdx = (targetIdx >= 0 ? targetIdx : curIdx) + 1;
+                    showToast(`${isFwd ? '⏭' : '⏮'} ${dispIdx}/${items.length} • ${targetItem.type === 'video' ? '📹' : '🖼'}`);
+                    grokSpaNavigate(targetItem.url);
+                    setTimeout(() => {
+                        if (typeof grokHighlightActivePlaylistItem === 'function') {
+                            grokHighlightActivePlaylistItem(targetItem.url);
+                        }
+                    }, 120);
+                    _postPlayerNav(wasPaused);
+                    return;
+                }
+            }
+        }
+
+        // 2. PINTEREST ENGINE
+        if (rootDomain.includes('pinterest.')) {
+            selectNextPinterestPin(dir, { isManual: true });
+            _postPlayerNav(wasPaused);
+            return;
+        }
+
+        // 3. REDGIFS ENGINE
+        if (rootDomain.includes('redgifs.com')) {
+            if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
+                window.MOSSAD_ENGINES.redgifs.navigate(isFwd ? 'down' : 'up');
+            } else if (typeof redGifsNavigate === 'function') {
+                redGifsNavigate(isFwd ? 'down' : 'up');
+            }
+            _postPlayerNav(wasPaused);
+            return;
+        }
+
+        // 4. ДРУГИЕ САЙТЫ (универсальный переход ленты)
+        const dirs = config.slideshowDirections;
+        const mainDir = (dirs && dirs.length) ? dirs[0] : 'down';
+        const getOppKey = (d) => {
+            if (d === 'up') return 'ArrowDown';
+            if (d === 'down') return 'ArrowUp';
+            if (d === 'left') return 'ArrowRight';
+            return 'ArrowLeft';
+        };
+        const keyToPress = isFwd ? getArrowKey(mainDir) : getOppKey(mainDir);
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: keyToPress, bubbles: true }));
+        document.dispatchEvent(new KeyboardEvent('keyup', { key: keyToPress, bubbles: true }));
+        if (typeof triggerUniversalFullScreen === 'function') triggerUniversalFullScreen();
+        _postPlayerNav(wasPaused);
+    }
+
+    // Ранний перехват клавиш слайдера (PageUp / PageDown) ДО сайта на window в фазе capture
+    window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
+        if (window.capturingFor !== null) return;
+        const activeEl = document.activeElement;
+        const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
+        if (isEditing) return;
+
+        // Перехватываем ТОЛЬКО пока слайдшоу активно или на паузе. При STOP — не перехватываем!
+        if (!isSlideshowActiveOrPaused()) return;
+
+        const isNext = hotkeyMatches(e, config.hk.nextSlide);
+        const isPrev = hotkeyMatches(e, config.hk.prevSlide);
+
+        if (isNext || isPrev) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            playerStepSlide(isNext ? 'next' : 'prev');
+        }
+    }, true);
+
     document.addEventListener('keydown', function (e) {
         if (window.capturingFor !== null) return;
         const activeEl = document.activeElement;
@@ -5531,18 +5723,6 @@ function findMediaForDownload() {
             doRewind();
         }
 
-        // Пробел: пауза/продолжить галерейное слайдшоу; или принудительный следующий слайд
-        if (hotkeyMatches(e, config.hk.nextSlide)) {
-            if (window._mossadGalleryActive && typeof toggleGalleryPause === 'function') {
-                e.preventDefault();
-                toggleGalleryPause();
-            } else if (slideshowActive) {
-                e.preventDefault();
-                showToast('⏭ Принудительный переход...');
-                triggerNextSlide();
-            }
-        }
-
         // Дублирование страницы в фоновой вкладке + принудительный переход (Ctrl + Пробел)
         if (hotkeyMatches(e, config.hk.duplicateNext)) {
             e.preventDefault();
@@ -5554,17 +5734,6 @@ function findMediaForDownload() {
                 showToast('📑 Открыта вкладка + Переход...');
             }
             triggerNextSlide();
-        }
-
-        // Ручная навигация стрелками на Pinterest (влево/вверх = назад, вправо/вниз = вперед)
-        if (rootDomain.includes('pinterest.')) {
-            if (['ArrowRight', 'ArrowDown'].includes(e.key)) {
-                e.preventDefault();
-                selectNextPinterestPin('next');
-            } else if (['ArrowLeft', 'ArrowUp'].includes(e.key)) {
-                e.preventDefault();
-                selectNextPinterestPin('prev');
-            }
         }
     }, true);
 

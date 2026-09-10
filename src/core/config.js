@@ -34,11 +34,8 @@
         pinterestHistoryIdx: -1,           // текущий индекс в истории (как в Проводнике)
         
         hk: {
-            download:       [
-                { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
-                { key: 'PageDown',   ctrl: false, alt: false, shift: false }  // PageDown (резерв)
-            ],
-            upscale:        { key: 'PageUp',     ctrl: false, alt: false, shift: false },
+            download:       { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
+            upscale:        { key: 'PageUp',     ctrl: true,  alt: false, shift: false }, // Ctrl+PageUp
             deleteVid:      { key: 'Delete',     ctrl: false, alt: false, shift: false },
             sound:          { key: 'ScrollLock', ctrl: false, alt: false, shift: false },
             playPause:      { key: 'Pause',      ctrl: false, alt: false, shift: false },
@@ -47,7 +44,11 @@
             slideshowPanel: { key: 'Insert',     ctrl: true,  alt: false, shift: false },
             slideshowStart: { key: 'Insert',     ctrl: false, alt: false, shift: false },
             focusWidget:    { key: 'F7',         ctrl: false, alt: false, shift: false },
-            nextSlide:      { key: ' ',          ctrl: false, alt: false, shift: false }, // Пробел — сдвинуть слайд
+            nextSlide:      [
+                { key: 'PageDown',   ctrl: false, alt: false, shift: false },
+                { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)
+            ],
+            prevSlide:      { key: 'PageUp',     ctrl: false, alt: false, shift: false },
             duplicateNext:  { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:         { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
             updateScript:   { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
@@ -97,10 +98,28 @@
     // Сброс при рефреше страницы
     config.downloadType = 'none';
 
-    // Миграция старых настроек скачивания (если там был объект)
-    if (!Array.isArray(config.hk.download)) {
-        config.hk.download = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk.download));
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    // Миграция старых настроек скачивания (если там был объект или дублирующий PageDown)
+    if (Array.isArray(config.hk.download)) {
+        config.hk.download = config.hk.download.filter(h => !(h && h.key === 'PageDown' && !h.ctrl && !h.alt && !h.shift));
+        if (config.hk.download.length === 0) {
+            config.hk.download = [{ key: 'PageDown', ctrl: false, alt: false, shift: true }];
+        }
+    } else if (!config.hk.download || (config.hk.download.key === 'PageDown' && !config.hk.download.ctrl && !config.hk.download.alt && !config.hk.download.shift)) {
+        config.hk.download = { key: 'PageDown', ctrl: false, alt: false, shift: true };
+    }
+
+    // Миграция: переносим upscale с PageUp на Ctrl+PageUp во избежание конфликта со слайдером
+    if (config.hk.upscale && config.hk.upscale.key === 'PageUp' && !config.hk.upscale.ctrl && !config.hk.upscale.alt && !config.hk.upscale.shift) {
+        config.hk.upscale = { key: 'PageUp', ctrl: true, alt: false, shift: false };
+    }
+
+    // Миграция: инициализация prevSlide (PageUp) и nextSlide (PageDown)
+    if (!config.hk.prevSlide) {
+        config.hk.prevSlide = { key: 'PageUp', ctrl: false, alt: false, shift: false };
+    }
+    if (!config.hk.nextSlide || (Array.isArray(config.hk.nextSlide) && !config.hk.nextSlide.some(h => h && h.key === 'PageDown'))) {
+        const spaceHk = { key: ' ', ctrl: false, alt: false, shift: false };
+        config.hk.nextSlide = [{ key: 'PageDown', ctrl: false, alt: false, shift: false }, spaceHk];
     }
 
     const Settings = {

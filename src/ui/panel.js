@@ -504,12 +504,11 @@
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { initWidget(); initGrokGalleryBar(); grokGallerySlideshowTick(); grokGalleryKeyboardNav(); });
+        document.addEventListener('DOMContentLoaded', () => { initWidget(); initGrokGalleryBar(); grokGallerySlideshowTick(); });
     } else {
         initWidget();
         initGrokGalleryBar();
         grokGallerySlideshowTick();
-        grokGalleryKeyboardNav();
     }
 
     function openHotkeySettings() {
@@ -550,10 +549,18 @@
         
         const list = modal.querySelector('#mossad-hk-list');
         const keysMap = {
-            download: 'Скачать (DL)', upscale: 'Улучшить', deleteVid: 'Удалить видео', sound: 'Звук (вкл/выкл)',
-            playPause: 'Пауза/Плей', help: 'Настройки клавиш', history: 'История (Grok)', 
-            slideshowPanel: 'Меню слайдшоу', slideshowStart: 'Старт слайдшоу',
-            nextSlide: 'Следующий слайд (Пробел)', duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
+            nextSlide: 'Следующий слайд (PageDown)',
+            prevSlide: 'Предыдущий слайд (PageUp)',
+            download: 'Скачать (DL)',
+            upscale: 'Улучшить',
+            deleteVid: 'Удалить видео',
+            sound: 'Звук (вкл/выкл)',
+            playPause: 'Пауза/Плей',
+            help: 'Настройки клавиш',
+            history: 'История (Grok)', 
+            slideshowPanel: 'Меню слайдшоу',
+            slideshowStart: 'Старт слайдшоу',
+            duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             rewind: 'Мотать в начало'
         };
         

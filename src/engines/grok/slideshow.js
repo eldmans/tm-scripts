@@ -363,67 +363,13 @@
 
         // Запускаем стандартный движок — он сам разберётся фото/видео/циклы/паузы
         slideshowActive = true;
-        slideshowPaused = false;
+        slideshowPaused = isPaused;
         sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
         window.widgetState = 'bar';
         if (window.updateWidgetUI) window.updateWidgetUI();
-        setTimeout(() => scheduleNextSlideCycle(0), 300);
-    }
-
-
-
-    /** Клавиши ←→ и ↑↓ по коллекции и полосе киноплёнки (filmstrip) */
-    function grokGalleryKeyboardNav() {
-        if (!isGrokPostPage()) return;
-        const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-        let items = [];
-        if (raw) {
-            try { items = JSON.parse(raw).items || []; } catch {}
+        if (!isPaused) {
+            setTimeout(() => scheduleNextSlideCycle(0), 300);
         }
-
-        document.addEventListener('keydown', function _gNav(e) {
-            if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
-
-            // Игнорируем нажатия внутри текстовых полей ввода промпта
-            const tag = (document.activeElement?.tagName || '').toLowerCase();
-            if (tag === 'input' || tag === 'textarea' || document.activeElement?.isContentEditable) return;
-
-            const isNext = (e.key === 'ArrowRight' || e.key === 'ArrowDown');
-
-            // UUID текущего поста
-            const curId = (typeof grokExtractUuid === 'function')
-                ? grokExtractUuid(location.pathname)
-                : location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1];
-
-            const curIdx = (curId && items.length > 0)
-                ? items.findIndex(it => it.url.toLowerCase().includes(curId.toLowerCase()))
-                : -1;
-
-            if (curIdx === -1) {
-                // Если текущего поста нет в собранной коллекции — шагаем по полосе киноплёнки (filmstrip)
-                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isNext)) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-                return;
-            }
-
-            e.preventDefault();
-            e.stopPropagation();
-
-            const nextIdx = isNext
-                ? (curIdx + 1) % items.length
-                : (curIdx - 1 + items.length) % items.length;
-            const next = items[nextIdx];
-            if (next.type) sessionStorage.setItem('mossad_expected_type', next.type);
-            showToast(`${isNext ? '→' : '←'} ${nextIdx + 1}/${items.length} • ${next.type === 'video' ? '📹' : '🖼'}`);
-            grokSpaNavigate(next.url);
-            setTimeout(() => {
-                if (typeof grokHighlightActivePlaylistItem === 'function') {
-                    grokHighlightActivePlaylistItem(next.url);
-                }
-            }, 120);
-        }, true); // capture — раньше страницы
     }
 
     // Фасад для явного контракта MOSSAD GALLERY
