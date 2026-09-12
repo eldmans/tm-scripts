@@ -22,6 +22,7 @@
         githubConfigPath: 'mossad-config.json',
         filenameTemplate: '{id8}-{domain}.{ext}',  // шаблон имени файла по умолчанию (8 символов UUID + домен)
         filenameTemplateEnabled: false,  // использовать шаблон?
+        playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
@@ -44,6 +45,7 @@
             slideshowPanel: { key: 'Insert',     ctrl: true,  alt: false, shift: false },
             slideshowStart: { key: 'Insert',     ctrl: false, alt: false, shift: false },
             focusWidget:    { key: 'F7',         ctrl: false, alt: false, shift: false },
+            snapWidget:     { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
             nextSlide:      [
                 { key: 'PageDown',   ctrl: false, alt: false, shift: false },
                 { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)

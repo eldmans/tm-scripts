@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.6
+// @version      1.3.7
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.6';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.7';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -82,6 +82,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         githubConfigPath: 'mossad-config.json',
         filenameTemplate: '{id8}-{domain}.{ext}',  // шаблон имени файла по умолчанию (8 символов UUID + домен)
         filenameTemplateEnabled: false,  // использовать шаблон?
+        playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
@@ -104,6 +105,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             slideshowPanel: { key: 'Insert',     ctrl: true,  alt: false, shift: false },
             slideshowStart: { key: 'Insert',     ctrl: false, alt: false, shift: false },
             focusWidget:    { key: 'F7',         ctrl: false, alt: false, shift: false },
+            snapWidget:     { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
             nextSlide:      [
                 { key: 'PageDown',   ctrl: false, alt: false, shift: false },
                 { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)
@@ -2361,16 +2363,17 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         row.id = 'mossad-gallery-row';
         row.style.cssText = `
             background: rgba(20,20,20,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 6px 10px;
-            display: flex; align-items: center; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            font-family: system-ui,-apple-system,sans-serif; cursor: grab; flex-wrap: wrap; pointer-events: auto;
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 5px 8px;
+            display: flex; align-items: center; gap: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            font-family: system-ui,-apple-system,sans-serif; cursor: grab; flex-wrap: nowrap; pointer-events: auto;
+            width: fit-content; max-width: 100%; box-sizing: border-box;
         `;
 
         // ── Утилита создания маленьких кнопок ──
         const mkBtn = (id, text, title, css) => {
             const b = document.createElement('button');
             b.id = id; b.textContent = text; b.title = title;
-            b.style.cssText = `cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;transition:all 0.2s;${css}`;
+            b.style.cssText = `cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;font-weight:700;font-size:11px;transition:all 0.2s;${css}`;
             return b;
         };
 
@@ -2384,7 +2387,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         } catch(e) {}
         btnCollect.textContent = savedCount > 0 ? String(savedCount) : 'Собрать';
         btnCollect.title = savedCount > 0 ? `Коллекция (${savedCount}): открыть список` : 'Собрать коллекцию ссылок';
-        btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
+        btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:3px 7px;font-weight:700;font-size:11px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
 
         // Клик: на /saved — собирать; иначе — открывать плейлист (если есть коллекция)
         btnCollect.onclick = () => {
@@ -2431,7 +2434,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         const btnStatus = document.createElement('button');
         btnStatus.id = 'mossad-gallery-status';
-        btnStatus.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;transition:all 0.2s;`;
+        btnStatus.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:3px 7px;font-weight:700;font-size:11px;transition:all 0.2s;`;
         if (_ssActive) {
             btnStatus.textContent = _isPaused ? '▶' : '❚❚';
             btnStatus.title = _isPaused ? 'Продолжить' : 'Пауза';
@@ -2505,7 +2508,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         // Helper: цвет кнопки по состоянию
         const grBtnCss = (state) => state === 'off' ? 'background:#1a1a2e;color:#4b5563;' : 'background:#1a2e3a;color:#7dd3fc;';
         const mdBtnCss = (state) => state === 'off' ? 'background:#1a1a2e;color:#4b5563;' : 'background:#1e1a3a;color:#c4b5fd;';
-        const BASE_BTN = 'cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;transition:all 0.2s;';
+        const BASE_BTN = 'cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;font-weight:700;font-size:11px;transition:all 0.2s;';
 
         // Кнопка Gr (порядок групп)
         const btnGr = mkBtn('mossad-gallery-grmode',
@@ -2536,6 +2539,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         };
 
         row.append(btnCollect, btnDl, btnStatus, btnStop, btnGr, btnMd);
+
+        // Переносим крестик закрытия на самый верхний ряд (на Grok это mossad-gallery-row)
+        const closeBtn = document.getElementById('mossad-btn-close');
+        if (closeBtn) {
+            closeBtn.style.marginLeft = 'auto';
+            row.appendChild(closeBtn);
+        }
+
         container.insertBefore(row, container.firstChild);
 
         if (typeof window.makeWidgetDraggable === 'function') {
@@ -2701,6 +2712,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         } catch(e) {}
         const saveLoopSet = () => _gSS.setItem('mossad_grok_loop_set', JSON.stringify(loopSet));
 
+        const savedCustomWidth = (typeof config !== 'undefined' && config.playlistWidth)
+            ? config.playlistWidth
+            : parseInt(localStorage.getItem('mossad_playlist_width') || '0', 10);
+        const initialWidth = savedCustomWidth > 0 ? `${savedCustomWidth}px` : '100%';
+
         const panel = document.createElement('div');
         panel.id = 'mossad-playlist-panel';
 
@@ -2708,8 +2724,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (container) {
             // Монолитно внутри контейнера виджета
             panel.style.cssText = `
-                box-sizing: border-box; width: 100%; min-width: 320px; max-width: 380px;
-                max-height: 62vh; overflow-y: auto;
+                box-sizing: border-box; width: ${initialWidth}; min-width: 140px; max-width: 95vw;
+                max-height: 62vh; overflow-y: auto; overflow-x: hidden; resize: horizontal;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
                 font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #d1d5db;
@@ -2721,13 +2737,32 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             // Fallback (если виджет ещё не создан)
             panel.style.cssText = `
                 position: fixed; top: 70px; right: 16px; z-index: 9999999;
-                width: 320px; max-height: 62vh; overflow-y: auto;
+                width: ${savedCustomWidth > 0 ? `${savedCustomWidth}px` : '240px'}; min-width: 140px; max-width: 95vw;
+                max-height: 62vh; overflow-y: auto; overflow-x: hidden; resize: horizontal;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
                 font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #d1d5db;
                 box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
                 scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
             `;
+        }
+
+        // Сохраняем пользовательскую ширину при интерактивном ресайзе мышью
+        if (window.ResizeObserver) {
+            let lastW = savedCustomWidth || 0;
+            const ro = new ResizeObserver(entries => {
+                for (const entry of entries) {
+                    const w = Math.round(entry.contentRect.width);
+                    if (w >= 120 && Math.abs(w - lastW) > 6) {
+                        lastW = w;
+                        localStorage.setItem('mossad_playlist_width', String(w));
+                        if (typeof Settings !== 'undefined') {
+                            Settings.setQuiet('playlistWidth', w);
+                        }
+                    }
+                }
+            });
+            ro.observe(panel);
         }
 
         // ── Заголовок (липкий вверху с поддержкой перетаскивания всего меню) ──
@@ -2737,15 +2772,24 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             gap: 6px; position: sticky; top: 0; background: rgba(14, 14, 18, 0.98);
             backdrop-filter: blur(16px); z-index: 2; border-top-left-radius: 12px; border-top-right-radius: 12px;
-            cursor: grab;
+            cursor: grab; min-width: 0; max-width: 100%; box-sizing: border-box;
         `;
         if (typeof window.makeWidgetDraggable === 'function') {
             window.makeWidgetDraggable(header);
         }
 
         const titleEl = document.createElement('span');
-        titleEl.style.cssText = `font-weight: 700; font-size: 13px; flex: 1;`;
+        titleEl.style.cssText = `font-weight: 700; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;`;
         titleEl.textContent = `📋 Список (${items.length})`;
+        titleEl.title = 'Двойной клик — сбросить ширину списка по ширине меню';
+        titleEl.ondblclick = () => {
+            panel.style.width = '100%';
+            localStorage.removeItem('mossad_playlist_width');
+            if (typeof Settings !== 'undefined') {
+                Settings.setQuiet('playlistWidth', 0);
+            }
+            showToast('↔ Ширина списка сброшена по ширине меню');
+        };
 
         // Кнопка «отключить все R» — появляется если зациклено 2+ элементов
         const btnClearLoop = document.createElement('button');
@@ -2775,7 +2819,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         panel.appendChild(header);
 
         const body = document.createElement('div');
-        body.style.cssText = `padding: 6px;`;
+        body.style.cssText = `padding: 6px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden;`;
 
         // ── Утилита: кнопка R ──
         const makeRBtn = (isActive, onToggle) => {
@@ -2810,12 +2854,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 const gItems = groups[gid];
                 const grpEl = document.createElement('div');
                 grpEl.className = 'mossad-playlist-group';
-                grpEl.style.cssText = `margin-bottom:6px;border:1px solid rgba(255,255,255,0.07);border-radius:8px;overflow:hidden;transition:border-color 0.2s;`;
+                grpEl.style.cssText = `margin-bottom:6px;border:1px solid rgba(255,255,255,0.07);border-radius:8px;overflow:hidden;transition:border-color 0.2s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
                 const grpHeader = document.createElement('div');
                 grpHeader.className = 'mossad-playlist-grp-header';
                 const shortId = gid === '__noconv__' ? 'Без группы' : gid.slice(0, 8) + '…';
-                grpHeader.style.cssText = `display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.04);transition:background 0.2s;`;
+                grpHeader.style.cssText = `display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.04);transition:background 0.2s;min-width:0;max-width:100%;box-sizing:border-box;`;
                 grpHeader.title = `Группа: ${gid}`;
 
                 const isGrpLooped = loopSet.groupIds.includes(gid);
@@ -2829,7 +2873,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 });
 
                 const grpLabel = document.createElement('span');
-                grpLabel.style.cssText = `flex:1;font-weight:600;font-size:11px;color:#7dd3fc;cursor:pointer;`;
+                grpLabel.style.cssText = `flex:1;min-width:0;font-weight:600;font-size:11px;color:#7dd3fc;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
                 grpLabel.textContent = shortId;
                 grpLabel.onclick = (e) => {
                     e.stopPropagation();
@@ -2838,21 +2882,21 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 };
 
                 const grpCount = document.createElement('span');
-                grpCount.style.cssText = `color:#6b7280;font-size:10px;`;
+                grpCount.style.cssText = `color:#6b7280;font-size:10px;flex-shrink:0;white-space:nowrap;`;
                 grpCount.textContent = `${gItems.length} ген.`;
 
                 grpHeader.append(rGrp, grpLabel, grpCount);
                 grpEl.appendChild(grpHeader);
 
                 const listEl = document.createElement('div');
-                listEl.style.cssText = `padding:3px 6px;`;
+                listEl.style.cssText = `padding:3px 6px;min-width:0;max-width:100%;box-sizing:border-box;overflow:hidden;`;
                 gItems.forEach((item, idx) => {
                     const li = document.createElement('div');
                     li.className = 'mossad-playlist-item';
                     li.dataset.url = item.url || '';
                     const itemUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(item.url) : '';
                     li.dataset.uuid = itemUuid;
-                    li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:10px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;`;
+                    li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:10px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
                     const baseUrl = (item.url || '').split('?')[0];
                     const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
@@ -2867,9 +2911,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
                     const label = document.createElement('span');
                     label.className = 'mossad-playlist-label';
-                    label.style.cssText = `flex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
+                    label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
                     const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 22)}`;
                     label.textContent = baseText;
+                    li.dataset.origText = baseText;
+                    label.title = item.url;
                     li.dataset.origText = baseText;
                     label.title = item.url;
 
@@ -2901,7 +2947,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 li.dataset.url = item.url || '';
                 const itemUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(item.url) : '';
                 li.dataset.uuid = itemUuid;
-                li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:11px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;`;
+                li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:11px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
                 const baseUrl = (item.url || '').split('?')[0];
                 const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
@@ -2916,7 +2962,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
                 const label = document.createElement('span');
                 label.className = 'mossad-playlist-label';
-                label.style.cssText = `flex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
+                label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
                 const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 26)}`;
                 label.textContent = baseText;
                 li.dataset.origText = baseText;
@@ -4762,16 +4808,27 @@ function findMediaForDownload() {
         const defTop = isGrokSavedPage() ? '72px' : '20px';
         const initTop = (savedPos && savedPos.top) ? savedPos.top : defTop;
         const initLeft = (savedPos && savedPos.left) ? savedPos.left : null;
-        const initRight = (savedPos && savedPos.right) ? savedPos.right : null;
+        const initRight = (savedPos && savedPos.right && savedPos.right !== 'auto') ? savedPos.right : null;
 
         container.style.cssText = `
             position: fixed;
             top: ${initTop};
-            ${initRight ? `right: ${initRight}; left: auto;` : initLeft ? `left: ${initLeft};` : 'right: 20px;'}
+            ${initRight ? `right: ${initRight}; left: auto;` : initLeft ? `left: ${initLeft}; right: auto;` : 'right: 20px;'}
             z-index: 999998;
             font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; user-select: none;
             display: flex; flex-direction: column; gap: 4px; pointer-events: none;
         `;
+
+        window.snapWidgetToCorner = function() {
+            const topVal = isGrokSavedPage() ? '72px' : '20px';
+            container.style.left = '20px';
+            container.style.top = topVal;
+            container.style.right = 'auto';
+            try {
+                localStorage.setItem('mossad_widget_pos', JSON.stringify({ left: '20px', top: topVal, right: 'auto' }));
+            } catch(err) {}
+            showToast('📍 Виджет привязан к левому верхнему краю');
+        };
 
         window.makeWidgetDraggable = function(handleEl) {
             if (!handleEl) return;
@@ -4816,21 +4873,22 @@ function findMediaForDownload() {
         topBar.id = 'mossad-top-bar';
         topBar.style.cssText = `
             background: rgba(20, 20, 20, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 6px 12px;
-            display: flex; align-items: center; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            transition: all 0.3s ease; cursor: grab; pointer-events: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 5px 8px;
+            display: flex; align-items: center; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: all 0.3s ease; cursor: grab; pointer-events: auto; width: fit-content; max-width: 100%; box-sizing: border-box;
         `;
         window.makeWidgetDraggable(topBar);
         
         const timerEl = document.createElement('div');
         timerEl.id = 'mossad-timer';
-        timerEl.style.cssText = `font-family: monospace; font-size: 13px; min-width: 95px; width: auto; white-space: nowrap; text-align: center; color: #9ca3af; padding: 0 4px;`;
+        timerEl.style.cssText = `font-family: monospace; font-size: 12px; min-width: 80px; width: auto; white-space: nowrap; text-align: center; color: #9ca3af; padding: 0 2px;`;
 
         const btnStart = document.createElement('button');
         btnStart.id = 'mossad-btn-start';
-        btnStart.innerHTML = '🚀 Пуск';
+        btnStart.innerHTML = '🚀';
+        btnStart.title = 'Старт слайдшоу (Insert)';
         btnStart.style.cssText = `
-            cursor: pointer; border: none; border-radius: 6px; padding: 5px 12px;
+            cursor: pointer; border: none; border-radius: 6px; padding: 4px 8px;
             font-weight: 700; font-size: 13px; transition: all 0.2s ease;
             background: #1f2937; color: #e5e7eb;
         `;
@@ -4838,42 +4896,21 @@ function findMediaForDownload() {
         const btnDL = document.createElement('button');
         btnDL.innerHTML = '💾';
         btnDL.title = 'Скачать';
-        btnDL.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #10b981; cursor: pointer; font-size: 14px; padding: 4px 8px;`;
-
-        const btnReset = document.createElement('button');
-        btnReset.id = 'mossad-btn-rewind-bar';
-        btnReset.innerHTML = '↺';
-        btnReset.title = `Мотать в начало (${formatHotkey(config.hk.rewind)})`;
-        btnReset.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 15px; padding: 0 4px;`;
+        btnDL.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #10b981; cursor: pointer; font-size: 13px; padding: 4px 7px;`;
 
         const btnUpdate = document.createElement('button');
         btnUpdate.innerHTML = '🔄';
         btnUpdate.title = 'Обновить скрипт (Win+Alt+R)';
-        btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 14px; padding: 4px 8px; transition: transform 0.2s ease;`;
+        btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 13px; padding: 4px 7px; transition: transform 0.2s ease;`;
         btnUpdate.onclick = () => {
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
-        };
-
-        const btnSnap = document.createElement('button');
-        btnSnap.innerHTML = '⤢';
-        btnSnap.title = 'Привязать к правому верхнему углу (-50px)';
-        btnSnap.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 3px; line-height: 1; transition: color 0.2s;`;
-        btnSnap.onmouseenter = () => { btnSnap.style.color = '#60a5fa'; };
-        btnSnap.onmouseleave = () => { btnSnap.style.color = '#6b7280'; };
-        btnSnap.onclick = () => {
-            container.style.right = '50px';
-            container.style.top = '50px';
-            container.style.left = 'auto';
-            try {
-                localStorage.setItem('mossad_widget_pos', JSON.stringify({ right: '50px', top: '50px' }));
-            } catch(err) {}
         };
 
         const btnTogglePanel = document.createElement('button');
         btnTogglePanel.id = 'mossad-btn-toggle-panel';
         btnTogglePanel.innerHTML = '▼';
         btnTogglePanel.title = 'Меню настроек';
-        btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: transform 0.2s, color 0.2s;`;
+        btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; padding: 0 3px; line-height: 1; transition: transform 0.2s, color 0.2s;`;
         btnTogglePanel.onmouseenter = () => { btnTogglePanel.style.color = '#fff'; };
         btnTogglePanel.onmouseleave = () => { btnTogglePanel.style.color = '#9ca3af'; };
         btnTogglePanel.onclick = () => {
@@ -4882,9 +4919,10 @@ function findMediaForDownload() {
         };
 
         const btnClose = document.createElement('button');
+        btnClose.id = 'mossad-btn-close';
         btnClose.innerHTML = '✕';
         btnClose.title = 'Скрыть виджет (Ctrl+Insert)';
-        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1; transition: color 0.2s;`;
+        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: color 0.2s; margin-left: auto;`;
         btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
         btnClose.onmouseleave = () => { btnClose.style.color = '#6b7280'; };
         btnClose.onclick = () => {
@@ -4892,8 +4930,8 @@ function findMediaForDownload() {
             window.updateWidgetUI();
         };
 
-        // Порядок: …таймер… | 🚀Пуск | 💾 | ↺ | 🔄 | ⤢ | ▼ | ✕
-        topBar.append(timerEl, btnStart, btnDL, btnReset, btnUpdate, btnSnap, btnTogglePanel, btnClose);
+        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ▼ | ✕ (на Grok ✕ переносится на верхний ряд)
+        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnTogglePanel, btnClose);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -5006,10 +5044,15 @@ function findMediaForDownload() {
                     ` : ''}
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label title="Ширина списка плейлиста в px (0 = авто под ширину меню)" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                        Ширина списка (px): <input id="mossad-in-playlist-w" type="number" min="0" max="800" step="10" value="${config.playlistWidth || 0}" style="width:48px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="0 = авто под ширину меню">
+                    </label>
+                </div>
+                <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⚙ Настройки</button>
                     <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py)">📥 База</button>
-                    <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Мотать в начало (${formatHotkey(config.hk.rewind)})">↺</button>
                     <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">↺ Сброс</button>
                     <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
@@ -5104,7 +5147,22 @@ function findMediaForDownload() {
                     };
                 }
             }
-            panel.querySelector('#mossad-btn-rewind').onclick = doRewind;
+            const inPlW = panel.querySelector('#mossad-in-playlist-w');
+            if (inPlW) {
+                inPlW.oninput = debounce((e) => {
+                    const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                    Settings.set('playlistWidth', val);
+                    if (val > 0) {
+                        localStorage.setItem('mossad_playlist_width', String(val));
+                    } else {
+                        localStorage.removeItem('mossad_playlist_width');
+                    }
+                    const pl = document.getElementById('mossad-playlist-panel');
+                    if (pl) {
+                        pl.style.width = val > 0 ? (val + 'px') : '100%';
+                    }
+                }, 300);
+            }
             const btnImportDb = panel.querySelector('#mossad-btn-import-db');
             const fileDbInput = panel.querySelector('#mossad-file-db');
             if (btnImportDb && fileDbInput) {
@@ -5134,6 +5192,7 @@ function findMediaForDownload() {
             panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
                 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
                 localStorage.removeItem(STORAGE_KEY);
+                localStorage.removeItem('mossad_playlist_width');
                 Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
                 window.updateWidgetUI();
                 showToast('✅ Настройки сброшены по умолчанию');
@@ -5150,7 +5209,6 @@ function findMediaForDownload() {
             if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
             triggerDownload();
         };
-        btnReset.onclick = () => doRewind();
 
         window.updateWidgetUI = () => {
             const galleryRow = document.getElementById('mossad-gallery-row');
@@ -5210,7 +5268,6 @@ function findMediaForDownload() {
                 btnStart.style.color = '#e5e7eb';
                 btnStart.style.boxShadow = 'none';
             }
-            btnReset.title = `Мотать в начало (${formatHotkey(config.hk.rewind)})`;
         };
 
         window.updateWidgetUI();
@@ -5271,7 +5328,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-10</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-12</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
@@ -5297,7 +5354,8 @@ function findMediaForDownload() {
             slideshowPanel: 'Меню слайдшоу',
             slideshowStart: 'Старт слайдшоу',
             duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
-            rewind: 'Мотать в начало'
+            rewind: 'Мотать в начало',
+            snapWidget: 'Привязать к левому верхнему краю (F8)'
         };
         
         Object.keys(keysMap).forEach(k => {
@@ -5712,6 +5770,14 @@ function findMediaForDownload() {
         if (hotkeyMatches(e, config.hk.history) && rootDomain === 'grok.com') {
             e.preventDefault();
             window.location.href = 'https://grok.com/imagine/saved';
+        }
+
+        // Привязать виджет к левому верхнему краю
+        if (hotkeyMatches(e, config.hk.snapWidget)) {
+            e.preventDefault();
+            if (typeof window.snapWidgetToCorner === 'function') {
+                window.snapWidgetToCorner();
+            }
         }
 
         // Обновить скрипт (Win+Alt+R) / Мотать в начало (Alt+R по умолчанию)

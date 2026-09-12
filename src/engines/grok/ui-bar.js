@@ -14,16 +14,17 @@
         row.id = 'mossad-gallery-row';
         row.style.cssText = `
             background: rgba(20,20,20,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 6px 10px;
-            display: flex; align-items: center; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            font-family: system-ui,-apple-system,sans-serif; cursor: grab; flex-wrap: wrap; pointer-events: auto;
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 5px 8px;
+            display: flex; align-items: center; gap: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            font-family: system-ui,-apple-system,sans-serif; cursor: grab; flex-wrap: nowrap; pointer-events: auto;
+            width: fit-content; max-width: 100%; box-sizing: border-box;
         `;
 
         // ── Утилита создания маленьких кнопок ──
         const mkBtn = (id, text, title, css) => {
             const b = document.createElement('button');
             b.id = id; b.textContent = text; b.title = title;
-            b.style.cssText = `cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;transition:all 0.2s;${css}`;
+            b.style.cssText = `cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;font-weight:700;font-size:11px;transition:all 0.2s;${css}`;
             return b;
         };
 
@@ -37,7 +38,7 @@
         } catch(e) {}
         btnCollect.textContent = savedCount > 0 ? String(savedCount) : 'Собрать';
         btnCollect.title = savedCount > 0 ? `Коллекция (${savedCount}): открыть список` : 'Собрать коллекцию ссылок';
-        btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
+        btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:3px 7px;font-weight:700;font-size:11px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
 
         // Клик: на /saved — собирать; иначе — открывать плейлист (если есть коллекция)
         btnCollect.onclick = () => {
@@ -84,7 +85,7 @@
 
         const btnStatus = document.createElement('button');
         btnStatus.id = 'mossad-gallery-status';
-        btnStatus.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12px;transition:all 0.2s;`;
+        btnStatus.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:3px 7px;font-weight:700;font-size:11px;transition:all 0.2s;`;
         if (_ssActive) {
             btnStatus.textContent = _isPaused ? '▶' : '❚❚';
             btnStatus.title = _isPaused ? 'Продолжить' : 'Пауза';
@@ -158,7 +159,7 @@
         // Helper: цвет кнопки по состоянию
         const grBtnCss = (state) => state === 'off' ? 'background:#1a1a2e;color:#4b5563;' : 'background:#1a2e3a;color:#7dd3fc;';
         const mdBtnCss = (state) => state === 'off' ? 'background:#1a1a2e;color:#4b5563;' : 'background:#1e1a3a;color:#c4b5fd;';
-        const BASE_BTN = 'cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;transition:all 0.2s;';
+        const BASE_BTN = 'cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;font-weight:700;font-size:11px;transition:all 0.2s;';
 
         // Кнопка Gr (порядок групп)
         const btnGr = mkBtn('mossad-gallery-grmode',
@@ -189,6 +190,14 @@
         };
 
         row.append(btnCollect, btnDl, btnStatus, btnStop, btnGr, btnMd);
+
+        // Переносим крестик закрытия на самый верхний ряд (на Grok это mossad-gallery-row)
+        const closeBtn = document.getElementById('mossad-btn-close');
+        if (closeBtn) {
+            closeBtn.style.marginLeft = 'auto';
+            row.appendChild(closeBtn);
+        }
+
         container.insertBefore(row, container.firstChild);
 
         if (typeof window.makeWidgetDraggable === 'function') {

@@ -295,6 +295,14 @@
             window.location.href = 'https://grok.com/imagine/saved';
         }
 
+        // Привязать виджет к левому верхнему краю
+        if (hotkeyMatches(e, config.hk.snapWidget)) {
+            e.preventDefault();
+            if (typeof window.snapWidgetToCorner === 'function') {
+                window.snapWidgetToCorner();
+            }
+        }
+
         // Обновить скрипт (Win+Alt+R) / Мотать в начало (Alt+R по умолчанию)
         if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R'))) {
             e.preventDefault();

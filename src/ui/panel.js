@@ -26,16 +26,27 @@
         const defTop = isGrokSavedPage() ? '72px' : '20px';
         const initTop = (savedPos && savedPos.top) ? savedPos.top : defTop;
         const initLeft = (savedPos && savedPos.left) ? savedPos.left : null;
-        const initRight = (savedPos && savedPos.right) ? savedPos.right : null;
+        const initRight = (savedPos && savedPos.right && savedPos.right !== 'auto') ? savedPos.right : null;
 
         container.style.cssText = `
             position: fixed;
             top: ${initTop};
-            ${initRight ? `right: ${initRight}; left: auto;` : initLeft ? `left: ${initLeft};` : 'right: 20px;'}
+            ${initRight ? `right: ${initRight}; left: auto;` : initLeft ? `left: ${initLeft}; right: auto;` : 'right: 20px;'}
             z-index: 999998;
             font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; user-select: none;
             display: flex; flex-direction: column; gap: 4px; pointer-events: none;
         `;
+
+        window.snapWidgetToCorner = function() {
+            const topVal = isGrokSavedPage() ? '72px' : '20px';
+            container.style.left = '20px';
+            container.style.top = topVal;
+            container.style.right = 'auto';
+            try {
+                localStorage.setItem('mossad_widget_pos', JSON.stringify({ left: '20px', top: topVal, right: 'auto' }));
+            } catch(err) {}
+            showToast('📍 Виджет привязан к левому верхнему краю');
+        };
 
         window.makeWidgetDraggable = function(handleEl) {
             if (!handleEl) return;
@@ -80,21 +91,22 @@
         topBar.id = 'mossad-top-bar';
         topBar.style.cssText = `
             background: rgba(20, 20, 20, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 6px 12px;
-            display: flex; align-items: center; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            transition: all 0.3s ease; cursor: grab; pointer-events: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 5px 8px;
+            display: flex; align-items: center; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: all 0.3s ease; cursor: grab; pointer-events: auto; width: fit-content; max-width: 100%; box-sizing: border-box;
         `;
         window.makeWidgetDraggable(topBar);
         
         const timerEl = document.createElement('div');
         timerEl.id = 'mossad-timer';
-        timerEl.style.cssText = `font-family: monospace; font-size: 13px; min-width: 95px; width: auto; white-space: nowrap; text-align: center; color: #9ca3af; padding: 0 4px;`;
+        timerEl.style.cssText = `font-family: monospace; font-size: 12px; min-width: 80px; width: auto; white-space: nowrap; text-align: center; color: #9ca3af; padding: 0 2px;`;
 
         const btnStart = document.createElement('button');
         btnStart.id = 'mossad-btn-start';
-        btnStart.innerHTML = '🚀 Пуск';
+        btnStart.innerHTML = '🚀';
+        btnStart.title = 'Старт слайдшоу (Insert)';
         btnStart.style.cssText = `
-            cursor: pointer; border: none; border-radius: 6px; padding: 5px 12px;
+            cursor: pointer; border: none; border-radius: 6px; padding: 4px 8px;
             font-weight: 700; font-size: 13px; transition: all 0.2s ease;
             background: #1f2937; color: #e5e7eb;
         `;
@@ -102,42 +114,21 @@
         const btnDL = document.createElement('button');
         btnDL.innerHTML = '💾';
         btnDL.title = 'Скачать';
-        btnDL.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #10b981; cursor: pointer; font-size: 14px; padding: 4px 8px;`;
-
-        const btnReset = document.createElement('button');
-        btnReset.id = 'mossad-btn-rewind-bar';
-        btnReset.innerHTML = '↺';
-        btnReset.title = `Мотать в начало (${formatHotkey(config.hk.rewind)})`;
-        btnReset.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 15px; padding: 0 4px;`;
+        btnDL.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #10b981; cursor: pointer; font-size: 13px; padding: 4px 7px;`;
 
         const btnUpdate = document.createElement('button');
         btnUpdate.innerHTML = '🔄';
         btnUpdate.title = 'Обновить скрипт (Win+Alt+R)';
-        btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 14px; padding: 4px 8px; transition: transform 0.2s ease;`;
+        btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 13px; padding: 4px 7px; transition: transform 0.2s ease;`;
         btnUpdate.onclick = () => {
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
-        };
-
-        const btnSnap = document.createElement('button');
-        btnSnap.innerHTML = '⤢';
-        btnSnap.title = 'Привязать к правому верхнему углу (-50px)';
-        btnSnap.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 3px; line-height: 1; transition: color 0.2s;`;
-        btnSnap.onmouseenter = () => { btnSnap.style.color = '#60a5fa'; };
-        btnSnap.onmouseleave = () => { btnSnap.style.color = '#6b7280'; };
-        btnSnap.onclick = () => {
-            container.style.right = '50px';
-            container.style.top = '50px';
-            container.style.left = 'auto';
-            try {
-                localStorage.setItem('mossad_widget_pos', JSON.stringify({ right: '50px', top: '50px' }));
-            } catch(err) {}
         };
 
         const btnTogglePanel = document.createElement('button');
         btnTogglePanel.id = 'mossad-btn-toggle-panel';
         btnTogglePanel.innerHTML = '▼';
         btnTogglePanel.title = 'Меню настроек';
-        btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: transform 0.2s, color 0.2s;`;
+        btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; padding: 0 3px; line-height: 1; transition: transform 0.2s, color 0.2s;`;
         btnTogglePanel.onmouseenter = () => { btnTogglePanel.style.color = '#fff'; };
         btnTogglePanel.onmouseleave = () => { btnTogglePanel.style.color = '#9ca3af'; };
         btnTogglePanel.onclick = () => {
@@ -146,9 +137,10 @@
         };
 
         const btnClose = document.createElement('button');
+        btnClose.id = 'mossad-btn-close';
         btnClose.innerHTML = '✕';
         btnClose.title = 'Скрыть виджет (Ctrl+Insert)';
-        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1; transition: color 0.2s;`;
+        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: color 0.2s; margin-left: auto;`;
         btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
         btnClose.onmouseleave = () => { btnClose.style.color = '#6b7280'; };
         btnClose.onclick = () => {
@@ -156,8 +148,8 @@
             window.updateWidgetUI();
         };
 
-        // Порядок: …таймер… | 🚀Пуск | 💾 | ↺ | 🔄 | ⤢ | ▼ | ✕
-        topBar.append(timerEl, btnStart, btnDL, btnReset, btnUpdate, btnSnap, btnTogglePanel, btnClose);
+        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ▼ | ✕ (на Grok ✕ переносится на верхний ряд)
+        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnTogglePanel, btnClose);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -270,10 +262,15 @@
                     ` : ''}
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label title="Ширина списка плейлиста в px (0 = авто под ширину меню)" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                        Ширина списка (px): <input id="mossad-in-playlist-w" type="number" min="0" max="800" step="10" value="${config.playlistWidth || 0}" style="width:48px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="0 = авто под ширину меню">
+                    </label>
+                </div>
+                <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⚙ Настройки</button>
                     <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py)">📥 База</button>
-                    <button id="mossad-btn-rewind" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#9ca3af; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Мотать в начало (${formatHotkey(config.hk.rewind)})">↺</button>
                     <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">↺ Сброс</button>
                     <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
@@ -368,7 +365,22 @@
                     };
                 }
             }
-            panel.querySelector('#mossad-btn-rewind').onclick = doRewind;
+            const inPlW = panel.querySelector('#mossad-in-playlist-w');
+            if (inPlW) {
+                inPlW.oninput = debounce((e) => {
+                    const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                    Settings.set('playlistWidth', val);
+                    if (val > 0) {
+                        localStorage.setItem('mossad_playlist_width', String(val));
+                    } else {
+                        localStorage.removeItem('mossad_playlist_width');
+                    }
+                    const pl = document.getElementById('mossad-playlist-panel');
+                    if (pl) {
+                        pl.style.width = val > 0 ? (val + 'px') : '100%';
+                    }
+                }, 300);
+            }
             const btnImportDb = panel.querySelector('#mossad-btn-import-db');
             const fileDbInput = panel.querySelector('#mossad-file-db');
             if (btnImportDb && fileDbInput) {
@@ -398,6 +410,7 @@
             panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
                 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
                 localStorage.removeItem(STORAGE_KEY);
+                localStorage.removeItem('mossad_playlist_width');
                 Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
                 window.updateWidgetUI();
                 showToast('✅ Настройки сброшены по умолчанию');
@@ -414,7 +427,6 @@
             if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
             triggerDownload();
         };
-        btnReset.onclick = () => doRewind();
 
         window.updateWidgetUI = () => {
             const galleryRow = document.getElementById('mossad-gallery-row');
@@ -474,7 +486,6 @@
                 btnStart.style.color = '#e5e7eb';
                 btnStart.style.boxShadow = 'none';
             }
-            btnReset.title = `Мотать в начало (${formatHotkey(config.hk.rewind)})`;
         };
 
         window.updateWidgetUI();
@@ -535,7 +546,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-10</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-12</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
@@ -561,7 +572,8 @@
             slideshowPanel: 'Меню слайдшоу',
             slideshowStart: 'Старт слайдшоу',
             duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
-            rewind: 'Мотать в начало'
+            rewind: 'Мотать в начало',
+            snapWidget: 'Привязать к левому верхнему краю (F8)'
         };
         
         Object.keys(keysMap).forEach(k => {

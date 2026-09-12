@@ -147,6 +147,11 @@
         } catch(e) {}
         const saveLoopSet = () => _gSS.setItem('mossad_grok_loop_set', JSON.stringify(loopSet));
 
+        const savedCustomWidth = (typeof config !== 'undefined' && config.playlistWidth)
+            ? config.playlistWidth
+            : parseInt(localStorage.getItem('mossad_playlist_width') || '0', 10);
+        const initialWidth = savedCustomWidth > 0 ? `${savedCustomWidth}px` : '100%';
+
         const panel = document.createElement('div');
         panel.id = 'mossad-playlist-panel';
 
@@ -154,8 +159,8 @@
         if (container) {
             // Монолитно внутри контейнера виджета
             panel.style.cssText = `
-                box-sizing: border-box; width: 100%; min-width: 320px; max-width: 380px;
-                max-height: 62vh; overflow-y: auto;
+                box-sizing: border-box; width: ${initialWidth}; min-width: 140px; max-width: 95vw;
+                max-height: 62vh; overflow-y: auto; overflow-x: hidden; resize: horizontal;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
                 font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #d1d5db;
@@ -167,13 +172,32 @@
             // Fallback (если виджет ещё не создан)
             panel.style.cssText = `
                 position: fixed; top: 70px; right: 16px; z-index: 9999999;
-                width: 320px; max-height: 62vh; overflow-y: auto;
+                width: ${savedCustomWidth > 0 ? `${savedCustomWidth}px` : '240px'}; min-width: 140px; max-width: 95vw;
+                max-height: 62vh; overflow-y: auto; overflow-x: hidden; resize: horizontal;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
                 font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #d1d5db;
                 box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
                 scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
             `;
+        }
+
+        // Сохраняем пользовательскую ширину при интерактивном ресайзе мышью
+        if (window.ResizeObserver) {
+            let lastW = savedCustomWidth || 0;
+            const ro = new ResizeObserver(entries => {
+                for (const entry of entries) {
+                    const w = Math.round(entry.contentRect.width);
+                    if (w >= 120 && Math.abs(w - lastW) > 6) {
+                        lastW = w;
+                        localStorage.setItem('mossad_playlist_width', String(w));
+                        if (typeof Settings !== 'undefined') {
+                            Settings.setQuiet('playlistWidth', w);
+                        }
+                    }
+                }
+            });
+            ro.observe(panel);
         }
 
         // ── Заголовок (липкий вверху с поддержкой перетаскивания всего меню) ──
@@ -183,15 +207,24 @@
             padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             gap: 6px; position: sticky; top: 0; background: rgba(14, 14, 18, 0.98);
             backdrop-filter: blur(16px); z-index: 2; border-top-left-radius: 12px; border-top-right-radius: 12px;
-            cursor: grab;
+            cursor: grab; min-width: 0; max-width: 100%; box-sizing: border-box;
         `;
         if (typeof window.makeWidgetDraggable === 'function') {
             window.makeWidgetDraggable(header);
         }
 
         const titleEl = document.createElement('span');
-        titleEl.style.cssText = `font-weight: 700; font-size: 13px; flex: 1;`;
+        titleEl.style.cssText = `font-weight: 700; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;`;
         titleEl.textContent = `📋 Список (${items.length})`;
+        titleEl.title = 'Двойной клик — сбросить ширину списка по ширине меню';
+        titleEl.ondblclick = () => {
+            panel.style.width = '100%';
+            localStorage.removeItem('mossad_playlist_width');
+            if (typeof Settings !== 'undefined') {
+                Settings.setQuiet('playlistWidth', 0);
+            }
+            showToast('↔ Ширина списка сброшена по ширине меню');
+        };
 
         // Кнопка «отключить все R» — появляется если зациклено 2+ элементов
         const btnClearLoop = document.createElement('button');
@@ -221,7 +254,7 @@
         panel.appendChild(header);
 
         const body = document.createElement('div');
-        body.style.cssText = `padding: 6px;`;
+        body.style.cssText = `padding: 6px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden;`;
 
         // ── Утилита: кнопка R ──
         const makeRBtn = (isActive, onToggle) => {
@@ -256,12 +289,12 @@
                 const gItems = groups[gid];
                 const grpEl = document.createElement('div');
                 grpEl.className = 'mossad-playlist-group';
-                grpEl.style.cssText = `margin-bottom:6px;border:1px solid rgba(255,255,255,0.07);border-radius:8px;overflow:hidden;transition:border-color 0.2s;`;
+                grpEl.style.cssText = `margin-bottom:6px;border:1px solid rgba(255,255,255,0.07);border-radius:8px;overflow:hidden;transition:border-color 0.2s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
                 const grpHeader = document.createElement('div');
                 grpHeader.className = 'mossad-playlist-grp-header';
                 const shortId = gid === '__noconv__' ? 'Без группы' : gid.slice(0, 8) + '…';
-                grpHeader.style.cssText = `display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.04);transition:background 0.2s;`;
+                grpHeader.style.cssText = `display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.04);transition:background 0.2s;min-width:0;max-width:100%;box-sizing:border-box;`;
                 grpHeader.title = `Группа: ${gid}`;
 
                 const isGrpLooped = loopSet.groupIds.includes(gid);
@@ -275,7 +308,7 @@
                 });
 
                 const grpLabel = document.createElement('span');
-                grpLabel.style.cssText = `flex:1;font-weight:600;font-size:11px;color:#7dd3fc;cursor:pointer;`;
+                grpLabel.style.cssText = `flex:1;min-width:0;font-weight:600;font-size:11px;color:#7dd3fc;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
                 grpLabel.textContent = shortId;
                 grpLabel.onclick = (e) => {
                     e.stopPropagation();
@@ -284,21 +317,21 @@
                 };
 
                 const grpCount = document.createElement('span');
-                grpCount.style.cssText = `color:#6b7280;font-size:10px;`;
+                grpCount.style.cssText = `color:#6b7280;font-size:10px;flex-shrink:0;white-space:nowrap;`;
                 grpCount.textContent = `${gItems.length} ген.`;
 
                 grpHeader.append(rGrp, grpLabel, grpCount);
                 grpEl.appendChild(grpHeader);
 
                 const listEl = document.createElement('div');
-                listEl.style.cssText = `padding:3px 6px;`;
+                listEl.style.cssText = `padding:3px 6px;min-width:0;max-width:100%;box-sizing:border-box;overflow:hidden;`;
                 gItems.forEach((item, idx) => {
                     const li = document.createElement('div');
                     li.className = 'mossad-playlist-item';
                     li.dataset.url = item.url || '';
                     const itemUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(item.url) : '';
                     li.dataset.uuid = itemUuid;
-                    li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:10px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;`;
+                    li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:10px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
                     const baseUrl = (item.url || '').split('?')[0];
                     const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
@@ -313,9 +346,11 @@
 
                     const label = document.createElement('span');
                     label.className = 'mossad-playlist-label';
-                    label.style.cssText = `flex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
+                    label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
                     const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 22)}`;
                     label.textContent = baseText;
+                    li.dataset.origText = baseText;
+                    label.title = item.url;
                     li.dataset.origText = baseText;
                     label.title = item.url;
 
@@ -347,7 +382,7 @@
                 li.dataset.url = item.url || '';
                 const itemUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(item.url) : '';
                 li.dataset.uuid = itemUuid;
-                li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:11px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;`;
+                li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:11px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
                 const baseUrl = (item.url || '').split('?')[0];
                 const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
@@ -362,7 +397,7 @@
 
                 const label = document.createElement('span');
                 label.className = 'mossad-playlist-label';
-                label.style.cssText = `flex:1;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
+                label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
                 const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 26)}`;
                 label.textContent = baseText;
                 li.dataset.origText = baseText;
