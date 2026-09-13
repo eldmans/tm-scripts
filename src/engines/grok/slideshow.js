@@ -3,75 +3,19 @@
     // ============================================================
 
     /**
-     * Бесшовная SPA-навигация на grok.com:
-     * 1. Внутри одной группы — поиск кадра в киноплёнке (filmstrip) и клик без перезагрузки страницы.
-     * 2. Next.js router.push (если доступен в рантайме).
-     * 3. Fallback: межпостовой переход по location.href (только для перехода на ДРУГУЮ группу/пост).
+     * SPA-навигация на grok.com.
+     * КАЖДЫЙ пост в группе имеет свой уникальный UUID → всегда навигируем по URL.
+     * Filmstrip используется ТОЛЬКО для ручного листания вариантов одного поста (grokStepFilmstrip),
+     * но НЕ для автоматического слайдшоу по коллекции.
+     * 1. Пробуем Next.js router.push (без перезагрузки страницы).
+     * 2. Fallback: window.location.href (полный переход).
      */
     function grokSpaNavigate(url) {
         if (!url) return;
-        try {
-            const urlObj = new URL(url, location.origin);
-            const path = urlObj.pathname + urlObj.search;
-            const targetUuid = (typeof grokExtractUuid === 'function')
-                ? grokExtractUuid(urlObj.pathname)
-                : (urlObj.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
 
-            const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
-            const isPostPage = typeof isGrokPostPage === 'function' ? isGrokPostPage() : location.pathname.includes('/imagine/post/');
-
-            if (isPostPage && struct) {
-                const targetPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct, url) : null;
-                const currentPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
-
-                const isSameGroup = targetPos && currentPos &&
-                                    targetPos.grpIndex !== -1 &&
-                                    targetPos.grpIndex === currentPos.grpIndex;
-
-                if (isSameGroup) {
-                    // Переход ВНУТРИ одной группы: ищем кадр в киноплёнке (filmstrip) на текущей странице
-                    let filmstripBtn = null;
-                    if (targetUuid && typeof grokFindFilmstripItemByUuid === 'function') {
-                        filmstripBtn = grokFindFilmstripItemByUuid(targetUuid);
-                    }
-                    if (!filmstripBtn && typeof grokGetFilmstripItems === 'function') {
-                        const filmItems = grokGetFilmstripItems();
-                        if (targetPos.itemInGrpIndex >= 0 && targetPos.itemInGrpIndex < filmItems.length) {
-                            filmstripBtn = filmItems[targetPos.itemInGrpIndex];
-                        }
-                    }
-
-                    if (filmstripBtn) {
-                        console.log(`[MOSSAD] grokSpaNavigate: внутри группы переключаем filmstrip без перезагрузки`);
-                        filmstripBtn.click();
-                        try {
-                            history.replaceState(null, '', path);
-                        } catch(e) {}
-
-                        let checks = 0;
-                        const checkInterval = setInterval(() => {
-                            checks++;
-                            const curUuid = (typeof grokExtractUuid === 'function')
-                                ? grokExtractUuid(location.pathname)
-                                : '';
-                            if ((curUuid && targetUuid && curUuid === targetUuid.toLowerCase()) || checks >= 6) {
-                                clearInterval(checkInterval);
-                                if (typeof grokGallerySlideshowTick === 'function') {
-                                    grokGallerySlideshowTick();
-                                }
-                            }
-                        }, 40);
-                        return;
-                    }
-                }
-            }
-        } catch (e) {
-            console.error('[MOSSAD] grokSpaNavigate error:', e);
-        }
-
-        // Переход на ДРУГУЮ группу/пост (или с главной /imagine) — полноценный переход
-        console.log('[MOSSAD] grokSpaNavigate: переход на другую группу/пост ->', url);
-        const wasPaused = window._mossadGalleryPaused || sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
+        // Сохраняем состояние паузы перед переходом
+        const wasPaused = window._mossadGalleryPaused ||
+                          sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
                           (typeof SESSION_PAUSED_KEY !== 'undefined' && sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true');
         if (wasPaused) {
             sessionStorage.setItem('mossad_gallery_paused', 'true');
@@ -81,6 +25,40 @@
             if (typeof SESSION_PAUSED_KEY !== 'undefined') sessionStorage.removeItem(SESSION_PAUSED_KEY);
         }
         sessionStorage.setItem('mossad_navigating_group', 'true');
+
+        try {
+            const urlObj = new URL(url, location.origin);
+            const path = urlObj.pathname + urlObj.search;
+
+            // Попытка SPA-навигации через Next.js router (без перезагрузки страницы)
+            if (window.next?.router?.push) {
+                console.log('[MOSSAD] grokSpaNavigate: Next.js router.push →', path);
+                window.next.router.push(path);
+                // Ждём смены URL, затем вызываем tick
+                let navChecks = 0;
+                const navWait = setInterval(() => {
+                    navChecks++;
+                    const curPath = location.pathname + location.search;
+                    if (curPath === path) {
+                        clearInterval(navWait);
+                        if (typeof grokGallerySlideshowTick === 'function') {
+                            setTimeout(grokGallerySlideshowTick, 200);
+                        }
+                    } else if (navChecks >= 20) {
+                        // 2 секунды прошло — роутер не отработал, переходим жёстко
+                        clearInterval(navWait);
+                        console.warn('[MOSSAD] grokSpaNavigate: router.push не сработал → location.href');
+                        window.location.href = url;
+                    }
+                }, 100);
+                return;
+            }
+        } catch(e) {
+            console.error('[MOSSAD] grokSpaNavigate error:', e);
+        }
+
+        // Fallback: полный переход
+        console.log('[MOSSAD] grokSpaNavigate: location.href →', url);
         window.location.href = url;
     }
 
@@ -163,12 +141,22 @@
         const startGid = startItem.convId || '__noconv__';
         const startUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(startItem.url) : '';
 
+        // Ищем явную позицию стартового элемента в структуре
+        let startGrpIdx = 0, startItemIdx = 0;
+        for (let _g = 0; _g < struct.groups.length; _g++) {
+            const _i = struct.groups[_g].items.findIndex(it =>
+                (it.url || '').split('?')[0].toLowerCase() === startBase);
+            if (_i !== -1) { startGrpIdx = _g; startItemIdx = _i; break; }
+        }
+
         const ss = {
             active: true,
             circle: 1,
             total: struct.items.length,
             targetUrl: startItem.url,
             targetUuid: startUuid,
+            curGrpIdx: startGrpIdx,
+            curItemIdx: startItemIdx,
             visitedInCurGroup: [startBase],
             visitedGroupsInCircle: [startGid],
             visitedInCircle: [startBase]
@@ -332,50 +320,10 @@
             document.body.appendChild(indicator);
         }
 
+
         const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
 
-        // Если в сессии есть целевой кадр, а на киноплёнке выбран другой (например, Grok открыл 5-й по умолчанию)
-        if (window._grokActivateTargetTimer) {
-            clearTimeout(window._grokActivateTargetTimer);
-            window._grokActivateTargetTimer = null;
-        }
-        if ((ss.targetUuid || ss.targetUrl) && typeof grokGetFilmstripItems === 'function') {
-            let attempts = 0;
-            const activateTarget = () => {
-                attempts++;
-                const filmItems = grokGetFilmstripItems();
-                if (filmItems.length > 0) {
-                    let targetBtn = (ss.targetUuid && typeof grokFindFilmstripItemByUuid === 'function')
-                        ? grokFindFilmstripItemByUuid(ss.targetUuid)
-                        : null;
-                    if (!targetBtn && struct && ss.targetUrl && typeof grokFindCurrentPosition === 'function') {
-                        const targetPos = grokFindCurrentPosition(struct, ss.targetUrl);
-                        if (targetPos && targetPos.itemInGrpIndex >= 0 && targetPos.itemInGrpIndex < filmItems.length) {
-                            targetBtn = filmItems[targetPos.itemInGrpIndex];
-                        }
-                    }
-                    if (targetBtn) {
-                        const activeIdx = typeof grokGetActiveFilmstripIndex === 'function' ? grokGetActiveFilmstripIndex() : -1;
-                        const isTargetActive = (activeIdx !== -1 && filmItems[activeIdx] === targetBtn) ||
-                                              targetBtn.getAttribute('aria-selected') === 'true';
-                        if (!isTargetActive) {
-                            console.log(`[MOSSAD] grokGallerySlideshowTick: активируем целевой кадр в filmstrip`);
-                            targetBtn.click();
-                        }
-                        window._grokActivateTargetTimer = null;
-                        return;
-                    }
-                }
-                if (attempts < 6) {
-                    window._grokActivateTargetTimer = setTimeout(activateTarget, 120);
-                } else {
-                    window._grokActivateTargetTimer = null;
-                }
-            };
-            activateTarget();
-        }
 
-        const curPos = (struct && typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
 
         const grpMode = struct?.grpMode || 'seq';
         const itemMode = struct?.itemMode || 'fwd';
@@ -383,15 +331,23 @@
         const modeTag = `Gr${grIcon[grpMode]||'↓'} Md${grIcon[itemMode]||'↓'}`;
         const statusPrefix = isPaused ? '⏸' : '▶';
 
+        // Позиция из SS (явная, надёжная)
         let posText = '';
-        if (curPos && curPos.flatIndex !== -1 && struct) {
-            posText = `${curPos.flatIndex + 1}/${struct.items.length}`;
-            if (curPos.grpIndex !== -1 && struct.groups.length > 1) {
-                posText += ` (гр. ${curPos.grpIndex + 1}/${struct.groups.length})`;
+        if (struct) {
+            const ssG = typeof ss.curGrpIdx === 'number' ? ss.curGrpIdx : -1;
+            const ssI = typeof ss.curItemIdx === 'number' ? ss.curItemIdx : -1;
+            if (ssG >= 0 && ssI >= 0 && ssG < struct.groups.length) {
+                const grp = struct.groups[ssG];
+                // flatIndex = число элементов во всех предыдущих группах + ssI
+                let flatIdx = ssI;
+                for (let _g = 0; _g < ssG; _g++) flatIdx += struct.groups[_g].items.length;
+                posText = `${flatIdx + 1}/${struct.items.length}`;
+                if (struct.groups.length > 1) posText += ` (гр. ${ssG + 1}/${struct.groups.length})`;
+            } else {
+                posText = `${struct.items.length}`;
             }
-        } else if (struct) {
-            posText = `${struct.items.length}`;
         }
+
 
         indicator.innerHTML = `<span id="mgi-status">${statusPrefix} ${modeTag} · ${posText} · Круг ${ss.circle || 1}</span>`;
 

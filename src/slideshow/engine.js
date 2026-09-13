@@ -261,14 +261,31 @@
         // Скачивание перед перелистыванием
         if (config.downloadType !== 'none') {
             const hasVideo = getActiveVideo() !== null;
-            if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
-                triggerDownload();
-                if (config.pdAction === 'del' && rootDomain === 'grok.com') {
-                    setTimeout(() => window.close(), 1000);
-                    return;
+            const typeMatch = !(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo);
+            if (typeMatch) {
+                // 60-секундный guard от повторного скачивания одной страницы
+                const _dlPageUrl = location.href.split('?')[0].toLowerCase();
+                const _dlLastUrl = sessionStorage.getItem('mossad_auto_dl_url');
+                const _dlLastTime = parseInt(sessionStorage.getItem('mossad_auto_dl_time') || '0', 10);
+                const _dlNow = Date.now();
+                const _recentDl = (_dlLastUrl === _dlPageUrl) && (_dlNow - _dlLastTime < 60000);
+                if (_recentDl) {
+                    const secsAgo = Math.round((_dlNow - _dlLastTime) / 1000);
+                    const _h = Array.isArray(config.hk?.download) ? config.hk.download[0] : config.hk?.download;
+                    const _dlLabel = _h?.key ? `${_h.ctrl?'Ctrl+':''}${_h.alt?'Alt+':''}${_h.shift?'Shift+':''}${_h.key}` : 'DL';
+                    showToast(`⚠️ ${secsAgo}с назад уже скачано. Повтор: ${_dlLabel}`);
+                } else {
+                    sessionStorage.setItem('mossad_auto_dl_url', _dlPageUrl);
+                    sessionStorage.setItem('mossad_auto_dl_time', String(_dlNow));
+                    triggerDownload();
+                    if (config.pdAction === 'del' && rootDomain === 'grok.com') {
+                        setTimeout(() => window.close(), 1000);
+                        return;
+                    }
                 }
             }
         }
+
         
         // Gallery Slideshow: вместо клавиши — переходим на следующий URL из списка
         if (rootDomain === 'grok.com') {

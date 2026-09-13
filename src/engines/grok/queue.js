@@ -82,33 +82,6 @@
             }
         }
 
-        // На странице группы с киноплёнкой синхронизируем индекс кадра с реальным активным элементом в DOM
-        if (!url && typeof isGrokPostPage === 'function' && isGrokPostPage() && typeof grokGetActiveFilmstripIndex === 'function') {
-            if (grpIndex === -1 && location.search) {
-                const convMatch = location.search.match(/conversation=([a-f0-9-]+)/i);
-                if (convMatch) {
-                    const cId = convMatch[1].toLowerCase();
-                    const g = structure.groups.findIndex(gr => (gr.id || '').toLowerCase() === cId);
-                    if (g !== -1) grpIndex = g;
-                }
-            }
-            if (grpIndex !== -1) {
-                const filmIdx = grokGetActiveFilmstripIndex();
-                if (filmIdx !== -1 && filmIdx < structure.groups[grpIndex].items.length) {
-                    itemInGrpIndex = filmIdx;
-                    const actItem = structure.groups[grpIndex].items[filmIdx];
-                    const fIdx = structure.items.indexOf(actItem);
-                    if (fIdx !== -1) flatIndex = fIdx;
-                    return {
-                        flatIndex,
-                        grpIndex,
-                        itemInGrpIndex,
-                        currentItem: actItem
-                    };
-                }
-            }
-        }
-
         return {
             flatIndex,
             grpIndex,
@@ -116,6 +89,7 @@
             currentItem: flatIndex !== -1 ? structure.items[flatIndex] : null
         };
     }
+
 
     /**
      * Главный диспетчер навигации по списку:
@@ -265,11 +239,23 @@
         }
 
         // Режим с группами
-        let g = (curPos && curPos.grpIndex !== -1) ? curPos.grpIndex : 0;
+        // Читаем позицию из SS — она явно записывается на каждом шаге и не зависит от DOM
+        let g, i;
+        const hasSsPos = typeof ss.curGrpIdx === 'number' && ss.curGrpIdx >= 0 &&
+                         typeof ss.curItemIdx === 'number' && ss.curItemIdx >= 0 &&
+                         ss.curGrpIdx < struct.groups.length;
+        if (hasSsPos) {
+            g = ss.curGrpIdx;
+            i = Math.min(ss.curItemIdx, struct.groups[g].items.length - 1);
+        } else {
+            // Fallback: определяем по URL (первый запуск или внешняя навигация)
+            g = (curPos && curPos.grpIndex !== -1) ? curPos.grpIndex : 0;
+            i = (curPos && curPos.itemInGrpIndex !== -1) ? curPos.itemInGrpIndex : 0;
+        }
         let curGrp = struct.groups[g];
-        let i = (curPos && curPos.itemInGrpIndex !== -1) ? curPos.itemInGrpIndex : 0;
 
-        const curBase = (curPos?.currentItem?.url || '').split('?')[0].toLowerCase();
+        const curItemForVisited = curGrp.items[i];
+        const curBase = (curItemForVisited?.url || '').split('?')[0].toLowerCase();
         if (!visitedInCurGroup.includes(curBase)) visitedInCurGroup.push(curBase);
         if (!visitedGroups.includes(curGrp.id)) visitedGroups.push(curGrp.id);
 
@@ -301,8 +287,11 @@
         }
 
         if (!groupDone && nextItemInGrp) {
+            const newItemIdx = curGrp.items.indexOf(nextItemInGrp);
             visitedInCurGroup.push((nextItemInGrp.url || '').split('?')[0].toLowerCase());
             ss.visitedInCurGroup = visitedInCurGroup;
+            ss.curGrpIdx = g;
+            ss.curItemIdx = newItemIdx >= 0 ? newItemIdx : i + 1;
             _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
             return { item: nextItemInGrp, circleCompleted: false };
         }
@@ -355,6 +344,8 @@
         }
 
         ss.visitedInCurGroup = [(targetItem.url || '').split('?')[0].toLowerCase()];
+        ss.curGrpIdx = nextG;
+        ss.curItemIdx = targetGrp.items.indexOf(targetItem);
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
 
         return { item: targetItem, circleCompleted };
