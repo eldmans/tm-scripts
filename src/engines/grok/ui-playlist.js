@@ -201,6 +201,17 @@
             `;
         }
 
+        panel.tabIndex = -1;
+        panel.style.outline = 'none';
+        panel.addEventListener('mouseenter', () => {
+            try { panel.focus(); } catch(e) {}
+        });
+        panel.addEventListener('click', (e) => {
+            if (e.target === panel || e.target === body) {
+                try { panel.focus(); } catch(e) {}
+            }
+        });
+
         // Сохраняем пользовательские размеры при интерактивном ресайзе мышью
         if (window.ResizeObserver) {
             let lastW = savedCustomWidth || 0;
@@ -393,6 +404,12 @@
                 grpCount.style.cssText = `color:#6b7280;font-size:calc(var(--mossad-pl-font-size, 11px) - 1px);flex-shrink:0;white-space:nowrap;line-height:1.15;`;
                 grpCount.textContent = `${gItems.length} ген.`;
 
+                grpHeader.onclick = (e) => {
+                    if (e.target === grpHeader || e.target === grpCount) {
+                        e.stopPropagation();
+                        try { panel.focus(); } catch(err) {}
+                    }
+                };
                 grpHeader.append(rGrp, grpLabel, grpCount);
                 grpEl.appendChild(grpHeader);
 
@@ -438,7 +455,12 @@
                         grokHighlightActivePlaylistItem(item.url);
                     };
                     label.onclick = onPlayItem;
-                    li.onclick = onPlayItem;
+                    li.onclick = (e) => {
+                        if (e.target === li) {
+                            e.stopPropagation();
+                            try { panel.focus(); } catch(err) {}
+                        }
+                    };
 
                     li.append(rItem, label);
                     listEl.appendChild(li);
@@ -487,7 +509,12 @@
                     grokHighlightActivePlaylistItem(item.url);
                 };
                 label.onclick = onPlayItem;
-                li.onclick = onPlayItem;
+                li.onclick = (e) => {
+                    if (e.target === li) {
+                        e.stopPropagation();
+                        try { panel.focus(); } catch(err) {}
+                    }
+                };
 
                 li.append(rItem, label);
                 body.appendChild(li);

@@ -30,12 +30,36 @@
     let lastTime = 0;
     let lastRAFTime = 0;
     let rafId = null;
+    let _videoReachedEndZone = false; // Видео зашло в финальную зону (последние доли секунды)
     let _lastDownloadUrl = null;     // защита от повторного скачивания одного файла
     let _lastDownloadTime = 0;
     const _filenameCounter = new Map(); // счётчик по базовому имени → (001)(002)...
     let _samePageSlideCount = 0;     // счётчик попыток перелистнуть с одной и той же страницы
     let _lastSlideUrl = '';          // URL во время последнего triggerNextSlide
     const SAME_PAGE_LIMIT = 3;       // сколько раз пробовать перед остановкой
+
+    function cancelSlideTimers() {
+        if (rafId) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+        }
+        if (slideshowTimeoutId) {
+            clearTimeout(slideshowTimeoutId);
+            slideshowTimeoutId = null;
+        }
+        if (downloadTimeoutId) {
+            clearTimeout(downloadTimeoutId);
+            downloadTimeoutId = null;
+        }
+        isCountingDown = false;
+        countdownSeconds = 0;
+        currentLoopCount = 0;
+        accumulatedTime = 0;
+        lastTime = 0;
+        _videoReachedEndZone = false;
+        currentVideoNode = null;
+    }
+    window.cancelSlideTimers = cancelSlideTimers;
     function getActiveVideo() {
         if (rootDomain.includes('redgifs.com') && window.MOSSAD_ENGINES?.redgifs?.getActiveVideo) {
             const rgVid = window.MOSSAD_ENGINES.redgifs.getActiveVideo();
@@ -174,15 +198,13 @@
     }, 250);
 
     function stopSlideshow() {
+        cancelSlideTimers();
         slideshowActive = false;
         setSlideshowPaused(false);
         isCountingDown = false;
         sessionStorage.removeItem(SESSION_ACTIVE_KEY);
         sessionStorage.removeItem(SESSION_STATE_KEY);
         sessionStorage.removeItem(SESSION_PAUSED_KEY);
-        if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
-        if (downloadTimeoutId) clearTimeout(downloadTimeoutId);
-        if (rafId) cancelAnimationFrame(rafId);
         if (rootDomain === 'grok.com') {
             _gSS.removeItem(GALLERY_SS_KEY);
             sessionStorage.removeItem('mossad_gallery_paused');
@@ -232,6 +254,7 @@
 
     function triggerNextSlide() {
         if (!slideshowActive || slideshowPaused || _isRewinding) return;
+        cancelSlideTimers();
         const dirs = config.slideshowDirections;
         if (!dirs || dirs.length === 0) { stopSlideshow(); return; }
 
@@ -390,8 +413,8 @@
 
     function scheduleNextSlideCycle(initSec, retryCount = 0) {
         if (!slideshowActive || slideshowPaused) return;
-        if (rafId) cancelAnimationFrame(rafId);
-        if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
+        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
         
         const detectedType = getPinMediaType();
         const video = getActiveVideo();
@@ -422,6 +445,7 @@
             accumulatedTime = 0;
             lastTime = video.currentTime;
             lastRAFTime = performance.now();
+            _videoReachedEndZone = false;
             rafId = requestAnimationFrame(checkVideoLoops);
         } else {
             // Если в DOM уже есть главная картинка пина и нет контейнеров видео
@@ -473,36 +497,50 @@
         }
 
         const ct = currentVideoNode.currentTime;
-        // Защита от ложного лупа при смене слайда (когда плеер сбрасывается на 0):
-        // Считаем за луп только если видео реально проигрывалось хотя бы до 65% длительности или больше 1 сек
-        const isRealLoop = (lastTime > 1.0) && (videoInitialDuration === 0 || lastTime >= videoInitialDuration * 0.65);
-        if (ct < lastTime && isRealLoop) {
-            // Произошел луп
-            currentLoopCount++;
-            accumulatedTime = 0;
-        } else if (ct >= lastTime) {
-            const delta = (timeNow - lastRAFTime) / 1000;
-            accumulatedTime += delta;
-        }
-        
-        lastTime = ct;
-        lastRAFTime = timeNow;
-        
-        // Лимит времени с учетом количества кругов (videoLoops * maxVideoDuration)
         const effDuration = videoInitialDuration || (currentVideoNode && !isNaN(currentVideoNode.duration) ? currentVideoNode.duration : 0);
-        const maxDurationCap = (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0)
-            ? (config.videoLoops * config.pinterestMaxVideoDuration)
-            : (config.videoLoops * effDuration);
 
-        const hasValidCap = maxDurationCap > 0;
-        if (currentLoopCount >= config.videoLoops || (hasValidCap && accumulatedTime >= maxDurationCap)) {
-            // Циклы или лимит времени завершены, запускаем паузу после видео
-            countdownSeconds = config.delayAfterVideo;
-            isCountingDown = true;
-            runPhotoTimer();
+        if (effDuration <= 0) {
+            rafId = requestAnimationFrame(checkVideoLoops);
             return;
         }
-        
+
+        // Финальная зона ролика (последние 0.45с либо нативное событие ended)
+        const isAtEnd = currentVideoNode.ended || (ct >= Math.max(0.5, effDuration - 0.45));
+        if (isAtEnd) {
+            _videoReachedEndZone = true;
+        }
+
+        // Завершение одного цикла/круга видео
+        let loopCompleted = false;
+        if (currentVideoNode.ended) {
+            loopCompleted = true;
+        } else if (_videoReachedEndZone && ct < 1.0) {
+            // Видео было в финальной зоне и зациклилось на начало
+            loopCompleted = true;
+        } else if (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0 && ct >= config.pinterestMaxVideoDuration) {
+            // Pinterest лимит длительности
+            loopCompleted = true;
+        }
+
+        if (loopCompleted) {
+            currentLoopCount++;
+            _videoReachedEndZone = false;
+            lastTime = ct;
+            if (currentLoopCount >= config.videoLoops) {
+                // Все круги завершены: запускаем паузу после видео
+                countdownSeconds = config.delayAfterVideo;
+                if (countdownSeconds > 0) {
+                    isCountingDown = true;
+                    runPhotoTimer();
+                } else {
+                    triggerNextSlide();
+                }
+                return;
+            }
+        }
+
+        lastTime = ct;
+        lastRAFTime = timeNow;
         rafId = requestAnimationFrame(checkVideoLoops);
     }
 

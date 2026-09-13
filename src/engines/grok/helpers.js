@@ -11,7 +11,7 @@
         const lowerKeywords = keywords.map(k => k.toLowerCase().trim());
         const candidates = Array.from(rootEl.querySelectorAll('button, [role="button"], [role="menuitem"], a'));
         return candidates.find(el => {
-            if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+            if (el.offsetWidth === 0 && el.offsetHeight === 0 && (!el.getClientRects || !el.getClientRects().length)) return false;
             const aria = (el.getAttribute('aria-label') || '').toLowerCase();
             const title = (el.getAttribute('title') || '').toLowerCase();
             const txt = (el.textContent || '').trim().toLowerCase();
@@ -31,7 +31,7 @@
 
         // 2. Поиск по SVG иконке (кнопка с 3 точками / кругами)
         return Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
-            if (b.offsetParent === null) return false;
+            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
             const aria = (b.getAttribute('aria-label') || '').toLowerCase();
             if (aria.includes('post') || aria.includes('действи') || aria.includes('more')) return true;
             const svgs = b.querySelectorAll('svg');
@@ -228,7 +228,7 @@
         if (!directBtn) {
             // Поиск по SVG характерной иконки загрузки
             directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
-                if (b.offsetParent === null) return false;
+                if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
                 const path = b.querySelector('path');
                 const d = path ? (path.getAttribute('d') || '') : '';
                 return d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
@@ -307,8 +307,18 @@
     function grokGetActiveFilmstripIndex() {
         const items = grokGetFilmstripItems();
         if (items.length === 0) return -1;
+
+        // 1. По классу выделения (ring-white, border-white, aria-selected="true") БЕЗ ложных Tailwind focus:*
+        const activeByClass = items.findIndex(btn => {
+            if (btn.getAttribute('aria-selected') === 'true') return true;
+            const cls = btn.className || '';
+            const tokens = cls.split(/\s+/);
+            return tokens.some(t => /^(ring-white|border-white|ring-2|ring-4|active)$/i.test(t));
+        });
+        if (activeByClass !== -1) return activeByClass;
+
+        // 2. По совпадению UUID ассета с текущим URL (fallback если класс ещё не применился)
         const curUuid = grokExtractUuid(location.pathname);
-        // 1. По совпадению UUID ассета с текущим URL (самый точный способ)
         if (curUuid) {
             const activeByMatch = items.findIndex(btn => {
                 const imgSrc = btn.querySelector('img, video, source')?.src || '';
@@ -322,14 +332,6 @@
             if (activeByMatch !== -1) return activeByMatch;
         }
 
-        // 2. По классу выделения (ring-white, border-white, aria-selected="true") БЕЗ ложных Tailwind focus:*
-        const activeByClass = items.findIndex(btn => {
-            if (btn.getAttribute('aria-selected') === 'true') return true;
-            const cls = btn.className || '';
-            const tokens = cls.split(/\s+/);
-            return tokens.some(t => /^(ring-white|border-white|ring-2|ring-4|active)$/i.test(t));
-        });
-        if (activeByClass !== -1) return activeByClass;
         return -1;
     }
 

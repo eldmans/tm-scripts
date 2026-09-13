@@ -635,6 +635,8 @@
         const keysMap = {
             nextSlide:        'Следующий слайд (PageDown)',
             prevSlide:        'Предыдущий слайд (PageUp)',
+            nextGroup:        'Следующая группа (Alt+PageDown)',
+            prevGroup:        'Предыдущая группа (Alt+PageUp)',
             download:         'Скачать (DL)',
             upscale:          'Улучшить',
             deleteVid:        'Удалить видео',

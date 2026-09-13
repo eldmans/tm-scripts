@@ -71,8 +71,15 @@
 
         // Переход на ДРУГУЮ группу/пост (или с главной /imagine) — полноценный переход
         console.log('[MOSSAD] grokSpaNavigate: переход на другую группу/пост ->', url);
-        sessionStorage.removeItem('mossad_gallery_paused');
-        if (typeof SESSION_PAUSED_KEY !== 'undefined') sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        const wasPaused = window._mossadGalleryPaused || sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
+                          (typeof SESSION_PAUSED_KEY !== 'undefined' && sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true');
+        if (wasPaused) {
+            sessionStorage.setItem('mossad_gallery_paused', 'true');
+            if (typeof SESSION_PAUSED_KEY !== 'undefined') sessionStorage.setItem(SESSION_PAUSED_KEY, 'true');
+        } else {
+            sessionStorage.removeItem('mossad_gallery_paused');
+            if (typeof SESSION_PAUSED_KEY !== 'undefined') sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        }
         sessionStorage.setItem('mossad_navigating_group', 'true');
         window.location.href = url;
     }
@@ -167,8 +174,15 @@
             visitedInCircle: [startBase]
         };
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
-        sessionStorage.removeItem('mossad_gallery_paused');
-        window._mossadGalleryPaused = false;
+        const wasPaused = window._mossadGalleryPaused || sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
+                          (typeof SESSION_PAUSED_KEY !== 'undefined' && sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true');
+        if (wasPaused) {
+            sessionStorage.setItem('mossad_gallery_paused', 'true');
+            window._mossadGalleryPaused = true;
+        } else {
+            sessionStorage.removeItem('mossad_gallery_paused');
+            window._mossadGalleryPaused = false;
+        }
         // Закрываем большое меню с D-Pad
         window.widgetState = 'bar';
         if (window.updateWidgetUI) window.updateWidgetUI();
@@ -294,8 +308,6 @@
 
         if (sessionStorage.getItem('mossad_navigating_group') === 'true') {
             sessionStorage.removeItem('mossad_navigating_group');
-            sessionStorage.removeItem('mossad_gallery_paused');
-            if (typeof SESSION_PAUSED_KEY !== 'undefined') sessionStorage.removeItem(SESSION_PAUSED_KEY);
         }
 
         // Проверяем, стояло ли слайдшоу на паузе до перехода

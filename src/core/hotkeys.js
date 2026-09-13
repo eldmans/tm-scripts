@@ -40,6 +40,7 @@
     }
 
     function playerStepSlide(dir) {
+        if (typeof cancelSlideTimers === 'function') cancelSlideTimers();
         const isFwd = (dir === 'next');
         const wasPaused = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
                           sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true' ||
@@ -126,17 +127,19 @@
         const isGrokPost = (rootDomain === 'grok.com' && isGrokPostPage());
         const hasGrokCollection = isGrokPost && !!_gSS.getItem(GALLERY_COLLECTION_KEY);
 
-        // Перехват групп на Grok: Alt+ArrowDown (след. группа) / Alt+ArrowUp (пред. группа)
-        if (isGrokPost && hasGrokCollection && e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        // Перехват групп: config.hk.nextGroup (по умолчанию Alt+PageDown) / config.hk.prevGroup (по умолчанию Alt+PageUp)
+        const isNextGrp = hotkeyMatches(e, config.hk.nextGroup);
+        const isPrevGrp = hotkeyMatches(e, config.hk.prevGroup);
+        if ((isNextGrp || isPrevGrp) && isGrokPost && hasGrokCollection) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const isDown = (e.key === 'ArrowDown');
+            if (typeof cancelSlideTimers === 'function') cancelSlideTimers();
             const nextRes = (typeof grokGetNextSlideItem === 'function')
-                ? grokGetNextSlideItem(isDown ? 'next_grp' : 'prev_grp')
+                ? grokGetNextSlideItem(isNextGrp ? 'next_grp' : 'prev_grp')
                 : null;
             if (nextRes && nextRes.item) {
                 if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
-                showToast(`📁 Группа: ${isDown ? '↓' : '↑'}`);
+                showToast(`📁 Группа: ${isNextGrp ? '↓' : '↑'}`);
                 grokSpaNavigate(nextRes.item.url);
                 setTimeout(() => {
                     if (typeof grokHighlightActivePlaylistItem === 'function') {
@@ -150,12 +153,13 @@
         // Перехватываем ТОЛЬКО пока слайдшоу активно/на паузе, либо на посте Grok с коллекцией
         if (!isSlideshowActiveOrPaused() && !hasGrokCollection) return;
 
-        const isNext = hotkeyMatches(e, config.hk.nextSlide) || (isGrokPost && e.key === 'ArrowDown' && !e.altKey && !e.ctrlKey && !e.metaKey);
-        const isPrev = hotkeyMatches(e, config.hk.prevSlide) || (isGrokPost && e.key === 'ArrowUp' && !e.altKey && !e.ctrlKey && !e.metaKey);
+        const isNext = hotkeyMatches(e, config.hk.nextSlide);
+        const isPrev = hotkeyMatches(e, config.hk.prevSlide);
 
         if (isNext || isPrev) {
             e.preventDefault();
             e.stopImmediatePropagation();
+            if (typeof cancelSlideTimers === 'function') cancelSlideTimers();
             playerStepSlide(isNext ? 'next' : 'prev');
         }
     }, true);

@@ -54,6 +54,8 @@
                 { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)
             ],
             prevSlide:        { key: 'PageUp',     ctrl: false, alt: false, shift: false },
+            nextGroup:        { key: 'PageDown',   ctrl: false, alt: true,  shift: false }, // Alt+PageDown
+            prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
             updateScript:     { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
@@ -100,8 +102,6 @@
             config.filenameTemplateEnabled = true;
         }
     }
-    // Сброс при рефреше страницы
-    config.downloadType = 'none';
 
     // Миграция старых настроек скачивания (если там был объект или дублирующий PageDown)
     if (Array.isArray(config.hk.download)) {
@@ -125,6 +125,14 @@
     if (!config.hk.nextSlide || (Array.isArray(config.hk.nextSlide) && !config.hk.nextSlide.some(h => h && h.key === 'PageDown'))) {
         const spaceHk = { key: ' ', ctrl: false, alt: false, shift: false };
         config.hk.nextSlide = [{ key: 'PageDown', ctrl: false, alt: false, shift: false }, spaceHk];
+    }
+
+    // Миграция v1.3.14: инициализация nextGroup (Alt+PageDown) и prevGroup (Alt+PageUp)
+    if (!config.hk.nextGroup) {
+        config.hk.nextGroup = { key: 'PageDown', ctrl: false, alt: true, shift: false };
+    }
+    if (!config.hk.prevGroup) {
+        config.hk.prevGroup = { key: 'PageUp', ctrl: false, alt: true, shift: false };
     }
 
     // Миграция v1.3.13: разделение малого (Shift+Insert) и большого слайдшоу (Insert)

@@ -82,7 +82,7 @@
             }
         }
 
-        // Если позиция не определилась по UUID напрямую, но мы на странице группы с киноплёнкой:
+        // На странице группы с киноплёнкой синхронизируем индекс кадра с реальным активным элементом в DOM
         if (!url && typeof isGrokPostPage === 'function' && isGrokPostPage() && typeof grokGetActiveFilmstripIndex === 'function') {
             if (grpIndex === -1 && location.search) {
                 const convMatch = location.search.match(/conversation=([a-f0-9-]+)/i);
@@ -92,7 +92,7 @@
                     if (g !== -1) grpIndex = g;
                 }
             }
-            if (grpIndex !== -1 && itemInGrpIndex === -1) {
+            if (grpIndex !== -1) {
                 const filmIdx = grokGetActiveFilmstripIndex();
                 if (filmIdx !== -1 && filmIdx < structure.groups[grpIndex].items.length) {
                     itemInGrpIndex = filmIdx;
