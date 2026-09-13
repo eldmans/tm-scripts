@@ -18,17 +18,20 @@
         return 'unknown';
     }
 
-    /** Собирает все уникальные ссылки /imagine/post/... из DOM + определяет тип по span с таймером + convId */
+    /** Собирает все уникальные ссылки /imagine/post/... из DOM в хронологическом порядке (снизу вверх страницы) */
     function grokCollectLinks() {
         const seen = new Set();
         const items = [];
-        document.querySelectorAll('a[href*="/imagine/post/"]').forEach(a => {
+        const anchors = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
+        // Идём от конца к началу DOM: всё, что в самом низу, создавалось раньше (хронологический порядок)
+        for (let i = anchors.length - 1; i >= 0; i--) {
+            const a = anchors[i];
             const href = a.getAttribute('href') || '';
-            if (!href) return;
+            if (!href) continue;
             const url = href.startsWith('http') ? href : 'https://grok.com' + href;
             // Нормализуем URL (убираем query-string для дедупликации по базовому URL поста)
             const baseUrl = url.split('?')[0];
-            if (seen.has(baseUrl)) return;
+            if (seen.has(baseUrl)) continue;
             seen.add(baseUrl);
             // Карточка — ближайший listitem / masonry-item родитель
             const card = a.closest('[role="listitem"], [data-masonry-key]') || a.parentElement;
@@ -41,51 +44,59 @@
                 convId = urlObj.searchParams.get('conversation') || null;
             } catch(e) {}
             items.push({ url, type: hasTimer ? 'video' : 'photo', convId });
-        });
+        }
         return items;
     }
 
 
 
-    /** Кнопка 1: сохранить коллекцию в sessionStorage — МЕРЖИТ с уже собранными */
+    /** Кнопка 1: сохранить коллекцию в sessionStorage (хронологический порядок) */
     function grokSaveCollection(btnEl) {
         const newItems = grokCollectLinks();
         if (newItems.length === 0) {
             showToast('⚠️ Ссылки не найдены. Проскролльте страницу до конца!', true);
             return;
         }
-        // Загружаем существующую коллекцию
-        let existingItems = [];
+
+        let existingData = {};
         try {
             const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-            if (raw) existingItems = JSON.parse(raw).items || [];
+            if (raw) existingData = JSON.parse(raw);
         } catch(e) {}
-        // Мерж: ключ — базовый URL без query string
-        const seenBase = new Set(existingItems.map(i => (i.url || '').split('?')[0]));
-        let addedCount = 0;
-        for (const item of newItems) {
-            const base = (item.url || '').split('?')[0];
-            if (!seenBase.has(base)) {
-                existingItems.push(item);
-                seenBase.add(base);
-                addedCount++;
-            }
-        }
-        const date   = new Date().toISOString().slice(0, 10);
-        const videos = existingItems.filter(i => i.type === 'video').length;
-        const photos = existingItems.length - videos;
-        _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({ date, items: existingItems }));
+
+        const grpMode  = existingData.grpMode  || 'seq';
+        const itemMode = existingData.itemMode || 'fwd';
+        const date     = new Date().toISOString().slice(0, 10);
+        const videos   = newItems.filter(i => i.type === 'video').length;
+        const photos   = newItems.length - videos;
+
+        _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({
+            date,
+            items: newItems,
+            grpMode,
+            itemMode
+        }));
+
         if (btnEl) {
-            btnEl.textContent = String(existingItems.length);
-            btnEl.title = `Коллекция (${existingItems.length}): открыть список`;
+            btnEl.textContent = String(newItems.length);
+            btnEl.title = `Коллекция (${newItems.length}): открыть список`;
             btnEl.style.background = '#065f46';
             btnEl.style.color = '#e5e7eb';
-            btnEl.dataset.collectedCount = String(existingItems.length);
+            btnEl.dataset.collectedCount = String(newItems.length);
             const dlBtn = document.getElementById('mossad-gallery-dl');
             if (dlBtn) dlBtn.style.display = 'inline-block';
         }
-        const addMsg = addedCount > 0 ? ` (+${addedCount} новых)` : ' (нет новых)';
-        showToast(`✅ Итого: ${existingItems.length}${addMsg} → 📹${videos} видео, 🖼${photos} фото`);
+
+        // Если открыт список (плейлист) — обновляем его под новый порядок
+        const playlistPanel = document.getElementById('mossad-playlist-panel');
+        if (playlistPanel) {
+            playlistPanel.remove();
+            if (typeof grokTogglePlaylistPanel === 'function') {
+                grokTogglePlaylistPanel(true);
+            }
+        }
+
+        showToast(`✅ Собрано: ${newItems.length} (хронологически) → 📹${videos} видео, 🖼${photos} фото`);
     }
 
     /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */

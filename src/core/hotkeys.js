@@ -48,123 +48,37 @@
 
         // 1. GROK ENGINE
         if (rootDomain === 'grok.com') {
-            const rawCol = (typeof _gSS !== 'undefined' && _gSS.getItem)
-                ? _gSS.getItem(GALLERY_COLLECTION_KEY)
-                : sessionStorage.getItem('mossad_grok_collection');
-            let colData = null;
-            if (rawCol) { try { colData = JSON.parse(rawCol); } catch(e) {} }
-            const items = colData?.items || [];
-
-            const curId = (typeof grokExtractUuid === 'function')
-                ? grokExtractUuid(location.pathname)
-                : (location.pathname.match(/\/imagine\/post\/([^/?]+)/)?.[1] ||
-                   location.search.match(/[?&]post=([^&]+)/)?.[1]);
-
-            const curIdx = (curId && items.length > 0)
-                ? items.findIndex(it => (it.url || '').toLowerCase().includes(curId.toLowerCase()))
-                : -1;
-
-            if (curIdx === -1) {
-                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
-                    _postPlayerNav(wasPaused);
-                    return;
+            const nextRes = (typeof grokGetNextSlideItem === 'function')
+                ? grokGetNextSlideItem(isFwd ? 'down' : 'up')
+                : null;
+            if (nextRes && nextRes.item) {
+                if (nextRes.circleCompleted) {
+                    if (typeof playCircleDoneSound === 'function') playCircleDoneSound();
+                    let ss = {};
+                    try { ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}'); } catch(e) {}
+                    ss.circle = (ss.circle || 1) + 1;
+                    _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+                    showToast(`🔄 Круг ${ss.circle} начался!`);
                 }
-            } else {
-                const loopItems = (typeof getGrokActiveLoopItems === 'function') ? getGrokActiveLoopItems(items) : [];
-                let targetItem = null;
-                let targetIdx = -1;
-
-                if (loopItems.length > 0) {
-                    const curLoopIdx = loopItems.findIndex(it => (it.url || '').toLowerCase().includes(curId.toLowerCase()));
-                    let nextLoopIdx = 0;
-                    if (curLoopIdx !== -1) {
-                        nextLoopIdx = isFwd
-                            ? (curLoopIdx + 1) % loopItems.length
-                            : (curLoopIdx - 1 + loopItems.length) % loopItems.length;
+                const targetItem = nextRes.item;
+                if (targetItem.type) sessionStorage.setItem('mossad_expected_type', targetItem.type);
+                const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+                const curPos = (struct && typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct, targetItem.url) : null;
+                const posStr = (curPos && curPos.flatIndex !== -1) ? ` ${curPos.flatIndex + 1}/${struct.items.length}` : '';
+                showToast(`${isFwd ? '⏭' : '⏮'}${posStr} • ${targetItem.type === 'video' ? '📹' : '🖼'}`);
+                grokSpaNavigate(targetItem.url);
+                setTimeout(() => {
+                    if (typeof grokHighlightActivePlaylistItem === 'function') {
+                        grokHighlightActivePlaylistItem(targetItem.url);
                     }
-                    targetItem = loopItems[nextLoopIdx];
-                    targetIdx = items.indexOf(targetItem);
-                } else {
-                    const grpMode = colData.grpMode || 'seq';
-                    const itemMode = colData.itemMode || 'fwd';
-                    const isRandom = (grpMode === 'rnd' || itemMode === 'rnd' || config.slideshowMode === 'random');
-
-                    if (isRandom) {
-                        let hist = [];
-                        try { hist = JSON.parse(sessionStorage.getItem('mossad_player_hist') || '[]'); } catch(e) {}
-                        if (isFwd) {
-                            hist.push(curIdx);
-                            if (hist.length > 50) hist.shift();
-                            sessionStorage.setItem('mossad_player_hist', JSON.stringify(hist));
-
-                            let rnd = Math.floor(Math.random() * (items.length - 1));
-                            if (rnd >= curIdx) rnd++;
-                            targetIdx = rnd;
-                        } else {
-                            if (hist.length > 0) {
-                                targetIdx = hist.pop();
-                                sessionStorage.setItem('mossad_player_hist', JSON.stringify(hist));
-                            } else {
-                                targetIdx = (curIdx - 1 + items.length) % items.length;
-                            }
-                        }
-                    } else if (itemMode === 'rev') {
-                        targetIdx = isFwd ? (curIdx - 1) : (curIdx + 1);
-                        if (targetIdx < 0) {
-                            if (config.loopFeed || true) targetIdx = items.length - 1;
-                            else { showToast('⚠️ Начало коллекции', true); return; }
-                        } else if (targetIdx >= items.length) {
-                            if (config.loopFeed || true) targetIdx = 0;
-                            else { showToast('⚠️ Конец коллекции', true); return; }
-                        }
-                    } else {
-                        targetIdx = isFwd ? (curIdx + 1) : (curIdx - 1);
-                        if (targetIdx >= items.length) {
-                            if (config.loopFeed || true) {
-                                targetIdx = 0;
-                                showToast('🔄 Новый круг коллекции');
-                            } else {
-                                showToast('⚠️ Конец коллекции', true);
-                                return;
-                            }
-                        } else if (targetIdx < 0) {
-                            if (config.loopFeed || true) {
-                                targetIdx = items.length - 1;
-                            } else {
-                                showToast('⚠️ Начало коллекции', true);
-                                return;
-                            }
-                        }
-                    }
-                    targetItem = items[targetIdx];
-                }
-
-                if (targetItem) {
-                    const rawSs = (typeof _gSS !== 'undefined' && _gSS.getItem)
-                        ? _gSS.getItem(GALLERY_SS_KEY)
-                        : sessionStorage.getItem('mossad_grok_gallery_ss');
-                    if (rawSs) {
-                        try {
-                            const ss = JSON.parse(rawSs);
-                            if (targetIdx >= 0) {
-                                ss.queue = [...items.slice(targetIdx + 1), ...items.slice(0, targetIdx)];
-                                _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
-                            }
-                        } catch(e) {}
-                    }
-
-                    if (targetItem.type) sessionStorage.setItem('mossad_expected_type', targetItem.type);
-                    const dispIdx = (targetIdx >= 0 ? targetIdx : curIdx) + 1;
-                    showToast(`${isFwd ? '⏭' : '⏮'} ${dispIdx}/${items.length} • ${targetItem.type === 'video' ? '📹' : '🖼'}`);
-                    grokSpaNavigate(targetItem.url);
-                    setTimeout(() => {
-                        if (typeof grokHighlightActivePlaylistItem === 'function') {
-                            grokHighlightActivePlaylistItem(targetItem.url);
-                        }
-                    }, 120);
-                    _postPlayerNav(wasPaused);
-                    return;
-                }
+                }, 100);
+                _postPlayerNav(wasPaused);
+                return;
+            }
+            // Fallback если коллекция не собрана: навигация по киноплёнке (filmstrip)
+            if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
+                _postPlayerNav(wasPaused);
+                return;
             }
         }
 
@@ -202,18 +116,42 @@
         _postPlayerNav(wasPaused);
     }
 
-    // Ранний перехват клавиш слайдера (PageUp / PageDown) ДО сайта на window в фазе capture
+    // Ранний перехват клавиш слайдера (PageUp / PageDown, ArrowDown / ArrowUp) ДО сайта на window в фазе capture
     window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
         if (window.capturingFor !== null) return;
         const activeEl = document.activeElement;
         const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
         if (isEditing) return;
 
-        // Перехватываем ТОЛЬКО пока слайдшоу активно или на паузе. При STOP — не перехватываем!
-        if (!isSlideshowActiveOrPaused()) return;
+        const isGrokPost = (rootDomain === 'grok.com' && isGrokPostPage());
+        const hasGrokCollection = isGrokPost && !!_gSS.getItem(GALLERY_COLLECTION_KEY);
 
-        const isNext = hotkeyMatches(e, config.hk.nextSlide);
-        const isPrev = hotkeyMatches(e, config.hk.prevSlide);
+        // Перехват групп на Grok: Alt+ArrowDown (след. группа) / Alt+ArrowUp (пред. группа)
+        if (isGrokPost && hasGrokCollection && e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const isDown = (e.key === 'ArrowDown');
+            const nextRes = (typeof grokGetNextSlideItem === 'function')
+                ? grokGetNextSlideItem(isDown ? 'next_grp' : 'prev_grp')
+                : null;
+            if (nextRes && nextRes.item) {
+                if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
+                showToast(`📁 Группа: ${isDown ? '↓' : '↑'}`);
+                grokSpaNavigate(nextRes.item.url);
+                setTimeout(() => {
+                    if (typeof grokHighlightActivePlaylistItem === 'function') {
+                        grokHighlightActivePlaylistItem(nextRes.item.url);
+                    }
+                }, 100);
+            }
+            return;
+        }
+
+        // Перехватываем ТОЛЬКО пока слайдшоу активно/на паузе, либо на посте Grok с коллекцией
+        if (!isSlideshowActiveOrPaused() && !hasGrokCollection) return;
+
+        const isNext = hotkeyMatches(e, config.hk.nextSlide) || (isGrokPost && e.key === 'ArrowDown' && !e.altKey && !e.ctrlKey && !e.metaKey);
+        const isPrev = hotkeyMatches(e, config.hk.prevSlide) || (isGrokPost && e.key === 'ArrowUp' && !e.altKey && !e.ctrlKey && !e.metaKey);
 
         if (isNext || isPrev) {
             e.preventDefault();

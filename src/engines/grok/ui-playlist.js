@@ -285,7 +285,7 @@
         const hasGroups = groupOrder.length > 1 || (groupOrder.length === 1 && groupOrder[0] !== '__noconv__');
 
         if (hasGroups) {
-            for (const gid of groupOrder) {
+            groupOrder.forEach((gid, gIdx) => {
                 const gItems = groups[gid];
                 const grpEl = document.createElement('div');
                 grpEl.className = 'mossad-playlist-group';
@@ -293,9 +293,9 @@
 
                 const grpHeader = document.createElement('div');
                 grpHeader.className = 'mossad-playlist-grp-header';
-                const shortId = gid === '__noconv__' ? 'Без группы' : gid.slice(0, 8) + '…';
+                const shortId = gid === '__noconv__' ? 'Без группы' : `Гр. ${gIdx + 1}: ${gid.slice(0, 8)}…`;
                 grpHeader.style.cssText = `display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.04);transition:background 0.2s;min-width:0;max-width:100%;box-sizing:border-box;`;
-                grpHeader.title = `Группа: ${gid}`;
+                grpHeader.title = `Группа ${gIdx + 1}: ${gid}`;
 
                 const isGrpLooped = loopSet.groupIds.includes(gid);
                 const rGrp = makeRBtn(isGrpLooped, (btn) => {
@@ -312,8 +312,19 @@
                 grpLabel.textContent = shortId;
                 grpLabel.onclick = (e) => {
                     e.stopPropagation();
-                    grokStartGallerySlideshowFrom(gItems[0]);
-                    grokHighlightActivePlaylistItem(gItems[0].url);
+                    const rawCol = _gSS.getItem(GALLERY_COLLECTION_KEY);
+                    let itemMode = 'fwd';
+                    if (rawCol) {
+                        try { itemMode = JSON.parse(rawCol).itemMode || 'fwd'; } catch(err) {}
+                    }
+                    let startItem = gItems[0];
+                    if (itemMode === 'rev') {
+                        startItem = gItems[gItems.length - 1];
+                    } else if (itemMode === 'rnd') {
+                        startItem = gItems[Math.floor(Math.random() * gItems.length)];
+                    }
+                    grokStartGallerySlideshowFrom(startItem);
+                    grokHighlightActivePlaylistItem(startItem.url);
                 };
 
                 const grpCount = document.createElement('span');
@@ -351,8 +362,6 @@
                     label.textContent = baseText;
                     li.dataset.origText = baseText;
                     label.title = item.url;
-                    li.dataset.origText = baseText;
-                    label.title = item.url;
 
                     li.onmouseover = () => {
                         if (li.dataset.active !== 'true') li.style.background = 'rgba(255,255,255,0.05)';
@@ -374,7 +383,8 @@
                 });
                 grpEl.appendChild(listEl);
                 body.appendChild(grpEl);
-            }
+            });
+        }
         } else {
             items.forEach((item, idx) => {
                 const li = document.createElement('div');

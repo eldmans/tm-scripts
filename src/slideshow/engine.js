@@ -253,17 +253,26 @@
             }
         }
         
-        // Gallery Slideshow: вместо клавиши — переходим на следующий URL из очереди
-        if (window._mossadGalleryActive && typeof window._mossadGalleryNextFn === 'function') {
-            // Скачивание (если включено) перед переходом
-            if (config.downloadType !== 'none') {
-                const hasVideo = getActiveVideo() !== null;
-                if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
-                    triggerDownload();
+        // Gallery Slideshow: вместо клавиши — переходим на следующий URL из списка
+        if (rootDomain === 'grok.com') {
+            const hasGrokSs = (() => {
+                try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
+            })();
+            if (window._mossadGalleryActive || hasGrokSs) {
+                if (config.downloadType !== 'none') {
+                    const hasVideo = getActiveVideo() !== null;
+                    if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
+                        triggerDownload();
+                    }
+                }
+                if (typeof window._mossadGalleryNextFn === 'function') {
+                    window._mossadGalleryNextFn();
+                    return;
+                } else if (typeof grokGalleryStepNext === 'function') {
+                    grokGalleryStepNext();
+                    return;
                 }
             }
-            window._mossadGalleryNextFn();
-            return;
         }
 
         // Pinterest ссылочная навигация
