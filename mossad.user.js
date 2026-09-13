@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.11
+// @version      1.3.12
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.11';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.12';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1405,28 +1405,23 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     /**
-     * Находит кнопку в киноплёнке по UUID генерации (с поддержкой fallbackIndex).
+     * Находит кнопку в киноплёнке по UUID генерации.
+     * Возвращает элемент ТОЛЬКО если он реально присутствует на текущей киноплёнке.
      */
-    function grokFindFilmstripItemByUuid(uuid, fallbackIndex = -1) {
+    function grokFindFilmstripItemByUuid(uuid) {
+        if (!uuid) return null;
         const items = grokGetFilmstripItems();
         if (items.length === 0) return null;
-        if (uuid) {
-            const cleanUuid = uuid.toLowerCase();
-            const found = items.find(btn => {
-                const img = btn.querySelector('img, video, source');
-                if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
-                const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-                if (aria.includes(cleanUuid)) return true;
-                const dataId = (btn.dataset.id || btn.dataset.uuid || '').toLowerCase();
-                if (dataId && dataId.includes(cleanUuid)) return true;
-                return false;
-            });
-            if (found) return found;
-        }
-        if (fallbackIndex >= 0 && fallbackIndex < items.length) {
-            return items[fallbackIndex];
-        }
-        return null;
+        const cleanUuid = uuid.toLowerCase();
+        return items.find(btn => {
+            const img = btn.querySelector('img, video, source');
+            if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
+            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+            if (aria.includes(cleanUuid)) return true;
+            const dataId = (btn.dataset.id || btn.dataset.uuid || '').toLowerCase();
+            if (dataId && dataId.includes(cleanUuid)) return true;
+            return false;
+        }) || null;
     }
 
     /**
@@ -1451,7 +1446,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             return false;
         });
         if (activeByMatch !== -1) return activeByMatch;
-        return 0;
+        return -1;
     }
 
     /**
@@ -2330,78 +2325,60 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 ? grokExtractUuid(urlObj.pathname)
                 : (urlObj.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
 
-            // 1. Приоритет: поиск в полосе киноплёнки (filmstrip) на текущей странице
-            if (typeof grokFindFilmstripItemByUuid === 'function') {
-                let fallbackIdx = -1;
-                const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
-                if (struct) {
-                    const targetPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct, url) : null;
-                    if (targetPos && targetPos.itemInGrpIndex !== -1) {
-                        fallbackIdx = targetPos.itemInGrpIndex;
-                    }
-                }
-                const filmstripBtn = grokFindFilmstripItemByUuid(targetUuid, fallbackIdx);
-                if (filmstripBtn) {
-                    console.log(`[MOSSAD] grokSpaNavigate: кадр найден в filmstrip — кликаем без перезагрузки!`);
-                    filmstripBtn.click();
-                    try {
-                        history.replaceState(null, '', path);
-                    } catch(e) {}
+            const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+            const isPostPage = typeof isGrokPostPage === 'function' ? isGrokPostPage() : location.pathname.includes('/imagine/post/');
 
-                    // Ожидаем обновления URL (через history.replaceState Грока) и возобновляем тик слайдшоу
-                    let checks = 0;
-                    const checkInterval = setInterval(() => {
-                        checks++;
-                        const curUuid = (typeof grokExtractUuid === 'function')
-                            ? grokExtractUuid(location.pathname)
-                            : (location.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
-                        if ((curUuid && targetUuid && curUuid === targetUuid.toLowerCase()) || checks >= 8) {
-                            clearInterval(checkInterval);
-                            if (typeof grokGallerySlideshowTick === 'function') {
-                                grokGallerySlideshowTick();
+            if (isPostPage && struct) {
+                const targetPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct, url) : null;
+                const currentPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
+
+                const isSameGroup = targetPos && currentPos &&
+                                    targetPos.grpIndex !== -1 &&
+                                    targetPos.grpIndex === currentPos.grpIndex;
+
+                if (isSameGroup) {
+                    // Переход ВНУТРИ одной группы: ищем кадр в киноплёнке (filmstrip) на текущей странице
+                    let filmstripBtn = null;
+                    if (targetUuid && typeof grokFindFilmstripItemByUuid === 'function') {
+                        filmstripBtn = grokFindFilmstripItemByUuid(targetUuid);
+                    }
+                    if (!filmstripBtn && typeof grokGetFilmstripItems === 'function') {
+                        const filmItems = grokGetFilmstripItems();
+                        if (targetPos.itemInGrpIndex >= 0 && targetPos.itemInGrpIndex < filmItems.length) {
+                            filmstripBtn = filmItems[targetPos.itemInGrpIndex];
+                        }
+                    }
+
+                    if (filmstripBtn) {
+                        console.log(`[MOSSAD] grokSpaNavigate: внутри группы переключаем filmstrip без перезагрузки`);
+                        filmstripBtn.click();
+                        try {
+                            history.replaceState(null, '', path);
+                        } catch(e) {}
+
+                        let checks = 0;
+                        const checkInterval = setInterval(() => {
+                            checks++;
+                            const curUuid = (typeof grokExtractUuid === 'function')
+                                ? grokExtractUuid(location.pathname)
+                                : '';
+                            if ((curUuid && targetUuid && curUuid === targetUuid.toLowerCase()) || checks >= 6) {
+                                clearInterval(checkInterval);
+                                if (typeof grokGallerySlideshowTick === 'function') {
+                                    grokGallerySlideshowTick();
+                                }
                             }
-                        }
-                    }, 40);
-                    return;
-                }
-            }
-
-            let navigated = false;
-
-            // 2. Next.js router.push — если доступен в контексте страницы
-            const nextRouter = (window.next && window.next.router) || (typeof unsafeWindow !== 'undefined' && unsafeWindow.next && unsafeWindow.next.router);
-            if (nextRouter && typeof nextRouter.push === 'function') {
-                nextRouter.push(path);
-                navigated = true;
-            } else {
-                // 3. Клик по ссылке в DOM (если есть)
-                const anchor = document.querySelector(`a[href="${path}"]`)
-                            || document.querySelector(`a[href="${urlObj.pathname}"]`);
-                if (anchor) {
-                    anchor.click();
-                    navigated = true;
-                }
-            }
-
-            if (navigated) {
-                let checks = 0;
-                const checkInterval = setInterval(() => {
-                    checks++;
-                    if (location.pathname === urlObj.pathname || checks >= 15) {
-                        clearInterval(checkInterval);
-                        if (typeof grokGallerySlideshowTick === 'function') {
-                            grokGallerySlideshowTick();
-                        }
+                        }, 40);
+                        return;
                     }
-                }, 40);
-                return;
+                }
             }
         } catch (e) {
             console.error('[MOSSAD] grokSpaNavigate error:', e);
         }
 
-        // 4. Межпостовой переход (только если кадр из ДРУГОЙ группы/поста)
-        console.log('[MOSSAD] grokSpaNavigate: пост не в текущей группе, открываем URL:', url);
+        // Переход на ДРУГУЮ группу/пост (или с главной /imagine) — полноценный переход
+        console.log('[MOSSAD] grokSpaNavigate: переход на другую группу/пост ->', url);
         window.location.href = url;
     }
 
@@ -2645,22 +2622,35 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
 
         // Если в сессии есть целевой кадр, а на киноплёнке выбран другой (например, Grok открыл 5-й по умолчанию)
-        if (ss.targetUuid && typeof grokGetFilmstripItems === 'function') {
-            const filmItems = grokGetFilmstripItems();
-            if (filmItems.length > 1) {
-                let targetPos = null;
-                if (struct && ss.targetUrl && typeof grokFindCurrentPosition === 'function') {
-                    targetPos = grokFindCurrentPosition(struct, ss.targetUrl);
+        if ((ss.targetUuid || ss.targetUrl) && typeof grokGetFilmstripItems === 'function') {
+            let attempts = 0;
+            const activateTarget = () => {
+                attempts++;
+                const filmItems = grokGetFilmstripItems();
+                if (filmItems.length > 0) {
+                    let targetBtn = (ss.targetUuid && typeof grokFindFilmstripItemByUuid === 'function')
+                        ? grokFindFilmstripItemByUuid(ss.targetUuid)
+                        : null;
+                    if (!targetBtn && struct && ss.targetUrl && typeof grokFindCurrentPosition === 'function') {
+                        const targetPos = grokFindCurrentPosition(struct, ss.targetUrl);
+                        if (targetPos && targetPos.itemInGrpIndex >= 0 && targetPos.itemInGrpIndex < filmItems.length) {
+                            targetBtn = filmItems[targetPos.itemInGrpIndex];
+                        }
+                    }
+                    if (targetBtn) {
+                        const isRingWhite = targetBtn.className.includes('ring-white') || targetBtn.className.includes('border-white') || targetBtn.getAttribute('aria-selected') === 'true';
+                        if (!isRingWhite) {
+                            console.log(`[MOSSAD] grokGallerySlideshowTick: активируем целевой кадр в filmstrip`);
+                            targetBtn.click();
+                        }
+                        return;
+                    }
                 }
-                const fallbackIdx = (targetPos && targetPos.itemInGrpIndex !== -1) ? targetPos.itemInGrpIndex : -1;
-                const targetBtn = (typeof grokFindFilmstripItemByUuid === 'function')
-                    ? grokFindFilmstripItemByUuid(ss.targetUuid, fallbackIdx)
-                    : null;
-                if (targetBtn && !targetBtn.className.includes('ring-white')) {
-                    console.log(`[MOSSAD] grokGallerySlideshowTick: принудительно активируем целевой кадр ${ss.targetUuid.slice(0, 8)}`);
-                    targetBtn.click();
+                if (attempts < 15) {
+                    setTimeout(activateTarget, 100);
                 }
-            }
+            };
+            activateTarget();
         }
 
         const curPos = (struct && typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
@@ -4868,11 +4858,13 @@ function findMediaForDownload() {
         lastRAFTime = timeNow;
         
         // Лимит времени с учетом количества кругов (videoLoops * maxVideoDuration)
+        const effDuration = videoInitialDuration || (currentVideoNode && !isNaN(currentVideoNode.duration) ? currentVideoNode.duration : 0);
         const maxDurationCap = (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0)
             ? (config.videoLoops * config.pinterestMaxVideoDuration)
-            : (config.videoLoops * videoInitialDuration);
+            : (config.videoLoops * effDuration);
 
-        if (currentLoopCount >= config.videoLoops || accumulatedTime >= maxDurationCap) {
+        const hasValidCap = maxDurationCap > 0;
+        if (currentLoopCount >= config.videoLoops || (hasValidCap && accumulatedTime >= maxDurationCap)) {
             // Циклы или лимит времени завершены, запускаем паузу после видео
             countdownSeconds = config.delayAfterVideo;
             isCountingDown = true;

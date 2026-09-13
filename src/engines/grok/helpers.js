@@ -282,28 +282,23 @@
     }
 
     /**
-     * Находит кнопку в киноплёнке по UUID генерации (с поддержкой fallbackIndex).
+     * Находит кнопку в киноплёнке по UUID генерации.
+     * Возвращает элемент ТОЛЬКО если он реально присутствует на текущей киноплёнке.
      */
-    function grokFindFilmstripItemByUuid(uuid, fallbackIndex = -1) {
+    function grokFindFilmstripItemByUuid(uuid) {
+        if (!uuid) return null;
         const items = grokGetFilmstripItems();
         if (items.length === 0) return null;
-        if (uuid) {
-            const cleanUuid = uuid.toLowerCase();
-            const found = items.find(btn => {
-                const img = btn.querySelector('img, video, source');
-                if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
-                const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-                if (aria.includes(cleanUuid)) return true;
-                const dataId = (btn.dataset.id || btn.dataset.uuid || '').toLowerCase();
-                if (dataId && dataId.includes(cleanUuid)) return true;
-                return false;
-            });
-            if (found) return found;
-        }
-        if (fallbackIndex >= 0 && fallbackIndex < items.length) {
-            return items[fallbackIndex];
-        }
-        return null;
+        const cleanUuid = uuid.toLowerCase();
+        return items.find(btn => {
+            const img = btn.querySelector('img, video, source');
+            if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
+            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+            if (aria.includes(cleanUuid)) return true;
+            const dataId = (btn.dataset.id || btn.dataset.uuid || '').toLowerCase();
+            if (dataId && dataId.includes(cleanUuid)) return true;
+            return false;
+        }) || null;
     }
 
     /**
@@ -328,7 +323,7 @@
             return false;
         });
         if (activeByMatch !== -1) return activeByMatch;
-        return 0;
+        return -1;
     }
 
     /**

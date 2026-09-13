@@ -495,11 +495,13 @@
         lastRAFTime = timeNow;
         
         // Лимит времени с учетом количества кругов (videoLoops * maxVideoDuration)
+        const effDuration = videoInitialDuration || (currentVideoNode && !isNaN(currentVideoNode.duration) ? currentVideoNode.duration : 0);
         const maxDurationCap = (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0)
             ? (config.videoLoops * config.pinterestMaxVideoDuration)
-            : (config.videoLoops * videoInitialDuration);
+            : (config.videoLoops * effDuration);
 
-        if (currentLoopCount >= config.videoLoops || accumulatedTime >= maxDurationCap) {
+        const hasValidCap = maxDurationCap > 0;
+        if (currentLoopCount >= config.videoLoops || (hasValidCap && accumulatedTime >= maxDurationCap)) {
             // Циклы или лимит времени завершены, запускаем паузу после видео
             countdownSeconds = config.delayAfterVideo;
             isCountingDown = true;
