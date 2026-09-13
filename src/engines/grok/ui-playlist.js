@@ -384,7 +384,6 @@
                 grpEl.appendChild(listEl);
                 body.appendChild(grpEl);
             });
-        }
         } else {
             items.forEach((item, idx) => {
                 const li = document.createElement('div');

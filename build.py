@@ -71,6 +71,42 @@ def bump_version():
     print(f"BUMPED: v{old_ver} -> v{new_ver} (date: {today})")
     return new_ver
 
+def verify_syntax(code_str):
+    browsers = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+    ]
+    browser_bin = next((b for b in browsers if os.path.exists(b)), None)
+    if not browser_bin:
+        return True
+    html = f"""<!DOCTYPE html>
+<html><head><script>
+window.__err = null;
+window.addEventListener('error', function(e) {{ window.__err = e.message + ' at line ' + e.lineno; }});
+</script><script>
+{code_str}
+</script></head><body><div id="res">CHECK</div><script>
+document.getElementById("res").innerText = window.__err ? ("ERROR: " + window.__err) : "SUCCESS";
+</script></body></html>"""
+    temp_file = "temp_syntax_check.html"
+    try:
+        with open(temp_file, "w", encoding="utf-8") as f:
+            f.write(html)
+        import subprocess
+        res = subprocess.run([browser_bin, "--headless=new", "--dump-dom", temp_file], capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=10)
+        if "ERROR:" in res.stdout:
+            for l in res.stdout.splitlines():
+                if "ERROR:" in l:
+                    print(f"CRITICAL ERROR: JS Syntax error detected: {l.strip()}")
+            return False
+        return True
+    except Exception as ex:
+        print(f"Warning during syntax check: {ex}")
+        return True
+    finally:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
 def build():
     bump = "--bump" in sys.argv
     check_only = "--check" in sys.argv
@@ -95,6 +131,10 @@ def build():
     code += "\n\n".join(body_parts)
     code += "\n\n})();\n"
     
+    if not verify_syntax(code):
+        print("BUILD FAILED: Syntax verification failed! Fix the JavaScript error before building.")
+        sys.exit(1)
+
     raw_bytes = code.encode("utf-8")
     
     required_emojis = ["❌", "✅", "🖼", "📹", "💾"]
