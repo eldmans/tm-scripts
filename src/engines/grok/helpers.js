@@ -160,7 +160,7 @@
 
             let grokFilename = `${shortId}-grok${dblSuffix}.${ext2}`;
 
-            if (config.filenameTemplateEnabled && config.filenameTemplate && config.filenameTemplate.trim()) {
+            if (config.filenameTemplateEnabled) {
                 const now2 = new Date();
                 const pad2 = (n) => String(n).padStart(2, '0');
                 const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
@@ -187,7 +187,10 @@
                     copy:     rootBase,
                     root:     rootBase
                 };
-                const tplStr = config.filenameTemplate.trim();
+                const rawTpl = (config.filenameTemplate && config.filenameTemplate.trim())
+                    ? config.filenameTemplate.trim()
+                    : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
+                const tplStr = rawTpl || '{id8}-{domain}.{ext}';
                 const hasDblVar = /\{dbl\}/i.test(tplStr);
                 grokFilename = tplStr.replace(/\{(\w+)(?:\[(\d+)\])?\}/gi, (_, name, lenStr) => {
                     const key = name.toLowerCase();
@@ -279,19 +282,28 @@
     }
 
     /**
-     * Находит кнопку в киноплёнке по UUID генерации.
+     * Находит кнопку в киноплёнке по UUID генерации (с поддержкой fallbackIndex).
      */
-    function grokFindFilmstripItemByUuid(uuid) {
-        if (!uuid) return null;
-        const cleanUuid = uuid.toLowerCase();
+    function grokFindFilmstripItemByUuid(uuid, fallbackIndex = -1) {
         const items = grokGetFilmstripItems();
-        return items.find(btn => {
-            const img = btn.querySelector('img, video, source');
-            if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
-            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-            if (aria.includes(cleanUuid)) return true;
-            return false;
-        }) || null;
+        if (items.length === 0) return null;
+        if (uuid) {
+            const cleanUuid = uuid.toLowerCase();
+            const found = items.find(btn => {
+                const img = btn.querySelector('img, video, source');
+                if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
+                const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+                if (aria.includes(cleanUuid)) return true;
+                const dataId = (btn.dataset.id || btn.dataset.uuid || '').toLowerCase();
+                if (dataId && dataId.includes(cleanUuid)) return true;
+                return false;
+            });
+            if (found) return found;
+        }
+        if (fallbackIndex >= 0 && fallbackIndex < items.length) {
+            return items[fallbackIndex];
+        }
+        return null;
     }
 
     /**
@@ -301,8 +313,11 @@
         const items = grokGetFilmstripItems();
         if (items.length === 0) return -1;
         const curUuid = grokExtractUuid(location.pathname);
-        // 1. По классу выделения (ring-white)
-        const activeByClass = items.findIndex(btn => btn.className.includes('ring-white'));
+        // 1. По классу выделения (ring-white, ring-2, border-white, active)
+        const activeByClass = items.findIndex(btn => {
+            const cls = (btn.className || '') + ' ' + (btn.getAttribute('aria-selected') === 'true' ? 'selected' : '');
+            return /ring-(white|[a-z0-9]+)|border-white|selected/i.test(cls);
+        });
         if (activeByClass !== -1) return activeByClass;
         // 2. По совпадению UUID ассета с текущим URL
         const activeByMatch = items.findIndex(btn => {

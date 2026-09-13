@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.9
+// @version      1.3.11
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.9';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.11';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -602,6 +602,17 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }, 120);
     }
     window.doRewind = doRewind;
+
+    /**
+     * Возвращает дефолтный шаблон имени файла для текущего сайта (отображается серым плейсхолдером)
+     */
+    function getDefaultFilenameTemplate() {
+        if (typeof rootDomain !== 'undefined' && rootDomain.includes('redgifs.com')) {
+            return '{userName}-{domain[4]}';
+        }
+        return '{id8}-{domain}.{ext}';
+    }
+    window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
 
 // ============================================
     // NOODLE MAGAZINE MODULE
@@ -1272,7 +1283,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
             let grokFilename = `${shortId}-grok${dblSuffix}.${ext2}`;
 
-            if (config.filenameTemplateEnabled && config.filenameTemplate && config.filenameTemplate.trim()) {
+            if (config.filenameTemplateEnabled) {
                 const now2 = new Date();
                 const pad2 = (n) => String(n).padStart(2, '0');
                 const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
@@ -1299,7 +1310,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     copy:     rootBase,
                     root:     rootBase
                 };
-                const tplStr = config.filenameTemplate.trim();
+                const rawTpl = (config.filenameTemplate && config.filenameTemplate.trim())
+                    ? config.filenameTemplate.trim()
+                    : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
+                const tplStr = rawTpl || '{id8}-{domain}.{ext}';
                 const hasDblVar = /\{dbl\}/i.test(tplStr);
                 grokFilename = tplStr.replace(/\{(\w+)(?:\[(\d+)\])?\}/gi, (_, name, lenStr) => {
                     const key = name.toLowerCase();
@@ -1391,19 +1405,28 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     /**
-     * Находит кнопку в киноплёнке по UUID генерации.
+     * Находит кнопку в киноплёнке по UUID генерации (с поддержкой fallbackIndex).
      */
-    function grokFindFilmstripItemByUuid(uuid) {
-        if (!uuid) return null;
-        const cleanUuid = uuid.toLowerCase();
+    function grokFindFilmstripItemByUuid(uuid, fallbackIndex = -1) {
         const items = grokGetFilmstripItems();
-        return items.find(btn => {
-            const img = btn.querySelector('img, video, source');
-            if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
-            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-            if (aria.includes(cleanUuid)) return true;
-            return false;
-        }) || null;
+        if (items.length === 0) return null;
+        if (uuid) {
+            const cleanUuid = uuid.toLowerCase();
+            const found = items.find(btn => {
+                const img = btn.querySelector('img, video, source');
+                if (img && img.src && img.src.toLowerCase().includes(cleanUuid)) return true;
+                const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+                if (aria.includes(cleanUuid)) return true;
+                const dataId = (btn.dataset.id || btn.dataset.uuid || '').toLowerCase();
+                if (dataId && dataId.includes(cleanUuid)) return true;
+                return false;
+            });
+            if (found) return found;
+        }
+        if (fallbackIndex >= 0 && fallbackIndex < items.length) {
+            return items[fallbackIndex];
+        }
+        return null;
     }
 
     /**
@@ -1413,8 +1436,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const items = grokGetFilmstripItems();
         if (items.length === 0) return -1;
         const curUuid = grokExtractUuid(location.pathname);
-        // 1. По классу выделения (ring-white)
-        const activeByClass = items.findIndex(btn => btn.className.includes('ring-white'));
+        // 1. По классу выделения (ring-white, ring-2, border-white, active)
+        const activeByClass = items.findIndex(btn => {
+            const cls = (btn.className || '') + ' ' + (btn.getAttribute('aria-selected') === 'true' ? 'selected' : '');
+            return /ring-(white|[a-z0-9]+)|border-white|selected/i.test(cls);
+        });
         if (activeByClass !== -1) return activeByClass;
         // 2. По совпадению UUID ассета с текущим URL
         const activeByMatch = items.findIndex(btn => {
@@ -1919,7 +1945,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             return (item.url.split('?')[0].toLowerCase() === cleanTarget);
         };
 
-        const flatIndex = structure.items.findIndex(isMatch);
+        let flatIndex = structure.items.findIndex(isMatch);
         let grpIndex = -1;
         let itemInGrpIndex = -1;
 
@@ -1929,6 +1955,32 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 grpIndex = g;
                 itemInGrpIndex = idx;
                 break;
+            }
+        }
+
+        // Если позиция определяется для текущего экрана (url === null) и открыта киноплёнка Grok:
+        // Синхронизируем itemInGrpIndex с реально выделенным кадром (ring-white) на киноплёнке
+        if (!url && typeof isGrokPostPage === 'function' && isGrokPostPage() && typeof grokGetActiveFilmstripIndex === 'function') {
+            if (grpIndex === -1 && location.search) {
+                const convMatch = location.search.match(/conversation=([a-f0-9-]+)/i);
+                if (convMatch) {
+                    const cId = convMatch[1].toLowerCase();
+                    const g = structure.groups.findIndex(gr => (gr.id || '').toLowerCase() === cId);
+                    if (g !== -1) grpIndex = g;
+                }
+            }
+            const filmIdx = grokGetActiveFilmstripIndex();
+            if (filmIdx !== -1 && grpIndex !== -1 && filmIdx < structure.groups[grpIndex].items.length) {
+                itemInGrpIndex = filmIdx;
+                const actItem = structure.groups[grpIndex].items[filmIdx];
+                const fIdx = structure.items.indexOf(actItem);
+                if (fIdx !== -1) flatIndex = fIdx;
+                return {
+                    flatIndex,
+                    grpIndex,
+                    itemInGrpIndex,
+                    currentItem: actItem
+                };
             }
         }
 
@@ -2279,11 +2331,22 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 : (urlObj.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
 
             // 1. Приоритет: поиск в полосе киноплёнки (filmstrip) на текущей странице
-            if (targetUuid && typeof grokFindFilmstripItemByUuid === 'function') {
-                const filmstripBtn = grokFindFilmstripItemByUuid(targetUuid);
+            if (typeof grokFindFilmstripItemByUuid === 'function') {
+                let fallbackIdx = -1;
+                const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+                if (struct) {
+                    const targetPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct, url) : null;
+                    if (targetPos && targetPos.itemInGrpIndex !== -1) {
+                        fallbackIdx = targetPos.itemInGrpIndex;
+                    }
+                }
+                const filmstripBtn = grokFindFilmstripItemByUuid(targetUuid, fallbackIdx);
                 if (filmstripBtn) {
-                    console.log(`[MOSSAD] grokSpaNavigate: кадр ${targetUuid.slice(0, 8)} найден в filmstrip — кликаем без перезагрузки!`);
+                    console.log(`[MOSSAD] grokSpaNavigate: кадр найден в filmstrip — кликаем без перезагрузки!`);
                     filmstripBtn.click();
+                    try {
+                        history.replaceState(null, '', path);
+                    } catch(e) {}
 
                     // Ожидаем обновления URL (через history.replaceState Грока) и возобновляем тик слайдшоу
                     let checks = 0;
@@ -2292,13 +2355,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                         const curUuid = (typeof grokExtractUuid === 'function')
                             ? grokExtractUuid(location.pathname)
                             : (location.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
-                        if ((curUuid && curUuid === targetUuid.toLowerCase()) || checks >= 12) {
+                        if ((curUuid && targetUuid && curUuid === targetUuid.toLowerCase()) || checks >= 8) {
                             clearInterval(checkInterval);
                             if (typeof grokGallerySlideshowTick === 'function') {
                                 grokGallerySlideshowTick();
                             }
                         }
-                    }, 50);
+                    }, 40);
                     return;
                 }
             }
@@ -2409,13 +2472,24 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             return;
         }
 
+        // Немедленно останавливаем любые активные таймеры предыдущего видео/слайда!
+        if (typeof slideshowTimeoutId !== 'undefined' && slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
+        if (typeof rafId !== 'undefined' && rafId) cancelAnimationFrame(rafId);
+        isCountingDown = false;
+        countdownSeconds = 0;
+        currentLoopCount = 0;
+        accumulatedTime = 0;
+
         const startBase = (startItem.url || '').split('?')[0].toLowerCase();
         const startGid = startItem.convId || '__noconv__';
+        const startUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(startItem.url) : '';
 
         const ss = {
             active: true,
             circle: 1,
             total: struct.items.length,
+            targetUrl: startItem.url,
+            targetUuid: startUuid,
             visitedInCurGroup: [startBase],
             visitedGroupsInCircle: [startGid],
             visitedInCircle: [startBase]
@@ -2443,7 +2517,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (curClean === startBase) {
             grokGallerySlideshowTick();
         } else {
-            setTimeout(() => { grokSpaNavigate(startItem.url); }, 200);
+            setTimeout(() => { grokSpaNavigate(startItem.url); }, 150);
         }
     }
 
@@ -2527,6 +2601,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             showToast(`🔄 Круг ${ss.circle} начался!`);
         }
 
+        let ss = {};
+        try { ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}'); } catch(e) {}
+        ss.targetUrl = nextRes.item.url;
+        ss.targetUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(nextRes.item.url) : '';
+        _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+
         if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
         grokSpaNavigate(nextRes.item.url);
     }
@@ -2563,6 +2643,26 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
 
         const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+
+        // Если в сессии есть целевой кадр, а на киноплёнке выбран другой (например, Grok открыл 5-й по умолчанию)
+        if (ss.targetUuid && typeof grokGetFilmstripItems === 'function') {
+            const filmItems = grokGetFilmstripItems();
+            if (filmItems.length > 1) {
+                let targetPos = null;
+                if (struct && ss.targetUrl && typeof grokFindCurrentPosition === 'function') {
+                    targetPos = grokFindCurrentPosition(struct, ss.targetUrl);
+                }
+                const fallbackIdx = (targetPos && targetPos.itemInGrpIndex !== -1) ? targetPos.itemInGrpIndex : -1;
+                const targetBtn = (typeof grokFindFilmstripItemByUuid === 'function')
+                    ? grokFindFilmstripItemByUuid(ss.targetUuid, fallbackIdx)
+                    : null;
+                if (targetBtn && !targetBtn.className.includes('ring-white')) {
+                    console.log(`[MOSSAD] grokGallerySlideshowTick: принудительно активируем целевой кадр ${ss.targetUuid.slice(0, 8)}`);
+                    targetBtn.click();
+                }
+            }
+        }
+
         const curPos = (struct && typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
 
         const grpMode = struct?.grpMode || 'seq';
@@ -2588,7 +2688,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         // Подсвечиваем активный файл в открытом монолитном списке (плейлисте)
         if (typeof grokHighlightActivePlaylistItem === 'function') {
-            grokHighlightActivePlaylistItem();
+            grokHighlightActivePlaylistItem(ss.targetUrl || null);
         }
 
         // Устанавливаем функцию перехода: её вызовет triggerNextSlide
@@ -2862,6 +2962,15 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const panel = document.getElementById('mossad-playlist-panel');
         if (!panel) return;
 
+        // Если URL не передан явно — определяем текущий элемент через grokFindCurrentPosition (учитывая киноплёнку)
+        if (!overrideUrl && typeof grokGetPlaylistStructure === 'function' && typeof grokFindCurrentPosition === 'function') {
+            const struct = grokGetPlaylistStructure();
+            const curPos = grokFindCurrentPosition(struct);
+            if (curPos && curPos.currentItem && curPos.currentItem.url) {
+                overrideUrl = curPos.currentItem.url;
+            }
+        }
+
         // Извлекаем активный UUID
         let activeUuid = '';
         if (overrideUrl) {
@@ -2910,8 +3019,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 matchedEl = el;
                 el.style.background = 'rgba(59, 130, 246, 0.28)';
                 el.style.border = '1px solid rgba(96, 165, 250, 0.6)';
-                el.style.borderRadius = '6px';
-                el.style.boxShadow = '0 0 12px rgba(59, 130, 246, 0.35)';
+                el.style.borderRadius = '4px';
+                el.style.boxShadow = '0 0 8px rgba(59, 130, 246, 0.3)';
                 if (label) {
                     label.style.color = '#ffffff';
                     label.style.fontWeight = '700';
@@ -2994,7 +3103,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const savedCustomWidth = (typeof config !== 'undefined' && config.playlistWidth)
             ? config.playlistWidth
             : parseInt(localStorage.getItem('mossad_playlist_width') || '0', 10);
+        const savedCustomHeight = parseInt(localStorage.getItem('mossad_playlist_height') || '0', 10);
+        let currentFontSize = parseInt(localStorage.getItem('mossad_playlist_font_size') || '11', 10);
+        if (isNaN(currentFontSize) || currentFontSize < 8) currentFontSize = 8;
+        if (currentFontSize > 20) currentFontSize = 20;
+
         const initialWidth = savedCustomWidth > 0 ? `${savedCustomWidth}px` : '100%';
+        const initialHeight = savedCustomHeight > 0 ? `${savedCustomHeight}px` : 'auto';
 
         const panel = document.createElement('div');
         panel.id = 'mossad-playlist-panel';
@@ -3003,41 +3118,51 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (container) {
             // Монолитно внутри контейнера виджета
             panel.style.cssText = `
-                box-sizing: border-box; width: ${initialWidth}; min-width: 140px; max-width: 95vw;
-                max-height: 62vh; overflow-y: auto; overflow-x: hidden; resize: horizontal;
+                box-sizing: border-box; width: ${initialWidth}; ${savedCustomHeight > 0 ? `height: ${initialHeight};` : ''}
+                min-width: 140px; max-width: 95vw; min-height: 90px; max-height: 85vh;
+                overflow-y: auto; overflow-x: hidden; resize: both;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
-                font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #d1d5db;
+                font-family: system-ui, -apple-system, sans-serif; font-size: var(--mossad-pl-font-size, 11px); color: #d1d5db;
                 box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
                 scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
                 pointer-events: auto;
+                --mossad-pl-font-size: ${currentFontSize}px;
             `;
         } else {
             // Fallback (если виджет ещё не создан)
             panel.style.cssText = `
                 position: fixed; top: 70px; right: 16px; z-index: 9999999;
-                width: ${savedCustomWidth > 0 ? `${savedCustomWidth}px` : '240px'}; min-width: 140px; max-width: 95vw;
-                max-height: 62vh; overflow-y: auto; overflow-x: hidden; resize: horizontal;
+                width: ${savedCustomWidth > 0 ? `${savedCustomWidth}px` : '240px'}; ${savedCustomHeight > 0 ? `height: ${initialHeight};` : ''}
+                min-width: 140px; max-width: 95vw; min-height: 90px; max-height: 85vh;
+                overflow-y: auto; overflow-x: hidden; resize: both;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
-                font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #d1d5db;
+                font-family: system-ui, -apple-system, sans-serif; font-size: var(--mossad-pl-font-size, 11px); color: #d1d5db;
                 box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
                 scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+                --mossad-pl-font-size: ${currentFontSize}px;
             `;
         }
 
-        // Сохраняем пользовательскую ширину при интерактивном ресайзе мышью
+        // Сохраняем пользовательские размеры при интерактивном ресайзе мышью
         if (window.ResizeObserver) {
             let lastW = savedCustomWidth || 0;
+            let lastH = savedCustomHeight || 0;
             const ro = new ResizeObserver(entries => {
                 for (const entry of entries) {
                     const w = Math.round(entry.contentRect.width);
+                    const h = Math.round(entry.contentRect.height);
                     if (w >= 120 && Math.abs(w - lastW) > 6) {
                         lastW = w;
                         localStorage.setItem('mossad_playlist_width', String(w));
                         if (typeof Settings !== 'undefined') {
                             Settings.setQuiet('playlistWidth', w);
                         }
+                    }
+                    if (h >= 80 && Math.abs(h - lastH) > 6) {
+                        lastH = h;
+                        localStorage.setItem('mossad_playlist_height', String(h));
                     }
                 }
             });
@@ -3058,17 +3183,54 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
 
         const titleEl = document.createElement('span');
-        titleEl.style.cssText = `font-weight: 700; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;`;
+        titleEl.style.cssText = `font-weight: 700; font-size: calc(var(--mossad-pl-font-size, 11px) + 2px); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;`;
         titleEl.textContent = `📋 Список (${items.length})`;
-        titleEl.title = 'Двойной клик — сбросить ширину списка по ширине меню';
+        titleEl.title = 'Двойной клик — сбросить ширину и высоту списка';
         titleEl.ondblclick = () => {
             panel.style.width = '100%';
+            panel.style.height = 'auto';
             localStorage.removeItem('mossad_playlist_width');
+            localStorage.removeItem('mossad_playlist_height');
             if (typeof Settings !== 'undefined') {
                 Settings.setQuiet('playlistWidth', 0);
             }
-            showToast('↔ Ширина списка сброшена по ширине меню');
+            showToast('↔ Размеры списка сброшены');
         };
+
+        // Кнопки масштабирования шрифта списка (A− / A+)
+        const fontControls = document.createElement('div');
+        fontControls.style.cssText = `display: flex; align-items: center; gap: 3px; flex-shrink: 0;`;
+
+        const btnFontDec = document.createElement('button');
+        btnFontDec.textContent = 'A−';
+        btnFontDec.title = 'Уменьшить шрифт списка';
+        btnFontDec.style.cssText = `background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#9ca3af;padding:1px 5px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.2;transition:all 0.15s;`;
+        btnFontDec.onmouseenter = () => { btnFontDec.style.color = '#ffffff'; btnFontDec.style.background = 'rgba(255,255,255,0.14)'; };
+        btnFontDec.onmouseleave = () => { btnFontDec.style.color = '#9ca3af'; btnFontDec.style.background = 'rgba(255,255,255,0.06)'; };
+        btnFontDec.onclick = (e) => {
+            e.stopPropagation();
+            if (currentFontSize > 8) {
+                currentFontSize--;
+                panel.style.setProperty('--mossad-pl-font-size', `${currentFontSize}px`);
+                localStorage.setItem('mossad_playlist_font_size', String(currentFontSize));
+            }
+        };
+
+        const btnFontInc = document.createElement('button');
+        btnFontInc.textContent = 'A+';
+        btnFontInc.title = 'Увеличить шрифт списка';
+        btnFontInc.style.cssText = `background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#9ca3af;padding:1px 5px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.2;transition:all 0.15s;`;
+        btnFontInc.onmouseenter = () => { btnFontInc.style.color = '#ffffff'; btnFontInc.style.background = 'rgba(255,255,255,0.14)'; };
+        btnFontInc.onmouseleave = () => { btnFontInc.style.color = '#9ca3af'; btnFontInc.style.background = 'rgba(255,255,255,0.06)'; };
+        btnFontInc.onclick = (e) => {
+            e.stopPropagation();
+            if (currentFontSize < 20) {
+                currentFontSize++;
+                panel.style.setProperty('--mossad-pl-font-size', `${currentFontSize}px`);
+                localStorage.setItem('mossad_playlist_font_size', String(currentFontSize));
+            }
+        };
+        fontControls.append(btnFontDec, btnFontInc);
 
         // Кнопка «отключить все R» — появляется если зациклено 2+ элементов
         const btnClearLoop = document.createElement('button');
@@ -3094,19 +3256,19 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             grokUpdatePlaylistBtnState(false);
         };
 
-        header.append(titleEl, btnClearLoop, btnClose);
+        header.append(titleEl, fontControls, btnClearLoop, btnClose);
         panel.appendChild(header);
 
         const body = document.createElement('div');
-        body.style.cssText = `padding: 6px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden;`;
+        body.style.cssText = `padding: 2px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden;`;
 
         // ── Утилита: кнопка R ──
         const makeRBtn = (isActive, onToggle) => {
             const btn = document.createElement('button');
             btn.textContent = 'R';
             btn.style.cssText = `
-                background:none;border:none;cursor:pointer;font-weight:700;font-size:11px;
-                padding:0 4px;flex-shrink:0;transition:color 0.15s;
+                background:none;border:none;cursor:pointer;font-weight:700;font-size:var(--mossad-pl-font-size, 10px);
+                padding:0 2px;line-height:1;flex-shrink:0;transition:color 0.15s;
                 color:${isActive ? '#f87171' : '#374151'};
             `;
             btn.title = isActive ? 'Зациклено — клик для отмены' : 'Зациклить';
@@ -3133,12 +3295,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 const gItems = groups[gid];
                 const grpEl = document.createElement('div');
                 grpEl.className = 'mossad-playlist-group';
-                grpEl.style.cssText = `margin-bottom:6px;border:1px solid rgba(255,255,255,0.07);border-radius:8px;overflow:hidden;transition:border-color 0.2s;min-width:0;max-width:100%;box-sizing:border-box;`;
+                grpEl.style.cssText = `margin-bottom:2px;border:1px solid rgba(255,255,255,0.07);border-radius:5px;overflow:hidden;transition:border-color 0.2s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
                 const grpHeader = document.createElement('div');
                 grpHeader.className = 'mossad-playlist-grp-header';
                 const shortId = gid === '__noconv__' ? 'Без группы' : `Гр. ${gIdx + 1}: ${gid.slice(0, 8)}…`;
-                grpHeader.style.cssText = `display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.04);transition:background 0.2s;min-width:0;max-width:100%;box-sizing:border-box;`;
+                grpHeader.style.cssText = `display:flex;align-items:center;gap:3px;padding:2px 5px;background:rgba(255,255,255,0.04);line-height:1.15;transition:background 0.2s;min-width:0;max-width:100%;box-sizing:border-box;`;
                 grpHeader.title = `Группа ${gIdx + 1}: ${gid}`;
 
                 const isGrpLooped = loopSet.groupIds.includes(gid);
@@ -3152,7 +3314,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 });
 
                 const grpLabel = document.createElement('span');
-                grpLabel.style.cssText = `flex:1;min-width:0;font-weight:600;font-size:11px;color:#7dd3fc;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+                grpLabel.style.cssText = `flex:1;min-width:0;font-weight:600;font-size:var(--mossad-pl-font-size, 11px);color:#7dd3fc;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.15;`;
                 grpLabel.textContent = shortId;
                 grpLabel.onclick = (e) => {
                     e.stopPropagation();
@@ -3172,21 +3334,21 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 };
 
                 const grpCount = document.createElement('span');
-                grpCount.style.cssText = `color:#6b7280;font-size:10px;flex-shrink:0;white-space:nowrap;`;
+                grpCount.style.cssText = `color:#6b7280;font-size:calc(var(--mossad-pl-font-size, 11px) - 1px);flex-shrink:0;white-space:nowrap;line-height:1.15;`;
                 grpCount.textContent = `${gItems.length} ген.`;
 
                 grpHeader.append(rGrp, grpLabel, grpCount);
                 grpEl.appendChild(grpHeader);
 
                 const listEl = document.createElement('div');
-                listEl.style.cssText = `padding:3px 6px;min-width:0;max-width:100%;box-sizing:border-box;overflow:hidden;`;
+                listEl.style.cssText = `padding:1px 2px;min-width:0;max-width:100%;box-sizing:border-box;overflow:hidden;`;
                 gItems.forEach((item, idx) => {
                     const li = document.createElement('div');
                     li.className = 'mossad-playlist-item';
                     li.dataset.url = item.url || '';
                     const itemUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(item.url) : '';
                     li.dataset.uuid = itemUuid;
-                    li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:10px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;min-width:0;max-width:100%;box-sizing:border-box;`;
+                    li.style.cssText = `display:flex;align-items:center;gap:3px;padding:1px 3px;margin:0 0 1px 0;border-radius:3px;font-size:var(--mossad-pl-font-size, 10px);line-height:1.15;border:1px solid transparent;cursor:pointer;transition:all 0.12s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
                     const baseUrl = (item.url || '').split('?')[0];
                     const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
@@ -3201,7 +3363,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
                     const label = document.createElement('span');
                     label.className = 'mossad-playlist-label';
-                    label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
+                    label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;transition:color 0.12s;`;
                     const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 22)}`;
                     label.textContent = baseText;
                     li.dataset.origText = baseText;
@@ -3235,7 +3397,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 li.dataset.url = item.url || '';
                 const itemUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(item.url) : '';
                 li.dataset.uuid = itemUuid;
-                li.style.cssText = `display:flex;align-items:center;gap:4px;padding:3px 6px;margin-bottom:2px;border-radius:6px;font-size:11px;border:1px solid transparent;cursor:pointer;transition:all 0.15s;min-width:0;max-width:100%;box-sizing:border-box;`;
+                li.style.cssText = `display:flex;align-items:center;gap:3px;padding:1px 3px;margin:0 0 1px 0;border-radius:3px;font-size:var(--mossad-pl-font-size, 11px);line-height:1.15;border:1px solid transparent;cursor:pointer;transition:all 0.12s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
                 const baseUrl = (item.url || '').split('?')[0];
                 const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
@@ -3250,7 +3412,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
                 const label = document.createElement('span');
                 label.className = 'mossad-playlist-label';
-                label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 0.15s;`;
+                label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;transition:color 0.12s;`;
                 const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 26)}`;
                 label.textContent = baseText;
                 li.dataset.origText = baseText;
@@ -4121,7 +4283,7 @@ function findMediaForDownload() {
         }
 
         // --- Применяем шаблон имени файла, если включён ---
-        if (config.filenameTemplateEnabled && config.filenameTemplate && config.filenameTemplate.trim()) {
+        if (config.filenameTemplateEnabled) {
             const now2 = new Date();
             const pad2 = (n) => String(n).padStart(2, '0');
             const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
@@ -4154,7 +4316,10 @@ function findMediaForDownload() {
                 root:     rootBase,
             };
 
-            const tplStr = config.filenameTemplate.trim();
+            const rawTpl = (config.filenameTemplate && config.filenameTemplate.trim())
+                ? config.filenameTemplate.trim()
+                : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
+            const tplStr = rawTpl || '{id8}-{domain}.{ext}';
             const hasDblVar = /\{dbl\}/i.test(tplStr);
 
             // Регулярка: {varname} или {varname[N]}
@@ -4467,12 +4632,6 @@ function findMediaForDownload() {
                 try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
             })();
             if (window._mossadGalleryActive || hasGrokSs) {
-                if (config.downloadType !== 'none') {
-                    const hasVideo = getActiveVideo() !== null;
-                    if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
-                        triggerDownload();
-                    }
-                }
                 if (typeof window._mossadGalleryNextFn === 'function') {
                     window._mossadGalleryNextFn();
                     return;
@@ -4693,11 +4852,14 @@ function findMediaForDownload() {
         }
 
         const ct = currentVideoNode.currentTime;
-        if (ct < lastTime) {
+        // Защита от ложного лупа при смене слайда (когда плеер сбрасывается на 0):
+        // Считаем за луп только если видео реально проигрывалось хотя бы до 65% длительности или больше 1 сек
+        const isRealLoop = (lastTime > 1.0) && (videoInitialDuration === 0 || lastTime >= videoInitialDuration * 0.65);
+        if (ct < lastTime && isRealLoop) {
             // Произошел луп
             currentLoopCount++;
             accumulatedTime = 0;
-        } else {
+        } else if (ct >= lastTime) {
             const delta = (timeNow - lastRAFTime) / 1000;
             accumulatedTime += delta;
         }
@@ -5312,7 +5474,7 @@ function findMediaForDownload() {
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
                         <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> Шаблон:
                     </label>
-                    <input id="mossad-in-fn-tpl" type="text" placeholder="${rootDomain.includes('redgifs.com') ? '{userName}-{domain[4]}' : '{id8}-{domain}.{ext}'}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
+                    <input id="mossad-in-fn-tpl" type="text" placeholder="${typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : (rootDomain.includes('redgifs.com') ? '{userName}-{domain[4]}' : '{id8}-{domain}.{ext}')}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
                         title="Шаблон: {userName} {id8} {id} {domain} {title} {date} {time} {ext} {n} {dbl} {oldname}"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
                 </div>

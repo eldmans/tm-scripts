@@ -191,7 +191,7 @@
         }
 
         // --- Применяем шаблон имени файла, если включён ---
-        if (config.filenameTemplateEnabled && config.filenameTemplate && config.filenameTemplate.trim()) {
+        if (config.filenameTemplateEnabled) {
             const now2 = new Date();
             const pad2 = (n) => String(n).padStart(2, '0');
             const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
@@ -224,7 +224,10 @@
                 root:     rootBase,
             };
 
-            const tplStr = config.filenameTemplate.trim();
+            const rawTpl = (config.filenameTemplate && config.filenameTemplate.trim())
+                ? config.filenameTemplate.trim()
+                : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
+            const tplStr = rawTpl || '{id8}-{domain}.{ext}';
             const hasDblVar = /\{dbl\}/i.test(tplStr);
 
             // Регулярка: {varname} или {varname[N]}

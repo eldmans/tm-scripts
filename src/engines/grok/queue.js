@@ -69,7 +69,7 @@
             return (item.url.split('?')[0].toLowerCase() === cleanTarget);
         };
 
-        const flatIndex = structure.items.findIndex(isMatch);
+        let flatIndex = structure.items.findIndex(isMatch);
         let grpIndex = -1;
         let itemInGrpIndex = -1;
 
@@ -79,6 +79,32 @@
                 grpIndex = g;
                 itemInGrpIndex = idx;
                 break;
+            }
+        }
+
+        // Если позиция определяется для текущего экрана (url === null) и открыта киноплёнка Grok:
+        // Синхронизируем itemInGrpIndex с реально выделенным кадром (ring-white) на киноплёнке
+        if (!url && typeof isGrokPostPage === 'function' && isGrokPostPage() && typeof grokGetActiveFilmstripIndex === 'function') {
+            if (grpIndex === -1 && location.search) {
+                const convMatch = location.search.match(/conversation=([a-f0-9-]+)/i);
+                if (convMatch) {
+                    const cId = convMatch[1].toLowerCase();
+                    const g = structure.groups.findIndex(gr => (gr.id || '').toLowerCase() === cId);
+                    if (g !== -1) grpIndex = g;
+                }
+            }
+            const filmIdx = grokGetActiveFilmstripIndex();
+            if (filmIdx !== -1 && grpIndex !== -1 && filmIdx < structure.groups[grpIndex].items.length) {
+                itemInGrpIndex = filmIdx;
+                const actItem = structure.groups[grpIndex].items[filmIdx];
+                const fIdx = structure.items.indexOf(actItem);
+                if (fIdx !== -1) flatIndex = fIdx;
+                return {
+                    flatIndex,
+                    grpIndex,
+                    itemInGrpIndex,
+                    currentItem: actItem
+                };
             }
         }
 

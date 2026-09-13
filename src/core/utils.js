@@ -222,5 +222,13 @@
     }
     window.doRewind = doRewind;
 
-
-
+    /**
+     * Возвращает дефолтный шаблон имени файла для текущего сайта (отображается серым плейсхолдером)
+     */
+    function getDefaultFilenameTemplate() {
+        if (typeof rootDomain !== 'undefined' && rootDomain.includes('redgifs.com')) {
+            return '{userName}-{domain[4]}';
+        }
+        return '{id8}-{domain}.{ext}';
+    }
+    window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;

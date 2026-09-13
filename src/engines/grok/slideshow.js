@@ -18,11 +18,22 @@
                 : (urlObj.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
 
             // 1. Приоритет: поиск в полосе киноплёнки (filmstrip) на текущей странице
-            if (targetUuid && typeof grokFindFilmstripItemByUuid === 'function') {
-                const filmstripBtn = grokFindFilmstripItemByUuid(targetUuid);
+            if (typeof grokFindFilmstripItemByUuid === 'function') {
+                let fallbackIdx = -1;
+                const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+                if (struct) {
+                    const targetPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct, url) : null;
+                    if (targetPos && targetPos.itemInGrpIndex !== -1) {
+                        fallbackIdx = targetPos.itemInGrpIndex;
+                    }
+                }
+                const filmstripBtn = grokFindFilmstripItemByUuid(targetUuid, fallbackIdx);
                 if (filmstripBtn) {
-                    console.log(`[MOSSAD] grokSpaNavigate: кадр ${targetUuid.slice(0, 8)} найден в filmstrip — кликаем без перезагрузки!`);
+                    console.log(`[MOSSAD] grokSpaNavigate: кадр найден в filmstrip — кликаем без перезагрузки!`);
                     filmstripBtn.click();
+                    try {
+                        history.replaceState(null, '', path);
+                    } catch(e) {}
 
                     // Ожидаем обновления URL (через history.replaceState Грока) и возобновляем тик слайдшоу
                     let checks = 0;
@@ -31,13 +42,13 @@
                         const curUuid = (typeof grokExtractUuid === 'function')
                             ? grokExtractUuid(location.pathname)
                             : (location.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
-                        if ((curUuid && curUuid === targetUuid.toLowerCase()) || checks >= 12) {
+                        if ((curUuid && targetUuid && curUuid === targetUuid.toLowerCase()) || checks >= 8) {
                             clearInterval(checkInterval);
                             if (typeof grokGallerySlideshowTick === 'function') {
                                 grokGallerySlideshowTick();
                             }
                         }
-                    }, 50);
+                    }, 40);
                     return;
                 }
             }
@@ -148,13 +159,24 @@
             return;
         }
 
+        // Немедленно останавливаем любые активные таймеры предыдущего видео/слайда!
+        if (typeof slideshowTimeoutId !== 'undefined' && slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
+        if (typeof rafId !== 'undefined' && rafId) cancelAnimationFrame(rafId);
+        isCountingDown = false;
+        countdownSeconds = 0;
+        currentLoopCount = 0;
+        accumulatedTime = 0;
+
         const startBase = (startItem.url || '').split('?')[0].toLowerCase();
         const startGid = startItem.convId || '__noconv__';
+        const startUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(startItem.url) : '';
 
         const ss = {
             active: true,
             circle: 1,
             total: struct.items.length,
+            targetUrl: startItem.url,
+            targetUuid: startUuid,
             visitedInCurGroup: [startBase],
             visitedGroupsInCircle: [startGid],
             visitedInCircle: [startBase]
@@ -182,7 +204,7 @@
         if (curClean === startBase) {
             grokGallerySlideshowTick();
         } else {
-            setTimeout(() => { grokSpaNavigate(startItem.url); }, 200);
+            setTimeout(() => { grokSpaNavigate(startItem.url); }, 150);
         }
     }
 
@@ -266,6 +288,12 @@
             showToast(`🔄 Круг ${ss.circle} начался!`);
         }
 
+        let ss = {};
+        try { ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}'); } catch(e) {}
+        ss.targetUrl = nextRes.item.url;
+        ss.targetUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(nextRes.item.url) : '';
+        _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+
         if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
         grokSpaNavigate(nextRes.item.url);
     }
@@ -302,6 +330,26 @@
         }
 
         const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+
+        // Если в сессии есть целевой кадр, а на киноплёнке выбран другой (например, Grok открыл 5-й по умолчанию)
+        if (ss.targetUuid && typeof grokGetFilmstripItems === 'function') {
+            const filmItems = grokGetFilmstripItems();
+            if (filmItems.length > 1) {
+                let targetPos = null;
+                if (struct && ss.targetUrl && typeof grokFindCurrentPosition === 'function') {
+                    targetPos = grokFindCurrentPosition(struct, ss.targetUrl);
+                }
+                const fallbackIdx = (targetPos && targetPos.itemInGrpIndex !== -1) ? targetPos.itemInGrpIndex : -1;
+                const targetBtn = (typeof grokFindFilmstripItemByUuid === 'function')
+                    ? grokFindFilmstripItemByUuid(ss.targetUuid, fallbackIdx)
+                    : null;
+                if (targetBtn && !targetBtn.className.includes('ring-white')) {
+                    console.log(`[MOSSAD] grokGallerySlideshowTick: принудительно активируем целевой кадр ${ss.targetUuid.slice(0, 8)}`);
+                    targetBtn.click();
+                }
+            }
+        }
+
         const curPos = (struct && typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
 
         const grpMode = struct?.grpMode || 'seq';
@@ -327,7 +375,7 @@
 
         // Подсвечиваем активный файл в открытом монолитном списке (плейлисте)
         if (typeof grokHighlightActivePlaylistItem === 'function') {
-            grokHighlightActivePlaylistItem();
+            grokHighlightActivePlaylistItem(ss.targetUrl || null);
         }
 
         // Устанавливаем функцию перехода: её вызовет triggerNextSlide

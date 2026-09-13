@@ -259,12 +259,6 @@
                 try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
             })();
             if (window._mossadGalleryActive || hasGrokSs) {
-                if (config.downloadType !== 'none') {
-                    const hasVideo = getActiveVideo() !== null;
-                    if (!(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo)) {
-                        triggerDownload();
-                    }
-                }
                 if (typeof window._mossadGalleryNextFn === 'function') {
                     window._mossadGalleryNextFn();
                     return;
@@ -485,11 +479,14 @@
         }
 
         const ct = currentVideoNode.currentTime;
-        if (ct < lastTime) {
+        // Защита от ложного лупа при смене слайда (когда плеер сбрасывается на 0):
+        // Считаем за луп только если видео реально проигрывалось хотя бы до 65% длительности или больше 1 сек
+        const isRealLoop = (lastTime > 1.0) && (videoInitialDuration === 0 || lastTime >= videoInitialDuration * 0.65);
+        if (ct < lastTime && isRealLoop) {
             // Произошел луп
             currentLoopCount++;
             accumulatedTime = 0;
-        } else {
+        } else if (ct >= lastTime) {
             const delta = (timeNow - lastRAFTime) / 1000;
             accumulatedTime += delta;
         }
