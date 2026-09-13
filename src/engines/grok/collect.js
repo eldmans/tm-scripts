@@ -50,10 +50,10 @@
 
 
 
-    /** Кнопка 1: сохранить коллекцию в sessionStorage (хронологический порядок) */
+    /** Кнопка 1: сохранить коллекцию в sessionStorage (накопительное добавление, список только увеличивается) */
     function grokSaveCollection(btnEl) {
-        const newItems = grokCollectLinks();
-        if (newItems.length === 0) {
+        const foundItems = grokCollectLinks();
+        if (foundItems.length === 0) {
             showToast('⚠️ Ссылки не найдены. Проскролльте страницу до конца!', true);
             return;
         }
@@ -64,26 +64,50 @@
             if (raw) existingData = JSON.parse(raw);
         } catch(e) {}
 
+        const existingItems = existingData.items || [];
+        const seenUrls = new Set();
+        const mergedItems = [];
+
+        // 1. Сохраняем все уже имеющиеся элементы (список только увеличивается!)
+        for (const it of existingItems) {
+            const base = (it.url || '').split('?')[0].toLowerCase();
+            if (!seenUrls.has(base)) {
+                seenUrls.add(base);
+                mergedItems.push(it);
+            }
+        }
+
+        // 2. Добавляем новые элементы, которых ещё не было
+        let addedCount = 0;
+        for (const it of foundItems) {
+            const base = (it.url || '').split('?')[0].toLowerCase();
+            if (!seenUrls.has(base)) {
+                seenUrls.add(base);
+                mergedItems.push(it);
+                addedCount++;
+            }
+        }
+
         const grpMode  = existingData.grpMode  || 'seq';
         const itemMode = existingData.itemMode || 'fwd';
         const date     = new Date().toISOString().slice(0, 10);
-        const videos   = newItems.filter(i => i.type === 'video').length;
-        const photos   = newItems.length - videos;
+        const videos   = mergedItems.filter(i => i.type === 'video').length;
+        const photos   = mergedItems.length - videos;
 
         _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({
             date,
-            items: newItems,
+            items: mergedItems,
             grpMode,
             itemMode
         }));
 
         if (btnEl) {
-            btnEl.textContent = String(newItems.length);
-            btnEl.title = `Коллекция (${newItems.length}): открыть список`;
+            btnEl.textContent = String(mergedItems.length);
+            btnEl.title = `Коллекция (${mergedItems.length}): открыть список`;
             btnEl.style.background = '#065f46';
             btnEl.style.color = '#e5e7eb';
-            btnEl.dataset.collectedCount = String(newItems.length);
-            const dlBtn = document.getElementById('mossad-gallery-dl');
+            btnEl.dataset.collectedCount = String(mergedItems.length);
+            const dlBtn = document.getElementById('mossad-gallery-dl') || document.getElementById('mossad-btn-export-list');
             if (dlBtn) dlBtn.style.display = 'inline-block';
         }
 
@@ -96,7 +120,11 @@
             }
         }
 
-        showToast(`✅ Собрано: ${newItems.length} (хронологически) → 📹${videos} видео, 🖼${photos} фото`);
+        if (addedCount > 0) {
+            showToast(`✅ Добавлено +${addedCount}! Всего в списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
+        } else {
+            showToast(`ℹ️ Новых ссылок нет. В списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
+        }
     }
 
     /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */

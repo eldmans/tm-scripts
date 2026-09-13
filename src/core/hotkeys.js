@@ -160,27 +160,64 @@
         }
     }, true);
 
-    document.addEventListener('keydown', function (e) {
+    window.addEventListener('keydown', function (e) {
         if (window.capturingFor !== null) return;
         const activeEl = document.activeElement;
         const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
-        if (isEditing) { if (!/^F\d+$/.test(e.key)) return; }
+        if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
 
         if (hotkeyMatches(e, config.hk.help)) {
             e.preventDefault();
-            if (document.getElementById('mossad-hk-modal')) return;
-            openHotkeySettings();
+            e.stopImmediatePropagation();
+            const existingModal = document.getElementById('mossad-hk-modal');
+            if (existingModal) {
+                existingModal.remove();
+                return;
+            }
+            if (typeof openHotkeySettings === 'function') openHotkeySettings();
+            return;
         }
 
         if (hotkeyMatches(e, config.hk.slideshowPanel)) {
             e.preventDefault();
             window.widgetState = (window.widgetState === 'hidden') ? 'bar' : 'hidden';
             window.updateWidgetUI();
+            return;
         }
 
+        // Большое слайдшоу (по плейлисту коллекции): Плей / Пауза (Insert по умолчанию)
+        if (hotkeyMatches(e, config.hk.galleryPlayPause)) {
+            e.preventDefault();
+            if (rootDomain === 'grok.com') {
+                const active = window._mossadGalleryActive || (() => {
+                    try { return !!(JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem(GALLERY_SS_KEY) || '{}').active); } catch { return false; }
+                })();
+                if (active) {
+                    if (typeof toggleGalleryPause === 'function') toggleGalleryPause();
+                } else {
+                    if (typeof grokStartGallerySlideshow === 'function') grokStartGallerySlideshow();
+                }
+            } else {
+                startSlideshow();
+            }
+            return;
+        }
+
+        // Стоп большого слайдшоу
+        if (config.hk.galleryStop && hotkeyMatches(e, config.hk.galleryStop)) {
+            e.preventDefault();
+            if (rootDomain === 'grok.com' && typeof grokStopGallerySlideshow === 'function') {
+                grokStopGallerySlideshow();
+            }
+            stopSlideshow();
+            return;
+        }
+
+        // Малое слайдшоу (внутри группы / ракета: Shift+Insert по умолчанию)
         if (hotkeyMatches(e, config.hk.slideshowStart)) {
             e.preventDefault();
             startSlideshow();
+            return;
         }
 
         if (hotkeyMatches(e, config.hk.download)) {

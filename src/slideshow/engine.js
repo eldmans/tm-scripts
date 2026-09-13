@@ -135,15 +135,20 @@
 
     let lastUrlForSlideshow = location.href;
     let lastActiveVideo = null;
+    let _urlMonitorTimer = null;
 
     setInterval(() => {
         if (!slideshowActive || _isRewinding) return;
         
         const currentUrl = location.href;
-        const currentVideo = getActiveVideo();
-        
         const urlChanged = currentUrl !== lastUrlForSlideshow;
-        const videoChanged = currentVideo !== lastActiveVideo && (currentVideo !== null || lastActiveVideo !== null);
+        
+        let videoChanged = false;
+        let currentVideo = lastActiveVideo;
+        if (urlChanged || !lastActiveVideo || !document.body.contains(lastActiveVideo)) {
+            currentVideo = getActiveVideo();
+            videoChanged = currentVideo !== lastActiveVideo && (currentVideo !== null || lastActiveVideo !== null);
+        }
         
         if (urlChanged || videoChanged) {
             lastUrlForSlideshow = currentUrl;
@@ -158,26 +163,15 @@
 
             if (urlChanged) {
                 triggerUniversalFullScreen();
-                if (rootDomain === 'grok.com' && typeof grokGallerySlideshowTick === 'function') {
-                    const raw = (typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss');
-                    if (raw) {
-                        try {
-                            const ss = JSON.parse(raw);
-                            if (ss.active) grokGallerySlideshowTick();
-                        } catch(e) {}
-                    }
-                }
             }
             
-            // Ждем чуть-чуть, чтобы SPA успело обновить DOM
-            setTimeout(() => {
-                if (slideshowActive) scheduleNextSlideCycle(0);
-            }, 100);
-        } else {
-            lastUrlForSlideshow = currentUrl;
-            lastActiveVideo = currentVideo;
+            if (_urlMonitorTimer) clearTimeout(_urlMonitorTimer);
+            _urlMonitorTimer = setTimeout(() => {
+                _urlMonitorTimer = null;
+                if (slideshowActive && !slideshowPaused) scheduleNextSlideCycle(0);
+            }, 150);
         }
-    }, 100);
+    }, 250);
 
     function stopSlideshow() {
         slideshowActive = false;
@@ -532,6 +526,9 @@
     let _pausedByBrsr = false;
 
     function pauseAllSlideshows(reason) {
+        if (sessionStorage.getItem('mossad_navigating_group') === 'true') {
+            return; // Не ставить на паузу при автоматическом переходе между группами
+        }
         let anyPaused = false;
         if (slideshowActive && !slideshowPaused) {
             setSlideshowPaused(true);

@@ -52,22 +52,57 @@
             }
         };
 
-        // ── 2. Кнопка скачать коллекцию .txt (★) — появляется только когда список собран ──
-        const btnDl = mkBtn('mossad-gallery-dl', '★', 'Скачать коллекцию .txt', 'background:#1f2937;color:#fbbf24;');
-        btnDl.style.display = savedCount > 0 ? 'inline-block' : 'none';
-        btnDl.onclick = () => grokDownloadCollection();
+        // Правый клик: очистить коллекцию
+        btnCollect.oncontextmenu = (e) => {
+            e.preventDefault();
+            if (confirm('Очистить собранную коллекцию?')) {
+                _gSS.removeItem(GALLERY_COLLECTION_KEY);
+                btnCollect.textContent = 'Собрать';
+                btnCollect.dataset.collectedCount = '0';
+                btnCollect.style.background = '#1f2937';
+                btnCollect.style.color = '#e5e7eb';
+                const pl = document.getElementById('mossad-playlist-panel');
+                if (pl) pl.remove();
+                showToast('🗑 Коллекция очищена');
+            }
+        };
+
 
         if (isGrokSavedPage()) {
-            // Мониторим изменение числа ссылок на странице каждые 2с
+            // Мониторим появление новых ссылок на странице каждые 2с (количество только увеличивается!)
             setInterval(() => {
-                const currentCount = document.querySelectorAll('a[href*="/imagine/post/"]').length;
-                const sc = parseInt(btnCollect.dataset.collectedCount || String(savedCount), 10);
-                if (sc === 0) return;
-                if (currentCount !== sc) {
-                    const diff = currentCount - sc;
-                    const sign = diff > 0 ? '+' : '';
-                    btnCollect.textContent = `${sc} 🔴${sign}${diff}`;
-                    btnCollect.style.color = '#fca5a5';
+                let currentTotal = savedCount;
+                const existingUrls = new Set();
+                try {
+                    const cRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
+                    if (cRaw) {
+                        const items = JSON.parse(cRaw).items || [];
+                        currentTotal = items.length;
+                        items.forEach(it => existingUrls.add((it.url || '').split('?')[0].toLowerCase()));
+                    }
+                } catch(e) {}
+
+                if (currentTotal === 0 && !btnCollect.dataset.collectedCount) return;
+
+                const anchors = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
+                let uncollected = 0;
+                anchors.forEach(a => {
+                    const href = a.getAttribute('href') || '';
+                    if (!href) return;
+                    const url = href.startsWith('http') ? href : 'https://grok.com' + href;
+                    if (!existingUrls.has(url.split('?')[0].toLowerCase())) {
+                        uncollected++;
+                    }
+                });
+
+                if (uncollected > 0) {
+                    btnCollect.textContent = `${currentTotal} 🟢+${uncollected}`;
+                    btnCollect.style.color = '#34d399';
+                    btnCollect.title = `Собрано: ${currentTotal}, новых на странице: +${uncollected}. Кликните для добавления!`;
+                } else if (currentTotal > 0) {
+                    btnCollect.textContent = String(currentTotal);
+                    btnCollect.style.color = '#e5e7eb';
+                    btnCollect.title = `Коллекция (${currentTotal}): открыть список`;
                 }
             }, 2000);
         }
@@ -189,13 +224,26 @@
             btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
         };
 
-        row.append(btnCollect, btnDl, btnStatus, btnStop, btnGr, btnMd);
+        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd);
+
+        // ── Кнопка вызова настроек горячих клавиш (⌨) слева от крестика (✕) ──
+        const btnHk = mkBtn('mossad-gallery-hk', '⌨', 'Настройки горячих клавиш', 'background:#1f2937;color:#9ca3af;font-size:12px;padding:2px 6px;margin-left:auto;');
+        btnHk.onclick = () => {
+            const existingModal = document.getElementById('mossad-hk-modal');
+            if (existingModal) {
+                existingModal.remove();
+                return;
+            }
+            if (typeof openHotkeySettings === 'function') openHotkeySettings();
+        };
 
         // Переносим крестик закрытия на самый верхний ряд (на Grok это mossad-gallery-row)
         const closeBtn = document.getElementById('mossad-btn-close');
         if (closeBtn) {
-            closeBtn.style.marginLeft = 'auto';
-            row.appendChild(closeBtn);
+            closeBtn.style.marginLeft = '4px';
+            row.append(btnHk, closeBtn);
+        } else {
+            row.append(btnHk);
         }
 
         container.insertBefore(row, container.firstChild);

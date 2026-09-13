@@ -71,6 +71,9 @@
 
         // Переход на ДРУГУЮ группу/пост (или с главной /imagine) — полноценный переход
         console.log('[MOSSAD] grokSpaNavigate: переход на другую группу/пост ->', url);
+        sessionStorage.removeItem('mossad_gallery_paused');
+        if (typeof SESSION_PAUSED_KEY !== 'undefined') sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        sessionStorage.setItem('mossad_navigating_group', 'true');
         window.location.href = url;
     }
 
@@ -289,6 +292,12 @@
         try { ss = JSON.parse(raw); } catch { return; }
         if (!ss.active) return;
 
+        if (sessionStorage.getItem('mossad_navigating_group') === 'true') {
+            sessionStorage.removeItem('mossad_navigating_group');
+            sessionStorage.removeItem('mossad_gallery_paused');
+            if (typeof SESSION_PAUSED_KEY !== 'undefined') sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        }
+
         // Проверяем, стояло ли слайдшоу на паузе до перехода
         const isPaused = sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
                          (typeof SESSION_PAUSED_KEY !== 'undefined' && sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true');
@@ -314,6 +323,10 @@
         const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
 
         // Если в сессии есть целевой кадр, а на киноплёнке выбран другой (например, Grok открыл 5-й по умолчанию)
+        if (window._grokActivateTargetTimer) {
+            clearTimeout(window._grokActivateTargetTimer);
+            window._grokActivateTargetTimer = null;
+        }
         if ((ss.targetUuid || ss.targetUrl) && typeof grokGetFilmstripItems === 'function') {
             let attempts = 0;
             const activateTarget = () => {
@@ -330,16 +343,21 @@
                         }
                     }
                     if (targetBtn) {
-                        const isRingWhite = targetBtn.className.includes('ring-white') || targetBtn.className.includes('border-white') || targetBtn.getAttribute('aria-selected') === 'true';
-                        if (!isRingWhite) {
+                        const activeIdx = typeof grokGetActiveFilmstripIndex === 'function' ? grokGetActiveFilmstripIndex() : -1;
+                        const isTargetActive = (activeIdx !== -1 && filmItems[activeIdx] === targetBtn) ||
+                                              targetBtn.getAttribute('aria-selected') === 'true';
+                        if (!isTargetActive) {
                             console.log(`[MOSSAD] grokGallerySlideshowTick: активируем целевой кадр в filmstrip`);
                             targetBtn.click();
                         }
+                        window._grokActivateTargetTimer = null;
                         return;
                     }
                 }
-                if (attempts < 15) {
-                    setTimeout(activateTarget, 100);
+                if (attempts < 6) {
+                    window._grokActivateTargetTimer = setTimeout(activateTarget, 120);
+                } else {
+                    window._grokActivateTargetTimer = null;
                 }
             };
             activateTarget();

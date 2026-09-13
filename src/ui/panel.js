@@ -37,6 +37,14 @@
             display: flex; flex-direction: column; gap: 4px; pointer-events: none;
         `;
 
+        window.applyWidgetZoom = function() {
+            const z = (typeof config !== 'undefined' && config.widgetZoom) ? config.widgetZoom : 1.0;
+            container.style.transform = `scale(${z})`;
+            const isRight = container.style.right && container.style.right !== 'auto';
+            container.style.transformOrigin = isRight ? 'top right' : 'top left';
+        };
+        window.applyWidgetZoom();
+
         window.snapWidgetToCorner = function() {
             const topVal = isGrokSavedPage() ? '72px' : '20px';
             container.style.left = '20px';
@@ -228,6 +236,17 @@
                         </label>
                     </div>
                 </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; gap: 6px;">
+                    <button id="mossad-btn-export-list" style="background:#1f2937; border:1px solid #374151; border-radius:4px; padding:2px 8px; color:#fbbf24; cursor:pointer; font-weight:bold; font-size:11px; display:flex; align-items:center; gap:4px;" title="Скачать список собранных ссылок (.txt)">
+                        💾 Список
+                    </button>
+                    <div style="display:flex; align-items:center; gap:3px; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:1px 5px;">
+                        <span style="font-size:10px; color:#9ca3af;" title="Масштаб интерфейса MOSSAD">🔍</span>
+                        <button id="mossad-btn-zoom-dec" style="background:transparent; border:none; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px; padding:0 3px;" title="Уменьшить масштаб виджета">−</button>
+                        <span id="mossad-zoom-val" style="font-size:10px; color:#60a5fa; cursor:pointer; min-width:32px; text-align:center;" title="Клик — сбросить на 100%">${Math.round((config.widgetZoom || 1) * 100)}%</span>
+                        <button id="mossad-btn-zoom-inc" style="background:transparent; border:none; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px; padding:0 3px;" title="Увеличить масштаб виджета">+</button>
+                    </div>
+                </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
@@ -236,6 +255,7 @@
                     <input id="mossad-in-fn-tpl" type="text" placeholder="${typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : (rootDomain.includes('redgifs.com') ? '{userName}-{domain[4]}' : '{id8}-{domain}.{ext}')}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
                         title="Шаблон: {userName} {id8} {id} {domain} {title} {date} {time} {ext} {n} {dbl} {oldname}"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
+                    <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;">💾</button>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -343,6 +363,59 @@
             const _saveFnTpl = (e) => Settings.setQuiet('filenameTemplate', e.target.value);
             fnTplInput.onblur   = _saveFnTpl;  // сохранить при потере фокуса (Tab / клик)
             fnTplInput.onchange = _saveFnTpl;  // сохранить при Enter
+
+            const btnSaveTplGlobal = panel.querySelector('#mossad-btn-save-tpl-global');
+            if (btnSaveTplGlobal) {
+                btnSaveTplGlobal.onclick = () => {
+                    const val = fnTplInput.value.trim();
+                    Settings.set('filenameTemplate', val);
+                    if (typeof GM_setValue === 'function') {
+                        GM_setValue('mossad_tpl_' + rootDomain, val);
+                        showToast(`💾 Шаблон сохранён глобально для ${rootDomain}`);
+                    } else {
+                        showToast('💾 Шаблон сохранён локально');
+                    }
+                };
+            }
+
+            const btnExportList = panel.querySelector('#mossad-btn-export-list');
+            if (btnExportList) {
+                btnExportList.onclick = () => {
+                    if (typeof grokDownloadCollection === 'function') {
+                        grokDownloadCollection();
+                    } else {
+                        showToast('⚠️ Экспорт списка доступен на Grok', true);
+                    }
+                };
+            }
+
+            const btnZoomDec = panel.querySelector('#mossad-btn-zoom-dec');
+            const btnZoomInc = panel.querySelector('#mossad-btn-zoom-inc');
+            const lblZoomVal = panel.querySelector('#mossad-zoom-val');
+            if (btnZoomDec && btnZoomInc && lblZoomVal) {
+                btnZoomDec.onclick = () => {
+                    const cur = config.widgetZoom || 1.0;
+                    const nxt = Math.max(0.6, Math.round((cur - 0.1) * 10) / 10);
+                    config.widgetZoom = nxt;
+                    Settings.save();
+                    lblZoomVal.textContent = `${Math.round(nxt * 100)}%`;
+                    if (window.applyWidgetZoom) window.applyWidgetZoom();
+                };
+                btnZoomInc.onclick = () => {
+                    const cur = config.widgetZoom || 1.0;
+                    const nxt = Math.min(1.8, Math.round((cur + 0.1) * 10) / 10);
+                    config.widgetZoom = nxt;
+                    Settings.save();
+                    lblZoomVal.textContent = `${Math.round(nxt * 100)}%`;
+                    if (window.applyWidgetZoom) window.applyWidgetZoom();
+                };
+                lblZoomVal.onclick = () => {
+                    config.widgetZoom = 1.0;
+                    Settings.save();
+                    lblZoomVal.textContent = '100%';
+                    if (window.applyWidgetZoom) window.applyWidgetZoom();
+                };
+            }
             panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
             panel.querySelector('#mossad-cb-brsr').onchange = (e) => Settings.set('stopOnBrsrSwitch', e.target.checked);
             const cbUniFS = panel.querySelector('#mossad-cb-universal-fs');
@@ -560,20 +633,22 @@
         
         const list = modal.querySelector('#mossad-hk-list');
         const keysMap = {
-            nextSlide: 'Следующий слайд (PageDown)',
-            prevSlide: 'Предыдущий слайд (PageUp)',
-            download: 'Скачать (DL)',
-            upscale: 'Улучшить',
-            deleteVid: 'Удалить видео',
-            sound: 'Звук (вкл/выкл)',
-            playPause: 'Пауза/Плей',
-            help: 'Настройки клавиш',
-            history: 'История (Grok)', 
-            slideshowPanel: 'Меню слайдшоу',
-            slideshowStart: 'Старт слайдшоу',
-            duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
-            rewind: 'Мотать в начало',
-            snapWidget: 'Привязать к левому верхнему краю (F8)'
+            nextSlide:        'Следующий слайд (PageDown)',
+            prevSlide:        'Предыдущий слайд (PageUp)',
+            download:         'Скачать (DL)',
+            upscale:          'Улучшить',
+            deleteVid:        'Удалить видео',
+            sound:            'Звук (вкл/выкл)',
+            playPause:        'Пауза/Плей видео',
+            help:             'Настройки клавиш (Ctrl+F1)',
+            history:          'История (Grok)', 
+            slideshowPanel:   'Меню слайдшоу (Ctrl+Insert)',
+            slideshowStart:   'Малое слайдшоу / ракета (Shift+Insert)',
+            galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert)',
+            galleryStop:      'Стоп большого слайдшоу',
+            duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
+            rewind:           'Мотать в начало (Alt+R)',
+            snapWidget:       'Привязать к левому верхнему краю (F8)'
         };
         
         Object.keys(keysMap).forEach(k => {

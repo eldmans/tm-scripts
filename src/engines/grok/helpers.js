@@ -308,21 +308,28 @@
         const items = grokGetFilmstripItems();
         if (items.length === 0) return -1;
         const curUuid = grokExtractUuid(location.pathname);
-        // 1. По классу выделения (ring-white, ring-2, border-white, active)
+        // 1. По совпадению UUID ассета с текущим URL (самый точный способ)
+        if (curUuid) {
+            const activeByMatch = items.findIndex(btn => {
+                const imgSrc = btn.querySelector('img, video, source')?.src || '';
+                const genMatch = imgSrc.match(/generated\/([a-f0-9-]+)\//)?.[1];
+                if (genMatch && curUuid.includes(genMatch.toLowerCase())) return true;
+                if (imgSrc.toLowerCase().includes(curUuid)) return true;
+                const dataId = (btn.dataset.id || btn.dataset.uuid || '').toLowerCase();
+                if (dataId && dataId.includes(curUuid)) return true;
+                return false;
+            });
+            if (activeByMatch !== -1) return activeByMatch;
+        }
+
+        // 2. По классу выделения (ring-white, border-white, aria-selected="true") БЕЗ ложных Tailwind focus:*
         const activeByClass = items.findIndex(btn => {
-            const cls = (btn.className || '') + ' ' + (btn.getAttribute('aria-selected') === 'true' ? 'selected' : '');
-            return /ring-(white|[a-z0-9]+)|border-white|selected/i.test(cls);
+            if (btn.getAttribute('aria-selected') === 'true') return true;
+            const cls = btn.className || '';
+            const tokens = cls.split(/\s+/);
+            return tokens.some(t => /^(ring-white|border-white|ring-2|ring-4|active)$/i.test(t));
         });
         if (activeByClass !== -1) return activeByClass;
-        // 2. По совпадению UUID ассета с текущим URL
-        const activeByMatch = items.findIndex(btn => {
-            const imgSrc = btn.querySelector('img, video, source')?.src || '';
-            const genMatch = imgSrc.match(/generated\/([a-f0-9-]+)\//)?.[1];
-            if (genMatch && location.pathname.includes(genMatch)) return true;
-            if (curUuid && imgSrc.toLowerCase().includes(curUuid)) return true;
-            return false;
-        });
-        if (activeByMatch !== -1) return activeByMatch;
         return -1;
     }
 

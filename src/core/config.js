@@ -23,6 +23,7 @@
         filenameTemplate: '{id8}-{domain}.{ext}',  // шаблон имени файла по умолчанию (8 символов UUID + домен)
         filenameTemplateEnabled: false,  // использовать шаблон?
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
+        widgetZoom: 1.0,                 // масштаб виджета (1.0 = 100%)
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
@@ -35,25 +36,27 @@
         pinterestHistoryIdx: -1,           // текущий индекс в истории (как в Проводнике)
         
         hk: {
-            download:       { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
-            upscale:        { key: 'PageUp',     ctrl: true,  alt: false, shift: false }, // Ctrl+PageUp
-            deleteVid:      { key: 'Delete',     ctrl: false, alt: false, shift: false },
-            sound:          { key: 'ScrollLock', ctrl: false, alt: false, shift: false },
-            playPause:      { key: 'Pause',      ctrl: false, alt: false, shift: false },
-            help:           { key: 'F1',         ctrl: true,  alt: false, shift: false },
-            history:        { key: 'Home',       ctrl: false, alt: false, shift: false },
-            slideshowPanel: { key: 'Insert',     ctrl: true,  alt: false, shift: false },
-            slideshowStart: { key: 'Insert',     ctrl: false, alt: false, shift: false },
-            focusWidget:    { key: 'F7',         ctrl: false, alt: false, shift: false },
-            snapWidget:     { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
-            nextSlide:      [
+            download:         { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
+            upscale:          { key: 'PageUp',     ctrl: true,  alt: false, shift: false }, // Ctrl+PageUp
+            deleteVid:        { key: 'Delete',     ctrl: false, alt: false, shift: false },
+            sound:            { key: 'ScrollLock', ctrl: false, alt: false, shift: false },
+            playPause:        { key: 'Pause',      ctrl: false, alt: false, shift: false },
+            help:             { key: 'F1',         ctrl: true,  alt: false, shift: false },
+            history:          { key: 'Home',       ctrl: false, alt: false, shift: false },
+            slideshowPanel:   { key: 'Insert',     ctrl: true,  alt: false, shift: false }, // Ctrl+Insert — меню
+            slideshowStart:   { key: 'Insert',     ctrl: false, alt: false, shift: true },  // Shift+Insert — малое слайдшоу (ракета)
+            galleryPlayPause: { key: 'Insert',     ctrl: false, alt: false, shift: false }, // Insert — большое слайдшоу (плейлист)
+            galleryStop:      { key: '',           ctrl: false, alt: false, shift: false }, // Пусто — стоп большого слайдшоу
+            focusWidget:      { key: 'F7',         ctrl: false, alt: false, shift: false },
+            snapWidget:       { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
+            nextSlide:        [
                 { key: 'PageDown',   ctrl: false, alt: false, shift: false },
                 { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)
             ],
-            prevSlide:      { key: 'PageUp',     ctrl: false, alt: false, shift: false },
-            duplicateNext:  { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
-            rewind:         { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
-            updateScript:   { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
+            prevSlide:        { key: 'PageUp',     ctrl: false, alt: false, shift: false },
+            duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
+            rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
+            updateScript:     { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
         }
     };
 
@@ -122,6 +125,25 @@
     if (!config.hk.nextSlide || (Array.isArray(config.hk.nextSlide) && !config.hk.nextSlide.some(h => h && h.key === 'PageDown'))) {
         const spaceHk = { key: ' ', ctrl: false, alt: false, shift: false };
         config.hk.nextSlide = [{ key: 'PageDown', ctrl: false, alt: false, shift: false }, spaceHk];
+    }
+
+    // Миграция v1.3.13: разделение малого (Shift+Insert) и большого слайдшоу (Insert)
+    if (!config.hk.galleryPlayPause) {
+        config.hk.galleryPlayPause = { key: 'Insert', ctrl: false, alt: false, shift: false };
+    }
+    if (!config.hk.galleryStop) {
+        config.hk.galleryStop = { key: '', ctrl: false, alt: false, shift: false };
+    }
+    if (config.hk.slideshowStart && config.hk.slideshowStart.key === 'Insert' && !config.hk.slideshowStart.ctrl && !config.hk.slideshowStart.alt && !config.hk.slideshowStart.shift) {
+        config.hk.slideshowStart = { key: 'Insert', ctrl: false, alt: false, shift: true };
+    }
+
+    // Глобальная синхронизация шаблона имени файла через GM_getValue
+    if (typeof GM_getValue === 'function') {
+        const gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
+        if (gmTpl && typeof gmTpl === 'string') {
+            config.filenameTemplate = gmTpl;
+        }
     }
 
     const Settings = {
