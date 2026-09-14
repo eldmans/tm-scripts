@@ -5,9 +5,9 @@
   "slideshowDirections": [
     "up"
   ],
-  "videoLoops": 2,
+  "videoLoops": 1,
   "slideshowDelay": 3,
-  "delayAfterVideo": 2,
+  "delayAfterVideo": 0,
   "downloadType": "none",
   "pdAction": "none",
   "stopOnTabSwitch": true,

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.15
+// @version      1.3.16
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.15';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.16';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -2403,12 +2403,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     // ============================================================
 
     /**
-     * SPA-навигация на grok.com.
-     * КАЖДЫЙ пост в группе имеет свой уникальный UUID → всегда навигируем по URL.
-     * Filmstrip используется ТОЛЬКО для ручного листания вариантов одного поста (grokStepFilmstrip),
-     * но НЕ для автоматического слайдшоу по коллекции.
-     * 1. Пробуем Next.js router.push (без перезагрузки страницы).
-     * 2. Fallback: window.location.href (полный переход).
+     * Навигация на grok.com:
+     * - Та же conversation (группа) → filmstrip click (мгновенно, без перезагрузки)
+     * - Другая conversation → window.location.href (полный переход)
      */
     function grokSpaNavigate(url) {
         if (!url) return;
@@ -2429,36 +2426,57 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         try {
             const urlObj = new URL(url, location.origin);
             const path = urlObj.pathname + urlObj.search;
+            const targetUuid = (typeof grokExtractUuid === 'function')
+                ? grokExtractUuid(urlObj.pathname)
+                : (urlObj.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
 
-            // Попытка SPA-навигации через Next.js router (без перезагрузки страницы)
-            if (window.next?.router?.push) {
-                console.log('[MOSSAD] grokSpaNavigate: Next.js router.push →', path);
-                window.next.router.push(path);
-                // Ждём смены URL, затем вызываем tick
-                let navChecks = 0;
-                const navWait = setInterval(() => {
-                    navChecks++;
-                    const curPath = location.pathname + location.search;
-                    if (curPath === path) {
-                        clearInterval(navWait);
-                        if (typeof grokGallerySlideshowTick === 'function') {
-                            setTimeout(grokGallerySlideshowTick, 200);
-                        }
-                    } else if (navChecks >= 20) {
-                        // 2 секунды прошло — роутер не отработал, переходим жёстко
-                        clearInterval(navWait);
-                        console.warn('[MOSSAD] grokSpaNavigate: router.push не сработал → location.href');
-                        window.location.href = url;
+            const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+            const isPostPage = typeof isGrokPostPage === 'function' ? isGrokPostPage() : location.pathname.includes('/imagine/post/');
+
+            if (isPostPage && struct) {
+                const targetPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct, url) : null;
+                const currentPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
+
+                const isSameGroup = targetPos && currentPos &&
+                                    targetPos.grpIndex !== -1 &&
+                                    targetPos.grpIndex === currentPos.grpIndex;
+
+                if (isSameGroup) {
+                    // Та же conversation → filmstrip click, без перезагрузки страницы
+                    let filmstripBtn = null;
+                    if (targetUuid && typeof grokFindFilmstripItemByUuid === 'function') {
+                        filmstripBtn = grokFindFilmstripItemByUuid(targetUuid);
                     }
-                }, 100);
-                return;
+                    if (!filmstripBtn && typeof grokGetFilmstripItems === 'function') {
+                        const filmItems = grokGetFilmstripItems();
+                        if (targetPos.itemInGrpIndex >= 0 && targetPos.itemInGrpIndex < filmItems.length) {
+                            filmstripBtn = filmItems[targetPos.itemInGrpIndex];
+                        }
+                    }
+
+                    if (filmstripBtn) {
+                        console.log('[MOSSAD] grokSpaNavigate: та же conversation → filmstrip click');
+                        filmstripBtn.click();
+                        try { history.replaceState(null, '', path); } catch(e) {}
+                        let checks = 0;
+                        const checkInterval = setInterval(() => {
+                            checks++;
+                            const curUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(location.pathname) : '';
+                            if ((curUuid && targetUuid && curUuid === targetUuid.toLowerCase()) || checks >= 6) {
+                                clearInterval(checkInterval);
+                                if (typeof grokGallerySlideshowTick === 'function') grokGallerySlideshowTick();
+                            }
+                        }, 40);
+                        return;
+                    }
+                }
             }
         } catch(e) {
             console.error('[MOSSAD] grokSpaNavigate error:', e);
         }
 
-        // Fallback: полный переход
-        console.log('[MOSSAD] grokSpaNavigate: location.href →', url);
+        // Другая conversation или нет filmstrip → полный переход по URL
+        console.log('[MOSSAD] grokSpaNavigate: другая conversation → location.href', url);
         window.location.href = url;
     }
 
@@ -6057,7 +6075,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-13</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-14</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
