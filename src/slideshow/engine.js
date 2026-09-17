@@ -4,6 +4,13 @@
     const SESSION_ACTIVE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`;
     const SESSION_STATE_KEY  = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_wstate`;
     const SESSION_PAUSED_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_paused`;
+    const SESSION_NAV_KEY    = 'mossad_navigating';
+
+    // Если был автоматический переход на следующий слайд, гарантируем очистку флагов навигации и паузы
+    if (sessionStorage.getItem(SESSION_NAV_KEY) === 'true') {
+        sessionStorage.removeItem(SESSION_NAV_KEY);
+        sessionStorage.removeItem(SESSION_PAUSED_KEY);
+    }
 
     let slideshowActive = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true';
     let slideshowPaused = sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
@@ -446,6 +453,9 @@
         }
 
         if (video) {
+            if (video.paused) {
+                try { video.play().catch(() => {}); } catch(e) {}
+            }
             if (isNaN(video.duration) || video.duration === 0) {
                 if (retryCount > 40) { // До 8 секунд ожидания параметров видео
                      triggerNextSlide();
@@ -581,17 +591,19 @@
     let _pausedByBrsr = false;
 
     function pauseAllSlideshows(reason) {
-        if (sessionStorage.getItem('mossad_navigating_group') === 'true') {
-            return; // Не ставить на паузу при автоматическом переходе между группами
+        if (window._mossadNavigating ||
+            sessionStorage.getItem('mossad_navigating_group') === 'true' ||
+            sessionStorage.getItem(SESSION_NAV_KEY) === 'true') {
+            return; // Не ставить на паузу при автоматическом переходе между группами / слайдами
         }
         let anyPaused = false;
         if (slideshowActive && !slideshowPaused) {
-            setSlideshowPaused(true);
+            slideshowPaused = true;
+            cancelSlideTimers();
             anyPaused = true;
         }
         if (window._mossadGalleryActive && !window._mossadGalleryPaused) {
             window._mossadGalleryPaused = true;
-            sessionStorage.setItem('mossad_gallery_paused', 'true');
             if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('paused');
             anyPaused = true;
         }
@@ -615,10 +627,10 @@
 
         // Если пауза была установлена пользователем вручную — не снимаем
         const manualPaused = sessionStorage.getItem('mossad_gallery_paused') === 'true' || sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
-        if (manualPaused && !_pausedByTab && !_pausedByBrsr) return;
+        if (manualPaused) return;
 
         if (slideshowActive) {
-            setSlideshowPaused(false);
+            slideshowPaused = false;
             if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
         }
         if (window._mossadGalleryActive) {
@@ -629,6 +641,13 @@
         }
         if (window.updateWidgetUI) window.updateWidgetUI();
     }
+
+    window.addEventListener('beforeunload', () => {
+        window._mossadNavigating = true;
+    });
+    window.addEventListener('pagehide', () => {
+        window._mossadNavigating = true;
+    });
 
     document.addEventListener('visibilitychange', () => {
         if (!config.stopOnTabSwitch) return;

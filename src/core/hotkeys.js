@@ -313,6 +313,13 @@
     }
 
     // Возобновление слайдшоу после перехода/перезагрузки страницы
+    if (sessionStorage.getItem('mossad_navigating') === 'true') {
+        sessionStorage.removeItem('mossad_navigating');
+        sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        if (typeof setSlideshowPaused === 'function') setSlideshowPaused(false);
+        else slideshowPaused = false;
+    }
+
     const _isPausedOnResume = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
                               sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true' ||
                               sessionStorage.getItem('mossad_gallery_paused') === 'true';

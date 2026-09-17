@@ -2,6 +2,18 @@
 
 Все ключевые изменения, решения и обновления версий фиксируются здесь на понятном человеческом языке.
 
+## [v1.3.18] — 2026-09-18
+### 📌 Устранение зависания слайдшоу на Pinterest после одного слайда
+* **Защита от ложной паузы при выгрузке страницы (`src/slideshow/engine.js`, `src/engines/pinterest.js`, `src/core/hotkeys.js`):**
+  * Исправлен критический баг, из-за которого на Pinterest слайдшоу перелистывало ровно один слайд и вставало на паузу.
+  * Введён флаг `SESSION_NAV_KEY = 'mossad_navigating'` в `sessionStorage` и `window._mossadNavigating`.
+  * При навигации на следующий пин (`navigatePinterestUrl`): если слайдшоу не было на паузе, сохраняется флаг `mossad_navigating` и гарантированно удаляется ключ `SESSION_PAUSED_KEY`.
+  * В `pauseAllSlideshows`: при автоматическом переходе между слайдами или группами, а также в момент выгрузки страницы (`beforeunload`, `pagehide`), событие `visibilitychange` (`document.hidden = true`) теперь игнорируется и не записывает паузу в сессию.
+  * Временная пауза при переключении вкладки или потере фокуса браузером (`tab`/`brsr`) теперь хранится исключительно в памяти процесса (`slideshowPaused = true`), не перезаписывая `SESSION_PAUSED_KEY` постоянным значением в `sessionStorage`.
+  * При старте следующего пина в `src/core/hotkeys.js` и `src/slideshow/engine.js` флаг `mossad_navigating` снимается, пауза гарантированно сбрасывается, и воспроизведение автоматически продолжается.
+* **Автостарт видео при загрузке пина (`src/slideshow/engine.js`):**
+  * В `scheduleNextSlideCycle` добавлена попытка запуска воспроизведения `video.play().catch(...)`, если плеер обнаружен в состоянии `paused`, предотвращая зависание таймера на видео-пинах.
+
 ## [v1.3.17] — 2026-09-18
 ### 🏷️ Шаблон сохранения на Grok: `{conv4}-{id4}-{domain}.{ext}` и динамическая длина переменных
 * **Новый дефолтный шаблон для Grok (`src/core/utils.js`, `src/core/config.js`, `src/engines/grok/helpers.js`, `src/download/router.js`):**

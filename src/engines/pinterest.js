@@ -66,6 +66,17 @@
         return candidates;
     }
 
+    function navigatePinterestUrl(url) {
+        window._mossadNavigating = true;
+        const isPaused = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
+                         sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
+        if (!isPaused) {
+            sessionStorage.setItem('mossad_navigating', 'true');
+            sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        }
+        window.location.href = url;
+    }
+
     function selectNextPinterestPin(direction, options = {}) {
         const isManual = options.isManual || false;
         if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
@@ -77,7 +88,7 @@
                 config.pinterestHistoryIdx = idx;
                 Settings.save();
                 showToast(`◀ Назад по истории (${idx + 1}/${config.pinterestHistory.length})`);
-                window.location.href = config.pinterestHistory[idx];
+                navigatePinterestUrl(config.pinterestHistory[idx]);
                 return;
             } else {
                 showToast('⚠️ Вы в самом начале истории просмотров', true);
@@ -92,7 +103,7 @@
             config.pinterestHistoryIdx = idx;
             Settings.save();
             showToast(`▶ Вперед по истории (${idx + 1}/${config.pinterestHistory.length})`);
-            window.location.href = config.pinterestHistory[idx];
+            navigatePinterestUrl(config.pinterestHistory[idx]);
             return;
         }
 
@@ -136,7 +147,7 @@
                     idx--;
                     config.pinterestHistoryIdx = idx;
                     Settings.save();
-                    window.location.href = config.pinterestHistory[idx];
+                    navigatePinterestUrl(config.pinterestHistory[idx]);
                     return;
                 }
                 filtered = candidates;
@@ -171,7 +182,7 @@
                 Settings.save();
 
                 showToast(`📌 Новый пин #${targetIndex + 1} (${target.type === 'video' ? '🎬 Видео' : '🖼 Фото'})`);
-                window.location.href = target.url;
+                navigatePinterestUrl(target.url);
             } else {
                 showToast('❌ Подходящий пин не найден', true);
             }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.17
+// @version      1.3.18
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.17';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.18';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -4647,6 +4647,13 @@ function findMediaForDownload() {
     const SESSION_ACTIVE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`;
     const SESSION_STATE_KEY  = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_wstate`;
     const SESSION_PAUSED_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_paused`;
+    const SESSION_NAV_KEY    = 'mossad_navigating';
+
+    // Если был автоматический переход на следующий слайд, гарантируем очистку флагов навигации и паузы
+    if (sessionStorage.getItem(SESSION_NAV_KEY) === 'true') {
+        sessionStorage.removeItem(SESSION_NAV_KEY);
+        sessionStorage.removeItem(SESSION_PAUSED_KEY);
+    }
 
     let slideshowActive = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true';
     let slideshowPaused = sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
@@ -5089,6 +5096,9 @@ function findMediaForDownload() {
         }
 
         if (video) {
+            if (video.paused) {
+                try { video.play().catch(() => {}); } catch(e) {}
+            }
             if (isNaN(video.duration) || video.duration === 0) {
                 if (retryCount > 40) { // До 8 секунд ожидания параметров видео
                      triggerNextSlide();
@@ -5224,17 +5234,19 @@ function findMediaForDownload() {
     let _pausedByBrsr = false;
 
     function pauseAllSlideshows(reason) {
-        if (sessionStorage.getItem('mossad_navigating_group') === 'true') {
-            return; // Не ставить на паузу при автоматическом переходе между группами
+        if (window._mossadNavigating ||
+            sessionStorage.getItem('mossad_navigating_group') === 'true' ||
+            sessionStorage.getItem(SESSION_NAV_KEY) === 'true') {
+            return; // Не ставить на паузу при автоматическом переходе между группами / слайдами
         }
         let anyPaused = false;
         if (slideshowActive && !slideshowPaused) {
-            setSlideshowPaused(true);
+            slideshowPaused = true;
+            cancelSlideTimers();
             anyPaused = true;
         }
         if (window._mossadGalleryActive && !window._mossadGalleryPaused) {
             window._mossadGalleryPaused = true;
-            sessionStorage.setItem('mossad_gallery_paused', 'true');
             if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('paused');
             anyPaused = true;
         }
@@ -5258,10 +5270,10 @@ function findMediaForDownload() {
 
         // Если пауза была установлена пользователем вручную — не снимаем
         const manualPaused = sessionStorage.getItem('mossad_gallery_paused') === 'true' || sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
-        if (manualPaused && !_pausedByTab && !_pausedByBrsr) return;
+        if (manualPaused) return;
 
         if (slideshowActive) {
-            setSlideshowPaused(false);
+            slideshowPaused = false;
             if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
         }
         if (window._mossadGalleryActive) {
@@ -5272,6 +5284,13 @@ function findMediaForDownload() {
         }
         if (window.updateWidgetUI) window.updateWidgetUI();
     }
+
+    window.addEventListener('beforeunload', () => {
+        window._mossadNavigating = true;
+    });
+    window.addEventListener('pagehide', () => {
+        window._mossadNavigating = true;
+    });
 
     document.addEventListener('visibilitychange', () => {
         if (!config.stopOnTabSwitch) return;
@@ -5360,6 +5379,17 @@ function findMediaForDownload() {
         return candidates;
     }
 
+    function navigatePinterestUrl(url) {
+        window._mossadNavigating = true;
+        const isPaused = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
+                         sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
+        if (!isPaused) {
+            sessionStorage.setItem('mossad_navigating', 'true');
+            sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        }
+        window.location.href = url;
+    }
+
     function selectNextPinterestPin(direction, options = {}) {
         const isManual = options.isManual || false;
         if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
@@ -5371,7 +5401,7 @@ function findMediaForDownload() {
                 config.pinterestHistoryIdx = idx;
                 Settings.save();
                 showToast(`◀ Назад по истории (${idx + 1}/${config.pinterestHistory.length})`);
-                window.location.href = config.pinterestHistory[idx];
+                navigatePinterestUrl(config.pinterestHistory[idx]);
                 return;
             } else {
                 showToast('⚠️ Вы в самом начале истории просмотров', true);
@@ -5386,7 +5416,7 @@ function findMediaForDownload() {
             config.pinterestHistoryIdx = idx;
             Settings.save();
             showToast(`▶ Вперед по истории (${idx + 1}/${config.pinterestHistory.length})`);
-            window.location.href = config.pinterestHistory[idx];
+            navigatePinterestUrl(config.pinterestHistory[idx]);
             return;
         }
 
@@ -5430,7 +5460,7 @@ function findMediaForDownload() {
                     idx--;
                     config.pinterestHistoryIdx = idx;
                     Settings.save();
-                    window.location.href = config.pinterestHistory[idx];
+                    navigatePinterestUrl(config.pinterestHistory[idx]);
                     return;
                 }
                 filtered = candidates;
@@ -5465,7 +5495,7 @@ function findMediaForDownload() {
                 Settings.save();
 
                 showToast(`📌 Новый пин #${targetIndex + 1} (${target.type === 'video' ? '🎬 Видео' : '🖼 Фото'})`);
-                window.location.href = target.url;
+                navigatePinterestUrl(target.url);
             } else {
                 showToast('❌ Подходящий пин не найден', true);
             }
@@ -6650,6 +6680,13 @@ function findMediaForDownload() {
     }
 
     // Возобновление слайдшоу после перехода/перезагрузки страницы
+    if (sessionStorage.getItem('mossad_navigating') === 'true') {
+        sessionStorage.removeItem('mossad_navigating');
+        sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        if (typeof setSlideshowPaused === 'function') setSlideshowPaused(false);
+        else slideshowPaused = false;
+    }
+
     const _isPausedOnResume = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
                               sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true' ||
                               sessionStorage.getItem('mossad_gallery_paused') === 'true';
