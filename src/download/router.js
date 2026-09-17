@@ -143,9 +143,33 @@
         
         // Извлечение UUID / ID поста для короткого именования (первые 8 символов)
         let postId = '';
+        let convId = '';
         if (rootDomain === 'grok.com') {
             const m = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
             if (m) postId = m[1];
+            try {
+                const u = new URL(location.href);
+                convId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
+            } catch(e) {}
+            if (!convId && postId) {
+                try {
+                    const raw = sessionStorage.getItem('grok_gallery_collection');
+                    if (raw) {
+                        const data = JSON.parse(raw);
+                        const found = (data.items || []).find(it => it.url && it.url.includes(postId));
+                        if (found && found.convId) convId = found.convId;
+                    }
+                } catch(e) {}
+            }
+            if (!convId && postId) {
+                const a = document.querySelector(`a[href*="${postId}"][href*="conversation="]`);
+                if (a) {
+                    try {
+                        const u = new URL(a.href, location.origin);
+                        convId = u.searchParams.get('conversation') || '';
+                    } catch(e) {}
+                }
+            }
         } else if (rootDomain.includes('pinterest.')) {
             const m = location.pathname.match(/\/pin\/(\d+)/);
             if (m) postId = m[1];
@@ -182,6 +206,11 @@
         const ext = media.type === 'video' ? 'mp4' : 'jpg';
         if (rootDomain.includes('redgifs.com') && media.itemId) {
             filename = `${getRedGifsTitleFilename(media.itemId)}`;
+        } else if (rootDomain === 'grok.com' && shortId && shortId.length >= 4) {
+            const shortConv4 = convId ? convId.slice(0, 4) : '';
+            const shortId4 = postId ? postId.slice(0, 4) : '';
+            const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : shortId;
+            filename = `${defaultPrefix}-${domainClean}.${ext}`;
         } else if (shortId && shortId.length >= 4) {
             // Формат по умолчанию: {8 символов UUID}-{домен}.{ext}
             filename = `${shortId}-${domainClean}.${ext}`;
@@ -202,55 +231,33 @@
 
             // Словарь переменных (значение без обрезки)
             const vars = {
-                id:       postId,
-                uuid:     postId,
-                hash:     postId,
-                postid:   postId,
-                id8:      shortId,
-                hash8:    shortId,
-                uuid8:    shortId,
-                title:    titleClean2,
-                date:     dateStr,
-                time:     timeStr,
-                ext:      ext2,
-                domain:   domainClean,
-                username: authorName || shortId,
-                user:     authorName || shortId,
-                author:   authorName || shortId,
-                n:        nStr,
-                dbl:      dblSuffix,
-                oldname:  rootBase,
-                copy:     rootBase,
-                root:     rootBase,
+                id:           postId,
+                conv:         convId,
+                conversation: convId,
+                uuid:         postId,
+                hash:         postId,
+                postid:       postId,
+                id8:          shortId,
+                hash8:        shortId,
+                uuid8:        shortId,
+                title:        titleClean2,
+                date:         dateStr,
+                time:         timeStr,
+                ext:          ext2,
+                domain:       domainClean,
+                username:     authorName || shortId,
+                user:         authorName || shortId,
+                author:       authorName || shortId,
+                n:            nStr,
+                dbl:          dblSuffix,
+                oldname:      rootBase,
+                copy:         rootBase,
+                root:         rootBase,
             };
 
-            const rawTpl = (config.filenameTemplate && config.filenameTemplate.trim())
-                ? config.filenameTemplate.trim()
-                : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
-            const tplStr = rawTpl || '{id8}-{domain}.{ext}';
-            const hasDblVar = /\{dbl\}/i.test(tplStr);
-
-            // Регулярка: {varname} или {varname[N]}
-            filename = tplStr.replace(
-                /\{(\w+)(?:\[(\d+)\])?\}/gi,
-                (_, name, lenStr) => {
-                    const key = name.toLowerCase();
-                    const val = key in vars ? vars[key] : '';
-                    const len = lenStr ? parseInt(lenStr, 10) : 0;
-                    return applyTplVar(val, len);
-                }
-            ).replace(/[\\/:*?"<>|]/g, '_');
-
-            // Добавить расширение, если шаблон его не содержит
-            if (!filename.includes('.')) filename += `.${ext2}`;
-
-            // Если шаблон не содержал {dbl}, но файл дубликат — автоматически добавляем (старое_имя) DBL перед расширением
-            if (isDup && !hasDblVar) {
-                const lastDot = filename.lastIndexOf('.');
-                const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
-                const extPart = lastDot !== -1 ? filename.slice(lastDot) : `.${ext2}`;
-                filename = `${base}${dblSuffix}${extPart}`;
-            }
+            filename = typeof renderFilenameTemplate === 'function'
+                ? renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2)
+                : filename;
         } else if (isDup) {
             // Без шаблона: добавляем разметку дубликата перед расширением
             const lastDot = filename.lastIndexOf('.');

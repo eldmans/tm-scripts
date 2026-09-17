@@ -229,6 +229,77 @@
         if (typeof rootDomain !== 'undefined' && rootDomain.includes('redgifs.com')) {
             return '{userName}-{domain[4]}';
         }
+        if (typeof rootDomain !== 'undefined' && rootDomain === 'grok.com') {
+            return '{conv4}-{id4}-{domain}.{ext}';
+        }
         return '{id8}-{domain}.{ext}';
     }
     window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
+
+    /**
+     * Форматирует имя файла по шаблону и словарю переменных.
+     * Поддерживает:
+     * - {varN} (например {conv4}, {id4}, {id8}, {conv8})
+     * - {var[N]} (например {domain[4]}, {id[8]})
+     * - {var} (полное значение без обрезки)
+     * - авто-очистку висячих разделителей при пустых переменных
+     * - подстановку суффикса дубликата {dbl}
+     */
+    function renderFilenameTemplate(rawTpl, vars, isDup = false, dblSuffix = '', defaultExt = 'mp4') {
+        const tplStr = (rawTpl && rawTpl.trim())
+            ? rawTpl.trim()
+            : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
+
+        const hasDblVar = /\{dbl\}/i.test(tplStr);
+
+        const aliasMap = {
+            conversation: 'conv',
+            uuid: 'id',
+            hash: 'id',
+            postid: 'id',
+            user: 'username',
+            author: 'username',
+            copy: 'oldname',
+            root: 'oldname'
+        };
+
+        let filename = tplStr.replace(
+            /\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g,
+            (_, name, inlineLen, bracketLen) => {
+                const rawName = name.toLowerCase();
+                const key = aliasMap[rawName] || rawName;
+                const len = parseInt(bracketLen || inlineLen || '0', 10);
+                if (key in vars) {
+                    const val = vars[key] != null ? String(vars[key]) : '';
+                    return len > 0 ? val.slice(0, len) : val;
+                }
+                if (rawName in vars) {
+                    const val = vars[rawName] != null ? String(vars[rawName]) : '';
+                    return len > 0 ? val.slice(0, len) : val;
+                }
+                return '';
+            }
+        ).replace(/[\\/:*?"<>|]/g, '_');
+
+        // Очистка возможных двойных или висячих дефисов/подчеркиваний (например, если conv пустой)
+        filename = filename
+            .replace(/-{2,}/g, '-')
+            .replace(/_{2,}/g, '_')
+            .replace(/^[-_\s]+/, '')
+            .replace(/[-_\s]+(?=\.[a-zA-Z0-9]+$)/, '');
+
+        const ext = vars.ext || defaultExt;
+        if (!filename.includes('.')) {
+            filename += `.${ext}`;
+        }
+
+        if (isDup && !hasDblVar && dblSuffix) {
+            const lastDot = filename.lastIndexOf('.');
+            const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
+            const extPart = lastDot !== -1 ? filename.slice(lastDot) : `.${ext}`;
+            filename = `${base}${dblSuffix}${extPart}`;
+        }
+
+        return filename;
+    }
+    window.renderFilenameTemplate = renderFilenameTemplate;

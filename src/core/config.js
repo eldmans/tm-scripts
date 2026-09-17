@@ -103,6 +103,23 @@
         }
     }
 
+    // Для Grok дефолтный шаблон {conv4}-{id4}-{domain}.{ext}
+    if (rootDomain === 'grok.com') {
+        let storedHasTpl = false;
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed.filenameTemplate !== undefined && parsed.filenameTemplate !== '{id8}-{domain}.{ext}') {
+                    storedHasTpl = true;
+                }
+            }
+        } catch(e) {}
+        if (!storedHasTpl || config.filenameTemplate === '{id8}-{domain}.{ext}') {
+            config.filenameTemplate = '{conv4}-{id4}-{domain}.{ext}';
+        }
+    }
+
     // Миграция старых настроек скачивания (если там был объект или дублирующий PageDown)
     if (Array.isArray(config.hk.download)) {
         config.hk.download = config.hk.download.filter(h => !(h && h.key === 'PageDown' && !h.ctrl && !h.alt && !h.shift));

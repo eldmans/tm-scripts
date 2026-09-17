@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.16
+// @version      1.3.17
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.16';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.17';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -162,6 +162,23 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
         if (!storedHasTplEnabled) {
             config.filenameTemplateEnabled = true;
+        }
+    }
+
+    // Для Grok дефолтный шаблон {conv4}-{id4}-{domain}.{ext}
+    if (rootDomain === 'grok.com') {
+        let storedHasTpl = false;
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed.filenameTemplate !== undefined && parsed.filenameTemplate !== '{id8}-{domain}.{ext}') {
+                    storedHasTpl = true;
+                }
+            }
+        } catch(e) {}
+        if (!storedHasTpl || config.filenameTemplate === '{id8}-{domain}.{ext}') {
+            config.filenameTemplate = '{conv4}-{id4}-{domain}.{ext}';
         }
     }
 
@@ -642,9 +659,80 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (typeof rootDomain !== 'undefined' && rootDomain.includes('redgifs.com')) {
             return '{userName}-{domain[4]}';
         }
+        if (typeof rootDomain !== 'undefined' && rootDomain === 'grok.com') {
+            return '{conv4}-{id4}-{domain}.{ext}';
+        }
         return '{id8}-{domain}.{ext}';
     }
     window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
+
+    /**
+     * Форматирует имя файла по шаблону и словарю переменных.
+     * Поддерживает:
+     * - {varN} (например {conv4}, {id4}, {id8}, {conv8})
+     * - {var[N]} (например {domain[4]}, {id[8]})
+     * - {var} (полное значение без обрезки)
+     * - авто-очистку висячих разделителей при пустых переменных
+     * - подстановку суффикса дубликата {dbl}
+     */
+    function renderFilenameTemplate(rawTpl, vars, isDup = false, dblSuffix = '', defaultExt = 'mp4') {
+        const tplStr = (rawTpl && rawTpl.trim())
+            ? rawTpl.trim()
+            : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
+
+        const hasDblVar = /\{dbl\}/i.test(tplStr);
+
+        const aliasMap = {
+            conversation: 'conv',
+            uuid: 'id',
+            hash: 'id',
+            postid: 'id',
+            user: 'username',
+            author: 'username',
+            copy: 'oldname',
+            root: 'oldname'
+        };
+
+        let filename = tplStr.replace(
+            /\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g,
+            (_, name, inlineLen, bracketLen) => {
+                const rawName = name.toLowerCase();
+                const key = aliasMap[rawName] || rawName;
+                const len = parseInt(bracketLen || inlineLen || '0', 10);
+                if (key in vars) {
+                    const val = vars[key] != null ? String(vars[key]) : '';
+                    return len > 0 ? val.slice(0, len) : val;
+                }
+                if (rawName in vars) {
+                    const val = vars[rawName] != null ? String(vars[rawName]) : '';
+                    return len > 0 ? val.slice(0, len) : val;
+                }
+                return '';
+            }
+        ).replace(/[\\/:*?"<>|]/g, '_');
+
+        // Очистка возможных двойных или висячих дефисов/подчеркиваний (например, если conv пустой)
+        filename = filename
+            .replace(/-{2,}/g, '-')
+            .replace(/_{2,}/g, '_')
+            .replace(/^[-_\s]+/, '')
+            .replace(/[-_\s]+(?=\.[a-zA-Z0-9]+$)/, '');
+
+        const ext = vars.ext || defaultExt;
+        if (!filename.includes('.')) {
+            filename += `.${ext}`;
+        }
+
+        if (isDup && !hasDblVar && dblSuffix) {
+            const lastDot = filename.lastIndexOf('.');
+            const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
+            const extPart = lastDot !== -1 ? filename.slice(lastDot) : `.${ext}`;
+            filename = `${base}${dblSuffix}${extPart}`;
+        }
+
+        return filename;
+    }
+    window.renderFilenameTemplate = renderFilenameTemplate;
 
 // ============================================
     // NOODLE MAGAZINE MODULE
@@ -1321,6 +1409,30 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         const currentPostUrl = location.href;
         const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+        let currentConvId = '';
+        try {
+            const u = new URL(currentPostUrl);
+            currentConvId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
+        } catch(e) {}
+        if (!currentConvId && currentPostId) {
+            try {
+                const raw = sessionStorage.getItem('grok_gallery_collection');
+                if (raw) {
+                    const data = JSON.parse(raw);
+                    const found = (data.items || []).find(it => it.url && it.url.includes(currentPostId));
+                    if (found && found.convId) currentConvId = found.convId;
+                }
+            } catch(e) {}
+        }
+        if (!currentConvId && currentPostId) {
+            const a = document.querySelector(`a[href*="${currentPostId}"][href*="conversation="]`);
+            if (a) {
+                try {
+                    const u = new URL(a.href, location.origin);
+                    currentConvId = u.searchParams.get('conversation') || '';
+                } catch(e) {}
+            }
+        }
 
         // Проверка дубликата в истории
         const hasVid = getActiveVideo() !== null;
@@ -1340,11 +1452,15 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         const onDownloadTriggered = () => {
             const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
+            const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
+            const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
             const ext2 = hasVid ? 'mp4' : 'jpg';
             const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(duplicateRecord.filename) : (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
             const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
 
-            let grokFilename = `${shortId}-grok${dblSuffix}.${ext2}`;
+            // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4
+            const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
+            let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
 
             if (config.filenameTemplateEnabled) {
                 const now2 = new Date();
@@ -1352,46 +1468,32 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
                 const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
                 const vars = {
-                    id:       currentPostId || '',
-                    uuid:     currentPostId || '',
-                    hash:     currentPostId || '',
-                    postid:   currentPostId || '',
-                    id8:      shortId,
-                    hash8:    shortId,
-                    uuid8:    shortId,
-                    domain:   'grok',
-                    title:    'Imagine - Grok',
-                    username: 'grok',
-                    user:     'grok',
-                    author:   'grok',
-                    date:     dateStr,
-                    time:     timeStr,
-                    ext:      ext2,
-                    n:        String(Date.now()).slice(-6),
-                    dbl:      dblSuffix,
-                    oldname:  rootBase,
-                    copy:     rootBase,
-                    root:     rootBase
+                    id:           currentPostId || '',
+                    conv:         currentConvId || '',
+                    conversation: currentConvId || '',
+                    uuid:         currentPostId || '',
+                    hash:         currentPostId || '',
+                    postid:       currentPostId || '',
+                    id8:          shortId,
+                    hash8:        shortId,
+                    uuid8:        shortId,
+                    domain:       'grok',
+                    title:        'Imagine - Grok',
+                    username:     'grok',
+                    user:         'grok',
+                    author:       'grok',
+                    date:         dateStr,
+                    time:         timeStr,
+                    ext:          ext2,
+                    n:            String(Date.now()).slice(-6),
+                    dbl:          dblSuffix,
+                    oldname:      rootBase,
+                    copy:         rootBase,
+                    root:         rootBase
                 };
-                const rawTpl = (config.filenameTemplate && config.filenameTemplate.trim())
-                    ? config.filenameTemplate.trim()
-                    : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
-                const tplStr = rawTpl || '{id8}-{domain}.{ext}';
-                const hasDblVar = /\{dbl\}/i.test(tplStr);
-                grokFilename = tplStr.replace(/\{(\w+)(?:\[(\d+)\])?\}/gi, (_, name, lenStr) => {
-                    const key = name.toLowerCase();
-                    const val = key in vars ? vars[key] : '';
-                    const len = lenStr ? parseInt(lenStr, 10) : 0;
-                    return len > 0 ? val.slice(0, len) : val;
-                }).replace(/[\\/:*?"<>|]/g, '_');
-
-                if (!grokFilename.includes('.')) grokFilename += `.${ext2}`;
-                if (duplicateRecord && !hasDblVar) {
-                    const lastDot = grokFilename.lastIndexOf('.');
-                    const base = lastDot !== -1 ? grokFilename.slice(0, lastDot) : grokFilename;
-                    const extPart = lastDot !== -1 ? grokFilename.slice(lastDot) : `.${ext2}`;
-                    grokFilename = `${base}${dblSuffix}${extPart}`;
-                }
+                grokFilename = typeof renderFilenameTemplate === 'function'
+                    ? renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2)
+                    : grokFilename;
             }
 
             showToast(`📥 Скачивание: ${grokFilename}...`);
@@ -4396,9 +4498,33 @@ function findMediaForDownload() {
         
         // Извлечение UUID / ID поста для короткого именования (первые 8 символов)
         let postId = '';
+        let convId = '';
         if (rootDomain === 'grok.com') {
             const m = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
             if (m) postId = m[1];
+            try {
+                const u = new URL(location.href);
+                convId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
+            } catch(e) {}
+            if (!convId && postId) {
+                try {
+                    const raw = sessionStorage.getItem('grok_gallery_collection');
+                    if (raw) {
+                        const data = JSON.parse(raw);
+                        const found = (data.items || []).find(it => it.url && it.url.includes(postId));
+                        if (found && found.convId) convId = found.convId;
+                    }
+                } catch(e) {}
+            }
+            if (!convId && postId) {
+                const a = document.querySelector(`a[href*="${postId}"][href*="conversation="]`);
+                if (a) {
+                    try {
+                        const u = new URL(a.href, location.origin);
+                        convId = u.searchParams.get('conversation') || '';
+                    } catch(e) {}
+                }
+            }
         } else if (rootDomain.includes('pinterest.')) {
             const m = location.pathname.match(/\/pin\/(\d+)/);
             if (m) postId = m[1];
@@ -4435,6 +4561,11 @@ function findMediaForDownload() {
         const ext = media.type === 'video' ? 'mp4' : 'jpg';
         if (rootDomain.includes('redgifs.com') && media.itemId) {
             filename = `${getRedGifsTitleFilename(media.itemId)}`;
+        } else if (rootDomain === 'grok.com' && shortId && shortId.length >= 4) {
+            const shortConv4 = convId ? convId.slice(0, 4) : '';
+            const shortId4 = postId ? postId.slice(0, 4) : '';
+            const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : shortId;
+            filename = `${defaultPrefix}-${domainClean}.${ext}`;
         } else if (shortId && shortId.length >= 4) {
             // Формат по умолчанию: {8 символов UUID}-{домен}.{ext}
             filename = `${shortId}-${domainClean}.${ext}`;
@@ -4455,55 +4586,33 @@ function findMediaForDownload() {
 
             // Словарь переменных (значение без обрезки)
             const vars = {
-                id:       postId,
-                uuid:     postId,
-                hash:     postId,
-                postid:   postId,
-                id8:      shortId,
-                hash8:    shortId,
-                uuid8:    shortId,
-                title:    titleClean2,
-                date:     dateStr,
-                time:     timeStr,
-                ext:      ext2,
-                domain:   domainClean,
-                username: authorName || shortId,
-                user:     authorName || shortId,
-                author:   authorName || shortId,
-                n:        nStr,
-                dbl:      dblSuffix,
-                oldname:  rootBase,
-                copy:     rootBase,
-                root:     rootBase,
+                id:           postId,
+                conv:         convId,
+                conversation: convId,
+                uuid:         postId,
+                hash:         postId,
+                postid:       postId,
+                id8:          shortId,
+                hash8:        shortId,
+                uuid8:        shortId,
+                title:        titleClean2,
+                date:         dateStr,
+                time:         timeStr,
+                ext:          ext2,
+                domain:       domainClean,
+                username:     authorName || shortId,
+                user:         authorName || shortId,
+                author:       authorName || shortId,
+                n:            nStr,
+                dbl:          dblSuffix,
+                oldname:      rootBase,
+                copy:         rootBase,
+                root:         rootBase,
             };
 
-            const rawTpl = (config.filenameTemplate && config.filenameTemplate.trim())
-                ? config.filenameTemplate.trim()
-                : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
-            const tplStr = rawTpl || '{id8}-{domain}.{ext}';
-            const hasDblVar = /\{dbl\}/i.test(tplStr);
-
-            // Регулярка: {varname} или {varname[N]}
-            filename = tplStr.replace(
-                /\{(\w+)(?:\[(\d+)\])?\}/gi,
-                (_, name, lenStr) => {
-                    const key = name.toLowerCase();
-                    const val = key in vars ? vars[key] : '';
-                    const len = lenStr ? parseInt(lenStr, 10) : 0;
-                    return applyTplVar(val, len);
-                }
-            ).replace(/[\\/:*?"<>|]/g, '_');
-
-            // Добавить расширение, если шаблон его не содержит
-            if (!filename.includes('.')) filename += `.${ext2}`;
-
-            // Если шаблон не содержал {dbl}, но файл дубликат — автоматически добавляем (старое_имя) DBL перед расширением
-            if (isDup && !hasDblVar) {
-                const lastDot = filename.lastIndexOf('.');
-                const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
-                const extPart = lastDot !== -1 ? filename.slice(lastDot) : `.${ext2}`;
-                filename = `${base}${dblSuffix}${extPart}`;
-            }
+            filename = typeof renderFilenameTemplate === 'function'
+                ? renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2)
+                : filename;
         } else if (isDup) {
             // Без шаблона: добавляем разметку дубликата перед расширением
             const lastDot = filename.lastIndexOf('.');
@@ -5708,8 +5817,8 @@ function findMediaForDownload() {
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
                         <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> Шаблон:
                     </label>
-                    <input id="mossad-in-fn-tpl" type="text" placeholder="${typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : (rootDomain.includes('redgifs.com') ? '{userName}-{domain[4]}' : '{id8}-{domain}.{ext}')}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
-                        title="Шаблон: {userName} {id8} {id} {domain} {title} {date} {time} {ext} {n} {dbl} {oldname}"
+                    <input id="mossad-in-fn-tpl" type="text" placeholder="${typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : (rootDomain === 'grok.com' ? '{conv4}-{id4}-{domain}.{ext}' : (rootDomain.includes('redgifs.com') ? '{userName}-{domain[4]}' : '{id8}-{domain}.{ext}'))}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
+                        title="Шаблон: {conv4} {id4} {id8} {id} {domain} {userName} {title} {date} {time} {ext} {n} {dbl} {oldname}"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
                     <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;">💾</button>
                 </div>
@@ -6075,7 +6184,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-14</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-18</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>

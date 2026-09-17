@@ -135,6 +135,30 @@
 
         const currentPostUrl = location.href;
         const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+        let currentConvId = '';
+        try {
+            const u = new URL(currentPostUrl);
+            currentConvId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
+        } catch(e) {}
+        if (!currentConvId && currentPostId) {
+            try {
+                const raw = sessionStorage.getItem('grok_gallery_collection');
+                if (raw) {
+                    const data = JSON.parse(raw);
+                    const found = (data.items || []).find(it => it.url && it.url.includes(currentPostId));
+                    if (found && found.convId) currentConvId = found.convId;
+                }
+            } catch(e) {}
+        }
+        if (!currentConvId && currentPostId) {
+            const a = document.querySelector(`a[href*="${currentPostId}"][href*="conversation="]`);
+            if (a) {
+                try {
+                    const u = new URL(a.href, location.origin);
+                    currentConvId = u.searchParams.get('conversation') || '';
+                } catch(e) {}
+            }
+        }
 
         // Проверка дубликата в истории
         const hasVid = getActiveVideo() !== null;
@@ -154,11 +178,15 @@
 
         const onDownloadTriggered = () => {
             const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
+            const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
+            const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
             const ext2 = hasVid ? 'mp4' : 'jpg';
             const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(duplicateRecord.filename) : (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
             const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
 
-            let grokFilename = `${shortId}-grok${dblSuffix}.${ext2}`;
+            // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4
+            const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
+            let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
 
             if (config.filenameTemplateEnabled) {
                 const now2 = new Date();
@@ -166,46 +194,32 @@
                 const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
                 const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
                 const vars = {
-                    id:       currentPostId || '',
-                    uuid:     currentPostId || '',
-                    hash:     currentPostId || '',
-                    postid:   currentPostId || '',
-                    id8:      shortId,
-                    hash8:    shortId,
-                    uuid8:    shortId,
-                    domain:   'grok',
-                    title:    'Imagine - Grok',
-                    username: 'grok',
-                    user:     'grok',
-                    author:   'grok',
-                    date:     dateStr,
-                    time:     timeStr,
-                    ext:      ext2,
-                    n:        String(Date.now()).slice(-6),
-                    dbl:      dblSuffix,
-                    oldname:  rootBase,
-                    copy:     rootBase,
-                    root:     rootBase
+                    id:           currentPostId || '',
+                    conv:         currentConvId || '',
+                    conversation: currentConvId || '',
+                    uuid:         currentPostId || '',
+                    hash:         currentPostId || '',
+                    postid:       currentPostId || '',
+                    id8:          shortId,
+                    hash8:        shortId,
+                    uuid8:        shortId,
+                    domain:       'grok',
+                    title:        'Imagine - Grok',
+                    username:     'grok',
+                    user:         'grok',
+                    author:       'grok',
+                    date:         dateStr,
+                    time:         timeStr,
+                    ext:          ext2,
+                    n:            String(Date.now()).slice(-6),
+                    dbl:          dblSuffix,
+                    oldname:      rootBase,
+                    copy:         rootBase,
+                    root:         rootBase
                 };
-                const rawTpl = (config.filenameTemplate && config.filenameTemplate.trim())
-                    ? config.filenameTemplate.trim()
-                    : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
-                const tplStr = rawTpl || '{id8}-{domain}.{ext}';
-                const hasDblVar = /\{dbl\}/i.test(tplStr);
-                grokFilename = tplStr.replace(/\{(\w+)(?:\[(\d+)\])?\}/gi, (_, name, lenStr) => {
-                    const key = name.toLowerCase();
-                    const val = key in vars ? vars[key] : '';
-                    const len = lenStr ? parseInt(lenStr, 10) : 0;
-                    return len > 0 ? val.slice(0, len) : val;
-                }).replace(/[\\/:*?"<>|]/g, '_');
-
-                if (!grokFilename.includes('.')) grokFilename += `.${ext2}`;
-                if (duplicateRecord && !hasDblVar) {
-                    const lastDot = grokFilename.lastIndexOf('.');
-                    const base = lastDot !== -1 ? grokFilename.slice(0, lastDot) : grokFilename;
-                    const extPart = lastDot !== -1 ? grokFilename.slice(lastDot) : `.${ext2}`;
-                    grokFilename = `${base}${dblSuffix}${extPart}`;
-                }
+                grokFilename = typeof renderFilenameTemplate === 'function'
+                    ? renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2)
+                    : grokFilename;
             }
 
             showToast(`📥 Скачивание: ${grokFilename}...`);
