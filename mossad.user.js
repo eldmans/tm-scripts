@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.18
+// @version      1.3.19
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.18';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.19';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -121,6 +121,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
             updateScript:     { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
+            videoGen6s:       { key: 'Enter',      ctrl: false, alt: false, shift: true },  // Shift+Enter — видео 6с Grok
+            videoGen10s:      { key: 'Enter',      ctrl: true,  alt: false, shift: false }, // Ctrl+Enter — видео 10с Grok
         }
     };
 
@@ -223,6 +225,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
     if (config.hk.slideshowStart && config.hk.slideshowStart.key === 'Insert' && !config.hk.slideshowStart.ctrl && !config.hk.slideshowStart.alt && !config.hk.slideshowStart.shift) {
         config.hk.slideshowStart = { key: 'Insert', ctrl: false, alt: false, shift: true };
+    }
+
+    // Миграция v1.3.19: видеогенерация Grok (Shift+Enter / Ctrl+Enter)
+    if (!config.hk.videoGen6s) {
+        config.hk.videoGen6s = { key: 'Enter', ctrl: false, alt: false, shift: true };
+    }
+    if (!config.hk.videoGen10s) {
+        config.hk.videoGen10s = { key: 'Enter', ctrl: true, alt: false, shift: false };
     }
 
     // Глобальная синхронизация шаблона имени файла через GM_getValue
@@ -1641,6 +1651,188 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }, 120);
         return true;
     }
+
+    // ============================================================
+    // GROK: Video Generation Shortcuts (6s & 10s)
+    // ============================================================
+    let _isGeneratingGrokVideo = false;
+
+    function findMakeVideoButton() {
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+        // 1. По aria-label или title
+        const byLabel = buttons.find(b => {
+            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const title = (b.getAttribute('title') || '').toLowerCase();
+            return aria === 'make video' || aria.includes('make video') || aria.includes('создать видео') ||
+                   title === 'make video' || title.includes('make video');
+        });
+        if (byLabel) return byLabel;
+
+        // 2. По SVG стрелке отправки (path: M6 11L12 5M12 5L18 11M12 5V19)
+        const bySvg = buttons.find(b => {
+            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+            const path = b.querySelector('path');
+            const d = path ? (path.getAttribute('d') || '') : '';
+            return (d.includes('M6 11L12 5') || d.includes('5V19')) && (b.closest('div.relative.z-10') || (b.className && b.className.includes('rounded-full')));
+        });
+        return bySvg || null;
+    }
+
+    function findGrokVideoModeRadio() {
+        const candidates = Array.from(document.querySelectorAll('button[role="radio"], [role="radio"]'));
+        return candidates.find(b => {
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const txt = (b.textContent || '').trim().toLowerCase();
+            return aria === 'video' || aria.includes('video') || aria === 'видео' || txt === 'video' || txt === 'видео';
+        }) || null;
+    }
+
+    function isGrokVideoModeActive() {
+        const radio = findGrokVideoModeRadio();
+        if (radio) {
+            return radio.getAttribute('aria-checked') === 'true';
+        }
+        // Fallback: если Make video уже есть на экране
+        const makeBtn = findMakeVideoButton();
+        return Boolean(makeBtn);
+    }
+
+    function findVideoDurationButton() {
+        const candidates = Array.from(document.querySelectorAll('button, [role="button"]'));
+        return candidates.find(b => {
+            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            if (aria === 'video duration' || aria.includes('video duration') || aria.includes('длительность')) return true;
+            if (b.getAttribute('aria-haspopup') === 'menu' && (b.textContent.trim() === '6s' || b.textContent.trim() === '10s')) return true;
+            return false;
+        }) || null;
+    }
+
+    function findDurationMenuItem(targetSeconds) {
+        const targetStr = `${targetSeconds}s`.toLowerCase();
+        // 1. Поиск элементов меню Radix UI
+        const candidates = Array.from(document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [data-radix-collection-item], [role="menu"] button, [role="menu"] [tabindex]'));
+        for (const item of candidates) {
+            if (item.offsetWidth === 0 && item.offsetHeight === 0 && (!item.getClientRects || !item.getClientRects().length)) continue;
+            const spans = Array.from(item.querySelectorAll('span'));
+            if (spans.some(s => s.textContent.trim().toLowerCase() === targetStr)) {
+                return item;
+            }
+            if (item.textContent.trim().toLowerCase() === targetStr) {
+                return item;
+            }
+        }
+        // 2. Поиск любого открытого span с точным текстом "6s" или "10s"
+        const allSpans = Array.from(document.querySelectorAll('[role="menu"] span, div[data-radix-popper-content-wrapper] span, span'));
+        const matchedSpan = allSpans.find(s => {
+            if (s.offsetWidth === 0 && s.offsetHeight === 0 && (!s.getClientRects || !s.getClientRects().length)) return false;
+            return s.textContent.trim().toLowerCase() === targetStr;
+        });
+        if (matchedSpan) {
+            return matchedSpan.closest('[role="menuitem"], [role="menuitemradio"], [data-radix-collection-item], button, [tabindex]') || matchedSpan;
+        }
+        return null;
+    }
+
+    function waitForCondition(checkFn, timeoutMs = 2500, intervalMs = 50) {
+        return new Promise(resolve => {
+            const start = Date.now();
+            const timer = setInterval(() => {
+                let res = null;
+                try { res = checkFn(); } catch(e) {}
+                if (res) {
+                    clearInterval(timer);
+                    return resolve(res);
+                }
+                if (Date.now() - start >= timeoutMs) {
+                    clearInterval(timer);
+                    return resolve(null);
+                }
+            }, intervalMs);
+        });
+    }
+
+    async function triggerGrokVideoGeneration(targetSeconds = 6) {
+        if (rootDomain !== 'grok.com') return;
+        if (_isGeneratingGrokVideo) {
+            showToast('⏳ Уже выполняется выбор режима видео...');
+            return;
+        }
+        _isGeneratingGrokVideo = true;
+
+        try {
+            const targetStr = `${targetSeconds}s`.toLowerCase();
+
+            // ── Шаг 1: Проверка режима «Видео» ──
+            if (!isGrokVideoModeActive()) {
+                const videoRadio = findGrokVideoModeRadio();
+                if (videoRadio) {
+                    showToast('🎥 Переключение в режим видео...');
+                    triggerClick(videoRadio, 'Switch to Video Mode');
+                    const switched = await waitForCondition(() => isGrokVideoModeActive(), 2500);
+                    if (!switched) {
+                        showToast('⚠️ Не удалось переключить в режим видео', true);
+                        _isGeneratingGrokVideo = false;
+                        return;
+                    }
+                } else {
+                    console.log('[MOSSAD] Video mode radio not found, proceeding with Make video check');
+                }
+            }
+
+            // Небольшая пауза для рендера контролов длительности
+            await new Promise(r => setTimeout(r, 100));
+
+            // ── Шаг 2: Проверка и выбор длительности (6s / 10s) ──
+            const durBtn = await waitForCondition(() => findVideoDurationButton(), 2000);
+            if (durBtn) {
+                const curText = durBtn.textContent.trim().toLowerCase();
+                if (!curText.includes(targetStr)) {
+                    showToast(`⏱ Выбор длительности ${targetSeconds}с...`);
+                    triggerClick(durBtn, 'Open Video Duration Menu');
+
+                    const menuItem = await waitForCondition(() => findDurationMenuItem(targetSeconds), 2000);
+                    if (menuItem) {
+                        triggerClick(menuItem, `Select ${targetSeconds}s`);
+                        // Ждем обновления текста на кнопке длительности
+                        await waitForCondition(() => {
+                            const updated = durBtn.textContent.trim().toLowerCase();
+                            return updated.includes(targetStr);
+                        }, 1500);
+                    } else {
+                        showToast(`⚠️ Пункт ${targetSeconds}с не найден в меню`, true);
+                    }
+                }
+            }
+
+            // Небольшая пауза перед кликом по финальной кнопке
+            await new Promise(r => setTimeout(r, 120));
+
+            // ── Шаг 3: Нажатие кнопки Make video ──
+            const makeBtn = await waitForCondition(() => findMakeVideoButton(), 2500);
+            if (!makeBtn) {
+                showToast('⚠️ Кнопка «Make video» не найдена', true);
+                _isGeneratingGrokVideo = false;
+                return;
+            }
+
+            if (makeBtn.disabled || makeBtn.getAttribute('aria-disabled') === 'true') {
+                showToast('⚠️ Кнопка «Make video» неактивна (введите промпт)', true);
+                _isGeneratingGrokVideo = false;
+                return;
+            }
+
+            triggerClick(makeBtn, `Make Video (${targetSeconds}s)`);
+            showToast(`🎬 Генерация видео ${targetSeconds}с запущена!`);
+        } catch (err) {
+            console.error('[MOSSAD] Error in triggerGrokVideoGeneration:', err);
+            showToast('❌ Ошибка генерации видео: ' + err.message, true);
+        } finally {
+            _isGeneratingGrokVideo = false;
+        }
+    }
+    window.triggerGrokVideoGeneration = triggerGrokVideoGeneration;
 
 // ============================================================
     // GROK: Smart Delete (3-dots fallback, a.confirm, hold-post)
@@ -3140,7 +3332,17 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
         };
 
-        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd);
+        // ── 6. Быстрые кнопки генерации видео (6s / 10s) ──
+        const btnVid6 = mkBtn('mossad-grok-vid6', '6s', 'Генерация видео 6 сек (Shift+Enter)', 'background:#1a2332;color:#38bdf8;');
+        btnVid6.onclick = () => {
+            if (typeof triggerGrokVideoGeneration === 'function') triggerGrokVideoGeneration(6);
+        };
+        const btnVid10 = mkBtn('mossad-grok-vid10', '10s', 'Генерация видео 10 сек (Ctrl+Enter)', 'background:#1e1a3a;color:#a78bfa;');
+        btnVid10.onclick = () => {
+            if (typeof triggerGrokVideoGeneration === 'function') triggerGrokVideoGeneration(10);
+        };
+
+        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd, btnVid6, btnVid10);
 
         // ── Кнопка вызова настроек горячих клавиш (⌨) слева от крестика (✕) ──
         const btnHk = mkBtn('mossad-gallery-hk', '⌨', 'Настройки горячих клавиш', 'background:#1f2937;color:#9ca3af;font-size:12px;padding:2px 6px;margin-left:auto;');
@@ -6245,7 +6447,9 @@ function findMediaForDownload() {
             galleryStop:      'Стоп большого слайдшоу',
             duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             rewind:           'Мотать в начало (Alt+R)',
-            snapWidget:       'Привязать к левому верхнему краю (F8)'
+            snapWidget:       'Привязать к левому верхнему краю (F8)',
+            videoGen6s:       'Видео 6с Grok (Shift+Enter)',
+            videoGen10s:      'Видео 10с Grok (Ctrl+Enter)'
         };
         
         Object.keys(keysMap).forEach(k => {
@@ -6533,6 +6737,28 @@ function findMediaForDownload() {
 
     window.addEventListener('keydown', function (e) {
         if (window.capturingFor !== null) return;
+
+        // Перехват генерации видео в Grok (Shift+Enter — 6с, Ctrl+Enter — 10с)
+        // Срабатывает ДО проверки isEditing, чтобы работать прямо во время ввода текста промпта
+        if (rootDomain === 'grok.com') {
+            if (hotkeyMatches(e, config.hk.videoGen6s)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (typeof triggerGrokVideoGeneration === 'function') {
+                    triggerGrokVideoGeneration(6);
+                }
+                return;
+            }
+            if (hotkeyMatches(e, config.hk.videoGen10s)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (typeof triggerGrokVideoGeneration === 'function') {
+                    triggerGrokVideoGeneration(10);
+                }
+                return;
+            }
+        }
+
         const activeEl = document.activeElement;
         const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
         if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;

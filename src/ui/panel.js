@@ -650,7 +650,9 @@
             galleryStop:      'Стоп большого слайдшоу',
             duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             rewind:           'Мотать в начало (Alt+R)',
-            snapWidget:       'Привязать к левому верхнему краю (F8)'
+            snapWidget:       'Привязать к левому верхнему краю (F8)',
+            videoGen6s:       'Видео 6с Grok (Shift+Enter)',
+            videoGen10s:      'Видео 10с Grok (Ctrl+Enter)'
         };
         
         Object.keys(keysMap).forEach(k => {

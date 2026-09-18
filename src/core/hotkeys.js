@@ -166,6 +166,28 @@
 
     window.addEventListener('keydown', function (e) {
         if (window.capturingFor !== null) return;
+
+        // Перехват генерации видео в Grok (Shift+Enter — 6с, Ctrl+Enter — 10с)
+        // Срабатывает ДО проверки isEditing, чтобы работать прямо во время ввода текста промпта
+        if (rootDomain === 'grok.com') {
+            if (hotkeyMatches(e, config.hk.videoGen6s)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (typeof triggerGrokVideoGeneration === 'function') {
+                    triggerGrokVideoGeneration(6);
+                }
+                return;
+            }
+            if (hotkeyMatches(e, config.hk.videoGen10s)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (typeof triggerGrokVideoGeneration === 'function') {
+                    triggerGrokVideoGeneration(10);
+                }
+                return;
+            }
+        }
+
         const activeEl = document.activeElement;
         const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
         if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
