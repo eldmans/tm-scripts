@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.20
+// @version      1.3.21
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.20';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.21';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -5233,19 +5233,28 @@ function findMediaForDownload() {
         if (rootDomain.includes('pinterest.')) {
             const pinType = getPinMediaType();
             const mainPin = getPinterestMainPinData();
-            
+
             // 1. Если главный пин - ВИДЕО
-            if (pinType === 'video' || mainPin.bestMp4Url) {
+            if (pinType === 'video' || mainPin.type === 'video' || mainPin.bestMp4Url) {
                 if (mainPin.bestMp4Url) {
+                    console.log('[MOSSAD] Pinterest download URL (mp4):', mainPin.bestMp4Url);
                     return { urls: [mainPin.bestMp4Url], type: 'video' };
                 }
-                const stageSig = document.querySelector('div[data-test-id="closeup-stage"] [data-video-signature], div[data-test-id="pin-closeup"] [data-video-signature]');
-                if (stageSig) {
-                    const sig = stageSig.getAttribute('data-video-signature');
-                    if (sig && sig.length === 32) {
-                        return { urls: [`https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`], type: 'video' };
-                    }
+                // HLS — скачиваем через GM_xmlhttpRequest с нужными заголовками
+                const hlsUrl = mainPin.hlsUrl || window._mossadPinHlsUrl;
+                if (hlsUrl) {
+                    console.log('[MOSSAD] Pinterest download URL (hls):', hlsUrl);
+                    showToast('⏳ Pinterest HLS видео — попытка скачать через M3U8...', false);
+                    return { urls: [hlsUrl], type: 'video' };
                 }
+                // Попытка взять src из <video> напрямую
+                const vid = document.querySelector('div[data-test-id="closeup-stage"] video, div[data-test-id="pin-closeup"] video, video[elementtiming*="video"], video[data-test-id="duplo-hls-video"]');
+                if (vid && vid.currentSrc && !vid.currentSrc.startsWith('blob:')) {
+                    return { urls: [vid.currentSrc], type: 'video' };
+                }
+                // Нет доступного URL для видео
+                showToast('⏳ Запусти видео на пине — скрипт поймает URL автоматически', true);
+                return null;
             }
 
             // 2. Если главный пин - ФОТО (или не содержит видео)
@@ -5256,6 +5265,7 @@ function findMediaForDownload() {
                 return { urls: [imgUrl], type: 'photo' };
             }
         }
+
 
         if (rootDomain.includes('redgifs.com')) {
             if (window.MOSSAD_ENGINES?.redgifs?.findMedia) {
@@ -6275,6 +6285,9 @@ function findMediaForDownload() {
 
     function navigatePinterestUrl(url) {
         window._mossadNavigating = true;
+        // Сбрасываем перехваченные URL при переходе на новый пин
+        window._mossadPinHlsUrl = null;
+        window._mossadPinMp4Url = null;
         const isPaused = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
                          sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
         if (!isPaused) {
@@ -6396,78 +6409,120 @@ function findMediaForDownload() {
         }, 100);
     }
 
+    // ---- Pinterest HLS URL capture (перехват m3u8 при воспроизведении) ----
+    window._mossadPinHlsUrl = window._mossadPinHlsUrl || null;
+    window._mossadPinMp4Url = window._mossadPinMp4Url || null;
+
+    if (rootDomain.includes('pinterest.')) {
+        // Перехват XHR — ловим .m3u8 и .mp4 запросы к pinimg.com
+        const _pOrigXHROpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+            if (typeof url === 'string' && url.includes('pinimg.com')) {
+                if (url.includes('.m3u8')) {
+                    window._mossadPinHlsUrl = url;
+                    console.log('[MOSSAD] Pinterest HLS intercepted:', url);
+                } else if (url.includes('.mp4') && url.includes('/videos/')) {
+                    window._mossadPinMp4Url = url;
+                    console.log('[MOSSAD] Pinterest MP4 intercepted:', url);
+                }
+            }
+            return _pOrigXHROpen.call(this, method, url, ...rest);
+        };
+        // Перехват fetch
+        const _pOrigFetch = window.fetch;
+        window.fetch = function(...args) {
+            const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+            if (url.includes('pinimg.com')) {
+                if (url.includes('.m3u8')) {
+                    window._mossadPinHlsUrl = url;
+                    console.log('[MOSSAD] Pinterest HLS (fetch) intercepted:', url);
+                } else if (url.includes('.mp4') && url.includes('/videos/')) {
+                    window._mossadPinMp4Url = url;
+                }
+            }
+            return _pOrigFetch.apply(this, args);
+        };
+    }
+
     function getPinterestMainPinData() {
         try {
-            // 1. Прямой осмотр DOM тегов видео главного пина (closeup-video-main, duplo-hls-video)
-            const mainVideo = document.querySelector('video[elementtiming*="video"], video[data-test-id="duplo-hls-video"], video[src*="v1.pinimg.com"], video.jI_JN7');
+            // 0. Если XHR/fetch перехватил прямой mp4 — используем его
+            if (window._mossadPinMp4Url) {
+                console.log('[MOSSAD] Pinterest: using intercepted MP4 URL:', window._mossadPinMp4Url);
+                return { isFound: true, type: 'video', bestMp4Url: window._mossadPinMp4Url };
+            }
+
+            // 1. Поиск video_list в JSON страницы (V_720P, V_EXP7, V_480P, V_HLSV4)
+            const videoListResult = _pinterestParseVideoList();
+            if (videoListResult) return videoListResult;
+
+            // 2. Прямой осмотр DOM тегов <video> главного пина
+            const mainVideo = document.querySelector(
+                'video[elementtiming*="video"], video[data-test-id="duplo-hls-video"], video.jI_JN7, ' +
+                'div[data-test-id="closeup-stage"] video, div[data-test-id="pin-closeup"] video'
+            );
             if (mainVideo) {
-                const src = mainVideo.src || (mainVideo.querySelector('source') && mainVideo.querySelector('source').src) || '';
-                const sigMatch = src.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i) ||
-                                 src.match(/expMp4\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})/i);
-                let bestMp4Url = null;
-                if (sigMatch) {
-                    const sig = sigMatch[4];
-                    bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
-                } else if (src.endsWith('.mp4')) {
-                    bestMp4Url = src;
+                const currentSrc = mainVideo.currentSrc || mainVideo.src || '';
+                // blob: — значит HLS. Берём перехваченный m3u8 если есть
+                if (currentSrc.startsWith('blob:') && window._mossadPinHlsUrl) {
+                    return { isFound: true, type: 'video', bestMp4Url: null, hlsUrl: window._mossadPinHlsUrl };
                 }
-                return { isFound: true, type: 'video', bestMp4Url };
+                if (currentSrc && !currentSrc.startsWith('blob:') && currentSrc.includes('pinimg.com')) {
+                    return { isFound: true, type: 'video', bestMp4Url: currentSrc };
+                }
+                // Видео-элемент есть, но src blob и нет перехваченного — всё равно видео
+                if (currentSrc) {
+                    return { isFound: true, type: 'video', bestMp4Url: null };
+                }
             }
 
-            // 2. Сканирование разметки DOM на предмет v1.pinimg.com/videos/iht/hls/ или elementtiming="closeup-video-main"
+            // 3. Сканирование разметки DOM на предмет HLS-признаков
             const fullHtml = document.documentElement.innerHTML || '';
-            const hlsMatch = fullHtml.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/iht\\?\/hls\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{32})\.m3u8/i) ||
-                             fullHtml.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i);
-
-            if (hlsMatch || fullHtml.includes('elementtiming="closeup-video-main') || fullHtml.includes('data-test-id="duplo-hls-video"')) {
-                let bestMp4Url = null;
-                if (hlsMatch) {
-                    const sig = hlsMatch[4];
-                    bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
-                }
+            const hasHlsInHtml = /elementtiming="closeup-video-main/i.test(fullHtml) ||
+                                  /data-test-id="duplo-hls-video"/i.test(fullHtml) ||
+                                  /v1\.pinimg\.com\/videos/i.test(fullHtml);
+            if (hasHlsInHtml) {
+                // Попробуем найти прямой mp4 URL в HTML
+                const mp4InHtml = fullHtml.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"'\\]+\.mp4/);
+                const bestMp4Url = mp4InHtml ? mp4InHtml[0] : null;
                 return { isFound: true, type: 'video', bestMp4Url };
             }
 
+            // 4. Сканирование <script> тегов (старый метод)
             const scanText = (txt) => {
                 if (!txt || !txt.includes('auth_web_main_pin')) return null;
                 const idx = txt.indexOf('resource_response');
                 if (idx === -1) return null;
-                
-                // Берем с запасом 40000 символов, т.к. story_pin_data с видео-блоком лежит глубоко внизу JSON
                 const slice = txt.slice(Math.max(0, idx - 500), idx + 40000);
 
-                // 1. ПЕРВЫМ ДЕЛОМ ИЩЕМ СИГНАТУРЫ И БЛОКИ ВИДЕО
-                const sigMatch = slice.match(/"video_signature"\s*:\s*"([a-f0-9]{32})"/i) ||
-                                 slice.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i) ||
-                                 slice.match(/thumbnails\/originals\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\./i);
-
-                const hasVideoKeywords = /story_pin_video_block/i.test(slice) || 
-                                         /"video_list"\s*:\s*\{/i.test(slice) || 
-                                         /"videos"\s*:\s*\{/i.test(slice) || 
+                const hasVideoKeywords = /story_pin_video_block/i.test(slice) ||
+                                         /"video_list"\s*:\s*\{/i.test(slice) ||
+                                         /"videos"\s*:\s*\{/i.test(slice) ||
                                          /duplo-hls/i.test(slice);
+                const sigMatch = slice.match(/"video_signature"\s*:\s*"([a-f0-9]{32})"/i) ||
+                                 slice.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i);
 
                 if (sigMatch || hasVideoKeywords) {
+                    // Ищем прямые mp4 URL
+                    const mp4Matches = slice.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"'\\]+?\.mp4/g);
                     let bestMp4Url = null;
-                    const mp4Matches = slice.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+?\.mp4/g) ||
-                                       slice.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"',]+?\.mp4/g);
                     if (mp4Matches && mp4Matches.length > 0) {
-                        bestMp4Url = mp4Matches[0].replace(/\\/g, '');
+                        // Предпочитаем более высокое качество
+                        const sorted = mp4Matches.sort((a, b) => {
+                            const qa = a.includes('720') ? 3 : a.includes('480') ? 2 : a.includes('360') ? 1 : 0;
+                            const qb = b.includes('720') ? 3 : b.includes('480') ? 2 : b.includes('360') ? 1 : 0;
+                            return qb - qa;
+                        });
+                        bestMp4Url = sorted[0].replace(/\\/g, '');
                     }
-                    
-                    if (!bestMp4Url && sigMatch) {
-                        const sig = sigMatch[4] || sigMatch[1];
-                        if (sig && sig.length === 32) {
-                            bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
-                        }
-                    }
-                    return { isFound: true, type: 'video', bestMp4Url };
+                    // Перехваченный HLS как запасной
+                    const hlsUrl = !bestMp4Url ? (window._mossadPinHlsUrl || null) : null;
+                    return { isFound: true, type: 'video', bestMp4Url, hlsUrl };
                 }
 
-                // 2. И ТОЛЬКО ЕСЛИ НИ ОДНОГО ПРИЗНАКА ВИДЕО НЕТ — ЭТО ФОТО
                 if (/"images"\s*:\s*\{/i.test(slice) || /"image_signature"/i.test(slice)) {
                     return { isFound: true, type: 'image', bestMp4Url: null };
                 }
-
                 return null;
             };
 
@@ -6475,7 +6530,6 @@ function findMediaForDownload() {
                 const res = scanText(JSON.stringify(window.__PJS_OUTPUT__));
                 if (res) return res;
             }
-
             const scripts = document.querySelectorAll('script');
             for (const s of scripts) {
                 const res = scanText(s.textContent || '');
@@ -6485,6 +6539,61 @@ function findMediaForDownload() {
             console.error('[MOSSAD] PinResource JSON parse error:', e);
         }
         return { isFound: false, type: 'unknown', bestMp4Url: null };
+    }
+
+    // Парсинг video_list из JSON данных страницы Pinterest (V_720P, V_EXP7, V_480P, V_HLSV4)
+    function _pinterestParseVideoList() {
+        try {
+            const sources = [];
+            // Собираем кандидатов: script теги и __PJS_OUTPUT__
+            if (window.__PJS_OUTPUT__) sources.push(JSON.stringify(window.__PJS_OUTPUT__));
+            document.querySelectorAll('script[type="application/json"], script:not([src])').forEach(s => {
+                const t = s.textContent || '';
+                if (t.includes('video_list') || t.includes('V_720P') || t.includes('V_EXP7')) sources.push(t);
+            });
+
+            for (const txt of sources) {
+                // Ищем блок video_list
+                const vlIdx = txt.indexOf('"video_list"');
+                if (vlIdx === -1) continue;
+                const slice = txt.slice(vlIdx, vlIdx + 3000);
+
+                // Приоритет форматов: V_720P > V_EXP7 > V_480P > V_EXP6 > V_HLSV4
+                const formats = ['V_720P', 'V_EXP7', 'V_480P', 'V_EXP6', 'V_360P'];
+                for (const fmt of formats) {
+                    const fIdx = slice.indexOf(`"${fmt}"`);
+                    if (fIdx === -1) continue;
+                    const fSlice = slice.slice(fIdx, fIdx + 500);
+                    // Ищем "url":"https://..."
+                    const urlMatch = fSlice.match(/"url"\s*:\s*"(https:\/\/[^"]+\.mp4[^"]*)"/i);
+                    if (urlMatch) {
+                        const mp4url = urlMatch[1].replace(/\\/g, '');
+                        console.log(`[MOSSAD] Pinterest video_list[${fmt}]:`, mp4url);
+                        return { isFound: true, type: 'video', bestMp4Url: mp4url };
+                    }
+                }
+
+                // Если нашли video_list но не нашли конкретный формат — ищем любой mp4
+                const anyMp4 = slice.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"'\\]+?\.mp4/);
+                if (anyMp4) {
+                    return { isFound: true, type: 'video', bestMp4Url: anyMp4[0] };
+                }
+                // V_HLSV4 — HLS манифест
+                const hlsIdx = slice.indexOf('"V_HLSV4"');
+                if (hlsIdx !== -1) {
+                    const hlsSlice = slice.slice(hlsIdx, hlsIdx + 300);
+                    const hlsMatch = hlsSlice.match(/"url"\s*:\s*"(https:\/\/[^"]+\.m3u8[^"]*)"/i);
+                    if (hlsMatch) {
+                        const hlsUrl = hlsMatch[1].replace(/\\/g, '');
+                        window._mossadPinHlsUrl = window._mossadPinHlsUrl || hlsUrl;
+                        return { isFound: true, type: 'video', bestMp4Url: null, hlsUrl };
+                    }
+                }
+            }
+        } catch(e) {
+            console.warn('[MOSSAD] _pinterestParseVideoList error:', e);
+        }
+        return null;
     }
 
 // ============================================
