@@ -127,9 +127,139 @@
     }
 
     // ============================================================
-    // GROK: Download with 3-Dots Fallback
     // ============================================================
-    function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null) {
+    // GROK: Prompt & Media Finders
+    // ============================================================
+
+    /**
+     * Извлекает текст промпта для текущего поста Imagine.
+     */
+    function getGrokCurrentPrompt() {
+        // 1. Поле ввода промпта (textarea или contenteditable)
+        const ta = document.querySelector('textarea, div[contenteditable="true"]');
+        if (ta) {
+            const val = (ta.value !== undefined ? ta.value : (ta.innerText || ta.textContent || '')).trim();
+            if (val) return val;
+        }
+
+        // 2. Alt-атрибут главного изображения поста
+        const mainImg = document.querySelector('main img, div[role="dialog"] img, [data-filmstrip-item="true"] img');
+        if (mainImg) {
+            const alt = (mainImg.getAttribute('alt') || '').trim();
+            if (alt && alt.length > 2 && !/^(pfp|profile|avatar|logo|image)$/i.test(alt)) {
+                return alt;
+            }
+        }
+
+        // 3. Мета-теги OpenGraph / description
+        const metaDesc = document.querySelector('meta[property="og:description"], meta[name="description"]');
+        if (metaDesc) {
+            const content = (metaDesc.getAttribute('content') || '').trim();
+            if (content && !content.toLowerCase().includes('grok is an ai') && !content.toLowerCase().includes('imagine anything')) {
+                return content;
+            }
+        }
+
+        // 4. Текстовые блоки с классом prose или атрибутами
+        const promptBlock = document.querySelector('[data-testid*="prompt"], .prose');
+        if (promptBlock && promptBlock.textContent.trim()) {
+            return promptBlock.textContent.trim();
+        }
+
+        return '';
+    }
+
+    /**
+     * Находит активный медиа-элемент на странице поста Grok (видео или изображение).
+     */
+    function getGrokMedia() {
+        // 1. Видео
+        const video = getActiveVideo() || document.querySelector('main video, div[role="dialog"] video, video');
+        if (video) {
+            let src = '';
+            const sources = Array.from(video.querySelectorAll('source'));
+            for (const s of sources) {
+                if (s.src) { src = s.src; break; }
+            }
+            if (!src && video.currentSrc) src = video.currentSrc;
+            if (!src && video.src) src = video.src;
+            if (src) return { url: src, type: 'video', ext: 'mp4' };
+        }
+
+        // 2. Изображение
+        const candidates = Array.from(document.querySelectorAll('main img, div[role="dialog"] img, [data-filmstrip-item="true"] img, img'));
+        const validImgs = candidates.filter(img => {
+            if (!img.src) return false;
+            const s = img.src.toLowerCase();
+            if (s.includes('avatar') || s.includes('profile') || s.includes('pfp') || s.includes('icon')) return false;
+            const w = img.naturalWidth || img.width || 0;
+            const h = img.naturalHeight || img.height || 0;
+            return (w >= 150 && h >= 150) || s.includes('share-images') || s.includes('imagine-public') || s.includes('assets.grok.com');
+        }).sort((a, b) => {
+            const areaA = (a.naturalWidth || a.width || 0) * (a.naturalHeight || a.height || 0);
+            const areaB = (b.naturalWidth || b.width || 0) * (b.naturalHeight || b.height || 0);
+            return areaB - areaA;
+        });
+
+        if (validImgs.length > 0) {
+            const bestImg = validImgs[0];
+            let ext = 'jpg';
+            const srcLower = bestImg.src.toLowerCase();
+            if (srcLower.includes('.png')) ext = 'png';
+            else if (srcLower.includes('.webp')) ext = 'webp';
+            return { url: bestImg.src, type: 'photo', ext };
+        }
+
+        return null;
+    }
+
+    let _isGrokInternalClick = false;
+
+    /**
+     * Фолбэк на клик нативной кнопки Download при невозможности прямой загрузки.
+     */
+    function fallbackGrokNativeClick(onSuccess) {
+        _isGrokInternalClick = true;
+        try {
+            const dlKeywords = ['download', 'скачать'];
+            let directBtn = findGrokButton(dlKeywords);
+            if (!directBtn) {
+                directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                    if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+                    const path = b.querySelector('path');
+                    const d = path ? (path.getAttribute('d') || '') : '';
+                    return d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
+                });
+            }
+
+            if (directBtn) {
+                triggerClick(directBtn, 'Grok Direct Download (Fallback)');
+                if (onSuccess) onSuccess();
+                return;
+            }
+
+            const dotsBtn = findGrok3DotsMenuButton();
+            if (dotsBtn) {
+                triggerClick(dotsBtn, 'Post actions (for Fallback Download)');
+                retryAction((attempt) => {
+                    const innerDl = findGrokButton(dlKeywords);
+                    if (innerDl) {
+                        triggerClick(innerDl, 'Grok Download from 3-dots (Fallback)');
+                        if (onSuccess) onSuccess();
+                        return true;
+                    }
+                    return false;
+                }, [100, 300, 500]);
+            }
+        } finally {
+            setTimeout(() => { _isGrokInternalClick = false; }, 1000);
+        }
+    }
+
+    // ============================================================
+    // GROK: Download with Metadata Injection & Fallback
+    // ============================================================
+    function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
         if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
         blurActiveInput();
 
@@ -160,118 +290,172 @@
             }
         }
 
-        // Проверка дубликата в истории
-        const hasVid = getActiveVideo() !== null;
+        const media = getGrokMedia();
+        const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
         const currentMediaType = hasVid ? 'video' : 'photo';
+
+        // Проверка дубликата в истории
         if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl)) {
-            checkFileInHistory(null, null, currentPostUrl, currentMediaType).then(record => {
+            checkFileInHistory(null, media ? media.url : null, currentPostUrl, currentMediaType).then(record => {
                 if (record) {
-                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record));
+                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback));
                 } else {
-                    triggerGrokDownload(true, null);
+                    triggerGrokDownload(true, null, onDoneCallback);
                 }
             });
             return true;
         }
 
-        const dlKeywords = ['download', 'скачать'];
+        const prompt = getGrokCurrentPrompt();
+        const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
+        const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
+        const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
+        const ext2 = media ? media.ext : (hasVid ? 'mp4' : 'jpg');
+        const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(duplicateRecord.filename) : (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
+        const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
 
-        const onDownloadTriggered = () => {
-            const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
-            const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
-            const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
-            const ext2 = hasVid ? 'mp4' : 'jpg';
-            const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(duplicateRecord.filename) : (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
-            const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
+        // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4
+        const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
+        let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
 
-            // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4
-            const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
-            let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
+        if (config.filenameTemplateEnabled) {
+            const now2 = new Date();
+            const pad2 = (n) => String(n).padStart(2, '0');
+            const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
+            const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
+            const vars = {
+                id:           currentPostId || '',
+                conv:         currentConvId || '',
+                conversation: currentConvId || '',
+                uuid:         currentPostId || '',
+                hash:         currentPostId || '',
+                postid:       currentPostId || '',
+                id8:          shortId,
+                hash8:        shortId,
+                uuid8:        shortId,
+                domain:       'grok',
+                title:        'Imagine - Grok',
+                username:     'grok',
+                user:         'grok',
+                author:       'grok',
+                date:         dateStr,
+                time:         timeStr,
+                ext:          ext2,
+                n:            String(Date.now()).slice(-6),
+                dbl:          dblSuffix,
+                oldname:      rootBase,
+                copy:         rootBase,
+                root:         rootBase
+            };
+            grokFilename = typeof renderFilenameTemplate === 'function'
+                ? renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2)
+                : grokFilename;
+        }
 
-            if (config.filenameTemplateEnabled) {
-                const now2 = new Date();
-                const pad2 = (n) => String(n).padStart(2, '0');
-                const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
-                const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
-                const vars = {
-                    id:           currentPostId || '',
-                    conv:         currentConvId || '',
-                    conversation: currentConvId || '',
-                    uuid:         currentPostId || '',
-                    hash:         currentPostId || '',
-                    postid:       currentPostId || '',
-                    id8:          shortId,
-                    hash8:        shortId,
-                    uuid8:        shortId,
-                    domain:       'grok',
-                    title:        'Imagine - Grok',
-                    username:     'grok',
-                    user:         'grok',
-                    author:       'grok',
-                    date:         dateStr,
-                    time:         timeStr,
-                    ext:          ext2,
-                    n:            String(Date.now()).slice(-6),
-                    dbl:          dblSuffix,
-                    oldname:      rootBase,
-                    copy:         rootBase,
-                    root:         rootBase
-                };
-                grokFilename = typeof renderFilenameTemplate === 'function'
-                    ? renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2)
-                    : grokFilename;
-            }
-
-            showToast(`📥 Скачивание: ${grokFilename}...`);
-            saveFileToHistory({
-                hash: '',
-                filename: grokFilename,
-                rootFilename: rootBase || (typeof extractRootFilename === 'function' ? extractRootFilename(grokFilename) : grokFilename),
-                url: currentPostUrl,
-                postUrl: currentPostUrl,
-                domain: 'grok.com',
-                type: currentMediaType
-            });
+        const onDownloadFinalized = () => {
             if (typeof performPostDownloadAction === 'function') {
                 performPostDownloadAction();
             }
+            if (onDoneCallback) onDoneCallback();
         };
 
-        // 1. Прямая кнопка на панели
-        let directBtn = findGrokButton(dlKeywords);
-        if (!directBtn) {
-            // Поиск по SVG характерной иконки загрузки
-            directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
-                if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
-                const path = b.querySelector('path');
-                const d = path ? (path.getAttribute('d') || '') : '';
-                return d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
-            });
-        }
+        if (media && media.url) {
+            showToast(`⏳ Загрузка: ${grokFilename}...`);
+            const isBlobUrl = media.url.startsWith('blob:');
 
-        if (directBtn) {
-            triggerClick(directBtn, 'Grok Direct Download');
-            onDownloadTriggered();
-            return true;
-        }
-
-        // 2. Если прямой кнопки нет — открываем три точки
-        const dotsBtn = findGrok3DotsMenuButton();
-        if (dotsBtn) {
-            triggerClick(dotsBtn, 'Post actions (for Download)');
-            retryAction((attempt) => {
-                const innerDl = findGrokButton(dlKeywords);
-                if (innerDl) {
-                    triggerClick(innerDl, 'Grok Download from 3-dots');
-                    onDownloadTriggered();
-                    return true;
+            const handleBlobResponse = async (rawBlob) => {
+                try {
+                    showToast('⏳ Запись метаданных...');
+                    const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl);
+                    saveBlobToDisk(enrichedBlob, grokFilename);
+                    onDownloadFinalized();
+                } catch (err) {
+                    console.error('[MOSSAD] Metadata injection failed, saving raw blob:', err);
+                    saveBlobToDisk(rawBlob, grokFilename);
+                    onDownloadFinalized();
                 }
-                return false;
-            }, [100, 300, 500]);
+            };
+
+            const finalizeFallback = () => {
+                console.warn('[MOSSAD] Media fetch failed, using native Grok download button fallback');
+                fallbackGrokNativeClick(onDownloadFinalized);
+            };
+
+            if (isBlobUrl) {
+                fetch(media.url)
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        return res.blob();
+                    })
+                    .then(handleBlobResponse)
+                    .catch(finalizeFallback);
+                return true;
+            }
+
+            if (typeof GM_xmlhttpRequest === 'function') {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: media.url,
+                    responseType: 'blob',
+                    onprogress: (p) => {
+                        if (p.total > 0) {
+                            const pct = Math.round((p.loaded / p.total) * 100);
+                            showToast(`⏳ Скачивание: ${pct}%`);
+                        }
+                    },
+                    onload: (res) => {
+                        if (res.status === 200 && res.response) {
+                            handleBlobResponse(res.response);
+                        } else {
+                            finalizeFallback();
+                        }
+                    },
+                    onerror: () => finalizeFallback()
+                });
+            } else {
+                fetch(media.url)
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        return res.blob();
+                    })
+                    .then(handleBlobResponse)
+                    .catch(finalizeFallback);
+            }
             return true;
         }
 
-        return false;
+        // Если медиа-URL не найден — стандартный клик кнопки
+        fallbackGrokNativeClick(onDownloadFinalized);
+        return true;
+    }
+
+    // Перехват клика по нативной кнопке скачивания Grok на странице
+    if (typeof document !== 'undefined') {
+        document.addEventListener('click', function handleGrokNativeDownloadClick(e) {
+            if (rootDomain !== 'grok.com' || _isGrokInternalClick) return;
+            const btn = e.target.closest('button, [role="button"]');
+            if (!btn || (btn.id && btn.id.startsWith('mossad-'))) return;
+
+            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+            const title = (btn.getAttribute('title') || '').toLowerCase();
+            const txt = (btn.textContent || '').trim().toLowerCase();
+            const isDl = aria.includes('download') || aria.includes('скачать') || title.includes('download') || title.includes('скачать') || txt === 'download' || txt === 'скачать';
+
+            let isSvgDl = false;
+            if (!isDl) {
+                const path = btn.querySelector('path');
+                const d = path ? (path.getAttribute('d') || '') : '';
+                isSvgDl = (d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C'));
+            }
+
+            if (isDl || isSvgDl) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                console.log('[MOSSAD] Intercepted native Grok download button -> triggerGrokDownload with metadata');
+                triggerGrokDownload();
+            }
+        }, true);
     }
 
 

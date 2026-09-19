@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.19
+// @version      1.3.20
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.19';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.20';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1265,6 +1265,491 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
 // ============================================================
+    // METADATA INJECTOR (MP4, JPEG, PNG, WebP)
+    // ============================================================
+
+    // CRC32 table for PNG chunk generation
+    let _crcTable = null;
+    function getCrcTable() {
+        if (_crcTable) return _crcTable;
+        const table = new Uint32Array(256);
+        for (let i = 0; i < 256; i++) {
+            let c = i;
+            for (let k = 0; k < 8; k++) {
+                c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+            }
+            table[i] = c >>> 0;
+        }
+        _crcTable = table;
+        return table;
+    }
+
+    function calculateCrc32(bytes) {
+        const table = getCrcTable();
+        let crc = 0xFFFFFFFF;
+        for (let i = 0; i < bytes.length; i++) {
+            crc = table[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+        }
+        return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    /**
+     * Внедряет метаданные (промпт и ссылку) в PNG файл через tEXt чанки.
+     */
+    function injectPngMetadata(buffer, prompt, url) {
+        try {
+            const u8 = new Uint8Array(buffer);
+            // Проверка PNG сигнатуры: 89 50 4E 47 0D 0A 1A 0A
+            if (u8.length < 33 || u8[0] !== 0x89 || u8[1] !== 0x50 || u8[2] !== 0x4E || u8[3] !== 0x47) {
+                return buffer;
+            }
+
+            // Первый чанк IHDR: длина 13 байт (заголовок 8 байт, данные 13, crc 4 = 25 байт). Заканчивается на 8 + 25 = 33
+            const insertPos = 33;
+            const textEncoder = new TextEncoder();
+
+            function makeTextChunk(keyword, text) {
+                const kwBytes = textEncoder.encode(keyword);
+                const valBytes = textEncoder.encode(text);
+                const chunkData = new Uint8Array(kwBytes.length + 1 + valBytes.length);
+                chunkData.set(kwBytes, 0);
+                chunkData[kwBytes.length] = 0; // null separator
+                chunkData.set(valBytes, kwBytes.length + 1);
+
+                const chunkLen = chunkData.length;
+                const chunk = new Uint8Array(8 + chunkLen + 4);
+                const view = new DataView(chunk.buffer);
+                view.setUint32(0, chunkLen, false);
+                chunk[4] = 0x74; chunk[5] = 0x45; chunk[6] = 0x58; chunk[7] = 0x74; // 'tEXt'
+                chunk.set(chunkData, 8);
+
+                // CRC считается от типа чанка (4 байта) + данных чанка
+                const crcBytes = chunk.subarray(4, 8 + chunkLen);
+                const crc = calculateCrc32(crcBytes);
+                view.setUint32(8 + chunkLen, crc, false);
+                return chunk;
+            }
+
+            const commentText = `Prompt: ${prompt}\nURL: ${url}`;
+            const chunks = [
+                makeTextChunk('Description', prompt),
+                makeTextChunk('Comment', commentText),
+                makeTextChunk('Source', url),
+                makeTextChunk('prompt', prompt),
+                makeTextChunk('parameters', prompt)
+            ];
+
+            const totalChunksLen = chunks.reduce((acc, c) => acc + c.length, 0);
+            const result = new Uint8Array(u8.length + totalChunksLen);
+            result.set(u8.subarray(0, insertPos), 0);
+            let offset = insertPos;
+            for (const ch of chunks) {
+                result.set(ch, offset);
+                offset += ch.length;
+            }
+            result.set(u8.subarray(insertPos), offset);
+            return result.buffer;
+        } catch (e) {
+            console.warn('[MOSSAD] injectPngMetadata error:', e);
+            return buffer;
+        }
+    }
+
+    /**
+     * Внедряет метаданные (промпт и ссылку) в JPEG файл через COM и XMP маркеры.
+     */
+    function injectJpegMetadata(buffer, prompt, url) {
+        try {
+            const u8 = new Uint8Array(buffer);
+            if (u8.length < 4 || u8[0] !== 0xFF || u8[1] !== 0xD8) {
+                return buffer; // Не JPEG
+            }
+
+            const textEncoder = new TextEncoder();
+            const comText = `Prompt: ${prompt}\nURL: ${url}`;
+            const comBytes = textEncoder.encode(comText);
+            const comLen = Math.min(comBytes.length, 65530);
+
+            // 1. COM маркер: FF FE [длина 2 байта] [текст]
+            const comMarker = new Uint8Array(4 + comLen);
+            comMarker[0] = 0xFF; comMarker[1] = 0xFE;
+            const comView = new DataView(comMarker.buffer);
+            comView.setUint16(2, comLen + 2, false);
+            comMarker.set(comBytes.subarray(0, comLen), 4);
+
+            // 2. XMP APP1 маркер: FF E1 [длина 2 байта] [http://ns.adobe.com/xap/1.0/\0] [XML]
+            const cleanXmlPrompt = (prompt || '').replace(/[<>&'"]/g, (c) => {
+                switch (c) {
+                    case '<': return '&lt;';
+                    case '>': return '&gt;';
+                    case '&': return '&amp;';
+                    case '\'': return '&apos;';
+                    case '"': return '&quot;';
+                }
+                return c;
+            });
+            const cleanXmlUrl = (url || '').replace(/[<>&'"]/g, (c) => {
+                switch (c) {
+                    case '<': return '&lt;';
+                    case '>': return '&gt;';
+                    case '&': return '&amp;';
+                    case '\'': return '&apos;';
+                    case '"': return '&quot;';
+                }
+                return c;
+            });
+
+            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source></rdf:Description></rdf:RDF></x:xmpmeta>`;
+            const xmpHeader = textEncoder.encode('http://ns.adobe.com/xap/1.0/\0');
+            const xmpXmlBytes = textEncoder.encode(xmpXml);
+            const xmpPayloadLen = xmpHeader.length + xmpXmlBytes.length;
+
+            let xmpMarker = null;
+            if (xmpPayloadLen + 2 < 65535) {
+                xmpMarker = new Uint8Array(4 + xmpPayloadLen);
+                xmpMarker[0] = 0xFF; xmpMarker[1] = 0xE1;
+                const xmpView = new DataView(xmpMarker.buffer);
+                xmpView.setUint16(2, xmpPayloadLen + 2, false);
+                xmpMarker.set(xmpHeader, 4);
+                xmpMarker.set(xmpXmlBytes, 4 + xmpHeader.length);
+            }
+
+            // Находим место вставки: сразу после SOI (байты 0, 1) или после APP0 (FF E0), если он есть
+            let insertPos = 2;
+            if (u8.length > 4 && u8[2] === 0xFF && u8[3] === 0xE0) {
+                const app0Len = (u8[4] << 8) | u8[5];
+                insertPos = 4 + app0Len;
+            }
+
+            const extraLen = comMarker.length + (xmpMarker ? xmpMarker.length : 0);
+            const result = new Uint8Array(u8.length + extraLen);
+            result.set(u8.subarray(0, insertPos), 0);
+            let curPos = insertPos;
+            result.set(comMarker, curPos);
+            curPos += comMarker.length;
+            if (xmpMarker) {
+                result.set(xmpMarker, curPos);
+                curPos += xmpMarker.length;
+            }
+            result.set(u8.subarray(insertPos), curPos);
+            return result.buffer;
+        } catch (e) {
+            console.warn('[MOSSAD] injectJpegMetadata error:', e);
+            return buffer;
+        }
+    }
+
+    /**
+     * Внедряет метаданные (промпт и ссылку) в MP4 (ISO BMFF / QuickTime) в атом moov.udta.meta.ilst.
+     * Корректирует таблицы смещений чанков stco/co64 при сдвиге mdat.
+     */
+    function injectMp4Metadata(buffer, prompt, url) {
+        try {
+            const u8 = new Uint8Array(buffer);
+            const view = new DataView(buffer);
+            const len = u8.length;
+
+            // Парсим верхнеуровневые атомы
+            let pos = 0;
+            let moovStart = -1, moovLen = 0;
+            let mdatStart = -1;
+
+            while (pos + 8 <= len) {
+                let boxSize = view.getUint32(pos, false);
+                const bType = String.fromCharCode(u8[pos+4], u8[pos+5], u8[pos+6], u8[pos+7]);
+                let headerLen = 8;
+                if (boxSize === 1 && pos + 16 <= len) {
+                    // 64-битный размер
+                    const hi = view.getUint32(pos + 8, false);
+                    const lo = view.getUint32(pos + 12, false);
+                    boxSize = hi * 4294967296 + lo;
+                    headerLen = 16;
+                } else if (boxSize === 0) {
+                    boxSize = len - pos;
+                }
+                if (boxSize < headerLen || pos + boxSize > len) break;
+
+                if (bType === 'moov') {
+                    moovStart = pos;
+                    moovLen = boxSize;
+                } else if (bType === 'mdat') {
+                    mdatStart = pos;
+                }
+                pos += boxSize;
+            }
+
+            if (moovStart === -1 || moovLen === 0) {
+                return buffer; // moov не найден
+            }
+
+            const textEncoder = new TextEncoder();
+
+            function makeMp4Box(typeStr, payloadBytes) {
+                const box = new Uint8Array(8 + payloadBytes.length);
+                const bView = new DataView(box.buffer);
+                bView.setUint32(0, box.length, false);
+                for (let i = 0; i < 4; i++) {
+                    box[4 + i] = typeStr.charCodeAt(i);
+                }
+                box.set(payloadBytes, 8);
+                return box;
+            }
+
+            function makeIlstItem(tagBytes, text) {
+                const textBytes = textEncoder.encode(text);
+                // Box 'data': 4 байта длина (16 + textBytes.length), 'data', 1 байт version=0, 3 байта flags=1 (UTF-8), 4 байта locale=0
+                const dataBox = new Uint8Array(16 + textBytes.length);
+                const dView = new DataView(dataBox.buffer);
+                dView.setUint32(0, dataBox.length, false);
+                dataBox[4] = 0x64; dataBox[5] = 0x61; dataBox[6] = 0x74; dataBox[7] = 0x61; // 'data'
+                dataBox[8] = 0; dataBox[9] = 0; dataBox[10] = 0; dataBox[11] = 1; // version 0, type 1 (UTF-8)
+                dView.setUint32(12, 0, false); // locale 0
+                dataBox.set(textBytes, 16);
+
+                const itemBox = new Uint8Array(8 + dataBox.length);
+                const iView = new DataView(itemBox.buffer);
+                iView.setUint32(0, itemBox.length, false);
+                itemBox.set(tagBytes, 4);
+                itemBox.set(dataBox, 8);
+                return itemBox;
+            }
+
+            // Собираем элементы ilst
+            const tagDes = new Uint8Array([0xA9, 0x64, 0x65, 0x73]); // '©des' (Description)
+            const tagCmt = new Uint8Array([0xA9, 0x63, 0x6D, 0x74]); // '©cmt' (Comment)
+            const tagUrl1 = new Uint8Array([0x70, 0x75, 0x72, 0x6C]); // 'purl' (Posting URL)
+            const tagUrl2 = new Uint8Array([0xA9, 0x75, 0x72, 0x6C]); // '©url' (URL)
+
+            const commentText = `Prompt: ${prompt}\nURL: ${url}`;
+            const items = [
+                makeIlstItem(tagDes, prompt),
+                makeIlstItem(tagCmt, commentText),
+                makeIlstItem(tagUrl1, url),
+                makeIlstItem(tagUrl2, url)
+            ];
+
+            const totalItemsLen = items.reduce((acc, it) => acc + it.length, 0);
+            const ilstPayload = new Uint8Array(totalItemsLen);
+            let ilstOff = 0;
+            for (const it of items) {
+                ilstPayload.set(it, ilstOff);
+                ilstOff += it.length;
+            }
+            const ilstBox = makeMp4Box('ilst', ilstPayload);
+
+            // Handler box 'hdlr' для meta
+            const hdlrBox = new Uint8Array(33);
+            const hView = new DataView(hdlrBox.buffer);
+            hView.setUint32(0, 33, false);
+            hdlrBox[4] = 0x68; hdlrBox[5] = 0x64; hdlrBox[6] = 0x6C; hdlrBox[7] = 0x72; // 'hdlr'
+            hView.setUint32(8, 0, false); // version + flags
+            hView.setUint32(12, 0, false); // pre_defined
+            hdlrBox[16] = 0x6D; hdlrBox[17] = 0x64; hdlrBox[18] = 0x69; hdlrBox[19] = 0x72; // 'mdir'
+            hdlrBox[20] = 0x61; hdlrBox[21] = 0x70; hdlrBox[22] = 0x70; hdlrBox[23] = 0x6C; // 'appl'
+            hView.setUint32(24, 0, false); // flags
+            hView.setUint32(28, 0, false); // flags mask
+            hdlrBox[32] = 0; // name empty string
+
+            // Box 'meta': FullBox (version 0 + flags 0 = 4 байта) + hdlr + ilst
+            const metaPayload = new Uint8Array(4 + hdlrBox.length + ilstBox.length);
+            metaPayload[0] = 0; metaPayload[1] = 0; metaPayload[2] = 0; metaPayload[3] = 0;
+            metaPayload.set(hdlrBox, 4);
+            metaPayload.set(ilstBox, 4 + hdlrBox.length);
+            const metaBox = makeMp4Box('meta', metaPayload);
+
+            // Box 'udta'
+            const udtaBox = makeMp4Box('udta', metaBox);
+
+            // Ищем и вырезаем старый udta внутри moov, если он был
+            let oldUdtaStart = -1, oldUdtaLen = 0;
+            let mPos = moovStart + 8;
+            const moovEnd = moovStart + moovLen;
+
+            while (mPos + 8 <= moovEnd) {
+                const subSize = view.getUint32(mPos, false);
+                const subType = String.fromCharCode(u8[mPos+4], u8[mPos+5], u8[mPos+6], u8[mPos+7]);
+                if (subSize < 8 || mPos + subSize > moovEnd) break;
+                if (subType === 'udta') {
+                    oldUdtaStart = mPos;
+                    oldUdtaLen = subSize;
+                    break;
+                }
+                mPos += subSize;
+            }
+
+            const delta = udtaBox.length - oldUdtaLen;
+
+            // Создаем копию буфера moov (без старого udta, но с новым udta)
+            let moovBodyBeforeUdta, moovBodyAfterUdta;
+            if (oldUdtaStart !== -1) {
+                moovBodyBeforeUdta = u8.slice(moovStart + 8, oldUdtaStart);
+                moovBodyAfterUdta = u8.slice(oldUdtaStart + oldUdtaLen, moovEnd);
+            } else {
+                moovBodyBeforeUdta = u8.slice(moovStart + 8, moovEnd);
+                moovBodyAfterUdta = new Uint8Array(0);
+            }
+
+            const newMoovLen = moovLen + delta;
+            const newMoovBytes = new Uint8Array(newMoovLen);
+            const newMoovView = new DataView(newMoovBytes.buffer);
+            newMoovView.setUint32(0, newMoovLen, false);
+            newMoovBytes[4] = 0x6D; newMoovBytes[5] = 0x6F; newMoovBytes[6] = 0x6F; newMoovBytes[7] = 0x76; // 'moov'
+
+            let writeOffset = 8;
+            newMoovBytes.set(moovBodyBeforeUdta, writeOffset);
+            writeOffset += moovBodyBeforeUdta.length;
+            newMoovBytes.set(moovBodyAfterUdta, writeOffset);
+            writeOffset += moovBodyAfterUdta.length;
+            newMoovBytes.set(udtaBox, writeOffset);
+
+            // Если moov расположен до mdat (faststart MP4), смещаем все chunk offsets на величину delta!
+            if (mdatStart !== -1 && moovStart < mdatStart && delta !== 0) {
+                // Ищем все stco и co64 внутри нового moov
+                let scanPos = 0;
+                while (scanPos + 8 <= newMoovBytes.length) {
+                    const bSize = newMoovView.getUint32(scanPos, false);
+                    if (bSize < 8 || scanPos + bSize > newMoovBytes.length) {
+                        scanPos++;
+                        continue;
+                    }
+                    const tag = String.fromCharCode(
+                        newMoovBytes[scanPos+4], newMoovBytes[scanPos+5],
+                        newMoovBytes[scanPos+6], newMoovBytes[scanPos+7]
+                    );
+                    if (tag === 'stco') {
+                        const entryCount = newMoovView.getUint32(scanPos + 12, false);
+                        for (let i = 0; i < entryCount; i++) {
+                            const curOff = newMoovView.getUint32(scanPos + 16 + i * 4, false);
+                            newMoovView.setUint32(scanPos + 16 + i * 4, curOff + delta, false);
+                        }
+                    } else if (tag === 'co64') {
+                        const entryCount = newMoovView.getUint32(scanPos + 12, false);
+                        for (let i = 0; i < entryCount; i++) {
+                            const curOffHi = newMoovView.getUint32(scanPos + 16 + i * 8, false);
+                            const curOffLo = newMoovView.getUint32(scanPos + 20 + i * 8, false);
+                            let off = BigInt(curOffHi) * 4294967296n + BigInt(curOffLo);
+                            off += BigInt(delta);
+                            newMoovView.setUint32(scanPos + 16 + i * 8, Number(off / 4294967296n), false);
+                            newMoovView.setUint32(scanPos + 20 + i * 8, Number(off % 4294967296n), false);
+                        }
+                    }
+                    scanPos += 4;
+                }
+            }
+
+            // Собираем итоговый файл
+            const result = new Uint8Array(len + delta);
+            result.set(u8.subarray(0, moovStart), 0);
+            result.set(newMoovBytes, moovStart);
+            result.set(u8.subarray(moovStart + moovLen), moovStart + newMoovLen);
+            return result.buffer;
+        } catch (e) {
+            console.warn('[MOSSAD] injectMp4Metadata error:', e);
+            return buffer;
+        }
+    }
+
+    /**
+     * Внедряет метаданные (промпт и ссылку) в WebP файл (RIFF контейнер) через XMP чанк.
+     */
+    function injectWebpMetadata(buffer, prompt, url) {
+        try {
+            const u8 = new Uint8Array(buffer);
+            const view = new DataView(buffer);
+            if (u8.length < 12) return buffer;
+            // Проверка 'RIFF' и 'WEBP'
+            const riff = String.fromCharCode(u8[0], u8[1], u8[2], u8[3]);
+            const webp = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]);
+            if (riff !== 'RIFF' || webp !== 'WEBP') return buffer;
+
+            const textEncoder = new TextEncoder();
+            const cleanXmlPrompt = (prompt || '').replace(/[<>&'"]/g, (c) => {
+                switch (c) {
+                    case '<': return '&lt;'; case '>': return '&gt;';
+                    case '&': return '&amp;'; case '\'': return '&apos;'; case '"': return '&quot;';
+                }
+                return c;
+            });
+            const cleanXmlUrl = (url || '').replace(/[<>&'"]/g, (c) => {
+                switch (c) {
+                    case '<': return '&lt;'; case '>': return '&gt;';
+                    case '&': return '&amp;'; case '\'': return '&apos;'; case '"': return '&quot;';
+                }
+                return c;
+            });
+
+            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source></rdf:Description></rdf:RDF></x:xmpmeta>`;
+            const xmpBytes = textEncoder.encode(xmpXml);
+
+            // Чанк XMP в RIFF: 'XMP ' (4 байта) + 4 байта длина (little-endian) + данные + паддинг до четного
+            const pad = (xmpBytes.length % 2 === 1) ? 1 : 0;
+            const chunkLen = 8 + xmpBytes.length + pad;
+            const xmpChunk = new Uint8Array(chunkLen);
+            const chView = new DataView(xmpChunk.buffer);
+            xmpChunk[0] = 0x58; xmpChunk[1] = 0x4D; xmpChunk[2] = 0x50; xmpChunk[3] = 0x20; // 'XMP '
+            chView.setUint32(4, xmpBytes.length, true); // little-endian
+            xmpChunk.set(xmpBytes, 8);
+
+            const result = new Uint8Array(u8.length + chunkLen);
+            result.set(u8, 0);
+            result.set(xmpChunk, u8.length);
+
+            // Обновляем размер RIFF в заголовке (offset 4, 4 байта little-endian = размер_файла - 8)
+            const resView = new DataView(result.buffer);
+            resView.setUint32(4, result.length - 8, true);
+            return result.buffer;
+        } catch (e) {
+            console.warn('[MOSSAD] injectWebpMetadata error:', e);
+            return buffer;
+        }
+    }
+
+    /**
+     * Главная точка входа: определяет тип медиа и внедряет метаданные (промпт и URL).
+     * @param {Blob} rawBlob
+     * @param {string} prompt
+     * @param {string} url
+     * @returns {Promise<Blob>}
+     */
+    async function injectGrokMetadataToBlob(rawBlob, prompt, url) {
+        if (!rawBlob) return rawBlob;
+        const cleanPrompt = (prompt || '').trim();
+        const cleanUrl = (url || location.href || '').trim();
+        if (!cleanPrompt && !cleanUrl) return rawBlob;
+
+        try {
+            const arrayBuffer = await rawBlob.arrayBuffer();
+            const u8 = new Uint8Array(arrayBuffer);
+            if (u8.length < 12) return rawBlob;
+
+            let enrichedBuffer = arrayBuffer;
+
+            // 1. Проверка MP4 (байты 4..7 === 'ftyp')
+            if (u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70) {
+                enrichedBuffer = injectMp4Metadata(arrayBuffer, cleanPrompt, cleanUrl);
+            }
+            // 2. Проверка PNG (сигнатура 89 50 4E 47)
+            else if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4E && u8[3] === 0x47) {
+                enrichedBuffer = injectPngMetadata(arrayBuffer, cleanPrompt, cleanUrl);
+            }
+            // 3. Проверка JPEG (FF D8)
+            else if (u8[0] === 0xFF && u8[1] === 0xD8) {
+                enrichedBuffer = injectJpegMetadata(arrayBuffer, cleanPrompt, cleanUrl);
+            }
+            // 4. Проверка WebP (RIFF....WEBP)
+            else if (u8[0] === 0x52 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x46 &&
+                     u8[8] === 0x57 && u8[9] === 0x45 && u8[10] === 0x42 && u8[11] === 0x50) {
+                enrichedBuffer = injectWebpMetadata(arrayBuffer, cleanPrompt, cleanUrl);
+            }
+
+            return new Blob([enrichedBuffer], { type: rawBlob.type || 'application/octet-stream' });
+        } catch (err) {
+            console.warn('[MOSSAD] injectGrokMetadataToBlob error:', err);
+            return rawBlob;
+        }
+    }
+
+// ============================================================
     // GROK ENGINE: Constants & Page Predicates
     // ============================================================
     const GALLERY_COLLECTION_KEY = 'mossad_grok_imagine_collection';
@@ -1411,9 +1896,139 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     // ============================================================
-    // GROK: Download with 3-Dots Fallback
     // ============================================================
-    function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null) {
+    // GROK: Prompt & Media Finders
+    // ============================================================
+
+    /**
+     * Извлекает текст промпта для текущего поста Imagine.
+     */
+    function getGrokCurrentPrompt() {
+        // 1. Поле ввода промпта (textarea или contenteditable)
+        const ta = document.querySelector('textarea, div[contenteditable="true"]');
+        if (ta) {
+            const val = (ta.value !== undefined ? ta.value : (ta.innerText || ta.textContent || '')).trim();
+            if (val) return val;
+        }
+
+        // 2. Alt-атрибут главного изображения поста
+        const mainImg = document.querySelector('main img, div[role="dialog"] img, [data-filmstrip-item="true"] img');
+        if (mainImg) {
+            const alt = (mainImg.getAttribute('alt') || '').trim();
+            if (alt && alt.length > 2 && !/^(pfp|profile|avatar|logo|image)$/i.test(alt)) {
+                return alt;
+            }
+        }
+
+        // 3. Мета-теги OpenGraph / description
+        const metaDesc = document.querySelector('meta[property="og:description"], meta[name="description"]');
+        if (metaDesc) {
+            const content = (metaDesc.getAttribute('content') || '').trim();
+            if (content && !content.toLowerCase().includes('grok is an ai') && !content.toLowerCase().includes('imagine anything')) {
+                return content;
+            }
+        }
+
+        // 4. Текстовые блоки с классом prose или атрибутами
+        const promptBlock = document.querySelector('[data-testid*="prompt"], .prose');
+        if (promptBlock && promptBlock.textContent.trim()) {
+            return promptBlock.textContent.trim();
+        }
+
+        return '';
+    }
+
+    /**
+     * Находит активный медиа-элемент на странице поста Grok (видео или изображение).
+     */
+    function getGrokMedia() {
+        // 1. Видео
+        const video = getActiveVideo() || document.querySelector('main video, div[role="dialog"] video, video');
+        if (video) {
+            let src = '';
+            const sources = Array.from(video.querySelectorAll('source'));
+            for (const s of sources) {
+                if (s.src) { src = s.src; break; }
+            }
+            if (!src && video.currentSrc) src = video.currentSrc;
+            if (!src && video.src) src = video.src;
+            if (src) return { url: src, type: 'video', ext: 'mp4' };
+        }
+
+        // 2. Изображение
+        const candidates = Array.from(document.querySelectorAll('main img, div[role="dialog"] img, [data-filmstrip-item="true"] img, img'));
+        const validImgs = candidates.filter(img => {
+            if (!img.src) return false;
+            const s = img.src.toLowerCase();
+            if (s.includes('avatar') || s.includes('profile') || s.includes('pfp') || s.includes('icon')) return false;
+            const w = img.naturalWidth || img.width || 0;
+            const h = img.naturalHeight || img.height || 0;
+            return (w >= 150 && h >= 150) || s.includes('share-images') || s.includes('imagine-public') || s.includes('assets.grok.com');
+        }).sort((a, b) => {
+            const areaA = (a.naturalWidth || a.width || 0) * (a.naturalHeight || a.height || 0);
+            const areaB = (b.naturalWidth || b.width || 0) * (b.naturalHeight || b.height || 0);
+            return areaB - areaA;
+        });
+
+        if (validImgs.length > 0) {
+            const bestImg = validImgs[0];
+            let ext = 'jpg';
+            const srcLower = bestImg.src.toLowerCase();
+            if (srcLower.includes('.png')) ext = 'png';
+            else if (srcLower.includes('.webp')) ext = 'webp';
+            return { url: bestImg.src, type: 'photo', ext };
+        }
+
+        return null;
+    }
+
+    let _isGrokInternalClick = false;
+
+    /**
+     * Фолбэк на клик нативной кнопки Download при невозможности прямой загрузки.
+     */
+    function fallbackGrokNativeClick(onSuccess) {
+        _isGrokInternalClick = true;
+        try {
+            const dlKeywords = ['download', 'скачать'];
+            let directBtn = findGrokButton(dlKeywords);
+            if (!directBtn) {
+                directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                    if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+                    const path = b.querySelector('path');
+                    const d = path ? (path.getAttribute('d') || '') : '';
+                    return d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
+                });
+            }
+
+            if (directBtn) {
+                triggerClick(directBtn, 'Grok Direct Download (Fallback)');
+                if (onSuccess) onSuccess();
+                return;
+            }
+
+            const dotsBtn = findGrok3DotsMenuButton();
+            if (dotsBtn) {
+                triggerClick(dotsBtn, 'Post actions (for Fallback Download)');
+                retryAction((attempt) => {
+                    const innerDl = findGrokButton(dlKeywords);
+                    if (innerDl) {
+                        triggerClick(innerDl, 'Grok Download from 3-dots (Fallback)');
+                        if (onSuccess) onSuccess();
+                        return true;
+                    }
+                    return false;
+                }, [100, 300, 500]);
+            }
+        } finally {
+            setTimeout(() => { _isGrokInternalClick = false; }, 1000);
+        }
+    }
+
+    // ============================================================
+    // GROK: Download with Metadata Injection & Fallback
+    // ============================================================
+    function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
         if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
         blurActiveInput();
 
@@ -1444,118 +2059,172 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
         }
 
-        // Проверка дубликата в истории
-        const hasVid = getActiveVideo() !== null;
+        const media = getGrokMedia();
+        const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
         const currentMediaType = hasVid ? 'video' : 'photo';
+
+        // Проверка дубликата в истории
         if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl)) {
-            checkFileInHistory(null, null, currentPostUrl, currentMediaType).then(record => {
+            checkFileInHistory(null, media ? media.url : null, currentPostUrl, currentMediaType).then(record => {
                 if (record) {
-                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record));
+                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback));
                 } else {
-                    triggerGrokDownload(true, null);
+                    triggerGrokDownload(true, null, onDoneCallback);
                 }
             });
             return true;
         }
 
-        const dlKeywords = ['download', 'скачать'];
+        const prompt = getGrokCurrentPrompt();
+        const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
+        const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
+        const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
+        const ext2 = media ? media.ext : (hasVid ? 'mp4' : 'jpg');
+        const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(duplicateRecord.filename) : (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
+        const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
 
-        const onDownloadTriggered = () => {
-            const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
-            const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
-            const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
-            const ext2 = hasVid ? 'mp4' : 'jpg';
-            const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(duplicateRecord.filename) : (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
-            const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
+        // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4
+        const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
+        let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
 
-            // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4
-            const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
-            let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
+        if (config.filenameTemplateEnabled) {
+            const now2 = new Date();
+            const pad2 = (n) => String(n).padStart(2, '0');
+            const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
+            const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
+            const vars = {
+                id:           currentPostId || '',
+                conv:         currentConvId || '',
+                conversation: currentConvId || '',
+                uuid:         currentPostId || '',
+                hash:         currentPostId || '',
+                postid:       currentPostId || '',
+                id8:          shortId,
+                hash8:        shortId,
+                uuid8:        shortId,
+                domain:       'grok',
+                title:        'Imagine - Grok',
+                username:     'grok',
+                user:         'grok',
+                author:       'grok',
+                date:         dateStr,
+                time:         timeStr,
+                ext:          ext2,
+                n:            String(Date.now()).slice(-6),
+                dbl:          dblSuffix,
+                oldname:      rootBase,
+                copy:         rootBase,
+                root:         rootBase
+            };
+            grokFilename = typeof renderFilenameTemplate === 'function'
+                ? renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2)
+                : grokFilename;
+        }
 
-            if (config.filenameTemplateEnabled) {
-                const now2 = new Date();
-                const pad2 = (n) => String(n).padStart(2, '0');
-                const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
-                const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
-                const vars = {
-                    id:           currentPostId || '',
-                    conv:         currentConvId || '',
-                    conversation: currentConvId || '',
-                    uuid:         currentPostId || '',
-                    hash:         currentPostId || '',
-                    postid:       currentPostId || '',
-                    id8:          shortId,
-                    hash8:        shortId,
-                    uuid8:        shortId,
-                    domain:       'grok',
-                    title:        'Imagine - Grok',
-                    username:     'grok',
-                    user:         'grok',
-                    author:       'grok',
-                    date:         dateStr,
-                    time:         timeStr,
-                    ext:          ext2,
-                    n:            String(Date.now()).slice(-6),
-                    dbl:          dblSuffix,
-                    oldname:      rootBase,
-                    copy:         rootBase,
-                    root:         rootBase
-                };
-                grokFilename = typeof renderFilenameTemplate === 'function'
-                    ? renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2)
-                    : grokFilename;
-            }
-
-            showToast(`📥 Скачивание: ${grokFilename}...`);
-            saveFileToHistory({
-                hash: '',
-                filename: grokFilename,
-                rootFilename: rootBase || (typeof extractRootFilename === 'function' ? extractRootFilename(grokFilename) : grokFilename),
-                url: currentPostUrl,
-                postUrl: currentPostUrl,
-                domain: 'grok.com',
-                type: currentMediaType
-            });
+        const onDownloadFinalized = () => {
             if (typeof performPostDownloadAction === 'function') {
                 performPostDownloadAction();
             }
+            if (onDoneCallback) onDoneCallback();
         };
 
-        // 1. Прямая кнопка на панели
-        let directBtn = findGrokButton(dlKeywords);
-        if (!directBtn) {
-            // Поиск по SVG характерной иконки загрузки
-            directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
-                if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
-                const path = b.querySelector('path');
-                const d = path ? (path.getAttribute('d') || '') : '';
-                return d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
-            });
-        }
+        if (media && media.url) {
+            showToast(`⏳ Загрузка: ${grokFilename}...`);
+            const isBlobUrl = media.url.startsWith('blob:');
 
-        if (directBtn) {
-            triggerClick(directBtn, 'Grok Direct Download');
-            onDownloadTriggered();
-            return true;
-        }
-
-        // 2. Если прямой кнопки нет — открываем три точки
-        const dotsBtn = findGrok3DotsMenuButton();
-        if (dotsBtn) {
-            triggerClick(dotsBtn, 'Post actions (for Download)');
-            retryAction((attempt) => {
-                const innerDl = findGrokButton(dlKeywords);
-                if (innerDl) {
-                    triggerClick(innerDl, 'Grok Download from 3-dots');
-                    onDownloadTriggered();
-                    return true;
+            const handleBlobResponse = async (rawBlob) => {
+                try {
+                    showToast('⏳ Запись метаданных...');
+                    const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl);
+                    saveBlobToDisk(enrichedBlob, grokFilename);
+                    onDownloadFinalized();
+                } catch (err) {
+                    console.error('[MOSSAD] Metadata injection failed, saving raw blob:', err);
+                    saveBlobToDisk(rawBlob, grokFilename);
+                    onDownloadFinalized();
                 }
-                return false;
-            }, [100, 300, 500]);
+            };
+
+            const finalizeFallback = () => {
+                console.warn('[MOSSAD] Media fetch failed, using native Grok download button fallback');
+                fallbackGrokNativeClick(onDownloadFinalized);
+            };
+
+            if (isBlobUrl) {
+                fetch(media.url)
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        return res.blob();
+                    })
+                    .then(handleBlobResponse)
+                    .catch(finalizeFallback);
+                return true;
+            }
+
+            if (typeof GM_xmlhttpRequest === 'function') {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: media.url,
+                    responseType: 'blob',
+                    onprogress: (p) => {
+                        if (p.total > 0) {
+                            const pct = Math.round((p.loaded / p.total) * 100);
+                            showToast(`⏳ Скачивание: ${pct}%`);
+                        }
+                    },
+                    onload: (res) => {
+                        if (res.status === 200 && res.response) {
+                            handleBlobResponse(res.response);
+                        } else {
+                            finalizeFallback();
+                        }
+                    },
+                    onerror: () => finalizeFallback()
+                });
+            } else {
+                fetch(media.url)
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        return res.blob();
+                    })
+                    .then(handleBlobResponse)
+                    .catch(finalizeFallback);
+            }
             return true;
         }
 
-        return false;
+        // Если медиа-URL не найден — стандартный клик кнопки
+        fallbackGrokNativeClick(onDownloadFinalized);
+        return true;
+    }
+
+    // Перехват клика по нативной кнопке скачивания Grok на странице
+    if (typeof document !== 'undefined') {
+        document.addEventListener('click', function handleGrokNativeDownloadClick(e) {
+            if (rootDomain !== 'grok.com' || _isGrokInternalClick) return;
+            const btn = e.target.closest('button, [role="button"]');
+            if (!btn || (btn.id && btn.id.startsWith('mossad-'))) return;
+
+            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+            const title = (btn.getAttribute('title') || '').toLowerCase();
+            const txt = (btn.textContent || '').trim().toLowerCase();
+            const isDl = aria.includes('download') || aria.includes('скачать') || title.includes('download') || title.includes('скачать') || txt === 'download' || txt === 'скачать';
+
+            let isSvgDl = false;
+            if (!isDl) {
+                const path = btn.querySelector('path');
+                const d = path ? (path.getAttribute('d') || '') : '';
+                isSvgDl = (d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C'));
+            }
+
+            if (isDl || isSvgDl) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                console.log('[MOSSAD] Intercepted native Grok download button -> triggerGrokDownload with metadata');
+                triggerGrokDownload();
+            }
+        }, true);
     }
 
 
@@ -4654,7 +5323,7 @@ function findMediaForDownload() {
 
     let _activeDuplicateRecord = null;
 
-    function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null) {
+    function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
         if (duplicateRecord) {
             _activeDuplicateRecord = duplicateRecord;
         } else if (!bypassDuplicateCheck) {
@@ -4662,7 +5331,7 @@ function findMediaForDownload() {
         }
 
         if (rootDomain === 'grok.com') {
-            if (triggerGrokDownload(bypassDuplicateCheck, duplicateRecord || _activeDuplicateRecord)) return;
+            if (triggerGrokDownload(bypassDuplicateCheck, duplicateRecord || _activeDuplicateRecord, onDoneCallback)) return;
         }
 
         const media = findMediaForDownload();
@@ -5110,6 +5779,102 @@ function findMediaForDownload() {
         const dirs = config.slideshowDirections;
         if (!dirs || dirs.length === 0) { stopSlideshow(); return; }
 
+        const advanceToNext = () => {
+            // Gallery Slideshow: вместо клавиши — переходим на следующий URL из списка
+            if (rootDomain === 'grok.com') {
+                const hasGrokSs = (() => {
+                    try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
+                })();
+                if (window._mossadGalleryActive || hasGrokSs) {
+                    if (typeof window._mossadGalleryNextFn === 'function') {
+                        window._mossadGalleryNextFn();
+                        return;
+                    } else if (typeof grokGalleryStepNext === 'function') {
+                        grokGalleryStepNext();
+                        return;
+                    }
+                }
+            }
+
+            // Pinterest ссылочная навигация
+            if (rootDomain.includes('pinterest.')) {
+                selectNextPinterestPin('next');
+                return;
+            }
+
+            // RedGifs навигация (изолирована от URL-детектора!)
+            if (rootDomain.includes('redgifs.com')) {
+                const dir = (dirs && dirs.length) ? dirs[0] : 'down';
+                if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
+                    window.MOSSAD_ENGINES.redgifs.navigate(dir);
+                } else if (typeof redGifsNavigate === 'function') {
+                    redGifsNavigate(dir);
+                }
+                return;
+            }
+
+            // Grok навигация по киноплёнке (filmstrip) на странице поста
+            if (rootDomain === 'grok.com' && isGrokPostPage()) {
+                const isFwd = ['down', 'right'].includes((dirs && dirs.length) ? dirs[0] : 'down');
+                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
+                    return;
+                }
+            }
+
+            // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
+            const startUrl = location.href;
+            const key = getArrowKey(dirs[0]);
+
+            const sendSlideKey = () => {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+                triggerUniversalFullScreen();
+            };
+
+            // Попытка 1: исходное нажатие
+            sendSlideKey();
+
+            // Проверяем через 1 секунду
+            setTimeout(() => {
+                if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                if (location.href !== startUrl) return; // Успешно перелистнулось с 1-й попытки
+
+                // Попытка 2: URL не изменился через 1 секунду
+                console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
+                sendSlideKey();
+
+                // Проверяем через 3 секунды (на 4-й секунде от начала)
+                setTimeout(() => {
+                    if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                    if (location.href !== startUrl) return; // Успешно перелистнулось со 2-й попытки
+
+                    // Попытка 3: URL всё ещё не изменился через 3 секунды
+                    console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
+                    sendSlideKey();
+
+                    // Даем 1 секунду на завершение 3-й попытки
+                    setTimeout(() => {
+                        if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                        if (location.href !== startUrl) return; // Успешно перелистнулось с 3-й попытки
+
+                        // URL так и не изменился после 3 попыток -> дошёл до конца ленты, упёрся
+                        console.warn('[MOSSAD] Достигнут конец ленты (3 попытки без смены URL)');
+                        if (config.loopFeed) {
+                            showToast('🔄 Конец ленты: повтор плейлиста (R)...');
+                            doRewind(() => {
+                                if (slideshowActive && !slideshowPaused) {
+                                    scheduleNextSlideCycle(0);
+                                }
+                            });
+                        } else {
+                            stopSlideshow();
+                            showToast('⏹ Слайдшоу остановлен: конец ленты', true);
+                        }
+                    }, 1000);
+                }, 3000);
+            }, 1000);
+        };
+
         // Скачивание перед перелистыванием
         if (config.downloadType !== 'none') {
             const hasVideo = getActiveVideo() !== null;
@@ -5126,112 +5891,39 @@ function findMediaForDownload() {
                     const _h = Array.isArray(config.hk?.download) ? config.hk.download[0] : config.hk?.download;
                     const _dlLabel = _h?.key ? `${_h.ctrl?'Ctrl+':''}${_h.alt?'Alt+':''}${_h.shift?'Shift+':''}${_h.key}` : 'DL';
                     showToast(`⚠️ ${secsAgo}с назад уже скачано. Повтор: ${_dlLabel}`);
+                    advanceToNext();
+                    return;
                 } else {
                     sessionStorage.setItem('mossad_auto_dl_url', _dlPageUrl);
                     sessionStorage.setItem('mossad_auto_dl_time', String(_dlNow));
-                    triggerDownload();
-                    if (config.pdAction === 'del' && rootDomain === 'grok.com') {
-                        setTimeout(() => window.close(), 1000);
-                        return;
-                    }
+                    
+                    let advanced = false;
+                    const onDownloadComplete = () => {
+                        if (advanced) return;
+                        advanced = true;
+                        if (config.pdAction === 'del' && rootDomain === 'grok.com') {
+                            setTimeout(() => window.close(), 1000);
+                            return;
+                        }
+                        advanceToNext();
+                    };
+
+                    // Страховочный таймаут: если скачивание/сеть задерживается, продолжаем листание через 8с
+                    const safetyTimer = setTimeout(() => {
+                        console.warn('[MOSSAD] Auto-download wait timeout (8s), advancing slide');
+                        onDownloadComplete();
+                    }, 8000);
+
+                    triggerDownload(false, null, () => {
+                        clearTimeout(safetyTimer);
+                        onDownloadComplete();
+                    });
+                    return;
                 }
             }
         }
 
-        
-        // Gallery Slideshow: вместо клавиши — переходим на следующий URL из списка
-        if (rootDomain === 'grok.com') {
-            const hasGrokSs = (() => {
-                try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
-            })();
-            if (window._mossadGalleryActive || hasGrokSs) {
-                if (typeof window._mossadGalleryNextFn === 'function') {
-                    window._mossadGalleryNextFn();
-                    return;
-                } else if (typeof grokGalleryStepNext === 'function') {
-                    grokGalleryStepNext();
-                    return;
-                }
-            }
-        }
-
-        // Pinterest ссылочная навигация
-        if (rootDomain.includes('pinterest.')) {
-            selectNextPinterestPin('next');
-            return;
-        }
-
-        // RedGifs навигация (изолирована от URL-детектора!)
-        if (rootDomain.includes('redgifs.com')) {
-            const dir = (dirs && dirs.length) ? dirs[0] : 'down';
-            if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
-                window.MOSSAD_ENGINES.redgifs.navigate(dir);
-            } else if (typeof redGifsNavigate === 'function') {
-                redGifsNavigate(dir);
-            }
-            return;
-        }
-
-        // Grok навигация по киноплёнке (filmstrip) на странице поста
-        if (rootDomain === 'grok.com' && isGrokPostPage()) {
-            const isFwd = ['down', 'right'].includes((dirs && dirs.length) ? dirs[0] : 'down');
-            if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
-                return;
-            }
-        }
-
-        // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
-        const startUrl = location.href;
-        const key = getArrowKey(dirs[0]);
-
-        const sendSlideKey = () => {
-            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-            document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
-            triggerUniversalFullScreen();
-        };
-
-        // Попытка 1: исходное нажатие
-        sendSlideKey();
-
-        // Проверяем через 1 секунду
-        setTimeout(() => {
-            if (!slideshowActive || slideshowPaused || _isRewinding) return;
-            if (location.href !== startUrl) return; // Успешно перелистнулось с 1-й попытки
-
-            // Попытка 2: URL не изменился через 1 секунду
-            console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
-            sendSlideKey();
-
-            // Проверяем через 3 секунды (на 4-й секунде от начала)
-            setTimeout(() => {
-                if (!slideshowActive || slideshowPaused || _isRewinding) return;
-                if (location.href !== startUrl) return; // Успешно перелистнулось со 2-й попытки
-
-                // Попытка 3: URL всё ещё не изменился через 3 секунды
-                console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
-                sendSlideKey();
-
-                // Даем 1 секунду на завершение 3-й попытки
-                setTimeout(() => {
-                    if (!slideshowActive || slideshowPaused || _isRewinding) return;
-                    if (location.href !== startUrl) return; // Успешно перелистнулось с 3-й попытки
-
-                    // URL так и не изменился после 3 попыток -> дошёл до конца ленты, упёрся
-                    console.warn('[MOSSAD] Достигнут конец ленты (3 попытки без смены URL)');
-                    if (config.loopFeed) {
-                        showToast('🔄 Конец ленты: повтор плейлиста (R)...');
-                        doRewind(() => {
-                            if (slideshowActive && !slideshowPaused) {
-                                scheduleNextSlideCycle(0);
-                            }
-                        });
-                    } else {
-                        stopSlideshow();
-                        showToast('⏹ Слайдшоу остановлен: конец ленты', true);
-                    }
-                }, 1000);
-            }, 3000);
-        }, 1000);
+        advanceToNext();
     }
 
     function getPinMediaType() {
@@ -6416,7 +7108,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-18</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-19</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>

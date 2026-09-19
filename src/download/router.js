@@ -97,7 +97,7 @@
 
     let _activeDuplicateRecord = null;
 
-    function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null) {
+    function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
         if (duplicateRecord) {
             _activeDuplicateRecord = duplicateRecord;
         } else if (!bypassDuplicateCheck) {
@@ -105,7 +105,7 @@
         }
 
         if (rootDomain === 'grok.com') {
-            if (triggerGrokDownload(bypassDuplicateCheck, duplicateRecord || _activeDuplicateRecord)) return;
+            if (triggerGrokDownload(bypassDuplicateCheck, duplicateRecord || _activeDuplicateRecord, onDoneCallback)) return;
         }
 
         const media = findMediaForDownload();

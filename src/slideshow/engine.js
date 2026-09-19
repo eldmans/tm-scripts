@@ -265,6 +265,102 @@
         const dirs = config.slideshowDirections;
         if (!dirs || dirs.length === 0) { stopSlideshow(); return; }
 
+        const advanceToNext = () => {
+            // Gallery Slideshow: вместо клавиши — переходим на следующий URL из списка
+            if (rootDomain === 'grok.com') {
+                const hasGrokSs = (() => {
+                    try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
+                })();
+                if (window._mossadGalleryActive || hasGrokSs) {
+                    if (typeof window._mossadGalleryNextFn === 'function') {
+                        window._mossadGalleryNextFn();
+                        return;
+                    } else if (typeof grokGalleryStepNext === 'function') {
+                        grokGalleryStepNext();
+                        return;
+                    }
+                }
+            }
+
+            // Pinterest ссылочная навигация
+            if (rootDomain.includes('pinterest.')) {
+                selectNextPinterestPin('next');
+                return;
+            }
+
+            // RedGifs навигация (изолирована от URL-детектора!)
+            if (rootDomain.includes('redgifs.com')) {
+                const dir = (dirs && dirs.length) ? dirs[0] : 'down';
+                if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
+                    window.MOSSAD_ENGINES.redgifs.navigate(dir);
+                } else if (typeof redGifsNavigate === 'function') {
+                    redGifsNavigate(dir);
+                }
+                return;
+            }
+
+            // Grok навигация по киноплёнке (filmstrip) на странице поста
+            if (rootDomain === 'grok.com' && isGrokPostPage()) {
+                const isFwd = ['down', 'right'].includes((dirs && dirs.length) ? dirs[0] : 'down');
+                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
+                    return;
+                }
+            }
+
+            // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
+            const startUrl = location.href;
+            const key = getArrowKey(dirs[0]);
+
+            const sendSlideKey = () => {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+                triggerUniversalFullScreen();
+            };
+
+            // Попытка 1: исходное нажатие
+            sendSlideKey();
+
+            // Проверяем через 1 секунду
+            setTimeout(() => {
+                if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                if (location.href !== startUrl) return; // Успешно перелистнулось с 1-й попытки
+
+                // Попытка 2: URL не изменился через 1 секунду
+                console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
+                sendSlideKey();
+
+                // Проверяем через 3 секунды (на 4-й секунде от начала)
+                setTimeout(() => {
+                    if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                    if (location.href !== startUrl) return; // Успешно перелистнулось со 2-й попытки
+
+                    // Попытка 3: URL всё ещё не изменился через 3 секунды
+                    console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
+                    sendSlideKey();
+
+                    // Даем 1 секунду на завершение 3-й попытки
+                    setTimeout(() => {
+                        if (!slideshowActive || slideshowPaused || _isRewinding) return;
+                        if (location.href !== startUrl) return; // Успешно перелистнулось с 3-й попытки
+
+                        // URL так и не изменился после 3 попыток -> дошёл до конца ленты, упёрся
+                        console.warn('[MOSSAD] Достигнут конец ленты (3 попытки без смены URL)');
+                        if (config.loopFeed) {
+                            showToast('🔄 Конец ленты: повтор плейлиста (R)...');
+                            doRewind(() => {
+                                if (slideshowActive && !slideshowPaused) {
+                                    scheduleNextSlideCycle(0);
+                                }
+                            });
+                        } else {
+                            stopSlideshow();
+                            showToast('⏹ Слайдшоу остановлен: конец ленты', true);
+                        }
+                    }, 1000);
+                }, 3000);
+            }, 1000);
+        };
+
         // Скачивание перед перелистыванием
         if (config.downloadType !== 'none') {
             const hasVideo = getActiveVideo() !== null;
@@ -281,112 +377,39 @@
                     const _h = Array.isArray(config.hk?.download) ? config.hk.download[0] : config.hk?.download;
                     const _dlLabel = _h?.key ? `${_h.ctrl?'Ctrl+':''}${_h.alt?'Alt+':''}${_h.shift?'Shift+':''}${_h.key}` : 'DL';
                     showToast(`⚠️ ${secsAgo}с назад уже скачано. Повтор: ${_dlLabel}`);
+                    advanceToNext();
+                    return;
                 } else {
                     sessionStorage.setItem('mossad_auto_dl_url', _dlPageUrl);
                     sessionStorage.setItem('mossad_auto_dl_time', String(_dlNow));
-                    triggerDownload();
-                    if (config.pdAction === 'del' && rootDomain === 'grok.com') {
-                        setTimeout(() => window.close(), 1000);
-                        return;
-                    }
+                    
+                    let advanced = false;
+                    const onDownloadComplete = () => {
+                        if (advanced) return;
+                        advanced = true;
+                        if (config.pdAction === 'del' && rootDomain === 'grok.com') {
+                            setTimeout(() => window.close(), 1000);
+                            return;
+                        }
+                        advanceToNext();
+                    };
+
+                    // Страховочный таймаут: если скачивание/сеть задерживается, продолжаем листание через 8с
+                    const safetyTimer = setTimeout(() => {
+                        console.warn('[MOSSAD] Auto-download wait timeout (8s), advancing slide');
+                        onDownloadComplete();
+                    }, 8000);
+
+                    triggerDownload(false, null, () => {
+                        clearTimeout(safetyTimer);
+                        onDownloadComplete();
+                    });
+                    return;
                 }
             }
         }
 
-        
-        // Gallery Slideshow: вместо клавиши — переходим на следующий URL из списка
-        if (rootDomain === 'grok.com') {
-            const hasGrokSs = (() => {
-                try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
-            })();
-            if (window._mossadGalleryActive || hasGrokSs) {
-                if (typeof window._mossadGalleryNextFn === 'function') {
-                    window._mossadGalleryNextFn();
-                    return;
-                } else if (typeof grokGalleryStepNext === 'function') {
-                    grokGalleryStepNext();
-                    return;
-                }
-            }
-        }
-
-        // Pinterest ссылочная навигация
-        if (rootDomain.includes('pinterest.')) {
-            selectNextPinterestPin('next');
-            return;
-        }
-
-        // RedGifs навигация (изолирована от URL-детектора!)
-        if (rootDomain.includes('redgifs.com')) {
-            const dir = (dirs && dirs.length) ? dirs[0] : 'down';
-            if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
-                window.MOSSAD_ENGINES.redgifs.navigate(dir);
-            } else if (typeof redGifsNavigate === 'function') {
-                redGifsNavigate(dir);
-            }
-            return;
-        }
-
-        // Grok навигация по киноплёнке (filmstrip) на странице поста
-        if (rootDomain === 'grok.com' && isGrokPostPage()) {
-            const isFwd = ['down', 'right'].includes((dirs && dirs.length) ? dirs[0] : 'down');
-            if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
-                return;
-            }
-        }
-
-        // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
-        const startUrl = location.href;
-        const key = getArrowKey(dirs[0]);
-
-        const sendSlideKey = () => {
-            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-            document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
-            triggerUniversalFullScreen();
-        };
-
-        // Попытка 1: исходное нажатие
-        sendSlideKey();
-
-        // Проверяем через 1 секунду
-        setTimeout(() => {
-            if (!slideshowActive || slideshowPaused || _isRewinding) return;
-            if (location.href !== startUrl) return; // Успешно перелистнулось с 1-й попытки
-
-            // Попытка 2: URL не изменился через 1 секунду
-            console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
-            sendSlideKey();
-
-            // Проверяем через 3 секунды (на 4-й секунде от начала)
-            setTimeout(() => {
-                if (!slideshowActive || slideshowPaused || _isRewinding) return;
-                if (location.href !== startUrl) return; // Успешно перелистнулось со 2-й попытки
-
-                // Попытка 3: URL всё ещё не изменился через 3 секунды
-                console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
-                sendSlideKey();
-
-                // Даем 1 секунду на завершение 3-й попытки
-                setTimeout(() => {
-                    if (!slideshowActive || slideshowPaused || _isRewinding) return;
-                    if (location.href !== startUrl) return; // Успешно перелистнулось с 3-й попытки
-
-                    // URL так и не изменился после 3 попыток -> дошёл до конца ленты, упёрся
-                    console.warn('[MOSSAD] Достигнут конец ленты (3 попытки без смены URL)');
-                    if (config.loopFeed) {
-                        showToast('🔄 Конец ленты: повтор плейлиста (R)...');
-                        doRewind(() => {
-                            if (slideshowActive && !slideshowPaused) {
-                                scheduleNextSlideCycle(0);
-                            }
-                        });
-                    } else {
-                        stopSlideshow();
-                        showToast('⏹ Слайдшоу остановлен: конец ленты', true);
-                    }
-                }, 1000);
-            }, 3000);
-        }, 1000);
+        advanceToNext();
     }
 
     function getPinMediaType() {

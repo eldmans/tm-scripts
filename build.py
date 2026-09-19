@@ -12,6 +12,7 @@ MODULES = [
     "src/engines/noodle.js",
     "src/download/blob.js",
     "src/download/history.js",
+    "src/download/metadata.js",
     "src/engines/grok/constants.js",
     "src/engines/grok/helpers.js",
     "src/engines/grok/delete.js",
