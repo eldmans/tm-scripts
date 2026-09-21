@@ -303,3 +303,40 @@
         return filename;
     }
     window.renderFilenameTemplate = renderFilenameTemplate;
+
+    /**
+     * Асинхронно отправляет промпт в локальный Universal Prompt Vault (http://127.0.0.1:5999).
+     * Работает в фоне без блокировки интерфейса и без назойливых ошибок при выключенном сервере.
+     */
+    function sendPromptToVault(prompt, model = '', source = '', url = '') {
+        if (!prompt || !prompt.trim()) return;
+        const payload = JSON.stringify({
+            prompt: prompt.trim(),
+            model: model || '',
+            source: source || location.hostname,
+            url: url || location.href
+        });
+
+        try {
+            if (typeof GM_xmlhttpRequest === 'function') {
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: 'http://127.0.0.1:5999/api/save_prompt',
+                    headers: { 'Content-Type': 'application/json' },
+                    data: payload,
+                    timeout: 3000,
+                    onload: () => {},
+                    onerror: () => {}
+                });
+            } else if (typeof fetch === 'function') {
+                fetch('http://127.0.0.1:5999/api/save_prompt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload,
+                    mode: 'cors'
+                }).catch(() => {});
+            }
+        } catch (e) {}
+    }
+    window.sendPromptToVault = sendPromptToVault;
+

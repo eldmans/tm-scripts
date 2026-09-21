@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.21
+// @version      1.3.22
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.21';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.22';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -743,6 +743,42 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return filename;
     }
     window.renderFilenameTemplate = renderFilenameTemplate;
+
+    /**
+     * Асинхронно отправляет промпт в локальный Universal Prompt Vault (http://127.0.0.1:5999).
+     * Работает в фоне без блокировки интерфейса и без назойливых ошибок при выключенном сервере.
+     */
+    function sendPromptToVault(prompt, model = '', source = '', url = '') {
+        if (!prompt || !prompt.trim()) return;
+        const payload = JSON.stringify({
+            prompt: prompt.trim(),
+            model: model || '',
+            source: source || location.hostname,
+            url: url || location.href
+        });
+
+        try {
+            if (typeof GM_xmlhttpRequest === 'function') {
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: 'http://127.0.0.1:5999/api/save_prompt',
+                    headers: { 'Content-Type': 'application/json' },
+                    data: payload,
+                    timeout: 3000,
+                    onload: () => {},
+                    onerror: () => {}
+                });
+            } else if (typeof fetch === 'function') {
+                fetch('http://127.0.0.1:5999/api/save_prompt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload,
+                    mode: 'cors'
+                }).catch(() => {});
+            }
+        } catch (e) {}
+    }
+    window.sendPromptToVault = sendPromptToVault;
 
 // ============================================
     // NOODLE MAGAZINE MODULE
@@ -2110,6 +2146,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const prompt = getGrokCurrentPrompt();
         const model = getGrokCurrentModel();
         const promptHash = computeGrokPromptHash(prompt);
+        if (prompt && typeof sendPromptToVault === 'function') {
+            sendPromptToVault(prompt, model, 'grok.com', currentPostUrl);
+        }
         const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
         const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
         const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
@@ -2251,6 +2290,26 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
         }, true);
     }
+
+    // Автоматический перехват отправки промпта в Grok в Universal Prompt Vault
+    if (typeof document !== 'undefined') {
+        document.addEventListener('keydown', function handleGrokPromptSubmit(e) {
+            if (rootDomain !== 'grok.com') return;
+            if (e.key === 'Enter' && !e.shiftKey) {
+                const ta = document.querySelector('textarea, div[contenteditable="true"]');
+                if (ta && (ta === e.target || ta.contains(e.target))) {
+                    const txt = (ta.value !== undefined ? ta.value : (ta.innerText || ta.textContent || '')).trim();
+                    if (txt && txt.length > 2) {
+                        const model = typeof getGrokCurrentModel === 'function' ? getGrokCurrentModel() : 'Grok Imagine';
+                        if (typeof sendPromptToVault === 'function') {
+                            sendPromptToVault(txt, model, 'grok.com', location.href);
+                        }
+                    }
+                }
+            }
+        }, true);
+    }
+
 
 
     // ============================================================

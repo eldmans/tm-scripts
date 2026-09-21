@@ -345,6 +345,9 @@
         const prompt = getGrokCurrentPrompt();
         const model = getGrokCurrentModel();
         const promptHash = computeGrokPromptHash(prompt);
+        if (prompt && typeof sendPromptToVault === 'function') {
+            sendPromptToVault(prompt, model, 'grok.com', currentPostUrl);
+        }
         const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
         const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
         const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
@@ -486,6 +489,26 @@
             }
         }, true);
     }
+
+    // Автоматический перехват отправки промпта в Grok в Universal Prompt Vault
+    if (typeof document !== 'undefined') {
+        document.addEventListener('keydown', function handleGrokPromptSubmit(e) {
+            if (rootDomain !== 'grok.com') return;
+            if (e.key === 'Enter' && !e.shiftKey) {
+                const ta = document.querySelector('textarea, div[contenteditable="true"]');
+                if (ta && (ta === e.target || ta.contains(e.target))) {
+                    const txt = (ta.value !== undefined ? ta.value : (ta.innerText || ta.textContent || '')).trim();
+                    if (txt && txt.length > 2) {
+                        const model = typeof getGrokCurrentModel === 'function' ? getGrokCurrentModel() : 'Grok Imagine';
+                        if (typeof sendPromptToVault === 'function') {
+                            sendPromptToVault(txt, model, 'grok.com', location.href);
+                        }
+                    }
+                }
+            }
+        }, true);
+    }
+
 
 
     // ============================================================
