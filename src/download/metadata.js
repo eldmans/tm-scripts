@@ -28,9 +28,9 @@
     }
 
     /**
-     * Внедряет метаданные (промпт и ссылку) в PNG файл через tEXt чанки.
+     * Внедряет метаданные (промпт, ссылку, модель и хэш) в PNG файл через tEXt чанки.
      */
-    function injectPngMetadata(buffer, prompt, url) {
+    function injectPngMetadata(buffer, prompt, url, model = '', promptHash = '') {
         try {
             const u8 = new Uint8Array(buffer);
             // Проверка PNG сигнатуры: 89 50 4E 47 0D 0A 1A 0A
@@ -64,7 +64,7 @@
                 return chunk;
             }
 
-            const commentText = `Prompt: ${prompt}\nURL: ${url}`;
+            const commentText = `Prompt: ${prompt}\nURL: ${url}${model ? `\nModel: ${model}` : ''}${promptHash ? `\nHash: ${promptHash}` : ''}`;
             const chunks = [
                 makeTextChunk('Description', prompt),
                 makeTextChunk('Comment', commentText),
@@ -72,6 +72,14 @@
                 makeTextChunk('prompt', prompt),
                 makeTextChunk('parameters', prompt)
             ];
+            if (model) {
+                chunks.push(makeTextChunk('source', model));
+                chunks.push(makeTextChunk('model', model));
+            }
+            if (promptHash) {
+                chunks.push(makeTextChunk('prompt_hash', promptHash));
+            }
+            chunks.push(makeTextChunk('timestamp', new Date().toISOString().replace('T', ' ').slice(0, 19)));
 
             const totalChunksLen = chunks.reduce((acc, c) => acc + c.length, 0);
             const result = new Uint8Array(u8.length + totalChunksLen);
@@ -90,9 +98,9 @@
     }
 
     /**
-     * Внедряет метаданные (промпт и ссылку) в JPEG файл через COM и XMP маркеры.
+     * Внедряет метаданные (промпт, ссылку, модель и хэш) в JPEG файл через COM и XMP маркеры.
      */
-    function injectJpegMetadata(buffer, prompt, url) {
+    function injectJpegMetadata(buffer, prompt, url, model = '', promptHash = '') {
         try {
             const u8 = new Uint8Array(buffer);
             if (u8.length < 4 || u8[0] !== 0xFF || u8[1] !== 0xD8) {
@@ -100,7 +108,7 @@
             }
 
             const textEncoder = new TextEncoder();
-            const comText = `Prompt: ${prompt}\nURL: ${url}`;
+            const comText = `Prompt: ${prompt}\nURL: ${url}${model ? `\nModel: ${model}` : ''}${promptHash ? `\nHash: ${promptHash}` : ''}`;
             const comBytes = textEncoder.encode(comText);
             const comLen = Math.min(comBytes.length, 65530);
 
@@ -112,28 +120,14 @@
             comMarker.set(comBytes.subarray(0, comLen), 4);
 
             // 2. XMP APP1 маркер: FF E1 [длина 2 байта] [http://ns.adobe.com/xap/1.0/\0] [XML]
-            const cleanXmlPrompt = (prompt || '').replace(/[<>&'"]/g, (c) => {
-                switch (c) {
-                    case '<': return '&lt;';
-                    case '>': return '&gt;';
-                    case '&': return '&amp;';
-                    case '\'': return '&apos;';
-                    case '"': return '&quot;';
-                }
-                return c;
-            });
-            const cleanXmlUrl = (url || '').replace(/[<>&'"]/g, (c) => {
-                switch (c) {
-                    case '<': return '&lt;';
-                    case '>': return '&gt;';
-                    case '&': return '&amp;';
-                    case '\'': return '&apos;';
-                    case '"': return '&quot;';
-                }
-                return c;
-            });
+            const escapeXml = (s) => (s || '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '\'': '&apos;', '"': '&quot;' }[c]));
+            const cleanXmlPrompt = escapeXml(prompt);
+            const cleanXmlUrl = escapeXml(url);
+            const cleanXmlModel = escapeXml(model || 'Grok');
+            const cleanXmlTitle = escapeXml((prompt || '').slice(0, 60));
+            const cleanXmlHash = escapeXml(promptHash);
 
-            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source></rdf:Description></rdf:RDF></x:xmpmeta>`;
+            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source><dc:creator><rdf:Seq><rdf:li>${cleanXmlModel}</rdf:li></rdf:Seq></dc:creator><dc:title><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlTitle}</rdf:li></rdf:Alt></dc:title><dc:identifier>${cleanXmlHash}</dc:identifier></rdf:Description></rdf:RDF></x:xmpmeta>`;
             const xmpHeader = textEncoder.encode('http://ns.adobe.com/xap/1.0/\0');
             const xmpXmlBytes = textEncoder.encode(xmpXml);
             const xmpPayloadLen = xmpHeader.length + xmpXmlBytes.length;
@@ -174,10 +168,10 @@
     }
 
     /**
-     * Внедряет метаданные (промпт и ссылку) в MP4 (ISO BMFF / QuickTime) в атом moov.udta.meta.ilst.
+     * Внедряет метаданные (промпт, ссылку, модель и хэш) в MP4 (ISO BMFF / QuickTime) в атом moov.udta.meta.ilst.
      * Корректирует таблицы смещений чанков stco/co64 при сдвиге mdat.
      */
-    function injectMp4Metadata(buffer, prompt, url) {
+    function injectMp4Metadata(buffer, prompt, url, model = '', promptHash = '') {
         try {
             const u8 = new Uint8Array(buffer);
             const view = new DataView(buffer);
@@ -253,14 +247,22 @@
             const tagCmt = new Uint8Array([0xA9, 0x63, 0x6D, 0x74]); // '©cmt' (Comment)
             const tagUrl1 = new Uint8Array([0x70, 0x75, 0x72, 0x6C]); // 'purl' (Posting URL)
             const tagUrl2 = new Uint8Array([0xA9, 0x75, 0x72, 0x6C]); // '©url' (URL)
+            const tagArt  = new Uint8Array([0xA9, 0x41, 0x52, 0x54]); // '©ART' (Artist / Model)
+            const tagNam  = new Uint8Array([0xA9, 0x6E, 0x61, 0x6D]); // '©nam' (Title)
 
-            const commentText = `Prompt: ${prompt}\nURL: ${url}`;
+            const commentText = `Prompt: ${prompt}\nURL: ${url}${model ? `\nModel: ${model}` : ''}${promptHash ? `\nHash: ${promptHash}` : ''}`;
             const items = [
                 makeIlstItem(tagDes, prompt),
                 makeIlstItem(tagCmt, commentText),
                 makeIlstItem(tagUrl1, url),
                 makeIlstItem(tagUrl2, url)
             ];
+            if (model) {
+                items.push(makeIlstItem(tagArt, model));
+            }
+            if (prompt) {
+                items.push(makeIlstItem(tagNam, prompt.slice(0, 60)));
+            }
 
             const totalItemsLen = items.reduce((acc, it) => acc + it.length, 0);
             const ilstPayload = new Uint8Array(totalItemsLen);
@@ -384,9 +386,9 @@
     }
 
     /**
-     * Внедряет метаданные (промпт и ссылку) в WebP файл (RIFF контейнер) через XMP чанк.
+     * Внедряет метаданные (промпт, ссылку, модель и хэш) в WebP файл (RIFF контейнер) через XMP чанк.
      */
-    function injectWebpMetadata(buffer, prompt, url) {
+    function injectWebpMetadata(buffer, prompt, url, model = '', promptHash = '') {
         try {
             const u8 = new Uint8Array(buffer);
             const view = new DataView(buffer);
@@ -397,22 +399,14 @@
             if (riff !== 'RIFF' || webp !== 'WEBP') return buffer;
 
             const textEncoder = new TextEncoder();
-            const cleanXmlPrompt = (prompt || '').replace(/[<>&'"]/g, (c) => {
-                switch (c) {
-                    case '<': return '&lt;'; case '>': return '&gt;';
-                    case '&': return '&amp;'; case '\'': return '&apos;'; case '"': return '&quot;';
-                }
-                return c;
-            });
-            const cleanXmlUrl = (url || '').replace(/[<>&'"]/g, (c) => {
-                switch (c) {
-                    case '<': return '&lt;'; case '>': return '&gt;';
-                    case '&': return '&amp;'; case '\'': return '&apos;'; case '"': return '&quot;';
-                }
-                return c;
-            });
+            const escapeXml = (s) => (s || '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '\'': '&apos;', '"': '&quot;' }[c]));
+            const cleanXmlPrompt = escapeXml(prompt);
+            const cleanXmlUrl = escapeXml(url);
+            const cleanXmlModel = escapeXml(model || 'Grok');
+            const cleanXmlTitle = escapeXml((prompt || '').slice(0, 60));
+            const cleanXmlHash = escapeXml(promptHash);
 
-            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source></rdf:Description></rdf:RDF></x:xmpmeta>`;
+            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source><dc:creator><rdf:Seq><rdf:li>${cleanXmlModel}</rdf:li></rdf:Seq></dc:creator><dc:title><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlTitle}</rdf:li></rdf:Alt></dc:title><dc:identifier>${cleanXmlHash}</dc:identifier></rdf:Description></rdf:RDF></x:xmpmeta>`;
             const xmpBytes = textEncoder.encode(xmpXml);
 
             // Чанк XMP в RIFF: 'XMP ' (4 байта) + 4 байта длина (little-endian) + данные + паддинг до четного
@@ -439,17 +433,19 @@
     }
 
     /**
-     * Главная точка входа: определяет тип медиа и внедряет метаданные (промпт и URL).
+     * Главная точка входа: определяет тип медиа и внедряет метаданные (промпт, URL, модель, хэш).
      * @param {Blob} rawBlob
      * @param {string} prompt
      * @param {string} url
+     * @param {string} model
+     * @param {string} promptHash
      * @returns {Promise<Blob>}
      */
-    async function injectGrokMetadataToBlob(rawBlob, prompt, url) {
+    async function injectGrokMetadataToBlob(rawBlob, prompt, url, model = '', promptHash = '') {
         if (!rawBlob) return rawBlob;
         const cleanPrompt = (prompt || '').trim();
         const cleanUrl = (url || location.href || '').trim();
-        if (!cleanPrompt && !cleanUrl) return rawBlob;
+        if (!cleanPrompt && !cleanUrl && !model) return rawBlob;
 
         try {
             const arrayBuffer = await rawBlob.arrayBuffer();
@@ -460,20 +456,20 @@
 
             // 1. Проверка MP4 (байты 4..7 === 'ftyp')
             if (u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70) {
-                enrichedBuffer = injectMp4Metadata(arrayBuffer, cleanPrompt, cleanUrl);
+                enrichedBuffer = injectMp4Metadata(arrayBuffer, cleanPrompt, cleanUrl, model, promptHash);
             }
             // 2. Проверка PNG (сигнатура 89 50 4E 47)
             else if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4E && u8[3] === 0x47) {
-                enrichedBuffer = injectPngMetadata(arrayBuffer, cleanPrompt, cleanUrl);
+                enrichedBuffer = injectPngMetadata(arrayBuffer, cleanPrompt, cleanUrl, model, promptHash);
             }
             // 3. Проверка JPEG (FF D8)
             else if (u8[0] === 0xFF && u8[1] === 0xD8) {
-                enrichedBuffer = injectJpegMetadata(arrayBuffer, cleanPrompt, cleanUrl);
+                enrichedBuffer = injectJpegMetadata(arrayBuffer, cleanPrompt, cleanUrl, model, promptHash);
             }
             // 4. Проверка WebP (RIFF....WEBP)
             else if (u8[0] === 0x52 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x46 &&
                      u8[8] === 0x57 && u8[9] === 0x45 && u8[10] === 0x42 && u8[11] === 0x50) {
-                enrichedBuffer = injectWebpMetadata(arrayBuffer, cleanPrompt, cleanUrl);
+                enrichedBuffer = injectWebpMetadata(arrayBuffer, cleanPrompt, cleanUrl, model, promptHash);
             }
 
             return new Blob([enrichedBuffer], { type: rawBlob.type || 'application/octet-stream' });

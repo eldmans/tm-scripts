@@ -213,24 +213,57 @@
         return null;
     }
 
+    /**
+     * Извлекает текущую модель генерации Grok (или возвращает дефолтное 'Grok Imagine').
+     */
+    function getGrokCurrentModel() {
+        const selectors = [
+            'button[aria-haspopup="menu"] span',
+            'button[data-testid*="model"]',
+            '[aria-label*="model" i]',
+            '[aria-label*="режим" i]'
+        ];
+        for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el && el.textContent) {
+                const txt = el.textContent.trim();
+                if (/grok|flux|aurora|imagine/i.test(txt)) {
+                    return txt;
+                }
+            }
+        }
+        return 'Grok Imagine';
+    }
+
+    /**
+     * Вычисляет короткий хэш промпта (12 hex символов).
+     */
+    function computeGrokPromptHash(str) {
+        if (!str) return '';
+        let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
+        for (let i = 0; i < str.length; i++) {
+            const ch = str.charCodeAt(i);
+            h1 = Math.imul(h1 ^ ch, 2654435761);
+            h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(12, '0').slice(-12);
+    }
+
     let _isGrokInternalClick = false;
 
     /**
      * Фолбэк на клик нативной кнопки Download при невозможности прямой загрузки.
+     * Поиск строго по aria-label="download".
      */
     function fallbackGrokNativeClick(onSuccess) {
         _isGrokInternalClick = true;
         try {
-            const dlKeywords = ['download', 'скачать'];
-            let directBtn = findGrokButton(dlKeywords);
-            if (!directBtn) {
-                directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
-                    if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
-                    const path = b.querySelector('path');
-                    const d = path ? (path.getAttribute('d') || '') : '';
-                    return d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
-                });
-            }
+            let directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+                return aria === 'download';
+            });
 
             if (directBtn) {
                 triggerClick(directBtn, 'Grok Direct Download (Fallback)');
@@ -242,7 +275,10 @@
             if (dotsBtn) {
                 triggerClick(dotsBtn, 'Post actions (for Fallback Download)');
                 retryAction((attempt) => {
-                    const innerDl = findGrokButton(dlKeywords);
+                    const innerDl = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                        const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+                        return aria === 'download';
+                    });
                     if (innerDl) {
                         triggerClick(innerDl, 'Grok Download from 3-dots (Fallback)');
                         if (onSuccess) onSuccess();
@@ -307,6 +343,8 @@
         }
 
         const prompt = getGrokCurrentPrompt();
+        const model = getGrokCurrentModel();
+        const promptHash = computeGrokPromptHash(prompt);
         const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
         const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
         const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
@@ -366,7 +404,7 @@
             const handleBlobResponse = async (rawBlob) => {
                 try {
                     showToast('⏳ Запись метаданных...');
-                    const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl);
+                    const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl, model, promptHash);
                     saveBlobToDisk(enrichedBlob, grokFilename);
                     onDownloadFinalized();
                 } catch (err) {
@@ -436,19 +474,10 @@
             const btn = e.target.closest('button, [role="button"]');
             if (!btn || (btn.id && btn.id.startsWith('mossad-'))) return;
 
-            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-            const title = (btn.getAttribute('title') || '').toLowerCase();
-            const txt = (btn.textContent || '').trim().toLowerCase();
-            const isDl = aria.includes('download') || aria.includes('скачать') || title.includes('download') || title.includes('скачать') || txt === 'download' || txt === 'скачать';
+            const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+            const isDl = aria === 'download';
 
-            let isSvgDl = false;
-            if (!isDl) {
-                const path = btn.querySelector('path');
-                const d = path ? (path.getAttribute('d') || '') : '';
-                isSvgDl = (d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C'));
-            }
-
-            if (isDl || isSvgDl) {
+            if (isDl) {
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();

@@ -1294,9 +1294,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     /**
-     * Внедряет метаданные (промпт и ссылку) в PNG файл через tEXt чанки.
+     * Внедряет метаданные (промпт, ссылку, модель и хэш) в PNG файл через tEXt чанки.
      */
-    function injectPngMetadata(buffer, prompt, url) {
+    function injectPngMetadata(buffer, prompt, url, model = '', promptHash = '') {
         try {
             const u8 = new Uint8Array(buffer);
             // Проверка PNG сигнатуры: 89 50 4E 47 0D 0A 1A 0A
@@ -1330,7 +1330,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 return chunk;
             }
 
-            const commentText = `Prompt: ${prompt}\nURL: ${url}`;
+            const commentText = `Prompt: ${prompt}\nURL: ${url}${model ? `\nModel: ${model}` : ''}${promptHash ? `\nHash: ${promptHash}` : ''}`;
             const chunks = [
                 makeTextChunk('Description', prompt),
                 makeTextChunk('Comment', commentText),
@@ -1338,6 +1338,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 makeTextChunk('prompt', prompt),
                 makeTextChunk('parameters', prompt)
             ];
+            if (model) {
+                chunks.push(makeTextChunk('source', model));
+                chunks.push(makeTextChunk('model', model));
+            }
+            if (promptHash) {
+                chunks.push(makeTextChunk('prompt_hash', promptHash));
+            }
+            chunks.push(makeTextChunk('timestamp', new Date().toISOString().replace('T', ' ').slice(0, 19)));
 
             const totalChunksLen = chunks.reduce((acc, c) => acc + c.length, 0);
             const result = new Uint8Array(u8.length + totalChunksLen);
@@ -1356,9 +1364,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     /**
-     * Внедряет метаданные (промпт и ссылку) в JPEG файл через COM и XMP маркеры.
+     * Внедряет метаданные (промпт, ссылку, модель и хэш) в JPEG файл через COM и XMP маркеры.
      */
-    function injectJpegMetadata(buffer, prompt, url) {
+    function injectJpegMetadata(buffer, prompt, url, model = '', promptHash = '') {
         try {
             const u8 = new Uint8Array(buffer);
             if (u8.length < 4 || u8[0] !== 0xFF || u8[1] !== 0xD8) {
@@ -1366,7 +1374,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
 
             const textEncoder = new TextEncoder();
-            const comText = `Prompt: ${prompt}\nURL: ${url}`;
+            const comText = `Prompt: ${prompt}\nURL: ${url}${model ? `\nModel: ${model}` : ''}${promptHash ? `\nHash: ${promptHash}` : ''}`;
             const comBytes = textEncoder.encode(comText);
             const comLen = Math.min(comBytes.length, 65530);
 
@@ -1378,28 +1386,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             comMarker.set(comBytes.subarray(0, comLen), 4);
 
             // 2. XMP APP1 маркер: FF E1 [длина 2 байта] [http://ns.adobe.com/xap/1.0/\0] [XML]
-            const cleanXmlPrompt = (prompt || '').replace(/[<>&'"]/g, (c) => {
-                switch (c) {
-                    case '<': return '&lt;';
-                    case '>': return '&gt;';
-                    case '&': return '&amp;';
-                    case '\'': return '&apos;';
-                    case '"': return '&quot;';
-                }
-                return c;
-            });
-            const cleanXmlUrl = (url || '').replace(/[<>&'"]/g, (c) => {
-                switch (c) {
-                    case '<': return '&lt;';
-                    case '>': return '&gt;';
-                    case '&': return '&amp;';
-                    case '\'': return '&apos;';
-                    case '"': return '&quot;';
-                }
-                return c;
-            });
+            const escapeXml = (s) => (s || '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '\'': '&apos;', '"': '&quot;' }[c]));
+            const cleanXmlPrompt = escapeXml(prompt);
+            const cleanXmlUrl = escapeXml(url);
+            const cleanXmlModel = escapeXml(model || 'Grok');
+            const cleanXmlTitle = escapeXml((prompt || '').slice(0, 60));
+            const cleanXmlHash = escapeXml(promptHash);
 
-            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source></rdf:Description></rdf:RDF></x:xmpmeta>`;
+            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source><dc:creator><rdf:Seq><rdf:li>${cleanXmlModel}</rdf:li></rdf:Seq></dc:creator><dc:title><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlTitle}</rdf:li></rdf:Alt></dc:title><dc:identifier>${cleanXmlHash}</dc:identifier></rdf:Description></rdf:RDF></x:xmpmeta>`;
             const xmpHeader = textEncoder.encode('http://ns.adobe.com/xap/1.0/\0');
             const xmpXmlBytes = textEncoder.encode(xmpXml);
             const xmpPayloadLen = xmpHeader.length + xmpXmlBytes.length;
@@ -1440,10 +1434,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     /**
-     * Внедряет метаданные (промпт и ссылку) в MP4 (ISO BMFF / QuickTime) в атом moov.udta.meta.ilst.
+     * Внедряет метаданные (промпт, ссылку, модель и хэш) в MP4 (ISO BMFF / QuickTime) в атом moov.udta.meta.ilst.
      * Корректирует таблицы смещений чанков stco/co64 при сдвиге mdat.
      */
-    function injectMp4Metadata(buffer, prompt, url) {
+    function injectMp4Metadata(buffer, prompt, url, model = '', promptHash = '') {
         try {
             const u8 = new Uint8Array(buffer);
             const view = new DataView(buffer);
@@ -1519,14 +1513,22 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const tagCmt = new Uint8Array([0xA9, 0x63, 0x6D, 0x74]); // '©cmt' (Comment)
             const tagUrl1 = new Uint8Array([0x70, 0x75, 0x72, 0x6C]); // 'purl' (Posting URL)
             const tagUrl2 = new Uint8Array([0xA9, 0x75, 0x72, 0x6C]); // '©url' (URL)
+            const tagArt  = new Uint8Array([0xA9, 0x41, 0x52, 0x54]); // '©ART' (Artist / Model)
+            const tagNam  = new Uint8Array([0xA9, 0x6E, 0x61, 0x6D]); // '©nam' (Title)
 
-            const commentText = `Prompt: ${prompt}\nURL: ${url}`;
+            const commentText = `Prompt: ${prompt}\nURL: ${url}${model ? `\nModel: ${model}` : ''}${promptHash ? `\nHash: ${promptHash}` : ''}`;
             const items = [
                 makeIlstItem(tagDes, prompt),
                 makeIlstItem(tagCmt, commentText),
                 makeIlstItem(tagUrl1, url),
                 makeIlstItem(tagUrl2, url)
             ];
+            if (model) {
+                items.push(makeIlstItem(tagArt, model));
+            }
+            if (prompt) {
+                items.push(makeIlstItem(tagNam, prompt.slice(0, 60)));
+            }
 
             const totalItemsLen = items.reduce((acc, it) => acc + it.length, 0);
             const ilstPayload = new Uint8Array(totalItemsLen);
@@ -1650,9 +1652,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     /**
-     * Внедряет метаданные (промпт и ссылку) в WebP файл (RIFF контейнер) через XMP чанк.
+     * Внедряет метаданные (промпт, ссылку, модель и хэш) в WebP файл (RIFF контейнер) через XMP чанк.
      */
-    function injectWebpMetadata(buffer, prompt, url) {
+    function injectWebpMetadata(buffer, prompt, url, model = '', promptHash = '') {
         try {
             const u8 = new Uint8Array(buffer);
             const view = new DataView(buffer);
@@ -1663,22 +1665,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             if (riff !== 'RIFF' || webp !== 'WEBP') return buffer;
 
             const textEncoder = new TextEncoder();
-            const cleanXmlPrompt = (prompt || '').replace(/[<>&'"]/g, (c) => {
-                switch (c) {
-                    case '<': return '&lt;'; case '>': return '&gt;';
-                    case '&': return '&amp;'; case '\'': return '&apos;'; case '"': return '&quot;';
-                }
-                return c;
-            });
-            const cleanXmlUrl = (url || '').replace(/[<>&'"]/g, (c) => {
-                switch (c) {
-                    case '<': return '&lt;'; case '>': return '&gt;';
-                    case '&': return '&amp;'; case '\'': return '&apos;'; case '"': return '&quot;';
-                }
-                return c;
-            });
+            const escapeXml = (s) => (s || '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '\'': '&apos;', '"': '&quot;' }[c]));
+            const cleanXmlPrompt = escapeXml(prompt);
+            const cleanXmlUrl = escapeXml(url);
+            const cleanXmlModel = escapeXml(model || 'Grok');
+            const cleanXmlTitle = escapeXml((prompt || '').slice(0, 60));
+            const cleanXmlHash = escapeXml(promptHash);
 
-            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source></rdf:Description></rdf:RDF></x:xmpmeta>`;
+            const xmpXml = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlPrompt}</rdf:li></rdf:Alt></dc:description><dc:source>${cleanXmlUrl}</dc:source><dc:creator><rdf:Seq><rdf:li>${cleanXmlModel}</rdf:li></rdf:Seq></dc:creator><dc:title><rdf:Alt><rdf:li xml:lang="x-default">${cleanXmlTitle}</rdf:li></rdf:Alt></dc:title><dc:identifier>${cleanXmlHash}</dc:identifier></rdf:Description></rdf:RDF></x:xmpmeta>`;
             const xmpBytes = textEncoder.encode(xmpXml);
 
             // Чанк XMP в RIFF: 'XMP ' (4 байта) + 4 байта длина (little-endian) + данные + паддинг до четного
@@ -1705,17 +1699,19 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     /**
-     * Главная точка входа: определяет тип медиа и внедряет метаданные (промпт и URL).
+     * Главная точка входа: определяет тип медиа и внедряет метаданные (промпт, URL, модель, хэш).
      * @param {Blob} rawBlob
      * @param {string} prompt
      * @param {string} url
+     * @param {string} model
+     * @param {string} promptHash
      * @returns {Promise<Blob>}
      */
-    async function injectGrokMetadataToBlob(rawBlob, prompt, url) {
+    async function injectGrokMetadataToBlob(rawBlob, prompt, url, model = '', promptHash = '') {
         if (!rawBlob) return rawBlob;
         const cleanPrompt = (prompt || '').trim();
         const cleanUrl = (url || location.href || '').trim();
-        if (!cleanPrompt && !cleanUrl) return rawBlob;
+        if (!cleanPrompt && !cleanUrl && !model) return rawBlob;
 
         try {
             const arrayBuffer = await rawBlob.arrayBuffer();
@@ -1726,20 +1722,20 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
             // 1. Проверка MP4 (байты 4..7 === 'ftyp')
             if (u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70) {
-                enrichedBuffer = injectMp4Metadata(arrayBuffer, cleanPrompt, cleanUrl);
+                enrichedBuffer = injectMp4Metadata(arrayBuffer, cleanPrompt, cleanUrl, model, promptHash);
             }
             // 2. Проверка PNG (сигнатура 89 50 4E 47)
             else if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4E && u8[3] === 0x47) {
-                enrichedBuffer = injectPngMetadata(arrayBuffer, cleanPrompt, cleanUrl);
+                enrichedBuffer = injectPngMetadata(arrayBuffer, cleanPrompt, cleanUrl, model, promptHash);
             }
             // 3. Проверка JPEG (FF D8)
             else if (u8[0] === 0xFF && u8[1] === 0xD8) {
-                enrichedBuffer = injectJpegMetadata(arrayBuffer, cleanPrompt, cleanUrl);
+                enrichedBuffer = injectJpegMetadata(arrayBuffer, cleanPrompt, cleanUrl, model, promptHash);
             }
             // 4. Проверка WebP (RIFF....WEBP)
             else if (u8[0] === 0x52 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x46 &&
                      u8[8] === 0x57 && u8[9] === 0x45 && u8[10] === 0x42 && u8[11] === 0x50) {
-                enrichedBuffer = injectWebpMetadata(arrayBuffer, cleanPrompt, cleanUrl);
+                enrichedBuffer = injectWebpMetadata(arrayBuffer, cleanPrompt, cleanUrl, model, promptHash);
             }
 
             return new Blob([enrichedBuffer], { type: rawBlob.type || 'application/octet-stream' });
@@ -1982,24 +1978,57 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return null;
     }
 
+    /**
+     * Извлекает текущую модель генерации Grok (или возвращает дефолтное 'Grok Imagine').
+     */
+    function getGrokCurrentModel() {
+        const selectors = [
+            'button[aria-haspopup="menu"] span',
+            'button[data-testid*="model"]',
+            '[aria-label*="model" i]',
+            '[aria-label*="режим" i]'
+        ];
+        for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el && el.textContent) {
+                const txt = el.textContent.trim();
+                if (/grok|flux|aurora|imagine/i.test(txt)) {
+                    return txt;
+                }
+            }
+        }
+        return 'Grok Imagine';
+    }
+
+    /**
+     * Вычисляет короткий хэш промпта (12 hex символов).
+     */
+    function computeGrokPromptHash(str) {
+        if (!str) return '';
+        let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
+        for (let i = 0; i < str.length; i++) {
+            const ch = str.charCodeAt(i);
+            h1 = Math.imul(h1 ^ ch, 2654435761);
+            h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(12, '0').slice(-12);
+    }
+
     let _isGrokInternalClick = false;
 
     /**
      * Фолбэк на клик нативной кнопки Download при невозможности прямой загрузки.
+     * Поиск строго по aria-label="download".
      */
     function fallbackGrokNativeClick(onSuccess) {
         _isGrokInternalClick = true;
         try {
-            const dlKeywords = ['download', 'скачать'];
-            let directBtn = findGrokButton(dlKeywords);
-            if (!directBtn) {
-                directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
-                    if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
-                    const path = b.querySelector('path');
-                    const d = path ? (path.getAttribute('d') || '') : '';
-                    return d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C');
-                });
-            }
+            let directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+                return aria === 'download';
+            });
 
             if (directBtn) {
                 triggerClick(directBtn, 'Grok Direct Download (Fallback)');
@@ -2011,7 +2040,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             if (dotsBtn) {
                 triggerClick(dotsBtn, 'Post actions (for Fallback Download)');
                 retryAction((attempt) => {
-                    const innerDl = findGrokButton(dlKeywords);
+                    const innerDl = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                        const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+                        return aria === 'download';
+                    });
                     if (innerDl) {
                         triggerClick(innerDl, 'Grok Download from 3-dots (Fallback)');
                         if (onSuccess) onSuccess();
@@ -2076,6 +2108,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
 
         const prompt = getGrokCurrentPrompt();
+        const model = getGrokCurrentModel();
+        const promptHash = computeGrokPromptHash(prompt);
         const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
         const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
         const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
@@ -2135,7 +2169,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const handleBlobResponse = async (rawBlob) => {
                 try {
                     showToast('⏳ Запись метаданных...');
-                    const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl);
+                    const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl, model, promptHash);
                     saveBlobToDisk(enrichedBlob, grokFilename);
                     onDownloadFinalized();
                 } catch (err) {
@@ -2205,19 +2239,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const btn = e.target.closest('button, [role="button"]');
             if (!btn || (btn.id && btn.id.startsWith('mossad-'))) return;
 
-            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-            const title = (btn.getAttribute('title') || '').toLowerCase();
-            const txt = (btn.textContent || '').trim().toLowerCase();
-            const isDl = aria.includes('download') || aria.includes('скачать') || title.includes('download') || title.includes('скачать') || txt === 'download' || txt === 'скачать';
+            const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+            const isDl = aria === 'download';
 
-            let isSvgDl = false;
-            if (!isDl) {
-                const path = btn.querySelector('path');
-                const d = path ? (path.getAttribute('d') || '') : '';
-                isSvgDl = (d.includes('17v2') || d.includes('v2a2') || (d.includes('M12') && d.includes('17')) || d.includes('20C'));
-            }
-
-            if (isDl || isSvgDl) {
+            if (isDl) {
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
@@ -5233,28 +5258,19 @@ function findMediaForDownload() {
         if (rootDomain.includes('pinterest.')) {
             const pinType = getPinMediaType();
             const mainPin = getPinterestMainPinData();
-
+            
             // 1. Если главный пин - ВИДЕО
-            if (pinType === 'video' || mainPin.type === 'video' || mainPin.bestMp4Url) {
+            if (pinType === 'video' || mainPin.bestMp4Url) {
                 if (mainPin.bestMp4Url) {
-                    console.log('[MOSSAD] Pinterest download URL (mp4):', mainPin.bestMp4Url);
                     return { urls: [mainPin.bestMp4Url], type: 'video' };
                 }
-                // HLS — скачиваем через GM_xmlhttpRequest с нужными заголовками
-                const hlsUrl = mainPin.hlsUrl || window._mossadPinHlsUrl;
-                if (hlsUrl) {
-                    console.log('[MOSSAD] Pinterest download URL (hls):', hlsUrl);
-                    showToast('⏳ Pinterest HLS видео — попытка скачать через M3U8...', false);
-                    return { urls: [hlsUrl], type: 'video' };
+                const stageSig = document.querySelector('div[data-test-id="closeup-stage"] [data-video-signature], div[data-test-id="pin-closeup"] [data-video-signature]');
+                if (stageSig) {
+                    const sig = stageSig.getAttribute('data-video-signature');
+                    if (sig && sig.length === 32) {
+                        return { urls: [`https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`], type: 'video' };
+                    }
                 }
-                // Попытка взять src из <video> напрямую
-                const vid = document.querySelector('div[data-test-id="closeup-stage"] video, div[data-test-id="pin-closeup"] video, video[elementtiming*="video"], video[data-test-id="duplo-hls-video"]');
-                if (vid && vid.currentSrc && !vid.currentSrc.startsWith('blob:')) {
-                    return { urls: [vid.currentSrc], type: 'video' };
-                }
-                // Нет доступного URL для видео
-                showToast('⏳ Запусти видео на пине — скрипт поймает URL автоматически', true);
-                return null;
             }
 
             // 2. Если главный пин - ФОТО (или не содержит видео)
@@ -5265,7 +5281,6 @@ function findMediaForDownload() {
                 return { urls: [imgUrl], type: 'photo' };
             }
         }
-
 
         if (rootDomain.includes('redgifs.com')) {
             if (window.MOSSAD_ENGINES?.redgifs?.findMedia) {
@@ -6285,9 +6300,6 @@ function findMediaForDownload() {
 
     function navigatePinterestUrl(url) {
         window._mossadNavigating = true;
-        // Сбрасываем перехваченные URL при переходе на новый пин
-        window._mossadPinHlsUrl = null;
-        window._mossadPinMp4Url = null;
         const isPaused = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
                          sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
         if (!isPaused) {
@@ -6409,120 +6421,78 @@ function findMediaForDownload() {
         }, 100);
     }
 
-    // ---- Pinterest HLS URL capture (перехват m3u8 при воспроизведении) ----
-    window._mossadPinHlsUrl = window._mossadPinHlsUrl || null;
-    window._mossadPinMp4Url = window._mossadPinMp4Url || null;
-
-    if (rootDomain.includes('pinterest.')) {
-        // Перехват XHR — ловим .m3u8 и .mp4 запросы к pinimg.com
-        const _pOrigXHROpen = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-            if (typeof url === 'string' && url.includes('pinimg.com')) {
-                if (url.includes('.m3u8')) {
-                    window._mossadPinHlsUrl = url;
-                    console.log('[MOSSAD] Pinterest HLS intercepted:', url);
-                } else if (url.includes('.mp4') && url.includes('/videos/')) {
-                    window._mossadPinMp4Url = url;
-                    console.log('[MOSSAD] Pinterest MP4 intercepted:', url);
-                }
-            }
-            return _pOrigXHROpen.call(this, method, url, ...rest);
-        };
-        // Перехват fetch
-        const _pOrigFetch = window.fetch;
-        window.fetch = function(...args) {
-            const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
-            if (url.includes('pinimg.com')) {
-                if (url.includes('.m3u8')) {
-                    window._mossadPinHlsUrl = url;
-                    console.log('[MOSSAD] Pinterest HLS (fetch) intercepted:', url);
-                } else if (url.includes('.mp4') && url.includes('/videos/')) {
-                    window._mossadPinMp4Url = url;
-                }
-            }
-            return _pOrigFetch.apply(this, args);
-        };
-    }
-
     function getPinterestMainPinData() {
         try {
-            // 0. Если XHR/fetch перехватил прямой mp4 — используем его
-            if (window._mossadPinMp4Url) {
-                console.log('[MOSSAD] Pinterest: using intercepted MP4 URL:', window._mossadPinMp4Url);
-                return { isFound: true, type: 'video', bestMp4Url: window._mossadPinMp4Url };
-            }
-
-            // 1. Поиск video_list в JSON страницы (V_720P, V_EXP7, V_480P, V_HLSV4)
-            const videoListResult = _pinterestParseVideoList();
-            if (videoListResult) return videoListResult;
-
-            // 2. Прямой осмотр DOM тегов <video> главного пина
-            const mainVideo = document.querySelector(
-                'video[elementtiming*="video"], video[data-test-id="duplo-hls-video"], video.jI_JN7, ' +
-                'div[data-test-id="closeup-stage"] video, div[data-test-id="pin-closeup"] video'
-            );
+            // 1. Прямой осмотр DOM тегов видео главного пина (closeup-video-main, duplo-hls-video)
+            const mainVideo = document.querySelector('video[elementtiming*="video"], video[data-test-id="duplo-hls-video"], video[src*="v1.pinimg.com"], video.jI_JN7');
             if (mainVideo) {
-                const currentSrc = mainVideo.currentSrc || mainVideo.src || '';
-                // blob: — значит HLS. Берём перехваченный m3u8 если есть
-                if (currentSrc.startsWith('blob:') && window._mossadPinHlsUrl) {
-                    return { isFound: true, type: 'video', bestMp4Url: null, hlsUrl: window._mossadPinHlsUrl };
+                const src = mainVideo.src || (mainVideo.querySelector('source') && mainVideo.querySelector('source').src) || '';
+                const sigMatch = src.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i) ||
+                                 src.match(/expMp4\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})/i);
+                let bestMp4Url = null;
+                if (sigMatch) {
+                    const sig = sigMatch[4];
+                    bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
+                } else if (src.endsWith('.mp4')) {
+                    bestMp4Url = src;
                 }
-                if (currentSrc && !currentSrc.startsWith('blob:') && currentSrc.includes('pinimg.com')) {
-                    return { isFound: true, type: 'video', bestMp4Url: currentSrc };
-                }
-                // Видео-элемент есть, но src blob и нет перехваченного — всё равно видео
-                if (currentSrc) {
-                    return { isFound: true, type: 'video', bestMp4Url: null };
-                }
-            }
-
-            // 3. Сканирование разметки DOM на предмет HLS-признаков
-            const fullHtml = document.documentElement.innerHTML || '';
-            const hasHlsInHtml = /elementtiming="closeup-video-main/i.test(fullHtml) ||
-                                  /data-test-id="duplo-hls-video"/i.test(fullHtml) ||
-                                  /v1\.pinimg\.com\/videos/i.test(fullHtml);
-            if (hasHlsInHtml) {
-                // Попробуем найти прямой mp4 URL в HTML
-                const mp4InHtml = fullHtml.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"'\\]+\.mp4/);
-                const bestMp4Url = mp4InHtml ? mp4InHtml[0] : null;
                 return { isFound: true, type: 'video', bestMp4Url };
             }
 
-            // 4. Сканирование <script> тегов (старый метод)
+            // 2. Сканирование разметки DOM на предмет v1.pinimg.com/videos/iht/hls/ или elementtiming="closeup-video-main"
+            const fullHtml = document.documentElement.innerHTML || '';
+            const hlsMatch = fullHtml.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/iht\\?\/hls\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{32})\.m3u8/i) ||
+                             fullHtml.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i);
+
+            if (hlsMatch || fullHtml.includes('elementtiming="closeup-video-main') || fullHtml.includes('data-test-id="duplo-hls-video"')) {
+                let bestMp4Url = null;
+                if (hlsMatch) {
+                    const sig = hlsMatch[4];
+                    bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
+                }
+                return { isFound: true, type: 'video', bestMp4Url };
+            }
+
             const scanText = (txt) => {
                 if (!txt || !txt.includes('auth_web_main_pin')) return null;
                 const idx = txt.indexOf('resource_response');
                 if (idx === -1) return null;
+                
+                // Берем с запасом 40000 символов, т.к. story_pin_data с видео-блоком лежит глубоко внизу JSON
                 const slice = txt.slice(Math.max(0, idx - 500), idx + 40000);
 
-                const hasVideoKeywords = /story_pin_video_block/i.test(slice) ||
-                                         /"video_list"\s*:\s*\{/i.test(slice) ||
-                                         /"videos"\s*:\s*\{/i.test(slice) ||
-                                         /duplo-hls/i.test(slice);
+                // 1. ПЕРВЫМ ДЕЛОМ ИЩЕМ СИГНАТУРЫ И БЛОКИ ВИДЕО
                 const sigMatch = slice.match(/"video_signature"\s*:\s*"([a-f0-9]{32})"/i) ||
-                                 slice.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i);
+                                 slice.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i) ||
+                                 slice.match(/thumbnails\/originals\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\./i);
+
+                const hasVideoKeywords = /story_pin_video_block/i.test(slice) || 
+                                         /"video_list"\s*:\s*\{/i.test(slice) || 
+                                         /"videos"\s*:\s*\{/i.test(slice) || 
+                                         /duplo-hls/i.test(slice);
 
                 if (sigMatch || hasVideoKeywords) {
-                    // Ищем прямые mp4 URL
-                    const mp4Matches = slice.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"'\\]+?\.mp4/g);
                     let bestMp4Url = null;
+                    const mp4Matches = slice.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+?\.mp4/g) ||
+                                       slice.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"',]+?\.mp4/g);
                     if (mp4Matches && mp4Matches.length > 0) {
-                        // Предпочитаем более высокое качество
-                        const sorted = mp4Matches.sort((a, b) => {
-                            const qa = a.includes('720') ? 3 : a.includes('480') ? 2 : a.includes('360') ? 1 : 0;
-                            const qb = b.includes('720') ? 3 : b.includes('480') ? 2 : b.includes('360') ? 1 : 0;
-                            return qb - qa;
-                        });
-                        bestMp4Url = sorted[0].replace(/\\/g, '');
+                        bestMp4Url = mp4Matches[0].replace(/\\/g, '');
                     }
-                    // Перехваченный HLS как запасной
-                    const hlsUrl = !bestMp4Url ? (window._mossadPinHlsUrl || null) : null;
-                    return { isFound: true, type: 'video', bestMp4Url, hlsUrl };
+                    
+                    if (!bestMp4Url && sigMatch) {
+                        const sig = sigMatch[4] || sigMatch[1];
+                        if (sig && sig.length === 32) {
+                            bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
+                        }
+                    }
+                    return { isFound: true, type: 'video', bestMp4Url };
                 }
 
+                // 2. И ТОЛЬКО ЕСЛИ НИ ОДНОГО ПРИЗНАКА ВИДЕО НЕТ — ЭТО ФОТО
                 if (/"images"\s*:\s*\{/i.test(slice) || /"image_signature"/i.test(slice)) {
                     return { isFound: true, type: 'image', bestMp4Url: null };
                 }
+
                 return null;
             };
 
@@ -6530,6 +6500,7 @@ function findMediaForDownload() {
                 const res = scanText(JSON.stringify(window.__PJS_OUTPUT__));
                 if (res) return res;
             }
+
             const scripts = document.querySelectorAll('script');
             for (const s of scripts) {
                 const res = scanText(s.textContent || '');
@@ -6539,61 +6510,6 @@ function findMediaForDownload() {
             console.error('[MOSSAD] PinResource JSON parse error:', e);
         }
         return { isFound: false, type: 'unknown', bestMp4Url: null };
-    }
-
-    // Парсинг video_list из JSON данных страницы Pinterest (V_720P, V_EXP7, V_480P, V_HLSV4)
-    function _pinterestParseVideoList() {
-        try {
-            const sources = [];
-            // Собираем кандидатов: script теги и __PJS_OUTPUT__
-            if (window.__PJS_OUTPUT__) sources.push(JSON.stringify(window.__PJS_OUTPUT__));
-            document.querySelectorAll('script[type="application/json"], script:not([src])').forEach(s => {
-                const t = s.textContent || '';
-                if (t.includes('video_list') || t.includes('V_720P') || t.includes('V_EXP7')) sources.push(t);
-            });
-
-            for (const txt of sources) {
-                // Ищем блок video_list
-                const vlIdx = txt.indexOf('"video_list"');
-                if (vlIdx === -1) continue;
-                const slice = txt.slice(vlIdx, vlIdx + 3000);
-
-                // Приоритет форматов: V_720P > V_EXP7 > V_480P > V_EXP6 > V_HLSV4
-                const formats = ['V_720P', 'V_EXP7', 'V_480P', 'V_EXP6', 'V_360P'];
-                for (const fmt of formats) {
-                    const fIdx = slice.indexOf(`"${fmt}"`);
-                    if (fIdx === -1) continue;
-                    const fSlice = slice.slice(fIdx, fIdx + 500);
-                    // Ищем "url":"https://..."
-                    const urlMatch = fSlice.match(/"url"\s*:\s*"(https:\/\/[^"]+\.mp4[^"]*)"/i);
-                    if (urlMatch) {
-                        const mp4url = urlMatch[1].replace(/\\/g, '');
-                        console.log(`[MOSSAD] Pinterest video_list[${fmt}]:`, mp4url);
-                        return { isFound: true, type: 'video', bestMp4Url: mp4url };
-                    }
-                }
-
-                // Если нашли video_list но не нашли конкретный формат — ищем любой mp4
-                const anyMp4 = slice.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"'\\]+?\.mp4/);
-                if (anyMp4) {
-                    return { isFound: true, type: 'video', bestMp4Url: anyMp4[0] };
-                }
-                // V_HLSV4 — HLS манифест
-                const hlsIdx = slice.indexOf('"V_HLSV4"');
-                if (hlsIdx !== -1) {
-                    const hlsSlice = slice.slice(hlsIdx, hlsIdx + 300);
-                    const hlsMatch = hlsSlice.match(/"url"\s*:\s*"(https:\/\/[^"]+\.m3u8[^"]*)"/i);
-                    if (hlsMatch) {
-                        const hlsUrl = hlsMatch[1].replace(/\\/g, '');
-                        window._mossadPinHlsUrl = window._mossadPinHlsUrl || hlsUrl;
-                        return { isFound: true, type: 'video', bestMp4Url: null, hlsUrl };
-                    }
-                }
-            }
-        } catch(e) {
-            console.warn('[MOSSAD] _pinterestParseVideoList error:', e);
-        }
-        return null;
     }
 
 // ============================================
@@ -7217,7 +7133,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-19</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-21</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
