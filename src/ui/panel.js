@@ -608,6 +608,10 @@
         
         modal.innerHTML = `
             <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
+            <div style="background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.3); border-radius:6px; padding:6px 10px; margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px;">
+              <span style="color:#34d399;">💡 При закрытии окна настройки автоматически сохраняются для всех сайтов</span>
+              <button id="mossad-hk-save-all" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:3px 8px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;" title="Сохранить для всех сайтов прямо сейчас">💾 Сохранить</button>
+            </div>
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
               <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">GitHub Sync Token:</div>
               <div style="display:flex;gap:6px;">
@@ -619,32 +623,35 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-21</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-25</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
             </div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
-                <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold;">↺ Клавиши по умолчанию</button>
-                <button id="mossad-hk-close" style="background:#ef4444; border:none; padding:6px 16px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold;">Закрыть</button>
+                <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ По умолчанию</button>
+                <div style="display:flex; gap:6px;">
+                    <button id="mossad-hk-save-close" style="background:#10b981; border:none; padding:6px 14px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold; font-size:12px;">💾 Сохранить и закрыть</button>
+                    <button id="mossad-hk-close" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#9ca3af; cursor:pointer; font-weight:bold; font-size:12px;">Закрыть</button>
+                </div>
             </div>
         `;
         
         const list = modal.querySelector('#mossad-hk-list');
         const keysMap = {
-            nextSlide:        'Следующий слайд (PageDown)',
-            prevSlide:        'Предыдущий слайд (PageUp)',
+            nextSlide:        'Следующий слайд (ArrowRight)',
+            prevSlide:        'Предыдущий слайд (ArrowLeft)',
             nextGroup:        'Следующая группа (Alt+PageDown)',
             prevGroup:        'Предыдущая группа (Alt+PageUp)',
-            download:         'Скачать (DL)',
-            upscale:          'Улучшить',
-            deleteVid:        'Удалить видео',
-            sound:            'Звук (вкл/выкл)',
-            playPause:        'Пауза/Плей видео',
+            download:         'Скачать (PageDown)',
+            upscale:          'Улучшить (Ctrl+PageUp)',
+            deleteVid:        'Удалить видео (Delete)',
+            sound:            'Звук вкл/выкл (ScrollLock)',
+            playPause:        'Пауза/Плей видео (Pause)',
             help:             'Настройки клавиш (Ctrl+F1)',
-            history:          'История (Grok)', 
-            slideshowPanel:   'Меню слайдшоу (Ctrl+Insert)',
+            history:          'История Grok (Home)', 
+            slideshowPanel:   'Меню виджета (Ctrl+Insert)',
             slideshowStart:   'Малое слайдшоу / ракета (Shift+Insert)',
             galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert)',
             galleryStop:      'Стоп большого слайдшоу',
@@ -761,14 +768,45 @@
             }
         };
 
-        modal.querySelector('#mossad-hk-close').onclick = () => modal.remove();
+        const closeAndSaveModal = () => {
+            if (typeof window.saveGlobalHotkeys === 'function') {
+                window.saveGlobalHotkeys(true);
+            } else {
+                Settings.save();
+            }
+            modal.remove();
+        };
+
+        modal.querySelector('#mossad-hk-save-all').onclick = () => {
+            if (typeof window.saveGlobalHotkeys === 'function') {
+                window.saveGlobalHotkeys(true);
+            } else {
+                Settings.save();
+            }
+        };
+
+        modal.querySelector('#mossad-hk-save-close').onclick = closeAndSaveModal;
+        modal.querySelector('#mossad-hk-close').onclick = closeAndSaveModal;
+
+        const onEscClose = (e) => {
+            if (e.key === 'Escape' && window.capturingFor === null) {
+                document.removeEventListener('keydown', onEscClose);
+                closeAndSaveModal();
+            }
+        };
+        document.addEventListener('keydown', onEscClose);
+
         modal.querySelector('#mossad-hk-reset').onclick = () => {
             if (!confirm('Сбросить все горячие клавиши по умолчанию?')) return;
             config.hk = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk));
-            Settings.save();
+            if (typeof window.saveGlobalHotkeys === 'function') {
+                window.saveGlobalHotkeys(false);
+            } else {
+                Settings.save();
+            }
             modal.remove();
             openHotkeySettings(); // переоткрыть с обновлёнными клавишами
-            showToast('✅ Клавиши сброшены по умолчанию');
+            showToast('✅ Клавиши сброшены по умолчанию для всех сайтов');
         };
     }
 

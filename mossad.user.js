@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.22
+// @version      1.3.23
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.22';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.23';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -98,7 +98,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         pinterestHistoryIdx: -1,           // текущий индекс в истории (как в Проводнике)
         
         hk: {
-            download:         { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
+            download:         { key: 'PageDown',   ctrl: false, alt: false, shift: false }, // PageDown — скачать
             upscale:          { key: 'PageUp',     ctrl: true,  alt: false, shift: false }, // Ctrl+PageUp
             deleteVid:        { key: 'Delete',     ctrl: false, alt: false, shift: false },
             sound:            { key: 'ScrollLock', ctrl: false, alt: false, shift: false },
@@ -112,10 +112,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             focusWidget:      { key: 'F7',         ctrl: false, alt: false, shift: false },
             snapWidget:       { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
             nextSlide:        [
-                { key: 'PageDown',   ctrl: false, alt: false, shift: false },
+                { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
                 { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)
             ],
-            prevSlide:        { key: 'PageUp',     ctrl: false, alt: false, shift: false },
+            prevSlide:        { key: 'ArrowLeft',  ctrl: false, alt: false, shift: false },
             nextGroup:        { key: 'PageDown',   ctrl: false, alt: true,  shift: false }, // Alt+PageDown
             prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
@@ -184,28 +184,37 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
     }
 
-    // Миграция старых настроек скачивания (если там был объект или дублирующий PageDown)
+    // Миграция v1.3.23: download -> PageDown, nextSlide -> ArrowRight, prevSlide -> ArrowLeft
+    const isOldDlShiftPd = (h) => h && h.key === 'PageDown' && h.shift && !h.ctrl && !h.alt;
+    const isOldNextPd = (h) => h && h.key === 'PageDown' && !h.shift && !h.ctrl && !h.alt;
+    const isOldPrevPu = (h) => h && h.key === 'PageUp' && !h.shift && !h.ctrl && !h.alt;
+
     if (Array.isArray(config.hk.download)) {
-        config.hk.download = config.hk.download.filter(h => !(h && h.key === 'PageDown' && !h.ctrl && !h.alt && !h.shift));
-        if (config.hk.download.length === 0) {
-            config.hk.download = [{ key: 'PageDown', ctrl: false, alt: false, shift: true }];
+        if (config.hk.download.some(isOldDlShiftPd)) {
+            config.hk.download = config.hk.download.map(h => isOldDlShiftPd(h) ? { key: 'PageDown', ctrl: false, alt: false, shift: false } : h);
         }
-    } else if (!config.hk.download || (config.hk.download.key === 'PageDown' && !config.hk.download.ctrl && !config.hk.download.alt && !config.hk.download.shift)) {
-        config.hk.download = { key: 'PageDown', ctrl: false, alt: false, shift: true };
+    } else if (!config.hk.download || isOldDlShiftPd(config.hk.download)) {
+        config.hk.download = { key: 'PageDown', ctrl: false, alt: false, shift: false };
     }
 
-    // Миграция: переносим upscale с PageUp на Ctrl+PageUp во избежание конфликта со слайдером
+    // Миграция: переносим upscale с PageUp на Ctrl+PageUp во избежание конфликта
     if (config.hk.upscale && config.hk.upscale.key === 'PageUp' && !config.hk.upscale.ctrl && !config.hk.upscale.alt && !config.hk.upscale.shift) {
         config.hk.upscale = { key: 'PageUp', ctrl: true, alt: false, shift: false };
     }
 
-    // Миграция: инициализация prevSlide (PageUp) и nextSlide (PageDown)
-    if (!config.hk.prevSlide) {
-        config.hk.prevSlide = { key: 'PageUp', ctrl: false, alt: false, shift: false };
+    if (Array.isArray(config.hk.nextSlide)) {
+        if (config.hk.nextSlide.some(isOldNextPd)) {
+            config.hk.nextSlide = config.hk.nextSlide.map(h => isOldNextPd(h) ? { key: 'ArrowRight', ctrl: false, alt: false, shift: false } : h);
+        }
+    } else if (!config.hk.nextSlide || isOldNextPd(config.hk.nextSlide)) {
+        config.hk.nextSlide = [
+            { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
+            { key: ' ', ctrl: false, alt: false, shift: false }
+        ];
     }
-    if (!config.hk.nextSlide || (Array.isArray(config.hk.nextSlide) && !config.hk.nextSlide.some(h => h && h.key === 'PageDown'))) {
-        const spaceHk = { key: ' ', ctrl: false, alt: false, shift: false };
-        config.hk.nextSlide = [{ key: 'PageDown', ctrl: false, alt: false, shift: false }, spaceHk];
+
+    if (!config.hk.prevSlide || isOldPrevPu(config.hk.prevSlide)) {
+        config.hk.prevSlide = { key: 'ArrowLeft', ctrl: false, alt: false, shift: false };
     }
 
     // Миграция v1.3.14: инициализация nextGroup (Alt+PageDown) и prevGroup (Alt+PageUp)
@@ -235,6 +244,19 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         config.hk.videoGen10s = { key: 'Enter', ctrl: true, alt: false, shift: false };
     }
 
+    // Глобальная синхронизация хоткеев через GM_getValue (общие для всех сайтов)
+    if (typeof GM_getValue === 'function') {
+        try {
+            const gmHk = GM_getValue('mossad_hk_global', null);
+            if (gmHk) {
+                const parsedHk = JSON.parse(gmHk);
+                if (parsedHk && typeof parsedHk === 'object') {
+                    config.hk = mergeDeep(config.hk, parsedHk);
+                }
+            }
+        } catch (e) {}
+    }
+
     // Глобальная синхронизация шаблона имени файла через GM_getValue
     if (typeof GM_getValue === 'function') {
         const gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
@@ -247,12 +269,22 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         get: () => config,
         save: () => {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            if (typeof GM_setValue === 'function' && config.hk) {
+                try {
+                    GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
+                } catch(e) {}
+            }
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleSyncPush(); // Запускаем батч-синхронизацию
         },
         // Сохранить без ре-рендера UI (для текстовых полей — не сбивает фокус)
         saveQuiet: () => {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            if (typeof GM_setValue === 'function' && config.hk) {
+                try {
+                    GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
+                } catch(e) {}
+            }
             scheduleSyncPush();
         },
         setQuiet: (key, val) => {
@@ -264,6 +296,39 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             Settings.save();
         },
     };
+
+    // Функция быстрого глобального сохранения хоткеев для всех сайтов
+    window.saveGlobalHotkeys = function(showToastNotice = true) {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            if (typeof GM_setValue === 'function' && config.hk) {
+                GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
+            }
+            if (window.updateWidgetUI) window.updateWidgetUI();
+            scheduleSyncPush();
+            if (showToastNotice && typeof showToast === 'function') {
+                showToast('✅ Хоткеи сохранены для всех сайтов');
+            }
+        } catch(e) {
+            console.error('[MOSSAD] saveGlobalHotkeys failed:', e);
+        }
+    };
+
+    // Синхронизация глобальных хоткеев при фокусе вкладки (подхват изменений с других сайтов)
+    window.addEventListener('focus', () => {
+        if (typeof GM_getValue === 'function' && window.capturingFor === null) {
+            try {
+                const gmHk = GM_getValue('mossad_hk_global', null);
+                if (gmHk) {
+                    const parsed = JSON.parse(gmHk);
+                    if (parsed && typeof parsed === 'object') {
+                        config.hk = mergeDeep(config.hk, parsed);
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+                    }
+                }
+            } catch(e) {}
+        }
+    });
 
 // ============================================
     // GITHUB SYNC
@@ -7181,6 +7246,10 @@ function findMediaForDownload() {
         
         modal.innerHTML = `
             <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
+            <div style="background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.3); border-radius:6px; padding:6px 10px; margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px;">
+              <span style="color:#34d399;">💡 При закрытии окна настройки автоматически сохраняются для всех сайтов</span>
+              <button id="mossad-hk-save-all" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:3px 8px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;" title="Сохранить для всех сайтов прямо сейчас">💾 Сохранить</button>
+            </div>
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
               <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">GitHub Sync Token:</div>
               <div style="display:flex;gap:6px;">
@@ -7192,32 +7261,35 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-21</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-25</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
             </div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
-                <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold;">↺ Клавиши по умолчанию</button>
-                <button id="mossad-hk-close" style="background:#ef4444; border:none; padding:6px 16px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold;">Закрыть</button>
+                <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ По умолчанию</button>
+                <div style="display:flex; gap:6px;">
+                    <button id="mossad-hk-save-close" style="background:#10b981; border:none; padding:6px 14px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold; font-size:12px;">💾 Сохранить и закрыть</button>
+                    <button id="mossad-hk-close" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#9ca3af; cursor:pointer; font-weight:bold; font-size:12px;">Закрыть</button>
+                </div>
             </div>
         `;
         
         const list = modal.querySelector('#mossad-hk-list');
         const keysMap = {
-            nextSlide:        'Следующий слайд (PageDown)',
-            prevSlide:        'Предыдущий слайд (PageUp)',
+            nextSlide:        'Следующий слайд (ArrowRight)',
+            prevSlide:        'Предыдущий слайд (ArrowLeft)',
             nextGroup:        'Следующая группа (Alt+PageDown)',
             prevGroup:        'Предыдущая группа (Alt+PageUp)',
-            download:         'Скачать (DL)',
-            upscale:          'Улучшить',
-            deleteVid:        'Удалить видео',
-            sound:            'Звук (вкл/выкл)',
-            playPause:        'Пауза/Плей видео',
+            download:         'Скачать (PageDown)',
+            upscale:          'Улучшить (Ctrl+PageUp)',
+            deleteVid:        'Удалить видео (Delete)',
+            sound:            'Звук вкл/выкл (ScrollLock)',
+            playPause:        'Пауза/Плей видео (Pause)',
             help:             'Настройки клавиш (Ctrl+F1)',
-            history:          'История (Grok)', 
-            slideshowPanel:   'Меню слайдшоу (Ctrl+Insert)',
+            history:          'История Grok (Home)', 
+            slideshowPanel:   'Меню виджета (Ctrl+Insert)',
             slideshowStart:   'Малое слайдшоу / ракета (Shift+Insert)',
             galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert)',
             galleryStop:      'Стоп большого слайдшоу',
@@ -7334,14 +7406,45 @@ function findMediaForDownload() {
             }
         };
 
-        modal.querySelector('#mossad-hk-close').onclick = () => modal.remove();
+        const closeAndSaveModal = () => {
+            if (typeof window.saveGlobalHotkeys === 'function') {
+                window.saveGlobalHotkeys(true);
+            } else {
+                Settings.save();
+            }
+            modal.remove();
+        };
+
+        modal.querySelector('#mossad-hk-save-all').onclick = () => {
+            if (typeof window.saveGlobalHotkeys === 'function') {
+                window.saveGlobalHotkeys(true);
+            } else {
+                Settings.save();
+            }
+        };
+
+        modal.querySelector('#mossad-hk-save-close').onclick = closeAndSaveModal;
+        modal.querySelector('#mossad-hk-close').onclick = closeAndSaveModal;
+
+        const onEscClose = (e) => {
+            if (e.key === 'Escape' && window.capturingFor === null) {
+                document.removeEventListener('keydown', onEscClose);
+                closeAndSaveModal();
+            }
+        };
+        document.addEventListener('keydown', onEscClose);
+
         modal.querySelector('#mossad-hk-reset').onclick = () => {
             if (!confirm('Сбросить все горячие клавиши по умолчанию?')) return;
             config.hk = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk));
-            Settings.save();
+            if (typeof window.saveGlobalHotkeys === 'function') {
+                window.saveGlobalHotkeys(false);
+            } else {
+                Settings.save();
+            }
             modal.remove();
             openHotkeySettings(); // переоткрыть с обновлёнными клавишами
-            showToast('✅ Клавиши сброшены по умолчанию');
+            showToast('✅ Клавиши сброшены по умолчанию для всех сайтов');
         };
     }
 
@@ -7544,6 +7647,7 @@ function findMediaForDownload() {
             e.stopImmediatePropagation();
             const existingModal = document.getElementById('mossad-hk-modal');
             if (existingModal) {
+                if (typeof window.saveGlobalHotkeys === 'function') window.saveGlobalHotkeys(true);
                 existingModal.remove();
                 return;
             }

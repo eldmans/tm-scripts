@@ -36,7 +36,7 @@
         pinterestHistoryIdx: -1,           // текущий индекс в истории (как в Проводнике)
         
         hk: {
-            download:         { key: 'PageDown',   ctrl: false, alt: false, shift: true },  // Shift+PageDown
+            download:         { key: 'PageDown',   ctrl: false, alt: false, shift: false }, // PageDown — скачать
             upscale:          { key: 'PageUp',     ctrl: true,  alt: false, shift: false }, // Ctrl+PageUp
             deleteVid:        { key: 'Delete',     ctrl: false, alt: false, shift: false },
             sound:            { key: 'ScrollLock', ctrl: false, alt: false, shift: false },
@@ -50,10 +50,10 @@
             focusWidget:      { key: 'F7',         ctrl: false, alt: false, shift: false },
             snapWidget:       { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
             nextSlide:        [
-                { key: 'PageDown',   ctrl: false, alt: false, shift: false },
+                { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
                 { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)
             ],
-            prevSlide:        { key: 'PageUp',     ctrl: false, alt: false, shift: false },
+            prevSlide:        { key: 'ArrowLeft',  ctrl: false, alt: false, shift: false },
             nextGroup:        { key: 'PageDown',   ctrl: false, alt: true,  shift: false }, // Alt+PageDown
             prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
@@ -122,28 +122,37 @@
         }
     }
 
-    // Миграция старых настроек скачивания (если там был объект или дублирующий PageDown)
+    // Миграция v1.3.23: download -> PageDown, nextSlide -> ArrowRight, prevSlide -> ArrowLeft
+    const isOldDlShiftPd = (h) => h && h.key === 'PageDown' && h.shift && !h.ctrl && !h.alt;
+    const isOldNextPd = (h) => h && h.key === 'PageDown' && !h.shift && !h.ctrl && !h.alt;
+    const isOldPrevPu = (h) => h && h.key === 'PageUp' && !h.shift && !h.ctrl && !h.alt;
+
     if (Array.isArray(config.hk.download)) {
-        config.hk.download = config.hk.download.filter(h => !(h && h.key === 'PageDown' && !h.ctrl && !h.alt && !h.shift));
-        if (config.hk.download.length === 0) {
-            config.hk.download = [{ key: 'PageDown', ctrl: false, alt: false, shift: true }];
+        if (config.hk.download.some(isOldDlShiftPd)) {
+            config.hk.download = config.hk.download.map(h => isOldDlShiftPd(h) ? { key: 'PageDown', ctrl: false, alt: false, shift: false } : h);
         }
-    } else if (!config.hk.download || (config.hk.download.key === 'PageDown' && !config.hk.download.ctrl && !config.hk.download.alt && !config.hk.download.shift)) {
-        config.hk.download = { key: 'PageDown', ctrl: false, alt: false, shift: true };
+    } else if (!config.hk.download || isOldDlShiftPd(config.hk.download)) {
+        config.hk.download = { key: 'PageDown', ctrl: false, alt: false, shift: false };
     }
 
-    // Миграция: переносим upscale с PageUp на Ctrl+PageUp во избежание конфликта со слайдером
+    // Миграция: переносим upscale с PageUp на Ctrl+PageUp во избежание конфликта
     if (config.hk.upscale && config.hk.upscale.key === 'PageUp' && !config.hk.upscale.ctrl && !config.hk.upscale.alt && !config.hk.upscale.shift) {
         config.hk.upscale = { key: 'PageUp', ctrl: true, alt: false, shift: false };
     }
 
-    // Миграция: инициализация prevSlide (PageUp) и nextSlide (PageDown)
-    if (!config.hk.prevSlide) {
-        config.hk.prevSlide = { key: 'PageUp', ctrl: false, alt: false, shift: false };
+    if (Array.isArray(config.hk.nextSlide)) {
+        if (config.hk.nextSlide.some(isOldNextPd)) {
+            config.hk.nextSlide = config.hk.nextSlide.map(h => isOldNextPd(h) ? { key: 'ArrowRight', ctrl: false, alt: false, shift: false } : h);
+        }
+    } else if (!config.hk.nextSlide || isOldNextPd(config.hk.nextSlide)) {
+        config.hk.nextSlide = [
+            { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
+            { key: ' ', ctrl: false, alt: false, shift: false }
+        ];
     }
-    if (!config.hk.nextSlide || (Array.isArray(config.hk.nextSlide) && !config.hk.nextSlide.some(h => h && h.key === 'PageDown'))) {
-        const spaceHk = { key: ' ', ctrl: false, alt: false, shift: false };
-        config.hk.nextSlide = [{ key: 'PageDown', ctrl: false, alt: false, shift: false }, spaceHk];
+
+    if (!config.hk.prevSlide || isOldPrevPu(config.hk.prevSlide)) {
+        config.hk.prevSlide = { key: 'ArrowLeft', ctrl: false, alt: false, shift: false };
     }
 
     // Миграция v1.3.14: инициализация nextGroup (Alt+PageDown) и prevGroup (Alt+PageUp)
@@ -173,6 +182,19 @@
         config.hk.videoGen10s = { key: 'Enter', ctrl: true, alt: false, shift: false };
     }
 
+    // Глобальная синхронизация хоткеев через GM_getValue (общие для всех сайтов)
+    if (typeof GM_getValue === 'function') {
+        try {
+            const gmHk = GM_getValue('mossad_hk_global', null);
+            if (gmHk) {
+                const parsedHk = JSON.parse(gmHk);
+                if (parsedHk && typeof parsedHk === 'object') {
+                    config.hk = mergeDeep(config.hk, parsedHk);
+                }
+            }
+        } catch (e) {}
+    }
+
     // Глобальная синхронизация шаблона имени файла через GM_getValue
     if (typeof GM_getValue === 'function') {
         const gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
@@ -185,12 +207,22 @@
         get: () => config,
         save: () => {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            if (typeof GM_setValue === 'function' && config.hk) {
+                try {
+                    GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
+                } catch(e) {}
+            }
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleSyncPush(); // Запускаем батч-синхронизацию
         },
         // Сохранить без ре-рендера UI (для текстовых полей — не сбивает фокус)
         saveQuiet: () => {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            if (typeof GM_setValue === 'function' && config.hk) {
+                try {
+                    GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
+                } catch(e) {}
+            }
             scheduleSyncPush();
         },
         setQuiet: (key, val) => {
@@ -202,4 +234,37 @@
             Settings.save();
         },
     };
+
+    // Функция быстрого глобального сохранения хоткеев для всех сайтов
+    window.saveGlobalHotkeys = function(showToastNotice = true) {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            if (typeof GM_setValue === 'function' && config.hk) {
+                GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
+            }
+            if (window.updateWidgetUI) window.updateWidgetUI();
+            scheduleSyncPush();
+            if (showToastNotice && typeof showToast === 'function') {
+                showToast('✅ Хоткеи сохранены для всех сайтов');
+            }
+        } catch(e) {
+            console.error('[MOSSAD] saveGlobalHotkeys failed:', e);
+        }
+    };
+
+    // Синхронизация глобальных хоткеев при фокусе вкладки (подхват изменений с других сайтов)
+    window.addEventListener('focus', () => {
+        if (typeof GM_getValue === 'function' && window.capturingFor === null) {
+            try {
+                const gmHk = GM_getValue('mossad_hk_global', null);
+                if (gmHk) {
+                    const parsed = JSON.parse(gmHk);
+                    if (parsed && typeof parsed === 'object') {
+                        config.hk = mergeDeep(config.hk, parsed);
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+                    }
+                }
+            } catch(e) {}
+        }
+    });
 

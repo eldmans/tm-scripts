@@ -197,6 +197,7 @@
             e.stopImmediatePropagation();
             const existingModal = document.getElementById('mossad-hk-modal');
             if (existingModal) {
+                if (typeof window.saveGlobalHotkeys === 'function') window.saveGlobalHotkeys(true);
                 existingModal.remove();
                 return;
             }
