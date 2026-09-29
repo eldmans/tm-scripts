@@ -17,7 +17,7 @@
             border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 5px 8px;
             display: flex; align-items: center; gap: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             font-family: system-ui,-apple-system,sans-serif; cursor: grab; flex-wrap: nowrap; pointer-events: auto;
-            width: fit-content; max-width: 100%; box-sizing: border-box;
+            width: 100%; box-sizing: border-box;
         `;
 
         // ── Утилита создания маленьких кнопок ──
@@ -57,6 +57,7 @@
             e.preventDefault();
             if (confirm('Очистить собранную коллекцию?')) {
                 _gSS.removeItem(GALLERY_COLLECTION_KEY);
+                sessionStorage.removeItem('mossad_grok_collect_active');
                 btnCollect.textContent = 'Собрать';
                 btnCollect.dataset.collectedCount = '0';
                 btnCollect.style.background = '#1f2937';
@@ -67,44 +68,10 @@
             }
         };
 
-
         if (isGrokSavedPage()) {
-            // Мониторим появление новых ссылок на странице каждые 2с (количество только увеличивается!)
-            setInterval(() => {
-                let currentTotal = savedCount;
-                const existingUrls = new Set();
-                try {
-                    const cRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-                    if (cRaw) {
-                        const items = JSON.parse(cRaw).items || [];
-                        currentTotal = items.length;
-                        items.forEach(it => existingUrls.add((it.url || '').split('?')[0].toLowerCase()));
-                    }
-                } catch(e) {}
-
-                if (currentTotal === 0 && !btnCollect.dataset.collectedCount) return;
-
-                const anchors = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
-                let uncollected = 0;
-                anchors.forEach(a => {
-                    const href = a.getAttribute('href') || '';
-                    if (!href) return;
-                    const url = href.startsWith('http') ? href : 'https://grok.com' + href;
-                    if (!existingUrls.has(url.split('?')[0].toLowerCase())) {
-                        uncollected++;
-                    }
-                });
-
-                if (uncollected > 0) {
-                    btnCollect.textContent = `${currentTotal} 🟢+${uncollected}`;
-                    btnCollect.style.color = '#34d399';
-                    btnCollect.title = `Собрано: ${currentTotal}, новых на странице: +${uncollected}. Кликните для добавления!`;
-                } else if (currentTotal > 0) {
-                    btnCollect.textContent = String(currentTotal);
-                    btnCollect.style.color = '#e5e7eb';
-                    btnCollect.title = `Коллекция (${currentTotal}): открыть список`;
-                }
-            }, 2000);
+            if (typeof grokInitAutoCollector === 'function') {
+                grokInitAutoCollector();
+            }
         }
 
         // ── 3. Кнопка-статус воспроизведения (Слайдшоу / ❚❚ / ▶) ──

@@ -35,6 +35,7 @@
             z-index: 999998;
             font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; user-select: none;
             display: flex; flex-direction: column; gap: 4px; pointer-events: none;
+            width: fit-content; max-width: calc(100vw - 40px); box-sizing: border-box; align-items: stretch;
         `;
 
         window.applyWidgetZoom = function() {
@@ -101,7 +102,7 @@
             background: rgba(20, 20, 20, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 5px 8px;
             display: flex; align-items: center; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            transition: all 0.3s ease; cursor: grab; pointer-events: auto; width: fit-content; max-width: 100%; box-sizing: border-box;
+            transition: all 0.3s ease; cursor: grab; pointer-events: auto; width: 100%; box-sizing: border-box;
         `;
         window.makeWidgetDraggable(topBar);
         
@@ -136,7 +137,7 @@
         btnTogglePanel.id = 'mossad-btn-toggle-panel';
         btnTogglePanel.innerHTML = '▼';
         btnTogglePanel.title = 'Меню настроек';
-        btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; padding: 0 3px; line-height: 1; transition: transform 0.2s, color 0.2s;`;
+        btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; padding: 2px 6px; line-height: 1; transition: transform 0.2s, color 0.2s; margin-left: auto;`;
         btnTogglePanel.onmouseenter = () => { btnTogglePanel.style.color = '#fff'; };
         btnTogglePanel.onmouseleave = () => { btnTogglePanel.style.color = '#9ca3af'; };
         btnTogglePanel.onclick = () => {
@@ -148,7 +149,7 @@
         btnClose.id = 'mossad-btn-close';
         btnClose.innerHTML = '✕';
         btnClose.title = 'Скрыть виджет (Ctrl+Insert)';
-        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: color 0.2s; margin-left: auto;`;
+        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: color 0.2s; margin-left: 4px;`;
         btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
         btnClose.onmouseleave = () => { btnClose.style.color = '#6b7280'; };
         btnClose.onclick = () => {
@@ -167,6 +168,7 @@
             border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 12px;
             display: none; flex-direction: column; gap: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             font-size: 12px; transition: opacity 0.2s ease, transform 0.2s ease; opacity: 0; pointer-events: auto; transform: translateY(-10px);
+            width: 100%; box-sizing: border-box;
         `;
 
         const renderPanel = () => {
@@ -501,12 +503,32 @@
             triggerDownload();
         };
 
+        window.cycleWidgetMenuState = () => {
+            // 3-позиционная логика по Ctrl+Insert (циклическое переключение):
+            // 1-е нажатие: Открывается полное меню (все 3 блока/строки, включая панель настроек)
+            // 2-е нажатие: Сворачивается до сокращённого меню (только 2 верхние строки)
+            // 3-е нажатие: Меню полностью скрывается с экрана (режим click-through)
+            // Следующее нажатие: Снова открывает полное меню (цикл заново)
+            if (window.widgetState === 'hidden') {
+                window.widgetState = 'panel';
+            } else if (window.widgetState === 'panel') {
+                window.widgetState = 'bar';
+            } else {
+                window.widgetState = 'hidden';
+            }
+            sessionStorage.setItem(SESSION_STATE_KEY, window.widgetState);
+            window.updateWidgetUI();
+        };
+
         window.updateWidgetUI = () => {
             const galleryRow = document.getElementById('mossad-gallery-row');
             const playlistPanel = document.getElementById('mossad-playlist-panel');
 
+            sessionStorage.setItem(SESSION_STATE_KEY, window.widgetState);
+
             if (window.widgetState === 'hidden') {
                 container.style.display = 'none';
+                container.style.pointerEvents = 'none';
                 topBar.style.display = 'none';
                 panel.style.display = 'none';
                 panel.style.pointerEvents = 'none';
@@ -514,6 +536,7 @@
                 if (playlistPanel) playlistPanel.style.display = 'none';
             } else if (window.widgetState === 'bar') {
                 container.style.display = 'flex';
+                container.style.pointerEvents = 'none';
                 topBar.style.display = 'flex';
                 topBar.style.pointerEvents = 'auto';
                 panel.style.display = 'none';
@@ -531,6 +554,7 @@
                 btnTogglePanel.style.color = '#9ca3af';
             } else if (window.widgetState === 'panel') {
                 container.style.display = 'flex';
+                container.style.pointerEvents = 'none';
                 topBar.style.display = 'flex';
                 topBar.style.pointerEvents = 'auto';
                 if (galleryRow) {
@@ -623,7 +647,7 @@
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-09-25</span>
+              <span>v${SCRIPT_VERSION} · 2026-09-30</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
@@ -650,8 +674,8 @@
             sound:            'Звук вкл/выкл (ScrollLock)',
             playPause:        'Пауза/Плей видео (Pause)',
             help:             'Настройки клавиш (Ctrl+F1)',
-            history:          'История Grok (Home)', 
-            slideshowPanel:   'Меню виджета (Ctrl+Insert)',
+            history:          'Переход в Saved Grok (Home)', 
+            slideshowPanel:   'Меню: полное / краткое / скрыть (Ctrl+Insert)',
             slideshowStart:   'Малое слайдшоу / ракета (Shift+Insert)',
             galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert)',
             galleryStop:      'Стоп большого слайдшоу',

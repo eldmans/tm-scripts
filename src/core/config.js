@@ -182,6 +182,14 @@
         config.hk.videoGen10s = { key: 'Enter', ctrl: true, alt: false, shift: false };
     }
 
+    // Миграция v1.3.24: history (Home) и slideshowPanel (Ctrl+Insert)
+    if (!config.hk.history) {
+        config.hk.history = { key: 'Home', ctrl: false, alt: false, shift: false };
+    }
+    if (!config.hk.slideshowPanel) {
+        config.hk.slideshowPanel = { key: 'Insert', ctrl: true, alt: false, shift: false };
+    }
+
     // Глобальная синхронизация хоткеев через GM_getValue (общие для всех сайтов)
     if (typeof GM_getValue === 'function') {
         try {

@@ -120,11 +120,118 @@
             }
         }
 
+        sessionStorage.setItem('mossad_grok_collect_active', 'true');
+
         if (addedCount > 0) {
             showToast(`✅ Добавлено +${addedCount}! Всего в списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
         } else {
             showToast(`ℹ️ Новых ссылок нет. В списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
         }
+    }
+
+    /**
+     * Автоматическое бесшовное добавление новых ссылок в коллекцию на лету.
+     * Новые ссылки сразу подхватываются при скролле и добавляются в общий список без подтверждений и без (+N).
+     */
+    function grokAutoCollectNewLinks() {
+        if (typeof isGrokSavedPage === 'function' && !isGrokSavedPage()) return;
+        const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
+        if (!raw) return; // Ручной клик требуется один раз; до первого сбора автосбор не активен
+
+        let existingData = {};
+        try { existingData = JSON.parse(raw); } catch(e) { return; }
+        const existingItems = existingData.items || [];
+        if (!existingItems.length && !sessionStorage.getItem('mossad_grok_collect_active')) return;
+
+        const seenUrls = new Set();
+        existingItems.forEach(it => {
+            const base = (it.url || '').split('?')[0].toLowerCase();
+            if (base) seenUrls.add(base);
+        });
+
+        const foundItems = grokCollectLinks();
+        let addedCount = 0;
+        for (const it of foundItems) {
+            const base = (it.url || '').split('?')[0].toLowerCase();
+            if (!seenUrls.has(base)) {
+                seenUrls.add(base);
+                existingItems.push(it);
+                addedCount++;
+            }
+        }
+
+        const btnCollect = document.getElementById('mossad-gallery-collect');
+
+        if (addedCount > 0) {
+            const date = new Date().toISOString().slice(0, 10);
+            existingData.date = date;
+            existingData.items = existingItems;
+            _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(existingData));
+
+            if (btnCollect) {
+                btnCollect.textContent = String(existingItems.length);
+                btnCollect.title = `Коллекция (${existingItems.length}): открыть список`;
+                btnCollect.style.background = '#065f46';
+                btnCollect.style.color = '#e5e7eb';
+                btnCollect.dataset.collectedCount = String(existingItems.length);
+                const dlBtn = document.getElementById('mossad-gallery-dl') || document.getElementById('mossad-btn-export-list');
+                if (dlBtn) dlBtn.style.display = 'inline-block';
+            }
+
+            const playlistPanel = document.getElementById('mossad-playlist-panel');
+            if (playlistPanel) {
+                playlistPanel.remove();
+                if (typeof grokTogglePlaylistPanel === 'function') {
+                    grokTogglePlaylistPanel(true);
+                }
+            }
+        } else if (btnCollect && existingItems.length > 0) {
+            // Без скобок и (+N): отображается только чистое количество
+            btnCollect.textContent = String(existingItems.length);
+            btnCollect.title = `Коллекция (${existingItems.length}): открыть список`;
+            btnCollect.style.background = '#065f46';
+            btnCollect.style.color = '#e5e7eb';
+            btnCollect.dataset.collectedCount = String(existingItems.length);
+        }
+    }
+
+    /**
+     * Инициализация слушателей MutationObserver и scroll для автосбора ссылок в ленте /imagine/saved
+     */
+    function grokInitAutoCollector() {
+        if (rootDomain !== 'grok.com') return;
+        if (window._mossadAutoCollectorInit) return;
+        window._mossadAutoCollectorInit = true;
+
+        let debounceTimer = null;
+        const triggerCollect = () => {
+            if (typeof isGrokSavedPage === 'function' && !isGrokSavedPage()) return;
+            const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
+            if (!raw) return;
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                grokAutoCollectNewLinks();
+            }, 300);
+        };
+
+        window.addEventListener('scroll', triggerCollect, { passive: true });
+
+        const observer = new MutationObserver((mutations) => {
+            if (typeof isGrokSavedPage === 'function' && !isGrokSavedPage()) return;
+            let hasAdded = false;
+            for (let i = 0; i < mutations.length; i++) {
+                if (mutations[i].addedNodes && mutations[i].addedNodes.length > 0) {
+                    hasAdded = true;
+                    break;
+                }
+            }
+            if (hasAdded) triggerCollect();
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // Периодическая проверка раз в 2 секунды
+        setInterval(triggerCollect, 2000);
     }
 
     /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */

@@ -189,8 +189,28 @@
         }
 
         const activeEl = document.activeElement;
-        const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
+        const isEditing = activeEl && (
+            activeEl.tagName === 'INPUT' || 
+            activeEl.tagName === 'TEXTAREA' || 
+            activeEl.isContentEditable || 
+            activeEl.getAttribute('role') === 'textbox' ||
+            !!activeEl.closest('[contenteditable="true"]') ||
+            !!activeEl.closest('input, textarea, [role="textbox"]')
+        );
         if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
+
+        // 1. Навигация Home: переход в grok.com/imagine/saved из любого места сайта Grok (если курсор не в поле ввода текста)
+        const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
+        if ((hotkeyMatches(e, config.hk.history) || isHomeKey) && rootDomain === 'grok.com') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (location.pathname !== '/imagine/saved') {
+                window.location.href = 'https://grok.com/imagine/saved';
+            } else {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            return;
+        }
 
         if (hotkeyMatches(e, config.hk.help)) {
             e.preventDefault();
@@ -205,10 +225,22 @@
             return;
         }
 
+        // Новая 3-позиционная логика переключения по Ctrl+Insert (циклическое переключение):
+        // 1-е нажатие: Открывается полное меню (все 3 блока/строки, включая панель настроек снизу)
+        // 2-е нажатие: Сворачивается до сокращённого меню (только 2 верхние строки)
+        // 3-е нажатие: Меню полностью скрывается с экрана (режим click-through)
+        // Следующее нажатие: Снова открывает полное меню (цикл заново)
         if (hotkeyMatches(e, config.hk.slideshowPanel)) {
             e.preventDefault();
-            window.widgetState = (window.widgetState === 'hidden') ? 'bar' : 'hidden';
-            window.updateWidgetUI();
+            e.stopImmediatePropagation();
+            if (typeof window.cycleWidgetMenuState === 'function') {
+                window.cycleWidgetMenuState();
+            } else {
+                if (window.widgetState === 'hidden') window.widgetState = 'panel';
+                else if (window.widgetState === 'panel') window.widgetState = 'bar';
+                else window.widgetState = 'hidden';
+                if (typeof window.updateWidgetUI === 'function') window.updateWidgetUI();
+            }
             return;
         }
 
@@ -290,11 +322,6 @@
                 else video.pause();
                 showToast(video.paused ? '▶ Проигрывание' : '⏸ Пауза');
             }
-        }
-
-        if (hotkeyMatches(e, config.hk.history) && rootDomain === 'grok.com') {
-            e.preventDefault();
-            window.location.href = 'https://grok.com/imagine/saved';
         }
 
         // Привязать виджет к левому верхнему краю
