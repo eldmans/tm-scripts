@@ -587,21 +587,59 @@
 
     /**
      * Шаг по киноплёнке (вперёд: down/right, назад: up/left).
-     * Возвращает true, если клик выполнен, false — если край или нет киноплёнки.
+     * Возвращает:
+     * - true: клик выполнен успешно
+     * - 'end': достигнут край киноплёнки при выключенном R (config.loopFeed)
+     * - false: нет киноплёнки или одиночный кадр
      */
     function grokStepFilmstrip(isNext = true) {
         const items = grokGetFilmstripItems();
         if (items.length <= 1) return false;
         const curIdx = grokGetActiveFilmstripIndex();
-        if (curIdx === -1) return false;
-        const nextIdx = isNext ? (curIdx + 1) % items.length : (curIdx - 1 + items.length) % items.length;
-        items[nextIdx].click();
-        setTimeout(() => {
-            if (typeof grokHighlightActivePlaylistItem === 'function') {
-                grokHighlightActivePlaylistItem();
+        const safeCurIdx = curIdx !== -1 ? curIdx : 0;
+        const loop = !!config.loopFeed;
+
+        let nextIdx;
+        let reachedEnd = false;
+
+        if (isNext) {
+            if (safeCurIdx + 1 < items.length) {
+                nextIdx = safeCurIdx + 1;
+            } else {
+                reachedEnd = true;
+                if (loop) {
+                    nextIdx = 0;
+                } else {
+                    return 'end'; // Достигнут конец, повтор выключен
+                }
             }
-        }, 120);
-        return true;
+        } else {
+            if (safeCurIdx > 0) {
+                nextIdx = safeCurIdx - 1;
+            } else {
+                reachedEnd = true;
+                if (loop) {
+                    nextIdx = items.length - 1;
+                } else {
+                    return 'end'; // Достигнуто начало, повтор выключен
+                }
+            }
+        }
+
+        if (nextIdx >= 0 && nextIdx < items.length) {
+            items[nextIdx].click();
+            if (reachedEnd && loop) {
+                showToast('🔄 Конец киноплёнки: повтор (R)...');
+            }
+            setTimeout(() => {
+                if (typeof grokHighlightActivePlaylistItem === 'function') {
+                    grokHighlightActivePlaylistItem();
+                }
+            }, 120);
+            return true;
+        }
+
+        return false;
     }
 
     // ============================================================

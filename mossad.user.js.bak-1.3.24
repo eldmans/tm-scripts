@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.25
+// @version      1.3.24
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.25';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.24';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -120,8 +120,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
-            videoGen6s:       { key: '',           ctrl: false, alt: false, shift: false }, // Пусто (отключено)
-            videoGen10s:      { key: '',           ctrl: false, alt: false, shift: false }, // Пусто (отключено)
+            updateScript:     { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
+            videoGen6s:       { key: 'Enter',      ctrl: false, alt: false, shift: true },  // Shift+Enter — видео 6с Grok
+            videoGen10s:      { key: 'Enter',      ctrl: true,  alt: false, shift: false }, // Ctrl+Enter — видео 10с Grok
         }
     };
 
@@ -235,12 +236,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         config.hk.slideshowStart = { key: 'Insert', ctrl: false, alt: false, shift: true };
     }
 
-    // Миграция v1.3.25: отключение хоткеев видеогенерации Grok (Shift+Enter / Ctrl+Enter)
-    if (config.hk.videoGen6s && config.hk.videoGen6s.key === 'Enter') {
-        config.hk.videoGen6s = { key: '', ctrl: false, alt: false, shift: false };
+    // Миграция v1.3.19: видеогенерация Grok (Shift+Enter / Ctrl+Enter)
+    if (!config.hk.videoGen6s) {
+        config.hk.videoGen6s = { key: 'Enter', ctrl: false, alt: false, shift: true };
     }
-    if (config.hk.videoGen10s && config.hk.videoGen10s.key === 'Enter') {
-        config.hk.videoGen10s = { key: '', ctrl: false, alt: false, shift: false };
+    if (!config.hk.videoGen10s) {
+        config.hk.videoGen10s = { key: 'Enter', ctrl: true, alt: false, shift: false };
     }
 
     // Миграция v1.3.24: history (Home) и slideshowPanel (Ctrl+Insert)
@@ -612,52 +613,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (config.pdAction === 'up') {
             setTimeout(() => {
                 const dirs = config.slideshowDirections;
-                const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
-                const isFwd = (dPadDir === 'down' || dPadDir === 'right');
-
-                // 1. Grok на странице поста: шагаем по киноплёнке или соседнему посту в направлении D-pad
-                if (rootDomain === 'grok.com' && typeof isGrokPostPage === 'function' && isGrokPostPage()) {
-                    const stepRes = (typeof grokStepFilmstrip === 'function') ? grokStepFilmstrip(isFwd) : false;
-                    if (stepRes === true) return;
-                    if (stepRes === 'end') {
-                        showToast('🏁 Достигнут конец ленты');
-                        return;
-                    }
-                    const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dPadDir) : null;
-                    if (neighborUrl) {
-                        if (typeof grokSpaNavigate === 'function') {
-                            grokSpaNavigate(neighborUrl);
-                        } else {
-                            window.location.href = neighborUrl;
-                        }
-                    } else {
-                        showToast('🏁 Достигнут конец ленты');
-                    }
-                    return;
-                }
-
-                // 2. Pinterest
-                if (rootDomain.includes('pinterest.')) {
-                    if (typeof selectNextPinterestPin === 'function') {
-                        selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: true });
-                    }
-                    return;
-                }
-
-                // 3. RedGifs
-                if (rootDomain.includes('redgifs.com')) {
-                    if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
-                        window.MOSSAD_ENGINES.redgifs.navigate(dPadDir);
-                    } else if (typeof redGifsNavigate === 'function') {
-                        redGifsNavigate(dPadDir);
-                    }
-                    return;
-                }
-
-                // 4. Универсальный шаг стрелкой в направлении D-pad
-                const key = getArrowKey(dPadDir);
+                const key = getArrowKey(dirs && dirs.length ? dirs[0] : 'up');
                 document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
                 if (typeof triggerUniversalFullScreen === 'function') {
                     triggerUniversalFullScreen();
                 }
@@ -2504,59 +2461,21 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
     /**
      * Шаг по киноплёнке (вперёд: down/right, назад: up/left).
-     * Возвращает:
-     * - true: клик выполнен успешно
-     * - 'end': достигнут край киноплёнки при выключенном R (config.loopFeed)
-     * - false: нет киноплёнки или одиночный кадр
+     * Возвращает true, если клик выполнен, false — если край или нет киноплёнки.
      */
     function grokStepFilmstrip(isNext = true) {
         const items = grokGetFilmstripItems();
         if (items.length <= 1) return false;
         const curIdx = grokGetActiveFilmstripIndex();
-        const safeCurIdx = curIdx !== -1 ? curIdx : 0;
-        const loop = !!config.loopFeed;
-
-        let nextIdx;
-        let reachedEnd = false;
-
-        if (isNext) {
-            if (safeCurIdx + 1 < items.length) {
-                nextIdx = safeCurIdx + 1;
-            } else {
-                reachedEnd = true;
-                if (loop) {
-                    nextIdx = 0;
-                } else {
-                    return 'end'; // Достигнут конец, повтор выключен
-                }
+        if (curIdx === -1) return false;
+        const nextIdx = isNext ? (curIdx + 1) % items.length : (curIdx - 1 + items.length) % items.length;
+        items[nextIdx].click();
+        setTimeout(() => {
+            if (typeof grokHighlightActivePlaylistItem === 'function') {
+                grokHighlightActivePlaylistItem();
             }
-        } else {
-            if (safeCurIdx > 0) {
-                nextIdx = safeCurIdx - 1;
-            } else {
-                reachedEnd = true;
-                if (loop) {
-                    nextIdx = items.length - 1;
-                } else {
-                    return 'end'; // Достигнуто начало, повтор выключен
-                }
-            }
-        }
-
-        if (nextIdx >= 0 && nextIdx < items.length) {
-            items[nextIdx].click();
-            if (reachedEnd && loop) {
-                showToast('🔄 Конец киноплёнки: повтор (R)...');
-            }
-            setTimeout(() => {
-                if (typeof grokHighlightActivePlaylistItem === 'function') {
-                    grokHighlightActivePlaylistItem();
-                }
-            }, 120);
-            return true;
-        }
-
-        return false;
+        }, 120);
+        return true;
     }
 
     // ============================================================
@@ -2744,16 +2663,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 // ============================================================
     // GROK: Smart Delete (3-dots fallback, a.confirm, hold-post)
     // ============================================================
-    function getGrokNeighborPostUrl(dirOverride = null) {
+    function getGrokNeighborPostUrl() {
         // 1. Проверяем карточки постов в текущем DOM
         const cards = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
         const currentIdMatch = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
         const currentId = currentIdMatch ? currentIdMatch[1] : null;
-
-        const dirs = config.slideshowDirections;
-        const dir = dirOverride || ((dirs && dirs.length) ? dirs[0] : 'down');
-        const isFwd = (dir === 'down' || dir === 'right');
-        const loop = !!config.loopFeed;
 
         if (cards.length > 0 && currentId) {
             const urls = cards.map(c => c.href || c.getAttribute('href') || '').filter(Boolean);
@@ -2764,24 +2678,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
             const unique = Array.from(seen.keys());
             const idx = unique.indexOf(currentId);
+            const dir = (config.slideshowDirections && config.slideshowDirections.length) ? config.slideshowDirections[0] : 'up';
 
             let targetId = null;
-            if (isFwd) {
-                if (idx >= 0 && idx < unique.length - 1) {
-                    targetId = unique[idx + 1];
-                } else if (loop && unique.length > 0) {
-                    targetId = unique[0];
-                } else if (!loop && idx > 0) {
-                    targetId = unique[idx - 1];
-                }
+            if (dir === 'down' || dir === 'right') {
+                targetId = (idx >= 0 && idx < unique.length - 1) ? unique[idx + 1] : (unique.length > 0 ? unique[0] : null);
             } else {
-                if (idx > 0) {
-                    targetId = unique[idx - 1];
-                } else if (loop && unique.length > 0) {
-                    targetId = unique[unique.length - 1];
-                } else if (!loop && idx < unique.length - 1) {
-                    targetId = unique[idx + 1];
-                }
+                targetId = (idx > 0) ? unique[idx - 1] : (unique.length > 0 ? unique[unique.length - 1] : null);
             }
             if (targetId && seen.get(targetId)) return seen.get(targetId);
         }
@@ -2793,25 +2696,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 const items = (JSON.parse(raw).items || []).map(i => i.url || i);
                 const idx = items.findIndex(u => u.includes(currentId));
                 if (idx !== -1) {
-                    let nextIdx = -1;
-                    if (isFwd) {
-                        if (idx + 1 < items.length) {
-                            nextIdx = idx + 1;
-                        } else if (loop) {
-                            nextIdx = 0;
-                        } else if (!loop && idx > 0) {
-                            nextIdx = idx - 1;
-                        }
-                    } else {
-                        if (idx > 0) {
-                            nextIdx = idx - 1;
-                        } else if (loop) {
-                            nextIdx = items.length - 1;
-                        } else if (!loop && idx + 1 < items.length) {
-                            nextIdx = idx + 1;
-                        }
-                    }
-                    if (nextIdx !== -1 && items[nextIdx]) return items[nextIdx];
+                    const nextIdx = (idx + 1) % items.length;
+                    return items[nextIdx];
                 }
             }
         } catch (e) {}
@@ -2850,27 +2736,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     const dirs = config.slideshowDirections;
                     const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
                     const isFwd = (dPadDir === 'down' || dPadDir === 'right');
-                    const loop = !!config.loopFeed;
 
                     let nextIdx;
                     if (isFwd) {
                         // Д-пад вниз/вправо: шагаем на следующее видео вниз по ленте
-                        if (safeCurIdx + 1 < items.length) {
-                            nextIdx = safeCurIdx + 1;
-                        } else if (loop) {
-                            nextIdx = 0; // петля R: в начало
-                        } else {
-                            nextIdx = safeCurIdx > 0 ? safeCurIdx - 1 : 0; // R выключен: не зацикливаем, отступаем назад
-                        }
+                        nextIdx = (safeCurIdx + 1 < items.length) ? safeCurIdx + 1 : (safeCurIdx > 0 ? safeCurIdx - 1 : 0);
                     } else {
                         // Д-пад вверх/влево: шагаем на предыдущее видео вверх по ленте (на 4-е от 5-го)
-                        if (safeCurIdx > 0) {
-                            nextIdx = safeCurIdx - 1;
-                        } else if (loop) {
-                            nextIdx = items.length - 1; // петля R: в конец
-                        } else {
-                            nextIdx = items.length > 1 ? 1 : 0; // R выключен: не зацикливаем, отступаем вперёд
-                        }
+                        nextIdx = (safeCurIdx > 0) ? safeCurIdx - 1 : (items.length > 1 ? 1 : 0);
                     }
                     targetFilmstripBtn = items[nextIdx];
 
@@ -2880,19 +2753,17 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     if (targetFilmstripUuid) {
                         finalTargetUrl = `/imagine/post/${targetFilmstripUuid}`;
                     }
-                    console.log(`[MOSSAD] hold post: DPad=${dPadDir} (${isFwd ? 'вниз' : 'вверх'}), целевой кадр: ${safeCurIdx + 1} -> ${nextIdx + 1} (UUID: ${targetFilmstripUuid || 'н/д'}, loop=${loop})`);
+                    console.log(`[MOSSAD] hold post: DPad=${dPadDir} (${isFwd ? 'вниз' : 'вверх'}), целевой кадр: ${safeCurIdx + 1} -> ${nextIdx + 1} (UUID: ${targetFilmstripUuid || 'н/д'})`);
                 } else {
                     // Б. Киноплёнка из 1 кадра или не найдена — ищем URL соседа по коллекции / DOM
-                    const dirs = config.slideshowDirections;
-                    const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
-                    finalTargetUrl = getGrokNeighborPostUrl(dPadDir);
+                    finalTargetUrl = getGrokNeighborPostUrl();
                     console.log('[MOSSAD] hold post: киноплёнка одиночная/отсутствует, fallback URL соседа:', finalTargetUrl);
                 }
 
                 // В. Крайний фолбэк: шаг стрелками, если нет киноплёнки и не найден URL соседа
                 if (!targetFilmstripBtn && !finalTargetUrl) {
                     const dirs = config.slideshowDirections;
-                    const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
+                    const dPadDir = (dirs && dirs.length) ? dirs[0] : 'up';
                     const forwardKey = getArrowKey(dPadDir);
                     const oppDir = dPadDir === 'up' ? 'down' : (dPadDir === 'down' ? 'up' : (dPadDir === 'left' ? 'right' : 'left'));
                     const backKey = getArrowKey(oppDir);
@@ -4362,11 +4233,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         };
 
         // ── 6. Быстрые кнопки генерации видео (6s / 10s) ──
-        const btnVid6 = mkBtn('mossad-grok-vid6', '6s', 'Генерация видео 6 сек', 'background:#1a2332;color:#38bdf8;');
+        const btnVid6 = mkBtn('mossad-grok-vid6', '6s', 'Генерация видео 6 сек (Shift+Enter)', 'background:#1a2332;color:#38bdf8;');
         btnVid6.onclick = () => {
             if (typeof triggerGrokVideoGeneration === 'function') triggerGrokVideoGeneration(6);
         };
-        const btnVid10 = mkBtn('mossad-grok-vid10', '10s', 'Генерация видео 10 сек', 'background:#1e1a3a;color:#a78bfa;');
+        const btnVid10 = mkBtn('mossad-grok-vid10', '10s', 'Генерация видео 10 сек (Ctrl+Enter)', 'background:#1e1a3a;color:#a78bfa;');
         btnVid10.onclick = () => {
             if (typeof triggerGrokVideoGeneration === 'function') triggerGrokVideoGeneration(10);
         };
@@ -6136,82 +6007,54 @@ function findMediaForDownload() {
     function triggerNextSlide() {
         if (!slideshowActive || slideshowPaused || _isRewinding) return;
         cancelSlideTimers();
-
-        // 1. Большое слайдшоу (по плейлисту коллекции в Grok): НЕ зависит от D-Pad!
-        const isBigGrokSs = (rootDomain === 'grok.com') && (() => {
-            if (window._mossadGalleryActive) return true;
-            try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
-        })();
-
         const dirs = config.slideshowDirections;
-        if (!isBigGrokSs && (!dirs || dirs.length === 0)) {
-            stopSlideshow();
-            return;
-        }
+        if (!dirs || dirs.length === 0) { stopSlideshow(); return; }
 
         const advanceToNext = () => {
-            // Большое слайдшоу (Gallery Slideshow): переходим на следующий URL из собранного плейлиста
-            if (isBigGrokSs) {
-                if (typeof window._mossadGalleryNextFn === 'function') {
-                    window._mossadGalleryNextFn();
-                    return;
-                } else if (typeof grokGalleryStepNext === 'function') {
-                    grokGalleryStepNext();
-                    return;
-                }
-            }
-
-            // Малое слайдшоу управляется D-Pad и петлей R
-            const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
-            const isFwd = (dPadDir === 'down' || dPadDir === 'right');
-
-            // Pinterest ссылочная навигация по D-Pad
-            if (rootDomain.includes('pinterest.')) {
-                selectNextPinterestPin(isFwd ? 'next' : 'prev');
-                return;
-            }
-
-            // RedGifs навигация по D-Pad
-            if (rootDomain.includes('redgifs.com')) {
-                if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
-                    window.MOSSAD_ENGINES.redgifs.navigate(dPadDir);
-                } else if (typeof redGifsNavigate === 'function') {
-                    redGifsNavigate(dPadDir);
-                }
-                return;
-            }
-
-            // Grok: Малое слайдшоу на странице поста (киноплёнка / соседний пост)
-            if (rootDomain === 'grok.com' && isGrokPostPage()) {
-                const stepRes = (typeof grokStepFilmstrip === 'function') ? grokStepFilmstrip(isFwd) : false;
-                if (stepRes === 'end') {
-                    // Конец киноплёнки и повтор (R) выключен -> останавливаем слайдшоу
-                    stopSlideshow();
-                    showToast('⏹ Слайдшоу остановлено: конец ленты', true);
-                    return;
-                }
-                if (stepRes === true) {
-                    return;
-                }
-                // Киноплёнка одиночная или отсутствует: переходим на соседний пост в направлении D-pad
-                const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dPadDir) : null;
-                if (neighborUrl) {
-                    if (typeof grokSpaNavigate === 'function') {
-                        grokSpaNavigate(neighborUrl);
-                    } else {
-                        window.location.href = neighborUrl;
+            // Gallery Slideshow: вместо клавиши — переходим на следующий URL из списка
+            if (rootDomain === 'grok.com') {
+                const hasGrokSs = (() => {
+                    try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
+                })();
+                if (window._mossadGalleryActive || hasGrokSs) {
+                    if (typeof window._mossadGalleryNextFn === 'function') {
+                        window._mossadGalleryNextFn();
+                        return;
+                    } else if (typeof grokGalleryStepNext === 'function') {
+                        grokGalleryStepNext();
+                        return;
                     }
-                    return;
-                } else {
-                    stopSlideshow();
-                    showToast('⏹ Слайдшоу остановлено: конец ленты', true);
+                }
+            }
+
+            // Pinterest ссылочная навигация
+            if (rootDomain.includes('pinterest.')) {
+                selectNextPinterestPin('next');
+                return;
+            }
+
+            // RedGifs навигация (изолирована от URL-детектора!)
+            if (rootDomain.includes('redgifs.com')) {
+                const dir = (dirs && dirs.length) ? dirs[0] : 'down';
+                if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
+                    window.MOSSAD_ENGINES.redgifs.navigate(dir);
+                } else if (typeof redGifsNavigate === 'function') {
+                    redGifsNavigate(dir);
+                }
+                return;
+            }
+
+            // Grok навигация по киноплёнке (filmstrip) на странице поста
+            if (rootDomain === 'grok.com' && isGrokPostPage()) {
+                const isFwd = ['down', 'right'].includes((dirs && dirs.length) ? dirs[0] : 'down');
+                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
                     return;
                 }
             }
 
             // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
             const startUrl = location.href;
-            const key = getArrowKey(dPadDir);
+            const key = getArrowKey(dirs[0]);
 
             const sendSlideKey = () => {
                 document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
@@ -7559,8 +7402,8 @@ function findMediaForDownload() {
             duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             rewind:           'Мотать в начало (Alt+R)',
             snapWidget:       'Привязать к левому верхнему краю (F8)',
-            videoGen6s:       'Видео 6с Grok',
-            videoGen10s:      'Видео 10с Grok'
+            videoGen6s:       'Видео 6с Grok (Shift+Enter)',
+            videoGen10s:      'Видео 10с Grok (Ctrl+Enter)'
         };
         
         Object.keys(keysMap).forEach(k => {
@@ -7879,6 +7722,27 @@ function findMediaForDownload() {
 
     window.addEventListener('keydown', function (e) {
         if (window.capturingFor !== null) return;
+
+        // Перехват генерации видео в Grok (Shift+Enter — 6с, Ctrl+Enter — 10с)
+        // Срабатывает ДО проверки isEditing, чтобы работать прямо во время ввода текста промпта
+        if (rootDomain === 'grok.com') {
+            if (hotkeyMatches(e, config.hk.videoGen6s)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (typeof triggerGrokVideoGeneration === 'function') {
+                    triggerGrokVideoGeneration(6);
+                }
+                return;
+            }
+            if (hotkeyMatches(e, config.hk.videoGen10s)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (typeof triggerGrokVideoGeneration === 'function') {
+                    triggerGrokVideoGeneration(10);
+                }
+                return;
+            }
+        }
 
         const activeEl = document.activeElement;
         const isEditing = activeEl && (

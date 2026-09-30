@@ -58,9 +58,8 @@
             prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
-            updateScript:     { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // Win+Alt+R — обновить скрипт
-            videoGen6s:       { key: 'Enter',      ctrl: false, alt: false, shift: true },  // Shift+Enter — видео 6с Grok
-            videoGen10s:      { key: 'Enter',      ctrl: true,  alt: false, shift: false }, // Ctrl+Enter — видео 10с Grok
+            videoGen6s:       { key: '',           ctrl: false, alt: false, shift: false }, // Пусто (отключено)
+            videoGen10s:      { key: '',           ctrl: false, alt: false, shift: false }, // Пусто (отключено)
         }
     };
 
@@ -174,12 +173,12 @@
         config.hk.slideshowStart = { key: 'Insert', ctrl: false, alt: false, shift: true };
     }
 
-    // Миграция v1.3.19: видеогенерация Grok (Shift+Enter / Ctrl+Enter)
-    if (!config.hk.videoGen6s) {
-        config.hk.videoGen6s = { key: 'Enter', ctrl: false, alt: false, shift: true };
+    // Миграция v1.3.25: отключение хоткеев видеогенерации Grok (Shift+Enter / Ctrl+Enter)
+    if (config.hk.videoGen6s && config.hk.videoGen6s.key === 'Enter') {
+        config.hk.videoGen6s = { key: '', ctrl: false, alt: false, shift: false };
     }
-    if (!config.hk.videoGen10s) {
-        config.hk.videoGen10s = { key: 'Enter', ctrl: true, alt: false, shift: false };
+    if (config.hk.videoGen10s && config.hk.videoGen10s.key === 'Enter') {
+        config.hk.videoGen10s = { key: '', ctrl: false, alt: false, shift: false };
     }
 
     // Миграция v1.3.24: history (Home) и slideshowPanel (Ctrl+Insert)

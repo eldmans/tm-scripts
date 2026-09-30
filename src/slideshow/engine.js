@@ -262,54 +262,82 @@
     function triggerNextSlide() {
         if (!slideshowActive || slideshowPaused || _isRewinding) return;
         cancelSlideTimers();
+
+        // 1. Большое слайдшоу (по плейлисту коллекции в Grok): НЕ зависит от D-Pad!
+        const isBigGrokSs = (rootDomain === 'grok.com') && (() => {
+            if (window._mossadGalleryActive) return true;
+            try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
+        })();
+
         const dirs = config.slideshowDirections;
-        if (!dirs || dirs.length === 0) { stopSlideshow(); return; }
+        if (!isBigGrokSs && (!dirs || dirs.length === 0)) {
+            stopSlideshow();
+            return;
+        }
 
         const advanceToNext = () => {
-            // Gallery Slideshow: вместо клавиши — переходим на следующий URL из списка
-            if (rootDomain === 'grok.com') {
-                const hasGrokSs = (() => {
-                    try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
-                })();
-                if (window._mossadGalleryActive || hasGrokSs) {
-                    if (typeof window._mossadGalleryNextFn === 'function') {
-                        window._mossadGalleryNextFn();
-                        return;
-                    } else if (typeof grokGalleryStepNext === 'function') {
-                        grokGalleryStepNext();
-                        return;
-                    }
+            // Большое слайдшоу (Gallery Slideshow): переходим на следующий URL из собранного плейлиста
+            if (isBigGrokSs) {
+                if (typeof window._mossadGalleryNextFn === 'function') {
+                    window._mossadGalleryNextFn();
+                    return;
+                } else if (typeof grokGalleryStepNext === 'function') {
+                    grokGalleryStepNext();
+                    return;
                 }
             }
 
-            // Pinterest ссылочная навигация
+            // Малое слайдшоу управляется D-Pad и петлей R
+            const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
+            const isFwd = (dPadDir === 'down' || dPadDir === 'right');
+
+            // Pinterest ссылочная навигация по D-Pad
             if (rootDomain.includes('pinterest.')) {
-                selectNextPinterestPin('next');
+                selectNextPinterestPin(isFwd ? 'next' : 'prev');
                 return;
             }
 
-            // RedGifs навигация (изолирована от URL-детектора!)
+            // RedGifs навигация по D-Pad
             if (rootDomain.includes('redgifs.com')) {
-                const dir = (dirs && dirs.length) ? dirs[0] : 'down';
                 if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
-                    window.MOSSAD_ENGINES.redgifs.navigate(dir);
+                    window.MOSSAD_ENGINES.redgifs.navigate(dPadDir);
                 } else if (typeof redGifsNavigate === 'function') {
-                    redGifsNavigate(dir);
+                    redGifsNavigate(dPadDir);
                 }
                 return;
             }
 
-            // Grok навигация по киноплёнке (filmstrip) на странице поста
+            // Grok: Малое слайдшоу на странице поста (киноплёнка / соседний пост)
             if (rootDomain === 'grok.com' && isGrokPostPage()) {
-                const isFwd = ['down', 'right'].includes((dirs && dirs.length) ? dirs[0] : 'down');
-                if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
+                const stepRes = (typeof grokStepFilmstrip === 'function') ? grokStepFilmstrip(isFwd) : false;
+                if (stepRes === 'end') {
+                    // Конец киноплёнки и повтор (R) выключен -> останавливаем слайдшоу
+                    stopSlideshow();
+                    showToast('⏹ Слайдшоу остановлено: конец ленты', true);
+                    return;
+                }
+                if (stepRes === true) {
+                    return;
+                }
+                // Киноплёнка одиночная или отсутствует: переходим на соседний пост в направлении D-pad
+                const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dPadDir) : null;
+                if (neighborUrl) {
+                    if (typeof grokSpaNavigate === 'function') {
+                        grokSpaNavigate(neighborUrl);
+                    } else {
+                        window.location.href = neighborUrl;
+                    }
+                    return;
+                } else {
+                    stopSlideshow();
+                    showToast('⏹ Слайдшоу остановлено: конец ленты', true);
                     return;
                 }
             }
 
             // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
             const startUrl = location.href;
-            const key = getArrowKey(dirs[0]);
+            const key = getArrowKey(dPadDir);
 
             const sendSlideKey = () => {
                 document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));

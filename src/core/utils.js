@@ -100,8 +100,52 @@
         if (config.pdAction === 'up') {
             setTimeout(() => {
                 const dirs = config.slideshowDirections;
-                const key = getArrowKey(dirs && dirs.length ? dirs[0] : 'up');
+                const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
+                const isFwd = (dPadDir === 'down' || dPadDir === 'right');
+
+                // 1. Grok на странице поста: шагаем по киноплёнке или соседнему посту в направлении D-pad
+                if (rootDomain === 'grok.com' && typeof isGrokPostPage === 'function' && isGrokPostPage()) {
+                    const stepRes = (typeof grokStepFilmstrip === 'function') ? grokStepFilmstrip(isFwd) : false;
+                    if (stepRes === true) return;
+                    if (stepRes === 'end') {
+                        showToast('🏁 Достигнут конец ленты');
+                        return;
+                    }
+                    const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dPadDir) : null;
+                    if (neighborUrl) {
+                        if (typeof grokSpaNavigate === 'function') {
+                            grokSpaNavigate(neighborUrl);
+                        } else {
+                            window.location.href = neighborUrl;
+                        }
+                    } else {
+                        showToast('🏁 Достигнут конец ленты');
+                    }
+                    return;
+                }
+
+                // 2. Pinterest
+                if (rootDomain.includes('pinterest.')) {
+                    if (typeof selectNextPinterestPin === 'function') {
+                        selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: true });
+                    }
+                    return;
+                }
+
+                // 3. RedGifs
+                if (rootDomain.includes('redgifs.com')) {
+                    if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
+                        window.MOSSAD_ENGINES.redgifs.navigate(dPadDir);
+                    } else if (typeof redGifsNavigate === 'function') {
+                        redGifsNavigate(dPadDir);
+                    }
+                    return;
+                }
+
+                // 4. Универсальный шаг стрелкой в направлении D-pad
+                const key = getArrowKey(dPadDir);
                 document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
                 if (typeof triggerUniversalFullScreen === 'function') {
                     triggerUniversalFullScreen();
                 }

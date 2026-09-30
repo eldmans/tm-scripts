@@ -1,11 +1,16 @@
     // ============================================================
     // GROK: Smart Delete (3-dots fallback, a.confirm, hold-post)
     // ============================================================
-    function getGrokNeighborPostUrl() {
+    function getGrokNeighborPostUrl(dirOverride = null) {
         // 1. Проверяем карточки постов в текущем DOM
         const cards = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
         const currentIdMatch = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
         const currentId = currentIdMatch ? currentIdMatch[1] : null;
+
+        const dirs = config.slideshowDirections;
+        const dir = dirOverride || ((dirs && dirs.length) ? dirs[0] : 'down');
+        const isFwd = (dir === 'down' || dir === 'right');
+        const loop = !!config.loopFeed;
 
         if (cards.length > 0 && currentId) {
             const urls = cards.map(c => c.href || c.getAttribute('href') || '').filter(Boolean);
@@ -16,13 +21,24 @@
             }
             const unique = Array.from(seen.keys());
             const idx = unique.indexOf(currentId);
-            const dir = (config.slideshowDirections && config.slideshowDirections.length) ? config.slideshowDirections[0] : 'up';
 
             let targetId = null;
-            if (dir === 'down' || dir === 'right') {
-                targetId = (idx >= 0 && idx < unique.length - 1) ? unique[idx + 1] : (unique.length > 0 ? unique[0] : null);
+            if (isFwd) {
+                if (idx >= 0 && idx < unique.length - 1) {
+                    targetId = unique[idx + 1];
+                } else if (loop && unique.length > 0) {
+                    targetId = unique[0];
+                } else if (!loop && idx > 0) {
+                    targetId = unique[idx - 1];
+                }
             } else {
-                targetId = (idx > 0) ? unique[idx - 1] : (unique.length > 0 ? unique[unique.length - 1] : null);
+                if (idx > 0) {
+                    targetId = unique[idx - 1];
+                } else if (loop && unique.length > 0) {
+                    targetId = unique[unique.length - 1];
+                } else if (!loop && idx < unique.length - 1) {
+                    targetId = unique[idx + 1];
+                }
             }
             if (targetId && seen.get(targetId)) return seen.get(targetId);
         }
@@ -34,8 +50,25 @@
                 const items = (JSON.parse(raw).items || []).map(i => i.url || i);
                 const idx = items.findIndex(u => u.includes(currentId));
                 if (idx !== -1) {
-                    const nextIdx = (idx + 1) % items.length;
-                    return items[nextIdx];
+                    let nextIdx = -1;
+                    if (isFwd) {
+                        if (idx + 1 < items.length) {
+                            nextIdx = idx + 1;
+                        } else if (loop) {
+                            nextIdx = 0;
+                        } else if (!loop && idx > 0) {
+                            nextIdx = idx - 1;
+                        }
+                    } else {
+                        if (idx > 0) {
+                            nextIdx = idx - 1;
+                        } else if (loop) {
+                            nextIdx = items.length - 1;
+                        } else if (!loop && idx + 1 < items.length) {
+                            nextIdx = idx + 1;
+                        }
+                    }
+                    if (nextIdx !== -1 && items[nextIdx]) return items[nextIdx];
                 }
             }
         } catch (e) {}
@@ -74,14 +107,27 @@
                     const dirs = config.slideshowDirections;
                     const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
                     const isFwd = (dPadDir === 'down' || dPadDir === 'right');
+                    const loop = !!config.loopFeed;
 
                     let nextIdx;
                     if (isFwd) {
                         // Д-пад вниз/вправо: шагаем на следующее видео вниз по ленте
-                        nextIdx = (safeCurIdx + 1 < items.length) ? safeCurIdx + 1 : (safeCurIdx > 0 ? safeCurIdx - 1 : 0);
+                        if (safeCurIdx + 1 < items.length) {
+                            nextIdx = safeCurIdx + 1;
+                        } else if (loop) {
+                            nextIdx = 0; // петля R: в начало
+                        } else {
+                            nextIdx = safeCurIdx > 0 ? safeCurIdx - 1 : 0; // R выключен: не зацикливаем, отступаем назад
+                        }
                     } else {
                         // Д-пад вверх/влево: шагаем на предыдущее видео вверх по ленте (на 4-е от 5-го)
-                        nextIdx = (safeCurIdx > 0) ? safeCurIdx - 1 : (items.length > 1 ? 1 : 0);
+                        if (safeCurIdx > 0) {
+                            nextIdx = safeCurIdx - 1;
+                        } else if (loop) {
+                            nextIdx = items.length - 1; // петля R: в конец
+                        } else {
+                            nextIdx = items.length > 1 ? 1 : 0; // R выключен: не зацикливаем, отступаем вперёд
+                        }
                     }
                     targetFilmstripBtn = items[nextIdx];
 
@@ -91,17 +137,19 @@
                     if (targetFilmstripUuid) {
                         finalTargetUrl = `/imagine/post/${targetFilmstripUuid}`;
                     }
-                    console.log(`[MOSSAD] hold post: DPad=${dPadDir} (${isFwd ? 'вниз' : 'вверх'}), целевой кадр: ${safeCurIdx + 1} -> ${nextIdx + 1} (UUID: ${targetFilmstripUuid || 'н/д'})`);
+                    console.log(`[MOSSAD] hold post: DPad=${dPadDir} (${isFwd ? 'вниз' : 'вверх'}), целевой кадр: ${safeCurIdx + 1} -> ${nextIdx + 1} (UUID: ${targetFilmstripUuid || 'н/д'}, loop=${loop})`);
                 } else {
                     // Б. Киноплёнка из 1 кадра или не найдена — ищем URL соседа по коллекции / DOM
-                    finalTargetUrl = getGrokNeighborPostUrl();
+                    const dirs = config.slideshowDirections;
+                    const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
+                    finalTargetUrl = getGrokNeighborPostUrl(dPadDir);
                     console.log('[MOSSAD] hold post: киноплёнка одиночная/отсутствует, fallback URL соседа:', finalTargetUrl);
                 }
 
                 // В. Крайний фолбэк: шаг стрелками, если нет киноплёнки и не найден URL соседа
                 if (!targetFilmstripBtn && !finalTargetUrl) {
                     const dirs = config.slideshowDirections;
-                    const dPadDir = (dirs && dirs.length) ? dirs[0] : 'up';
+                    const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
                     const forwardKey = getArrowKey(dPadDir);
                     const oppDir = dPadDir === 'up' ? 'down' : (dPadDir === 'down' ? 'up' : (dPadDir === 'left' ? 'right' : 'left'));
                     const backKey = getArrowKey(oppDir);
