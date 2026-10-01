@@ -1,7 +1,7 @@
     // ============================================================
     // GROK: Smart Delete (3-dots fallback, a.confirm, hold-post)
     // ============================================================
-    function getGrokNeighborPostUrl(dirOverride = null) {
+    function getGrokNeighborPostUrl(dirOverride = null, isDelete = false) {
         // 1. Проверяем карточки постов в текущем DOM
         const cards = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
         const currentIdMatch = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
@@ -28,7 +28,7 @@
                     targetId = unique[idx + 1];
                 } else if (loop && unique.length > 0) {
                     targetId = unique[0];
-                } else if (!loop && idx > 0) {
+                } else if (isDelete && !loop && idx > 0) {
                     targetId = unique[idx - 1];
                 }
             } else {
@@ -36,7 +36,7 @@
                     targetId = unique[idx - 1];
                 } else if (loop && unique.length > 0) {
                     targetId = unique[unique.length - 1];
-                } else if (!loop && idx < unique.length - 1) {
+                } else if (isDelete && !loop && idx < unique.length - 1) {
                     targetId = unique[idx + 1];
                 }
             }
@@ -56,7 +56,7 @@
                             nextIdx = idx + 1;
                         } else if (loop) {
                             nextIdx = 0;
-                        } else if (!loop && idx > 0) {
+                        } else if (isDelete && !loop && idx > 0) {
                             nextIdx = idx - 1;
                         }
                     } else {
@@ -64,7 +64,7 @@
                             nextIdx = idx - 1;
                         } else if (loop) {
                             nextIdx = items.length - 1;
-                        } else if (!loop && idx + 1 < items.length) {
+                        } else if (isDelete && !loop && idx + 1 < items.length) {
                             nextIdx = idx + 1;
                         }
                     }
@@ -142,7 +142,7 @@
                     // Б. Киноплёнка из 1 кадра или не найдена — ищем URL соседа по коллекции / DOM
                     const dirs = config.slideshowDirections;
                     const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
-                    finalTargetUrl = getGrokNeighborPostUrl(dPadDir);
+                    finalTargetUrl = getGrokNeighborPostUrl(dPadDir, true);
                     console.log('[MOSSAD] hold post: киноплёнка одиночная/отсутствует, fallback URL соседа:', finalTargetUrl);
                 }
 
@@ -157,8 +157,12 @@
                     showToast('🔍 Фиксация позиции...');
 
                     const sendKey = (k) => {
-                        document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
-                        document.dispatchEvent(new KeyboardEvent('keyup', { key: k, bubbles: true }));
+                        if (typeof sendDpadKeyEvent === 'function') {
+                            sendDpadKeyEvent(k);
+                        } else {
+                            document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+                            document.dispatchEvent(new KeyboardEvent('keyup', { key: k, bubbles: true }));
+                        }
                     };
 
                     sendKey(forwardKey);

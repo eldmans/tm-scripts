@@ -32,7 +32,13 @@
      */
     function blurActiveInput() {
         const activeEl = document.activeElement;
-        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+        if (activeEl && (
+            activeEl.tagName === 'INPUT' || 
+            activeEl.tagName === 'TEXTAREA' || 
+            activeEl.isContentEditable ||
+            activeEl.getAttribute('role') === 'textbox' ||
+            !!activeEl.closest('input, textarea, [contenteditable="true"], [role="textbox"]')
+        )) {
             try { activeEl.blur(); } catch (e) {}
         }
     }
@@ -92,6 +98,144 @@
     }
 
     /**
+     * Преобразует строковое направление в имя клавиши KeyboardEvent
+     */
+    function getArrowKey(dir) {
+        if (dir === 'up') return 'ArrowUp';
+        if (dir === 'down') return 'ArrowDown';
+        if (dir === 'left') return 'ArrowLeft';
+        return 'ArrowRight';
+    }
+    window.getArrowKey = getArrowKey;
+
+    /**
+     * Отправляет нативное синтетическое событие стрелки клавиатуры во все слои DOM:
+     * activeElement -> document -> window, заполняя key, code, keyCode и which.
+     */
+    function sendDpadKeyEvent(key) {
+        if (typeof blurActiveInput === 'function') blurActiveInput();
+        const keyCode = key === 'ArrowUp' ? 38 : (key === 'ArrowDown' ? 40 : (key === 'ArrowLeft' ? 37 : 39));
+        const eventInit = {
+            key: key,
+            code: key,
+            keyCode: keyCode,
+            which: keyCode,
+            bubbles: true,
+            cancelable: true,
+            composed: true
+        };
+        const active = (document.activeElement && document.activeElement !== document.body) ? document.activeElement : null;
+        if (active) {
+            try { active.dispatchEvent(new KeyboardEvent('keydown', eventInit)); } catch(e) {}
+            try { active.dispatchEvent(new KeyboardEvent('keyup', eventInit)); } catch(e) {}
+        }
+        try { document.dispatchEvent(new KeyboardEvent('keydown', eventInit)); } catch(e) {}
+        try { document.dispatchEvent(new KeyboardEvent('keyup', eventInit)); } catch(e) {}
+        try { window.dispatchEvent(new KeyboardEvent('keydown', eventInit)); } catch(e) {}
+        try { window.dispatchEvent(new KeyboardEvent('keyup', eventInit)); } catch(e) {}
+
+        if (typeof triggerUniversalFullScreen === 'function') {
+            triggerUniversalFullScreen();
+        }
+    }
+    window.sendDpadKeyEvent = sendDpadKeyEvent;
+
+    /**
+     * Поиск нативной кнопки навигации на Grok (если доступна в DOM)
+     */
+    function findGrokNavButton(dir) {
+        const isNext = (dir === 'down' || dir === 'right');
+        const labels = isNext
+            ? ['next post', 'next', 'следующий', 'следующая', 'следующее']
+            : ['previous post', 'previous', 'prev', 'предыдущий', 'предыдущая', 'предыдущее'];
+        const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+        return btns.find(b => {
+            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const title = (b.getAttribute('title') || '').toLowerCase();
+            return labels.some(l => aria === l || title === l);
+        }) || null;
+    }
+
+    /**
+     * Унифицированный пошаговый переход по направлению D-Pad.
+     * Используется:
+     * 1. В Малом слайдшоу (Shift+Insert / ракета 🚀).
+     * 2. После скачивания при включенном pdAction: 'up' (Скачать - +1).
+     * 3. При ручной навигации.
+     */
+    function performDpadStep(dirOverride = null, isSlideshow = false) {
+        const dirs = config.slideshowDirections;
+        const dir = dirOverride || ((dirs && dirs.length) ? dirs[0] : 'down');
+        const isFwd = (dir === 'down' || dir === 'right');
+
+        // 1. Pinterest
+        if (rootDomain.includes('pinterest.')) {
+            if (typeof selectNextPinterestPin === 'function') {
+                selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: !isSlideshow });
+            }
+            return true;
+        }
+
+        // 2. RedGifs
+        if (rootDomain.includes('redgifs.com')) {
+            if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
+                window.MOSSAD_ENGINES.redgifs.navigate(dir);
+            } else if (typeof redGifsNavigate === 'function') {
+                redGifsNavigate(dir);
+            }
+            return true;
+        }
+
+        // 3. Grok
+        if (rootDomain === 'grok.com') {
+            // А. Горизонтальное листание кадров группы по киноплёнке (left / right)
+            if ((dir === 'left' || dir === 'right') && typeof isGrokPostPage === 'function' && isGrokPostPage()) {
+                if (typeof grokStepFilmstrip === 'function') {
+                    const stepRes = grokStepFilmstrip(isFwd);
+                    if (stepRes === true) return true;
+                    if (stepRes === 'end') {
+                        if (isSlideshow && !config.loopFeed) {
+                            if (typeof stopSlideshow === 'function') stopSlideshow();
+                            showToast('⏹ Слайдшоу остановлено: конец ленты', true);
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            // Б. Проверяем, есть ли карточки соседних постов в DOM или в сохраненной коллекции
+            const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dir) : null;
+            if (neighborUrl) {
+                if (typeof grokSpaNavigate === 'function') {
+                    grokSpaNavigate(neighborUrl);
+                } else {
+                    window.location.href = neighborUrl;
+                }
+                return true;
+            }
+
+            // В. Проверяем нативную кнопку навигации
+            const navBtn = findGrokNavButton(dir);
+            if (navBtn) {
+                triggerClick(navBtn, `Grok Nav Button (${dir})`);
+                return true;
+            }
+
+            // Г. Нативная отправка стрелок Grok (ArrowUp / ArrowDown / ArrowLeft / ArrowRight)
+            const key = getArrowKey(dir);
+            sendDpadKeyEvent(key);
+            return true;
+        }
+
+        // 4. Все остальные сайты: универсальная отправка стрелки D-pad
+        const key = getArrowKey(dir);
+        sendDpadKeyEvent(key);
+        return true;
+    }
+    window.performDpadStep = performDpadStep;
+
+    /**
      * Выполняет пост-действие после фактического скачивания (+1 или del).
      * Срабатывает ТОЛЬКО когда скачивание реально началось, а не при блокировке дубликата.
      */
@@ -101,54 +245,7 @@
             setTimeout(() => {
                 const dirs = config.slideshowDirections;
                 const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
-                const isFwd = (dPadDir === 'down' || dPadDir === 'right');
-
-                // 1. Grok на странице поста: шагаем по киноплёнке или соседнему посту в направлении D-pad
-                if (rootDomain === 'grok.com' && typeof isGrokPostPage === 'function' && isGrokPostPage()) {
-                    const stepRes = (typeof grokStepFilmstrip === 'function') ? grokStepFilmstrip(isFwd) : false;
-                    if (stepRes === true) return;
-                    if (stepRes === 'end') {
-                        showToast('🏁 Достигнут конец ленты');
-                        return;
-                    }
-                    const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dPadDir) : null;
-                    if (neighborUrl) {
-                        if (typeof grokSpaNavigate === 'function') {
-                            grokSpaNavigate(neighborUrl);
-                        } else {
-                            window.location.href = neighborUrl;
-                        }
-                    } else {
-                        showToast('🏁 Достигнут конец ленты');
-                    }
-                    return;
-                }
-
-                // 2. Pinterest
-                if (rootDomain.includes('pinterest.')) {
-                    if (typeof selectNextPinterestPin === 'function') {
-                        selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: true });
-                    }
-                    return;
-                }
-
-                // 3. RedGifs
-                if (rootDomain.includes('redgifs.com')) {
-                    if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
-                        window.MOSSAD_ENGINES.redgifs.navigate(dPadDir);
-                    } else if (typeof redGifsNavigate === 'function') {
-                        redGifsNavigate(dPadDir);
-                    }
-                    return;
-                }
-
-                // 4. Универсальный шаг стрелкой в направлении D-pad
-                const key = getArrowKey(dPadDir);
-                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
-                if (typeof triggerUniversalFullScreen === 'function') {
-                    triggerUniversalFullScreen();
-                }
+                performDpadStep(dPadDir, false);
             }, 600);
         } else if (config.pdAction === 'del' && rootDomain === 'grok.com') {
             setTimeout(() => {
@@ -158,16 +255,7 @@
             }, 1000);
         }
     }
-
-    /**
-     * Преобразует строковое направление в имя клавиши KeyboardEvent
-     */
-    function getArrowKey(dir) {
-        if (dir === 'up') return 'ArrowUp';
-        if (dir === 'down') return 'ArrowDown';
-        if (dir === 'left') return 'ArrowLeft';
-        return 'ArrowRight';
-    }
+    window.performPostDownloadAction = performPostDownloadAction;
 
     /**
      * Извлекает чистое первоначальное (искомое) имя файла из истории или дубликата.
@@ -242,8 +330,7 @@
         let unchangedCount = 0;
 
         const interval = setInterval(() => {
-            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-            document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+            sendDpadKeyEvent(key);
 
             setTimeout(() => {
                 if (location.href === lastUrl) {

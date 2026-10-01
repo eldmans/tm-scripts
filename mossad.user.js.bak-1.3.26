@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.27
+// @version      1.3.26
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.27';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.26';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -544,13 +544,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
      */
     function blurActiveInput() {
         const activeEl = document.activeElement;
-        if (activeEl && (
-            activeEl.tagName === 'INPUT' || 
-            activeEl.tagName === 'TEXTAREA' || 
-            activeEl.isContentEditable ||
-            activeEl.getAttribute('role') === 'textbox' ||
-            !!activeEl.closest('input, textarea, [contenteditable="true"], [role="textbox"]')
-        )) {
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
             try { activeEl.blur(); } catch (e) {}
         }
     }
@@ -610,144 +604,6 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     /**
-     * Преобразует строковое направление в имя клавиши KeyboardEvent
-     */
-    function getArrowKey(dir) {
-        if (dir === 'up') return 'ArrowUp';
-        if (dir === 'down') return 'ArrowDown';
-        if (dir === 'left') return 'ArrowLeft';
-        return 'ArrowRight';
-    }
-    window.getArrowKey = getArrowKey;
-
-    /**
-     * Отправляет нативное синтетическое событие стрелки клавиатуры во все слои DOM:
-     * activeElement -> document -> window, заполняя key, code, keyCode и which.
-     */
-    function sendDpadKeyEvent(key) {
-        if (typeof blurActiveInput === 'function') blurActiveInput();
-        const keyCode = key === 'ArrowUp' ? 38 : (key === 'ArrowDown' ? 40 : (key === 'ArrowLeft' ? 37 : 39));
-        const eventInit = {
-            key: key,
-            code: key,
-            keyCode: keyCode,
-            which: keyCode,
-            bubbles: true,
-            cancelable: true,
-            composed: true
-        };
-        const active = (document.activeElement && document.activeElement !== document.body) ? document.activeElement : null;
-        if (active) {
-            try { active.dispatchEvent(new KeyboardEvent('keydown', eventInit)); } catch(e) {}
-            try { active.dispatchEvent(new KeyboardEvent('keyup', eventInit)); } catch(e) {}
-        }
-        try { document.dispatchEvent(new KeyboardEvent('keydown', eventInit)); } catch(e) {}
-        try { document.dispatchEvent(new KeyboardEvent('keyup', eventInit)); } catch(e) {}
-        try { window.dispatchEvent(new KeyboardEvent('keydown', eventInit)); } catch(e) {}
-        try { window.dispatchEvent(new KeyboardEvent('keyup', eventInit)); } catch(e) {}
-
-        if (typeof triggerUniversalFullScreen === 'function') {
-            triggerUniversalFullScreen();
-        }
-    }
-    window.sendDpadKeyEvent = sendDpadKeyEvent;
-
-    /**
-     * Поиск нативной кнопки навигации на Grok (если доступна в DOM)
-     */
-    function findGrokNavButton(dir) {
-        const isNext = (dir === 'down' || dir === 'right');
-        const labels = isNext
-            ? ['next post', 'next', 'следующий', 'следующая', 'следующее']
-            : ['previous post', 'previous', 'prev', 'предыдущий', 'предыдущая', 'предыдущее'];
-        const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
-        return btns.find(b => {
-            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
-            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-            const title = (b.getAttribute('title') || '').toLowerCase();
-            return labels.some(l => aria === l || title === l);
-        }) || null;
-    }
-
-    /**
-     * Унифицированный пошаговый переход по направлению D-Pad.
-     * Используется:
-     * 1. В Малом слайдшоу (Shift+Insert / ракета 🚀).
-     * 2. После скачивания при включенном pdAction: 'up' (Скачать - +1).
-     * 3. При ручной навигации.
-     */
-    function performDpadStep(dirOverride = null, isSlideshow = false) {
-        const dirs = config.slideshowDirections;
-        const dir = dirOverride || ((dirs && dirs.length) ? dirs[0] : 'down');
-        const isFwd = (dir === 'down' || dir === 'right');
-
-        // 1. Pinterest
-        if (rootDomain.includes('pinterest.')) {
-            if (typeof selectNextPinterestPin === 'function') {
-                selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: !isSlideshow });
-            }
-            return true;
-        }
-
-        // 2. RedGifs
-        if (rootDomain.includes('redgifs.com')) {
-            if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
-                window.MOSSAD_ENGINES.redgifs.navigate(dir);
-            } else if (typeof redGifsNavigate === 'function') {
-                redGifsNavigate(dir);
-            }
-            return true;
-        }
-
-        // 3. Grok
-        if (rootDomain === 'grok.com') {
-            // А. Горизонтальное листание кадров группы по киноплёнке (left / right)
-            if ((dir === 'left' || dir === 'right') && typeof isGrokPostPage === 'function' && isGrokPostPage()) {
-                if (typeof grokStepFilmstrip === 'function') {
-                    const stepRes = grokStepFilmstrip(isFwd);
-                    if (stepRes === true) return true;
-                    if (stepRes === 'end') {
-                        if (isSlideshow && !config.loopFeed) {
-                            if (typeof stopSlideshow === 'function') stopSlideshow();
-                            showToast('⏹ Слайдшоу остановлено: конец ленты', true);
-                            return false;
-                        }
-                    }
-                }
-            }
-
-            // Б. Проверяем, есть ли карточки соседних постов в DOM или в сохраненной коллекции
-            const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dir) : null;
-            if (neighborUrl) {
-                if (typeof grokSpaNavigate === 'function') {
-                    grokSpaNavigate(neighborUrl);
-                } else {
-                    window.location.href = neighborUrl;
-                }
-                return true;
-            }
-
-            // В. Проверяем нативную кнопку навигации
-            const navBtn = findGrokNavButton(dir);
-            if (navBtn) {
-                triggerClick(navBtn, `Grok Nav Button (${dir})`);
-                return true;
-            }
-
-            // Г. Нативная отправка стрелок Grok (ArrowUp / ArrowDown / ArrowLeft / ArrowRight)
-            const key = getArrowKey(dir);
-            sendDpadKeyEvent(key);
-            return true;
-        }
-
-        // 4. Все остальные сайты: универсальная отправка стрелки D-pad
-        const key = getArrowKey(dir);
-        sendDpadKeyEvent(key);
-        return true;
-    }
-    window.performDpadStep = performDpadStep;
-
-    /**
      * Выполняет пост-действие после фактического скачивания (+1 или del).
      * Срабатывает ТОЛЬКО когда скачивание реально началось, а не при блокировке дубликата.
      */
@@ -757,7 +613,54 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             setTimeout(() => {
                 const dirs = config.slideshowDirections;
                 const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
-                performDpadStep(dPadDir, false);
+                const isFwd = (dPadDir === 'down' || dPadDir === 'right');
+
+                // 1. Grok на странице поста: шагаем по киноплёнке или соседнему посту в направлении D-pad
+                if (rootDomain === 'grok.com' && typeof isGrokPostPage === 'function' && isGrokPostPage()) {
+                    const stepRes = (typeof grokStepFilmstrip === 'function') ? grokStepFilmstrip(isFwd) : false;
+                    if (stepRes === true) return;
+                    if (stepRes === 'end') {
+                        showToast('🏁 Достигнут конец ленты');
+                        return;
+                    }
+                    const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dPadDir) : null;
+                    if (neighborUrl) {
+                        if (typeof grokSpaNavigate === 'function') {
+                            grokSpaNavigate(neighborUrl);
+                        } else {
+                            window.location.href = neighborUrl;
+                        }
+                    } else {
+                        showToast('🏁 Достигнут конец ленты');
+                    }
+                    return;
+                }
+
+                // 2. Pinterest
+                if (rootDomain.includes('pinterest.')) {
+                    if (typeof selectNextPinterestPin === 'function') {
+                        selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: true });
+                    }
+                    return;
+                }
+
+                // 3. RedGifs
+                if (rootDomain.includes('redgifs.com')) {
+                    if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
+                        window.MOSSAD_ENGINES.redgifs.navigate(dPadDir);
+                    } else if (typeof redGifsNavigate === 'function') {
+                        redGifsNavigate(dPadDir);
+                    }
+                    return;
+                }
+
+                // 4. Универсальный шаг стрелкой в направлении D-pad
+                const key = getArrowKey(dPadDir);
+                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+                if (typeof triggerUniversalFullScreen === 'function') {
+                    triggerUniversalFullScreen();
+                }
             }, 600);
         } else if (config.pdAction === 'del' && rootDomain === 'grok.com') {
             setTimeout(() => {
@@ -767,7 +670,16 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }, 1000);
         }
     }
-    window.performPostDownloadAction = performPostDownloadAction;
+
+    /**
+     * Преобразует строковое направление в имя клавиши KeyboardEvent
+     */
+    function getArrowKey(dir) {
+        if (dir === 'up') return 'ArrowUp';
+        if (dir === 'down') return 'ArrowDown';
+        if (dir === 'left') return 'ArrowLeft';
+        return 'ArrowRight';
+    }
 
     /**
      * Извлекает чистое первоначальное (искомое) имя файла из истории или дубликата.
@@ -842,7 +754,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         let unchangedCount = 0;
 
         const interval = setInterval(() => {
-            sendDpadKeyEvent(key);
+            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+            document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
 
             setTimeout(() => {
                 if (location.href === lastUrl) {
@@ -2805,7 +2718,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 // ============================================================
     // GROK: Smart Delete (3-dots fallback, a.confirm, hold-post)
     // ============================================================
-    function getGrokNeighborPostUrl(dirOverride = null, isDelete = false) {
+    function getGrokNeighborPostUrl(dirOverride = null) {
         // 1. Проверяем карточки постов в текущем DOM
         const cards = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
         const currentIdMatch = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
@@ -2832,7 +2745,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     targetId = unique[idx + 1];
                 } else if (loop && unique.length > 0) {
                     targetId = unique[0];
-                } else if (isDelete && !loop && idx > 0) {
+                } else if (!loop && idx > 0) {
                     targetId = unique[idx - 1];
                 }
             } else {
@@ -2840,7 +2753,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     targetId = unique[idx - 1];
                 } else if (loop && unique.length > 0) {
                     targetId = unique[unique.length - 1];
-                } else if (isDelete && !loop && idx < unique.length - 1) {
+                } else if (!loop && idx < unique.length - 1) {
                     targetId = unique[idx + 1];
                 }
             }
@@ -2860,7 +2773,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                             nextIdx = idx + 1;
                         } else if (loop) {
                             nextIdx = 0;
-                        } else if (isDelete && !loop && idx > 0) {
+                        } else if (!loop && idx > 0) {
                             nextIdx = idx - 1;
                         }
                     } else {
@@ -2868,7 +2781,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                             nextIdx = idx - 1;
                         } else if (loop) {
                             nextIdx = items.length - 1;
-                        } else if (isDelete && !loop && idx + 1 < items.length) {
+                        } else if (!loop && idx + 1 < items.length) {
                             nextIdx = idx + 1;
                         }
                     }
@@ -2946,7 +2859,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     // Б. Киноплёнка из 1 кадра или не найдена — ищем URL соседа по коллекции / DOM
                     const dirs = config.slideshowDirections;
                     const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
-                    finalTargetUrl = getGrokNeighborPostUrl(dPadDir, true);
+                    finalTargetUrl = getGrokNeighborPostUrl(dPadDir);
                     console.log('[MOSSAD] hold post: киноплёнка одиночная/отсутствует, fallback URL соседа:', finalTargetUrl);
                 }
 
@@ -2961,12 +2874,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     showToast('🔍 Фиксация позиции...');
 
                     const sendKey = (k) => {
-                        if (typeof sendDpadKeyEvent === 'function') {
-                            sendDpadKeyEvent(k);
-                        } else {
-                            document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
-                            document.dispatchEvent(new KeyboardEvent('keyup', { key: k, bubbles: true }));
-                        }
+                        document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+                        document.dispatchEvent(new KeyboardEvent('keyup', { key: k, bubbles: true }));
                     };
 
                     sendKey(forwardKey);
@@ -6228,27 +6137,64 @@ function findMediaForDownload() {
 
             // Малое слайдшоу управляется D-Pad и петлей R
             const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
-            const startUrl = location.href;
+            const isFwd = (dPadDir === 'down' || dPadDir === 'right');
 
-            const sendSlideStep = () => {
-                if (typeof performDpadStep === 'function') {
-                    performDpadStep(dPadDir, true);
-                } else {
-                    const key = (typeof getArrowKey === 'function') ? getArrowKey(dPadDir) : 'ArrowDown';
-                    if (typeof sendDpadKeyEvent === 'function') {
-                        sendDpadKeyEvent(key);
+            // Pinterest ссылочная навигация по D-Pad
+            if (rootDomain.includes('pinterest.')) {
+                selectNextPinterestPin(isFwd ? 'next' : 'prev');
+                return;
+            }
+
+            // RedGifs навигация по D-Pad
+            if (rootDomain.includes('redgifs.com')) {
+                if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
+                    window.MOSSAD_ENGINES.redgifs.navigate(dPadDir);
+                } else if (typeof redGifsNavigate === 'function') {
+                    redGifsNavigate(dPadDir);
+                }
+                return;
+            }
+
+            // Grok: Малое слайдшоу на странице поста (киноплёнка / соседний пост)
+            if (rootDomain === 'grok.com' && isGrokPostPage()) {
+                const stepRes = (typeof grokStepFilmstrip === 'function') ? grokStepFilmstrip(isFwd) : false;
+                if (stepRes === 'end') {
+                    // Конец киноплёнки и повтор (R) выключен -> останавливаем слайдшоу
+                    stopSlideshow();
+                    showToast('⏹ Слайдшоу остановлено: конец ленты', true);
+                    return;
+                }
+                if (stepRes === true) {
+                    return;
+                }
+                // Киноплёнка одиночная или отсутствует: переходим на соседний пост в направлении D-pad
+                const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dPadDir) : null;
+                if (neighborUrl) {
+                    if (typeof grokSpaNavigate === 'function') {
+                        grokSpaNavigate(neighborUrl);
                     } else {
-                        document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                        document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+                        window.location.href = neighborUrl;
                     }
+                    return;
+                } else {
+                    stopSlideshow();
+                    showToast('⏹ Слайдшоу остановлено: конец ленты', true);
+                    return;
                 }
-                if (typeof triggerUniversalFullScreen === 'function') {
-                    triggerUniversalFullScreen();
-                }
+            }
+
+            // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
+            const startUrl = location.href;
+            const key = getArrowKey(dPadDir);
+
+            const sendSlideKey = () => {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+                triggerUniversalFullScreen();
             };
 
             // Попытка 1: исходное нажатие
-            sendSlideStep();
+            sendSlideKey();
 
             // Проверяем через 1 секунду
             setTimeout(() => {
@@ -6257,7 +6203,7 @@ function findMediaForDownload() {
 
                 // Попытка 2: URL не изменился через 1 секунду
                 console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
-                sendSlideStep();
+                sendSlideKey();
 
                 // Проверяем через 3 секунды (на 4-й секунде от начала)
                 setTimeout(() => {
@@ -6266,7 +6212,7 @@ function findMediaForDownload() {
 
                     // Попытка 3: URL всё ещё не изменился через 3 секунды
                     console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
-                    sendSlideStep();
+                    sendSlideKey();
 
                     // Даем 1 секунду на завершение 3-й попытки
                     setTimeout(() => {
@@ -6284,7 +6230,7 @@ function findMediaForDownload() {
                             });
                         } else {
                             stopSlideshow();
-                            showToast('⏹ Слайдшоу остановлено: конец ленты', true);
+                            showToast('⏹ Слайдшоу остановлен: конец ленты', true);
                         }
                     }, 1000);
                 }, 3000);
@@ -7552,7 +7498,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-02</span>
+              <span>v${SCRIPT_VERSION} · 2026-10-01</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>

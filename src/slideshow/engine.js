@@ -289,64 +289,27 @@
 
             // Малое слайдшоу управляется D-Pad и петлей R
             const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
-            const isFwd = (dPadDir === 'down' || dPadDir === 'right');
-
-            // Pinterest ссылочная навигация по D-Pad
-            if (rootDomain.includes('pinterest.')) {
-                selectNextPinterestPin(isFwd ? 'next' : 'prev');
-                return;
-            }
-
-            // RedGifs навигация по D-Pad
-            if (rootDomain.includes('redgifs.com')) {
-                if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
-                    window.MOSSAD_ENGINES.redgifs.navigate(dPadDir);
-                } else if (typeof redGifsNavigate === 'function') {
-                    redGifsNavigate(dPadDir);
-                }
-                return;
-            }
-
-            // Grok: Малое слайдшоу на странице поста (киноплёнка / соседний пост)
-            if (rootDomain === 'grok.com' && isGrokPostPage()) {
-                const stepRes = (typeof grokStepFilmstrip === 'function') ? grokStepFilmstrip(isFwd) : false;
-                if (stepRes === 'end') {
-                    // Конец киноплёнки и повтор (R) выключен -> останавливаем слайдшоу
-                    stopSlideshow();
-                    showToast('⏹ Слайдшоу остановлено: конец ленты', true);
-                    return;
-                }
-                if (stepRes === true) {
-                    return;
-                }
-                // Киноплёнка одиночная или отсутствует: переходим на соседний пост в направлении D-pad
-                const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dPadDir) : null;
-                if (neighborUrl) {
-                    if (typeof grokSpaNavigate === 'function') {
-                        grokSpaNavigate(neighborUrl);
-                    } else {
-                        window.location.href = neighborUrl;
-                    }
-                    return;
-                } else {
-                    stopSlideshow();
-                    showToast('⏹ Слайдшоу остановлено: конец ленты', true);
-                    return;
-                }
-            }
-
-            // Листание ленты с детектором конца (3 попытки: сразу, через 1с, через 3с)
             const startUrl = location.href;
-            const key = getArrowKey(dPadDir);
 
-            const sendSlideKey = () => {
-                document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-                document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
-                triggerUniversalFullScreen();
+            const sendSlideStep = () => {
+                if (typeof performDpadStep === 'function') {
+                    performDpadStep(dPadDir, true);
+                } else {
+                    const key = (typeof getArrowKey === 'function') ? getArrowKey(dPadDir) : 'ArrowDown';
+                    if (typeof sendDpadKeyEvent === 'function') {
+                        sendDpadKeyEvent(key);
+                    } else {
+                        document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+                        document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+                    }
+                }
+                if (typeof triggerUniversalFullScreen === 'function') {
+                    triggerUniversalFullScreen();
+                }
             };
 
             // Попытка 1: исходное нажатие
-            sendSlideKey();
+            sendSlideStep();
 
             // Проверяем через 1 секунду
             setTimeout(() => {
@@ -355,7 +318,7 @@
 
                 // Попытка 2: URL не изменился через 1 секунду
                 console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
-                sendSlideKey();
+                sendSlideStep();
 
                 // Проверяем через 3 секунды (на 4-й секунде от начала)
                 setTimeout(() => {
@@ -364,7 +327,7 @@
 
                     // Попытка 3: URL всё ещё не изменился через 3 секунды
                     console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
-                    sendSlideKey();
+                    sendSlideStep();
 
                     // Даем 1 секунду на завершение 3-й попытки
                     setTimeout(() => {
@@ -382,7 +345,7 @@
                             });
                         } else {
                             stopSlideshow();
-                            showToast('⏹ Слайдшоу остановлен: конец ленты', true);
+                            showToast('⏹ Слайдшоу остановлено: конец ленты', true);
                         }
                     }, 1000);
                 }, 3000);
