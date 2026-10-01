@@ -251,44 +251,37 @@
         return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(12, '0').slice(-12);
     }
 
-    let _isGrokInternalClick = false;
-
     /**
      * Фолбэк на клик нативной кнопки Download при невозможности прямой загрузки.
      * Поиск строго по aria-label="download".
      */
     function fallbackGrokNativeClick(onSuccess) {
-        _isGrokInternalClick = true;
-        try {
-            let directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
-                const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
-                return aria === 'download';
-            });
+        let directBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+            const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+            return aria === 'download';
+        });
 
-            if (directBtn) {
-                triggerClick(directBtn, 'Grok Direct Download (Fallback)');
-                if (onSuccess) onSuccess();
-                return;
-            }
+        if (directBtn) {
+            triggerClick(directBtn, 'Grok Direct Download (Fallback)');
+            if (onSuccess) onSuccess();
+            return;
+        }
 
-            const dotsBtn = findGrok3DotsMenuButton();
-            if (dotsBtn) {
-                triggerClick(dotsBtn, 'Post actions (for Fallback Download)');
-                retryAction((attempt) => {
-                    const innerDl = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
-                        const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
-                        return aria === 'download';
-                    });
-                    if (innerDl) {
-                        triggerClick(innerDl, 'Grok Download from 3-dots (Fallback)');
-                        if (onSuccess) onSuccess();
-                        return true;
-                    }
-                    return false;
-                }, [100, 300, 500]);
-            }
-        } finally {
-            setTimeout(() => { _isGrokInternalClick = false; }, 1000);
+        const dotsBtn = findGrok3DotsMenuButton();
+        if (dotsBtn) {
+            triggerClick(dotsBtn, 'Post actions (for Fallback Download)');
+            retryAction((attempt) => {
+                const innerDl = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+                    const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+                    return aria === 'download';
+                });
+                if (innerDl) {
+                    triggerClick(innerDl, 'Grok Download from 3-dots (Fallback)');
+                    if (onSuccess) onSuccess();
+                    return true;
+                }
+                return false;
+            }, [100, 300, 500]);
         }
     }
 
@@ -470,25 +463,6 @@
         return true;
     }
 
-    // Перехват клика по нативной кнопке скачивания Grok на странице
-    if (typeof document !== 'undefined') {
-        document.addEventListener('click', function handleGrokNativeDownloadClick(e) {
-            if (rootDomain !== 'grok.com' || _isGrokInternalClick) return;
-            const btn = e.target.closest('button, [role="button"]');
-            if (!btn || (btn.id && btn.id.startsWith('mossad-'))) return;
-
-            const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
-            const isDl = aria === 'download';
-
-            if (isDl) {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                console.log('[MOSSAD] Intercepted native Grok download button -> triggerGrokDownload with metadata');
-                triggerGrokDownload();
-            }
-        }, true);
-    }
 
     // Автоматический перехват отправки промпта в Grok в Universal Prompt Vault
     if (typeof document !== 'undefined') {
