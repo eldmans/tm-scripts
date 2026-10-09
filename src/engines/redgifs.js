@@ -12,49 +12,50 @@
 
         /** Находит активный элемент превью/карточки в DOM */
         function getActiveItem() {
-            // 1. Попап-плеер / модальное окно просмотра
-            const modal = document.querySelector('[role="dialog"], .modal, .preview-modal, .PlayerWrapper, .previewModal');
-            if (modal) return modal;
-
-            // 2. Активный элемент ленты или сетки
-            const activeEl = document.querySelector('.GifPreview_isActive, .GifPreview.isActive, .preview_isActive, [data-feed-item-id].active');
-            if (activeEl) return activeEl;
-
-            // 3. Элемент, содержащий играющее видео
+            // 1. Приоритет: текущее воспроизводящееся видео и его карточка
             const videos = Array.from(document.querySelectorAll('video'));
             const playingVideo = videos.find(v => !v.paused && v.currentTime > 0);
             if (playingVideo) {
-                const card = playingVideo.closest('[data-feed-item-id], .GifPreview, .feed-item, a[href*="/watch/"]');
+                const card = playingVideo.closest('.GifPreview_isActive, [data-feed-item-id], .GifPreview, .feed-item, a[href*="/watch/"]');
                 if (card) return card;
             }
 
-            // 4. Первый элемент с ID фида или превью
+            // 2. Активный элемент ленты или сетки с классом isActive
+            const activeEl = document.querySelector('.GifPreview_isActive, .GifPreview.isActive, .preview_isActive, [data-feed-item-id].active');
+            if (activeEl) return activeEl;
+
+            // 3. Видео с наибольшей видимой площадью
+            const bestVideo = getActiveVideo();
+            if (bestVideo) {
+                const card = bestVideo.closest('.GifPreview_isActive, [data-feed-item-id], .GifPreview, .feed-item');
+                if (card) return card;
+            }
+
+            // 4. Попап-плеер / модальное окно просмотра
+            const modal = document.querySelector('[role="dialog"], .modal, .preview-modal, .previewModal');
+            if (modal) return modal;
+
+            // 5. Первый элемент с ID фида или превью
             return document.querySelector('[data-feed-item-id], .GifPreview');
         }
 
         /** Находит активное/главное видео RedGifs */
         function getActiveVideo() {
-            // Если открыт попап/модалка — ищем видео строго внутри него
-            const modal = document.querySelector('[role="dialog"], .modal, .preview-modal, .PlayerWrapper');
-            if (modal) {
-                const modalVid = modal.querySelector('video');
-                if (modalVid) return modalVid;
-            }
-
-            const active = getActiveItem();
-            if (active) {
-                const v = active.querySelector('video');
-                if (v) return v;
-            }
-
             const videos = Array.from(document.querySelectorAll('video'));
             if (videos.length === 0) return null;
 
-            // Предпочитаем проигрывающееся видео
+            // 1. Безусловный приоритет: видео, которое прямо сейчас воспроизводится
             const playing = videos.find(v => !v.paused && v.currentTime > 0);
             if (playing) return playing;
 
-            // Иначе выбираем с наибольшей видимой площадью
+            // 2. Видео внутри активной карточки
+            const activeCard = document.querySelector('.GifPreview_isActive, .GifPreview.isActive');
+            if (activeCard) {
+                const v = activeCard.querySelector('video');
+                if (v) return v;
+            }
+
+            // 3. Видео с наибольшей видимой площадью
             let bestVideo = null;
             let maxArea = 0;
             const vh = window.innerHeight;
@@ -70,7 +71,16 @@
                     bestVideo = v;
                 }
             }
-            return bestVideo || videos[0];
+            if (bestVideo && maxArea > 0) return bestVideo;
+
+            // 4. Видео в модалке
+            const modal = document.querySelector('[role="dialog"], .modal, .preview-modal, .PlayerWrapper');
+            if (modal) {
+                const modalVid = modal.querySelector('video');
+                if (modalVid) return modalVid;
+            }
+
+            return videos[0];
         }
 
         /** Извлекает имя автора (userName) на RedGifs */
@@ -164,37 +174,86 @@
 
         /** Извлекает ссылки для скачивания текущего видео */
         function findMedia() {
-            const active = getActiveItem();
-            const urls = [];
-            const itemId = (active && active.getAttribute('data-feed-item-id')) || 
-                           (location.pathname.match(/\/watch\/([^/?#]+)/) || [])[1] || null;
+            const v = getActiveVideo();
+            let active = null;
+            if (v) {
+                active = v.closest('.GifPreview_isActive, [data-feed-item-id], .GifPreview');
+            }
+            if (!active) {
+                active = getActiveItem();
+            }
 
-            if (active) {
-                const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]')
-                            || (itemId ? document.querySelector(`img[src*="${itemId}"]`) : null)
-                            || document.querySelector('img[src*="media.redgifs.com"]');
-                if (poster && poster.src) {
-                    const mp4Hd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '.mp4').replace(/\.(?:jpg|png|jpeg)/i, '.mp4');
-                    const mp4Sd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '-mobile.mp4').replace(/\.(?:jpg|png|jpeg)/i, '-mobile.mp4');
-                    urls.push(mp4Hd, mp4Sd);
+            let itemId = (active && active.getAttribute('data-feed-item-id')) || null;
+            if (!itemId) {
+                const activeCard = document.querySelector('.GifPreview_isActive[data-feed-item-id], .GifPreview.isActive[data-feed-item-id]');
+                if (activeCard) itemId = activeCard.getAttribute('data-feed-item-id');
+            }
+            if (!itemId && v) {
+                const nearCard = v.closest('[data-feed-item-id]');
+                if (nearCard) itemId = nearCard.getAttribute('data-feed-item-id');
+            }
+            if (!itemId && active) {
+                const watchA = active.querySelector('a[href*="/watch/"]');
+                if (watchA) {
+                    const m = (watchA.getAttribute('href') || '').match(/\/watch\/([^/?#]+)/);
+                    if (m) itemId = m[1];
+                }
+            }
+            if (!itemId) {
+                const urlMatch = location.pathname.match(/\/watch\/([^/?#]+)/);
+                if (urlMatch) itemId = urlMatch[1];
+            }
+
+            // Мягкая синхронизация адресной строки (чтобы URL соответствовал текущему видео)
+            if (itemId && location.pathname.includes('/watch/')) {
+                const currentUrlId = (location.pathname.match(/\/watch\/([^/?#]+)/) || [])[1];
+                if (currentUrlId && currentUrlId.toLowerCase() !== itemId.toLowerCase()) {
+                    try {
+                        history.replaceState(null, '', `/watch/${itemId}`);
+                    } catch (e) {}
                 }
             }
 
-            const v = getActiveVideo();
+            const urls = [];
+
+            // 1. Прямые CDN ссылки RedGifs на основе itemId
+            if (itemId) {
+                const capId = itemId.charAt(0).toUpperCase() + itemId.slice(1);
+                urls.push(`https://media.redgifs.com/${capId}.mp4`);
+                urls.push(`https://media.redgifs.com/${capId}-mobile.mp4`);
+                urls.push(`https://media.redgifs.com/${itemId}.mp4`);
+                urls.push(`https://media.redgifs.com/${itemId}-mobile.mp4`);
+            }
+
+            // 2. Из постера активной карточки или текущего видео
+            if (active || v) {
+                const posterImg = (active && active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"], img[src*="thumbs"]'))
+                               || (itemId ? document.querySelector(`img[src*="${itemId}"]`) : null);
+                const posterSrc = posterImg?.src || v?.poster || (v && v.getAttribute('poster')) || '';
+                if (posterSrc) {
+                    const mp4Hd = posterSrc.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg|webp)/i, '.mp4').replace(/\.(?:jpg|png|jpeg|webp)/i, '.mp4');
+                    const mp4Sd = posterSrc.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg|webp)/i, '-mobile.mp4').replace(/\.(?:jpg|png|jpeg|webp)/i, '-mobile.mp4');
+                    if (!urls.includes(mp4Hd)) urls.unshift(mp4Hd);
+                    if (!urls.includes(mp4Sd)) urls.push(mp4Sd);
+                }
+            }
+
+            // 3. Прямой src видео (если не blob)
             if (v) {
                 const src = v.currentSrc || v.src || (v.querySelector('source') && v.querySelector('source').src);
                 if (src && !src.startsWith('blob:') && !urls.includes(src)) urls.push(src);
             }
 
-            if (itemId) {
-                const capId = itemId.charAt(0).toUpperCase() + itemId.slice(1);
-                urls.push(`https://media.redgifs.com/${capId}.mp4`);
-                urls.push(`https://media.redgifs.com/${capId}-mobile.mp4`);
-            }
-
             const cleanUrls = Array.from(new Set(urls.filter(Boolean)));
             if (cleanUrls.length > 0) {
-                return { urls: cleanUrls, type: 'video', itemId: itemId || 'video', userName: getUserName() };
+                const postUrl = itemId ? `https://www.redgifs.com/watch/${itemId}` : location.href;
+                return {
+                    urls: cleanUrls,
+                    type: 'video',
+                    itemId: itemId || 'video',
+                    userName: getUserName(active),
+                    postUrl: postUrl
+                };
             }
             return null;
         }

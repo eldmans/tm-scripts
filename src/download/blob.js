@@ -1,7 +1,7 @@
     // ============================================
     // PINTEREST / DOWNLOAD ENGINE
     // ============================================
-    function triggerDirectBlobDownload(url, filename, onErrorCallback) {
+    function triggerDirectBlobDownload(url, filename, onErrorCallback, postUrl = null) {
         // 1. Предпочитаем GM_download (без CORS-проблем, скачивает напрямую в Загрузки)
         if (typeof GM_download === 'function') {
             try {
@@ -17,15 +17,15 @@
                                 hash: '',
                                 filename,
                                 rootFilename: (typeof extractRootFilename === 'function') ? extractRootFilename(filename) : '',
-                                url: location.href,
-                                postUrl: location.href,
+                                url: url || location.href,
+                                postUrl: postUrl || location.href,
                                 domain: rootDomain
                             });
                         }
                     },
                     onerror: (err) => {
                         console.warn('[MOSSAD] GM_download failed, trying fallback:', err);
-                        _downloadViaXhrOrFetch(url, filename, onErrorCallback);
+                        _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl);
                     }
                 });
                 return;
@@ -33,10 +33,10 @@
                 console.warn('[MOSSAD] GM_download call exception:', e);
             }
         }
-        _downloadViaXhrOrFetch(url, filename, onErrorCallback);
+        _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl);
     }
 
-    function _downloadViaXhrOrFetch(url, filename, onErrorCallback) {
+    function _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl = null) {
         if (typeof GM_xmlhttpRequest === 'function') {
             GM_xmlhttpRequest({
                 method: 'GET',
@@ -50,36 +50,36 @@
                 },
                 onload: (res) => {
                     if (res.status === 200 && res.response) {
-                        saveBlobToDisk(res.response, filename);
+                        saveBlobToDisk(res.response, filename, url, postUrl);
                     } else {
                         if (onErrorCallback) onErrorCallback();
-                        else fetchBlobFallback(url, filename);
+                        else fetchBlobFallback(url, filename, postUrl);
                     }
                 },
                 onerror: () => {
                     if (onErrorCallback) onErrorCallback();
-                    else fetchBlobFallback(url, filename);
+                    else fetchBlobFallback(url, filename, postUrl);
                 }
             });
         } else {
             if (onErrorCallback) onErrorCallback();
-            else fetchBlobFallback(url, filename);
+            else fetchBlobFallback(url, filename, postUrl);
         }
     }
 
-    function downloadBlobMedia(url, filename) {
-        triggerDirectBlobDownload(url, filename);
+    function downloadBlobMedia(url, filename, postUrl = null) {
+        triggerDirectBlobDownload(url, filename, null, postUrl);
     }
 
-    function fetchAndDownloadBlob(url, filename) {
-        triggerDirectBlobDownload(url, filename);
+    function fetchAndDownloadBlob(url, filename, postUrl = null) {
+        triggerDirectBlobDownload(url, filename, null, postUrl);
     }
 
-    function fetchBlobFallback(url, filename) {
+    function fetchBlobFallback(url, filename, postUrl = null) {
         fetch(url).then(res => {
             if (!res.ok) throw new Error('HTTP ' + res.status);
             return res.blob();
-        }).then(blob => saveBlobToDisk(blob, filename))
+        }).then(blob => saveBlobToDisk(blob, filename, url, postUrl))
         .catch(err => {
             console.warn('[MOSSAD] fetch blob failed, using <a> download:', err);
             const a = document.createElement('a');
@@ -93,15 +93,15 @@
         });
     }
 
-    function saveBlobToDisk(blob, filename) {
+    function saveBlobToDisk(blob, filename, directUrl = null, postUrl = null) {
         if (typeof computeSHA256 === 'function' && typeof saveFileToHistory === 'function') {
             computeSHA256(blob).then(hash => {
                 saveFileToHistory({
                     hash,
                     filename,
                     rootFilename: (typeof extractRootFilename === 'function') ? extractRootFilename(filename) : '',
-                    url: location.href,
-                    postUrl: location.href,
+                    url: directUrl || location.href,
+                    postUrl: postUrl || location.href,
                     size: blob.size,
                     domain: rootDomain
                 });

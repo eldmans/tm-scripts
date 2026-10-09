@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.27
+// @version      1.3.28
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.27';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.28';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1011,7 +1011,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 // ============================================
     // PINTEREST / DOWNLOAD ENGINE
     // ============================================
-    function triggerDirectBlobDownload(url, filename, onErrorCallback) {
+    function triggerDirectBlobDownload(url, filename, onErrorCallback, postUrl = null) {
         // 1. Предпочитаем GM_download (без CORS-проблем, скачивает напрямую в Загрузки)
         if (typeof GM_download === 'function') {
             try {
@@ -1027,15 +1027,15 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                                 hash: '',
                                 filename,
                                 rootFilename: (typeof extractRootFilename === 'function') ? extractRootFilename(filename) : '',
-                                url: location.href,
-                                postUrl: location.href,
+                                url: url || location.href,
+                                postUrl: postUrl || location.href,
                                 domain: rootDomain
                             });
                         }
                     },
                     onerror: (err) => {
                         console.warn('[MOSSAD] GM_download failed, trying fallback:', err);
-                        _downloadViaXhrOrFetch(url, filename, onErrorCallback);
+                        _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl);
                     }
                 });
                 return;
@@ -1043,10 +1043,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 console.warn('[MOSSAD] GM_download call exception:', e);
             }
         }
-        _downloadViaXhrOrFetch(url, filename, onErrorCallback);
+        _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl);
     }
 
-    function _downloadViaXhrOrFetch(url, filename, onErrorCallback) {
+    function _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl = null) {
         if (typeof GM_xmlhttpRequest === 'function') {
             GM_xmlhttpRequest({
                 method: 'GET',
@@ -1060,36 +1060,36 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 },
                 onload: (res) => {
                     if (res.status === 200 && res.response) {
-                        saveBlobToDisk(res.response, filename);
+                        saveBlobToDisk(res.response, filename, url, postUrl);
                     } else {
                         if (onErrorCallback) onErrorCallback();
-                        else fetchBlobFallback(url, filename);
+                        else fetchBlobFallback(url, filename, postUrl);
                     }
                 },
                 onerror: () => {
                     if (onErrorCallback) onErrorCallback();
-                    else fetchBlobFallback(url, filename);
+                    else fetchBlobFallback(url, filename, postUrl);
                 }
             });
         } else {
             if (onErrorCallback) onErrorCallback();
-            else fetchBlobFallback(url, filename);
+            else fetchBlobFallback(url, filename, postUrl);
         }
     }
 
-    function downloadBlobMedia(url, filename) {
-        triggerDirectBlobDownload(url, filename);
+    function downloadBlobMedia(url, filename, postUrl = null) {
+        triggerDirectBlobDownload(url, filename, null, postUrl);
     }
 
-    function fetchAndDownloadBlob(url, filename) {
-        triggerDirectBlobDownload(url, filename);
+    function fetchAndDownloadBlob(url, filename, postUrl = null) {
+        triggerDirectBlobDownload(url, filename, null, postUrl);
     }
 
-    function fetchBlobFallback(url, filename) {
+    function fetchBlobFallback(url, filename, postUrl = null) {
         fetch(url).then(res => {
             if (!res.ok) throw new Error('HTTP ' + res.status);
             return res.blob();
-        }).then(blob => saveBlobToDisk(blob, filename))
+        }).then(blob => saveBlobToDisk(blob, filename, url, postUrl))
         .catch(err => {
             console.warn('[MOSSAD] fetch blob failed, using <a> download:', err);
             const a = document.createElement('a');
@@ -1103,15 +1103,15 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         });
     }
 
-    function saveBlobToDisk(blob, filename) {
+    function saveBlobToDisk(blob, filename, directUrl = null, postUrl = null) {
         if (typeof computeSHA256 === 'function' && typeof saveFileToHistory === 'function') {
             computeSHA256(blob).then(hash => {
                 saveFileToHistory({
                     hash,
                     filename,
                     rootFilename: (typeof extractRootFilename === 'function') ? extractRootFilename(filename) : '',
-                    url: location.href,
-                    postUrl: location.href,
+                    url: directUrl || location.href,
+                    postUrl: postUrl || location.href,
                     size: blob.size,
                     domain: rootDomain
                 });
@@ -5181,49 +5181,50 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         /** Находит активный элемент превью/карточки в DOM */
         function getActiveItem() {
-            // 1. Попап-плеер / модальное окно просмотра
-            const modal = document.querySelector('[role="dialog"], .modal, .preview-modal, .PlayerWrapper, .previewModal');
-            if (modal) return modal;
-
-            // 2. Активный элемент ленты или сетки
-            const activeEl = document.querySelector('.GifPreview_isActive, .GifPreview.isActive, .preview_isActive, [data-feed-item-id].active');
-            if (activeEl) return activeEl;
-
-            // 3. Элемент, содержащий играющее видео
+            // 1. Приоритет: текущее воспроизводящееся видео и его карточка
             const videos = Array.from(document.querySelectorAll('video'));
             const playingVideo = videos.find(v => !v.paused && v.currentTime > 0);
             if (playingVideo) {
-                const card = playingVideo.closest('[data-feed-item-id], .GifPreview, .feed-item, a[href*="/watch/"]');
+                const card = playingVideo.closest('.GifPreview_isActive, [data-feed-item-id], .GifPreview, .feed-item, a[href*="/watch/"]');
                 if (card) return card;
             }
 
-            // 4. Первый элемент с ID фида или превью
+            // 2. Активный элемент ленты или сетки с классом isActive
+            const activeEl = document.querySelector('.GifPreview_isActive, .GifPreview.isActive, .preview_isActive, [data-feed-item-id].active');
+            if (activeEl) return activeEl;
+
+            // 3. Видео с наибольшей видимой площадью
+            const bestVideo = getActiveVideo();
+            if (bestVideo) {
+                const card = bestVideo.closest('.GifPreview_isActive, [data-feed-item-id], .GifPreview, .feed-item');
+                if (card) return card;
+            }
+
+            // 4. Попап-плеер / модальное окно просмотра
+            const modal = document.querySelector('[role="dialog"], .modal, .preview-modal, .previewModal');
+            if (modal) return modal;
+
+            // 5. Первый элемент с ID фида или превью
             return document.querySelector('[data-feed-item-id], .GifPreview');
         }
 
         /** Находит активное/главное видео RedGifs */
         function getActiveVideo() {
-            // Если открыт попап/модалка — ищем видео строго внутри него
-            const modal = document.querySelector('[role="dialog"], .modal, .preview-modal, .PlayerWrapper');
-            if (modal) {
-                const modalVid = modal.querySelector('video');
-                if (modalVid) return modalVid;
-            }
-
-            const active = getActiveItem();
-            if (active) {
-                const v = active.querySelector('video');
-                if (v) return v;
-            }
-
             const videos = Array.from(document.querySelectorAll('video'));
             if (videos.length === 0) return null;
 
-            // Предпочитаем проигрывающееся видео
+            // 1. Безусловный приоритет: видео, которое прямо сейчас воспроизводится
             const playing = videos.find(v => !v.paused && v.currentTime > 0);
             if (playing) return playing;
 
-            // Иначе выбираем с наибольшей видимой площадью
+            // 2. Видео внутри активной карточки
+            const activeCard = document.querySelector('.GifPreview_isActive, .GifPreview.isActive');
+            if (activeCard) {
+                const v = activeCard.querySelector('video');
+                if (v) return v;
+            }
+
+            // 3. Видео с наибольшей видимой площадью
             let bestVideo = null;
             let maxArea = 0;
             const vh = window.innerHeight;
@@ -5239,7 +5240,16 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     bestVideo = v;
                 }
             }
-            return bestVideo || videos[0];
+            if (bestVideo && maxArea > 0) return bestVideo;
+
+            // 4. Видео в модалке
+            const modal = document.querySelector('[role="dialog"], .modal, .preview-modal, .PlayerWrapper');
+            if (modal) {
+                const modalVid = modal.querySelector('video');
+                if (modalVid) return modalVid;
+            }
+
+            return videos[0];
         }
 
         /** Извлекает имя автора (userName) на RedGifs */
@@ -5333,37 +5343,86 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         /** Извлекает ссылки для скачивания текущего видео */
         function findMedia() {
-            const active = getActiveItem();
-            const urls = [];
-            const itemId = (active && active.getAttribute('data-feed-item-id')) || 
-                           (location.pathname.match(/\/watch\/([^/?#]+)/) || [])[1] || null;
+            const v = getActiveVideo();
+            let active = null;
+            if (v) {
+                active = v.closest('.GifPreview_isActive, [data-feed-item-id], .GifPreview');
+            }
+            if (!active) {
+                active = getActiveItem();
+            }
 
-            if (active) {
-                const poster = active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"]')
-                            || (itemId ? document.querySelector(`img[src*="${itemId}"]`) : null)
-                            || document.querySelector('img[src*="media.redgifs.com"]');
-                if (poster && poster.src) {
-                    const mp4Hd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '.mp4').replace(/\.(?:jpg|png|jpeg)/i, '.mp4');
-                    const mp4Sd = poster.src.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg)/i, '-mobile.mp4').replace(/\.(?:jpg|png|jpeg)/i, '-mobile.mp4');
-                    urls.push(mp4Hd, mp4Sd);
+            let itemId = (active && active.getAttribute('data-feed-item-id')) || null;
+            if (!itemId) {
+                const activeCard = document.querySelector('.GifPreview_isActive[data-feed-item-id], .GifPreview.isActive[data-feed-item-id]');
+                if (activeCard) itemId = activeCard.getAttribute('data-feed-item-id');
+            }
+            if (!itemId && v) {
+                const nearCard = v.closest('[data-feed-item-id]');
+                if (nearCard) itemId = nearCard.getAttribute('data-feed-item-id');
+            }
+            if (!itemId && active) {
+                const watchA = active.querySelector('a[href*="/watch/"]');
+                if (watchA) {
+                    const m = (watchA.getAttribute('href') || '').match(/\/watch\/([^/?#]+)/);
+                    if (m) itemId = m[1];
+                }
+            }
+            if (!itemId) {
+                const urlMatch = location.pathname.match(/\/watch\/([^/?#]+)/);
+                if (urlMatch) itemId = urlMatch[1];
+            }
+
+            // Мягкая синхронизация адресной строки (чтобы URL соответствовал текущему видео)
+            if (itemId && location.pathname.includes('/watch/')) {
+                const currentUrlId = (location.pathname.match(/\/watch\/([^/?#]+)/) || [])[1];
+                if (currentUrlId && currentUrlId.toLowerCase() !== itemId.toLowerCase()) {
+                    try {
+                        history.replaceState(null, '', `/watch/${itemId}`);
+                    } catch (e) {}
                 }
             }
 
-            const v = getActiveVideo();
+            const urls = [];
+
+            // 1. Прямые CDN ссылки RedGifs на основе itemId
+            if (itemId) {
+                const capId = itemId.charAt(0).toUpperCase() + itemId.slice(1);
+                urls.push(`https://media.redgifs.com/${capId}.mp4`);
+                urls.push(`https://media.redgifs.com/${capId}-mobile.mp4`);
+                urls.push(`https://media.redgifs.com/${itemId}.mp4`);
+                urls.push(`https://media.redgifs.com/${itemId}-mobile.mp4`);
+            }
+
+            // 2. Из постера активной карточки или текущего видео
+            if (active || v) {
+                const posterImg = (active && active.querySelector('img.Player-Poster, img[src*="media.redgifs.com"], img[src*="thumbs"]'))
+                               || (itemId ? document.querySelector(`img[src*="${itemId}"]`) : null);
+                const posterSrc = posterImg?.src || v?.poster || (v && v.getAttribute('poster')) || '';
+                if (posterSrc) {
+                    const mp4Hd = posterSrc.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg|webp)/i, '.mp4').replace(/\.(?:jpg|png|jpeg|webp)/i, '.mp4');
+                    const mp4Sd = posterSrc.replace(/-(?:mobile|poster|thumbnail)\.(?:jpg|png|jpeg|webp)/i, '-mobile.mp4').replace(/\.(?:jpg|png|jpeg|webp)/i, '-mobile.mp4');
+                    if (!urls.includes(mp4Hd)) urls.unshift(mp4Hd);
+                    if (!urls.includes(mp4Sd)) urls.push(mp4Sd);
+                }
+            }
+
+            // 3. Прямой src видео (если не blob)
             if (v) {
                 const src = v.currentSrc || v.src || (v.querySelector('source') && v.querySelector('source').src);
                 if (src && !src.startsWith('blob:') && !urls.includes(src)) urls.push(src);
             }
 
-            if (itemId) {
-                const capId = itemId.charAt(0).toUpperCase() + itemId.slice(1);
-                urls.push(`https://media.redgifs.com/${capId}.mp4`);
-                urls.push(`https://media.redgifs.com/${capId}-mobile.mp4`);
-            }
-
             const cleanUrls = Array.from(new Set(urls.filter(Boolean)));
             if (cleanUrls.length > 0) {
-                return { urls: cleanUrls, type: 'video', itemId: itemId || 'video', userName: getUserName() };
+                const postUrl = itemId ? `https://www.redgifs.com/watch/${itemId}` : location.href;
+                return {
+                    urls: cleanUrls,
+                    type: 'video',
+                    itemId: itemId || 'video',
+                    userName: getUserName(active),
+                    postUrl: postUrl
+                };
             }
             return null;
         }
@@ -5763,10 +5822,11 @@ function findMediaForDownload() {
         if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
 
         const primaryUrl = media.urls[0];
+        const canonicalPostUrl = media.postUrl || location.href;
 
         // Проверка дубликата в истории (для Pinterest, Instagram, RedGifs и др.)
-        if (!bypassDuplicateCheck && typeof checkFileInHistory === 'function' && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(location.href)) {
-            checkFileInHistory(null, primaryUrl, location.href, media.type).then(record => {
+        if (!bypassDuplicateCheck && typeof checkFileInHistory === 'function' && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(canonicalPostUrl)) {
+            checkFileInHistory(null, primaryUrl, canonicalPostUrl, media.type).then(record => {
                 if (record) {
                     _activeDuplicateRecord = record;
                     showDuplicateDownloadNotice(record, () => triggerDownload(true, record));
@@ -5923,12 +5983,12 @@ function findMediaForDownload() {
         function tryNext() {
             if (attemptedIndex >= urls.length) {
                 console.warn('Все ссылки не сработали, fallback на Blob...');
-                downloadBlobMedia(urls[0], filename);
+                downloadBlobMedia(urls[0], filename, canonicalPostUrl);
                 return;
             }
             const targetUrl = urls[attemptedIndex++];
             showToast('⏳ Запуск скачивания...');
-            triggerDirectBlobDownload(targetUrl, filename, tryNext);
+            triggerDirectBlobDownload(targetUrl, filename, tryNext, canonicalPostUrl);
             if (typeof performPostDownloadAction === 'function') {
                 performPostDownloadAction();
             }
@@ -7552,7 +7612,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-02</span>
+              <span>v${SCRIPT_VERSION} · 2026-10-09</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>

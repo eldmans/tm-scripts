@@ -112,10 +112,11 @@
         if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
 
         const primaryUrl = media.urls[0];
+        const canonicalPostUrl = media.postUrl || location.href;
 
         // Проверка дубликата в истории (для Pinterest, Instagram, RedGifs и др.)
-        if (!bypassDuplicateCheck && typeof checkFileInHistory === 'function' && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(location.href)) {
-            checkFileInHistory(null, primaryUrl, location.href, media.type).then(record => {
+        if (!bypassDuplicateCheck && typeof checkFileInHistory === 'function' && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(canonicalPostUrl)) {
+            checkFileInHistory(null, primaryUrl, canonicalPostUrl, media.type).then(record => {
                 if (record) {
                     _activeDuplicateRecord = record;
                     showDuplicateDownloadNotice(record, () => triggerDownload(true, record));
@@ -272,12 +273,12 @@
         function tryNext() {
             if (attemptedIndex >= urls.length) {
                 console.warn('Все ссылки не сработали, fallback на Blob...');
-                downloadBlobMedia(urls[0], filename);
+                downloadBlobMedia(urls[0], filename, canonicalPostUrl);
                 return;
             }
             const targetUrl = urls[attemptedIndex++];
             showToast('⏳ Запуск скачивания...');
-            triggerDirectBlobDownload(targetUrl, filename, tryNext);
+            triggerDirectBlobDownload(targetUrl, filename, tryNext, canonicalPostUrl);
             if (typeof performPostDownloadAction === 'function') {
                 performPostDownloadAction();
             }
