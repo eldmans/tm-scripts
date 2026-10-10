@@ -117,6 +117,18 @@
         _postPlayerNav(wasPaused);
     }
 
+    // Снятие залипшего фокуса с текстовых полей при клике в медиа/фон/элементы вне полей ввода
+    window.addEventListener('pointerdown', function (e) {
+        if (!e.target) return;
+        const isInput = !!e.target.closest('input, textarea, [contenteditable="true"], [role="textbox"]');
+        if (!isInput && document.activeElement) {
+            const el = document.activeElement;
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('role') === 'textbox' || !!el.closest('input, textarea, [contenteditable="true"], [role="textbox"]')) {
+                try { el.blur(); } catch (err) {}
+            }
+        }
+    }, true);
+
     // Ранний перехват клавиш слайдера (PageUp / PageDown, ArrowDown / ArrowUp) ДО сайта на window в фазе capture
     window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
         if (window.capturingFor !== null) return;
@@ -176,20 +188,33 @@
             !!activeEl.closest('[contenteditable="true"]') ||
             !!activeEl.closest('input, textarea, [role="textbox"]')
         );
-        if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
 
-        // 1. Навигация Home: переход в grok.com/imagine/saved из любого места сайта Grok (если курсор не в поле ввода текста)
+        // 1. Навигация Home / Saved Grok (срабатывает из любого места grok.com)
         const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
-        if ((hotkeyMatches(e, config.hk.history) || isHomeKey) && rootDomain === 'grok.com') {
+        const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
+        if (isHistoryHk && rootDomain === 'grok.com') {
+            if (isEditing) {
+                const textVal = (activeEl.value !== undefined) ? String(activeEl.value) : (activeEl.textContent || '');
+                // Если это штатный Home (без модификаторов) и в поле есть введенный текст — сохраняем нативное поведение перемещения курсора в начало строки
+                if (isHomeKey && textVal.trim().length > 0) {
+                    return;
+                }
+            }
             e.preventDefault();
             e.stopImmediatePropagation();
-            if (location.pathname !== '/imagine/saved') {
-                window.location.href = 'https://grok.com/imagine/saved';
+            if (typeof grokNavigateToSaved === 'function') {
+                grokNavigateToSaved();
             } else {
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                if (location.pathname !== '/imagine/saved') {
+                    window.location.href = 'https://grok.com/imagine/saved';
+                } else {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
             }
             return;
         }
+
+        if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
 
         if (hotkeyMatches(e, config.hk.help)) {
             e.preventDefault();

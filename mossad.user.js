@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.28
+// @version      1.3.29
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.28';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.29';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -2802,6 +2802,44 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
     window.triggerGrokVideoGeneration = triggerGrokVideoGeneration;
 
+    /**
+     * Универсальная навигация в Saved Grok (/imagine/saved) из любого места grok.com.
+     * Если уже на /imagine/saved — плавно скроллит в начало ленты.
+     */
+    function grokNavigateToSaved() {
+        if (typeof isGrokSavedPage === 'function' && isGrokSavedPage()) {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            if (document.documentElement) document.documentElement.scrollTo({ top: 0, behavior: 'smooth' });
+            if (document.body) document.body.scrollTo({ top: 0, behavior: 'smooth' });
+            const scrollables = document.querySelectorAll('main, [role="main"], [data-scroll-container], div[class*="overflow-y"]');
+            scrollables.forEach(el => {
+                if (el.scrollTop > 0) el.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+            showToast('🔝 В начало Saved Grok');
+            return;
+        }
+
+        showToast('📂 Переход в Saved Grok...');
+
+        // 1. Попытка нативного SPA перехода через ссылку в DOM
+        const savedLink = document.querySelector('a[href="/imagine/saved"], a[href*="/imagine/saved"]');
+        if (savedLink) {
+            try {
+                savedLink.click();
+                setTimeout(() => {
+                    if (typeof isGrokSavedPage === 'function' && !isGrokSavedPage()) {
+                        window.location.href = 'https://grok.com/imagine/saved';
+                    }
+                }, 250);
+                return;
+            } catch(e) {}
+        }
+
+        // 2. Прямой переход по URL
+        window.location.href = 'https://grok.com/imagine/saved';
+    }
+    window.grokNavigateToSaved = grokNavigateToSaved;
+
 // ============================================================
     // GROK: Smart Delete (3-dots fallback, a.confirm, hold-post)
     // ============================================================
@@ -4282,8 +4320,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             } else if (savedCount > 0 || parseInt(btnCollect.dataset.collectedCount || '0') > 0) {
                 grokTogglePlaylistPanel();
             } else {
-                showToast('ℹ️ Переход на /imagine/saved для сбора...');
-                setTimeout(() => { window.location.href = 'https://grok.com/imagine/saved'; }, 300);
+                if (typeof grokNavigateToSaved === 'function') {
+                    grokNavigateToSaved();
+                } else {
+                    window.location.href = 'https://grok.com/imagine/saved';
+                }
             }
         };
 
@@ -7612,7 +7653,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-09</span>
+              <span>v${SCRIPT_VERSION} · 2026-10-10</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
@@ -7918,6 +7959,18 @@ function findMediaForDownload() {
         _postPlayerNav(wasPaused);
     }
 
+    // Снятие залипшего фокуса с текстовых полей при клике в медиа/фон/элементы вне полей ввода
+    window.addEventListener('pointerdown', function (e) {
+        if (!e.target) return;
+        const isInput = !!e.target.closest('input, textarea, [contenteditable="true"], [role="textbox"]');
+        if (!isInput && document.activeElement) {
+            const el = document.activeElement;
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('role') === 'textbox' || !!el.closest('input, textarea, [contenteditable="true"], [role="textbox"]')) {
+                try { el.blur(); } catch (err) {}
+            }
+        }
+    }, true);
+
     // Ранний перехват клавиш слайдера (PageUp / PageDown, ArrowDown / ArrowUp) ДО сайта на window в фазе capture
     window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
         if (window.capturingFor !== null) return;
@@ -7977,20 +8030,33 @@ function findMediaForDownload() {
             !!activeEl.closest('[contenteditable="true"]') ||
             !!activeEl.closest('input, textarea, [role="textbox"]')
         );
-        if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
 
-        // 1. Навигация Home: переход в grok.com/imagine/saved из любого места сайта Grok (если курсор не в поле ввода текста)
+        // 1. Навигация Home / Saved Grok (срабатывает из любого места grok.com)
         const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
-        if ((hotkeyMatches(e, config.hk.history) || isHomeKey) && rootDomain === 'grok.com') {
+        const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
+        if (isHistoryHk && rootDomain === 'grok.com') {
+            if (isEditing) {
+                const textVal = (activeEl.value !== undefined) ? String(activeEl.value) : (activeEl.textContent || '');
+                // Если это штатный Home (без модификаторов) и в поле есть введенный текст — сохраняем нативное поведение перемещения курсора в начало строки
+                if (isHomeKey && textVal.trim().length > 0) {
+                    return;
+                }
+            }
             e.preventDefault();
             e.stopImmediatePropagation();
-            if (location.pathname !== '/imagine/saved') {
-                window.location.href = 'https://grok.com/imagine/saved';
+            if (typeof grokNavigateToSaved === 'function') {
+                grokNavigateToSaved();
             } else {
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                if (location.pathname !== '/imagine/saved') {
+                    window.location.href = 'https://grok.com/imagine/saved';
+                } else {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
             }
             return;
         }
+
+        if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
 
         if (hotkeyMatches(e, config.hk.help)) {
             e.preventDefault();

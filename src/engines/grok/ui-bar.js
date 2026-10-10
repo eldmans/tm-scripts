@@ -47,8 +47,11 @@
             } else if (savedCount > 0 || parseInt(btnCollect.dataset.collectedCount || '0') > 0) {
                 grokTogglePlaylistPanel();
             } else {
-                showToast('ℹ️ Переход на /imagine/saved для сбора...');
-                setTimeout(() => { window.location.href = 'https://grok.com/imagine/saved'; }, 300);
+                if (typeof grokNavigateToSaved === 'function') {
+                    grokNavigateToSaved();
+                } else {
+                    window.location.href = 'https://grok.com/imagine/saved';
+                }
             }
         };
 
