@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.29
+// @version      1.3.30
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -1369,8 +1369,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     /**
      * Показывает компактное Glassmorphic-уведомление справа под виджетом
      * о том, что файл уже скачивался, с таймером подтверждения на 6 секунд.
+     * @param {Object} record          - запись из истории
+     * @param {Function} onConfirmDownload - коллбек, замыкающий URL/media момента нажатия
+     * @param {string} [lockedPostUrl] - URL поста в момент нажатия (фиксируется!)
+     * @param {string} [lockedMediaUrl] - URL медиа в момент нажатия (фиксируется!)
      */
-    function showDuplicateDownloadNotice(record, onConfirmDownload) {
+    function showDuplicateDownloadNotice(record, onConfirmDownload, lockedPostUrl, lockedMediaUrl) {
         // Если включена галочка «Качать дубли»: качаем сразу и показываем укороченное уведомление без таймера
         if (config.allowDuplicates) {
             showToast(`⚠️ Дубликат: ${record.filename || 'файл'} (${record.date || 'ранее'})`, false, 3000);
@@ -1427,9 +1431,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         notice.querySelector('#mossad-dup-close').onclick = closeNotice;
 
-        // Сохраняем ожидание подтверждения
+        // Сохраняем ожидание подтверждения — фиксируем URL/ID файла МОМЕНТА нажатия,
+        // чтобы подтверждение сработало только для того же файла, а не любого дубля.
+        const lockedId = record.id || record.hash || lockedMediaUrl || lockedPostUrl || '';
         _pendingDuplicateConfirm = {
-            id: record.id || record.hash || record.url,
+            id: lockedId,
+            lockedPostUrl: lockedPostUrl || '',
+            lockedMediaUrl: lockedMediaUrl || '',
             expiresAt: Date.now() + 6000,
             confirm: () => {
                 closeNotice();
@@ -1449,11 +1457,24 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
     /**
      * Проверяет, активно ли подтверждение повторного скачивания для текущего файла.
+     * Подтверждение действительно ТОЛЬКО для того файла (postUrl или mediaUrl),
+     * по которому было показано уведомление — скроллинг к другому посту не даёт пройти.
+     * @param {string} fileIdentifier - URL поста или медиа для сравнения
      */
     function isDuplicateConfirmed(fileIdentifier) {
-        if (_pendingDuplicateConfirm && Date.now() <= _pendingDuplicateConfirm.expiresAt) {
-            return true;
+        if (!_pendingDuplicateConfirm) return false;
+        if (Date.now() > _pendingDuplicateConfirm.expiresAt) return false;
+        // Если идентификатор совпадает с зафиксированным URL поста или медиа — подтверждено
+        if (fileIdentifier) {
+            const lp = _pendingDuplicateConfirm.lockedPostUrl;
+            const lm = _pendingDuplicateConfirm.lockedMediaUrl;
+            if (lp && fileIdentifier === lp) return true;
+            if (lm && fileIdentifier === lm) return true;
+            // Fallback: если id совпадает (хеш / id записи)
+            if (_pendingDuplicateConfirm.id && fileIdentifier === _pendingDuplicateConfirm.id) return true;
+            return false;
         }
+        // Без идентификатора — не подтверждаем (безопаснее)
         return false;
     }
 
@@ -2328,10 +2349,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const currentMediaType = hasVid ? 'video' : 'photo';
 
         // Проверка дубликата в истории
-        if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl)) {
-            checkFileInHistory(null, media ? media.url : null, currentPostUrl, currentMediaType).then(record => {
+        const lockedMediaUrl = media ? media.url : null;
+        if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl) && !isDuplicateConfirmed(lockedMediaUrl)) {
+            checkFileInHistory(null, lockedMediaUrl, currentPostUrl, currentMediaType).then(record => {
                 if (record) {
-                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback));
+                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback), currentPostUrl, lockedMediaUrl);
                 } else {
                     triggerGrokDownload(true, null, onDoneCallback);
                 }
@@ -2405,11 +2427,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 try {
                     showToast('⏳ Запись метаданных...');
                     const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl, model, promptHash);
-                    saveBlobToDisk(enrichedBlob, grokFilename);
+                    saveBlobToDisk(enrichedBlob, grokFilename, media.url, currentPostUrl);
                     onDownloadFinalized();
                 } catch (err) {
                     console.error('[MOSSAD] Metadata injection failed, saving raw blob:', err);
-                    saveBlobToDisk(rawBlob, grokFilename);
+                    saveBlobToDisk(rawBlob, grokFilename, media.url, currentPostUrl);
                     onDownloadFinalized();
                 }
             };
@@ -5870,7 +5892,7 @@ function findMediaForDownload() {
             checkFileInHistory(null, primaryUrl, canonicalPostUrl, media.type).then(record => {
                 if (record) {
                     _activeDuplicateRecord = record;
-                    showDuplicateDownloadNotice(record, () => triggerDownload(true, record));
+                    showDuplicateDownloadNotice(record, () => triggerDownload(true, record), canonicalPostUrl, primaryUrl);
                 } else {
                     _activeDuplicateRecord = null;
                     triggerDownload(true, null);
@@ -7653,7 +7675,7 @@ function findMediaForDownload() {
               </div>
             </div>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-10</span>
+              <span>v${SCRIPT_VERSION} · 2026-10-13</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
