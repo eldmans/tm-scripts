@@ -587,6 +587,28 @@
 
         window.updateWidgetUI();
 
+        // ── v1.3.37: сворачивание панели настроек кликом вне MOSSAD ──
+        // Только реальные клики пользователя (isTrusted), только в состоянии 'panel' → 'bar'.
+        // Игнорируются: клики по любым элементам MOSSAD (виджет, модалка F1, плейлист, тосты, уведомления —
+        // всё с id="mossad-…"), а также клики, начатые внутри MOSSAD (перетаскивание виджета,
+        // ресайз плейлиста, выделение текста в полях — mouseup снаружи не закрывает панель).
+        // Клик не перехватывается: страница получает его как обычно.
+        const isInsideMossad = (el) => !!(el && el.closest && el.closest('[id^="mossad-"]'));
+        let _pointerDownInside = false;
+        document.addEventListener('pointerdown', (e) => {
+            _pointerDownInside = isInsideMossad(e.target);
+        }, true);
+        document.addEventListener('click', (e) => {
+            const downInside = _pointerDownInside;
+            _pointerDownInside = false;
+            if (!e.isTrusted || config.closePanelOnOutsideClick === false) return;
+            if (window.widgetState !== 'panel') return;
+            if (downInside || isInsideMossad(e.target)) return;
+            if (document.getElementById('mossad-hk-modal')) return; // открыта модалка F1
+            window.widgetState = 'bar';
+            window.updateWidgetUI();
+        }, true);
+
         // Tracker Time
         setInterval(() => {
             if (window.widgetState === 'hidden') return;

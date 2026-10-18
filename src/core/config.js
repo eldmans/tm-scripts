@@ -25,6 +25,7 @@
         filenameTemplateEnabled: true,   // использовать шаблон?
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
+        closePanelOnOutsideClick: true,  // v1.3.37: сворачивать панель настроек виджета кликом вне MOSSAD
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'

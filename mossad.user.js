@@ -87,6 +87,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         filenameTemplateEnabled: true,   // использовать шаблон?
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
+        closePanelOnOutsideClick: true,  // v1.3.37: сворачивать панель настроек виджета кликом вне MOSSAD
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
@@ -7781,6 +7782,28 @@ function findMediaForDownload() {
 
         window.updateWidgetUI();
 
+        // ── v1.3.37: сворачивание панели настроек кликом вне MOSSAD ──
+        // Только реальные клики пользователя (isTrusted), только в состоянии 'panel' → 'bar'.
+        // Игнорируются: клики по любым элементам MOSSAD (виджет, модалка F1, плейлист, тосты, уведомления —
+        // всё с id="mossad-…"), а также клики, начатые внутри MOSSAD (перетаскивание виджета,
+        // ресайз плейлиста, выделение текста в полях — mouseup снаружи не закрывает панель).
+        // Клик не перехватывается: страница получает его как обычно.
+        const isInsideMossad = (el) => !!(el && el.closest && el.closest('[id^="mossad-"]'));
+        let _pointerDownInside = false;
+        document.addEventListener('pointerdown', (e) => {
+            _pointerDownInside = isInsideMossad(e.target);
+        }, true);
+        document.addEventListener('click', (e) => {
+            const downInside = _pointerDownInside;
+            _pointerDownInside = false;
+            if (!e.isTrusted || config.closePanelOnOutsideClick === false) return;
+            if (window.widgetState !== 'panel') return;
+            if (downInside || isInsideMossad(e.target)) return;
+            if (document.getElementById('mossad-hk-modal')) return; // открыта модалка F1
+            window.widgetState = 'bar';
+            window.updateWidgetUI();
+        }, true);
+
         // Tracker Time
         setInterval(() => {
             if (window.widgetState === 'hidden') return;
@@ -7844,6 +7867,10 @@ function findMediaForDownload() {
                 <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">⬇</button>
               </div>
             </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Клик мышью вне окон MOSSAD сворачивает панель настроек виджета до краткого меню">
+              <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
+              Сворачивать панель кликом вне её
+            </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
               <span>v${SCRIPT_VERSION} · 2026-10-19</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
@@ -7973,6 +8000,9 @@ function findMediaForDownload() {
         
         document.body.appendChild(modal);
         
+        modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
+            Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
+        };
         modal.querySelector('#mossad-gh-save').onclick = () => {
             setGithubToken(modal.querySelector('#mossad-gh-token').value);
             Settings.save();
