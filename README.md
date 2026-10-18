@@ -4,7 +4,7 @@
 
 MOSSAD is a universal userscript that combines powerful media features into one single tool: automated slideshows, hotkey management, downloading (including Pinterest `expMp4` audio extraction), and site-specific enhancements (Grok, Civitai, RedGifs, VKVideo, NoodleMagazine). 
 
-It replaces the older `grok_hotkeys_plus_slideshow` and `universal_media_enhancer` scripts.
+It replaces the older `grok_hotkeys_plus_slideshow` and `universal_media_enhancer` scripts (now kept for history in [`archive/`](archive/)).
 
 ## ✨ Features
 - **Universal Glassmorphism UI**: A sleek top bar with a timer, start button, settings dropdown, and download button.
@@ -30,7 +30,7 @@ It replaces the older `grok_hotkeys_plus_slideshow` and `universal_media_enhance
 
 MOSSAD — это универсальный юзерскрипт, объединяющий все возможности для работы с медиа: авто-слайдшоу, управление горячими клавишами, скачивание (включая извлечение аудио+видео с Pinterest) и модули для конкретных сайтов (Grok, Civitai, RedGifs, VKVideo, NoodleMagazine).
 
-Он заменяет старые скрипты `grok_hotkeys_plus_slideshow` и `universal_media_enhancer`.
+Он заменяет старые скрипты `grok_hotkeys_plus_slideshow` и `universal_media_enhancer` (сохранены для истории в [`archive/`](archive/)).
 
 ## ✨ Возможности
 - **Единый стеклянный UI (Glassmorphism)**: Компактная верхняя панель с таймером, кнопкой "Пуск", меню настроек и кнопкой скачивания.

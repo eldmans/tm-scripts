@@ -47,7 +47,8 @@ tm-scripts/grok/
 │   │   └── engine.js         # Движок авто-слайдшоу, таймеры фото/видео, D-pad
 │   └── ui/
 │       └── panel.js          # Glassmorphism виджет и панель настроек
-└── _archive/                 # Старые бэкапы и устаревшие файлы (не засоряют корень)
+├── archive/                  # Устаревшие standalone-скрипты (grok-hotkeys*, universal_media_enhancer) — в git, только история
+└── _archive/                 # Локальные бэкапы (в .gitignore, не коммитятся)
 ```
 
 ---
