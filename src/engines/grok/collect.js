@@ -196,7 +196,12 @@
     }
 
     /**
-     * Инициализация слушателей MutationObserver и scroll для автосбора ссылок в ленте /imagine/saved
+     * Инициализация слушателей MutationObserver и scroll для автосбора ссылок в ленте /imagine/saved.
+     * v1.3.33: слушатели живут ТОЛЬКО на /imagine/saved. При SPA-уходе со страницы
+     * (обнаруживается первой мутацией DOM или 2-секундной проверкой) observer отключается,
+     * scroll-слушатель и интервал снимаются; вместо них работает лёгкая 1-секундная проверка
+     * pathname, которая заново включает автосбор при возврате на /imagine/saved.
+     * Логика самого автосбора (накопление, дедупликация — ANTI_PATTERNS §2, §8) не менялась.
      */
     function grokInitAutoCollector() {
         if (rootDomain !== 'grok.com') return;
@@ -204,8 +209,12 @@
         window._mossadAutoCollectorInit = true;
 
         let debounceTimer = null;
+        let observer = null;
+        let pollId = null;
+        let routeWatchId = null;
+
         const triggerCollect = () => {
-            if (typeof isGrokSavedPage === 'function' && !isGrokSavedPage()) return;
+            if (!isGrokSavedPage()) return;
             const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
             if (!raw) return;
             if (debounceTimer) clearTimeout(debounceTimer);
@@ -214,24 +223,52 @@
             }, 300);
         };
 
-        window.addEventListener('scroll', triggerCollect, { passive: true });
+        const start = () => {
+            if (observer) return;
+            if (routeWatchId) { clearInterval(routeWatchId); routeWatchId = null; }
 
-        const observer = new MutationObserver((mutations) => {
-            if (typeof isGrokSavedPage === 'function' && !isGrokSavedPage()) return;
-            let hasAdded = false;
-            for (let i = 0; i < mutations.length; i++) {
-                if (mutations[i].addedNodes && mutations[i].addedNodes.length > 0) {
-                    hasAdded = true;
-                    break;
+            window.addEventListener('scroll', triggerCollect, { passive: true });
+
+            observer = new MutationObserver((mutations) => {
+                if (!isGrokSavedPage()) { stop(); return; }
+                let hasAdded = false;
+                for (let i = 0; i < mutations.length; i++) {
+                    if (mutations[i].addedNodes && mutations[i].addedNodes.length > 0) {
+                        hasAdded = true;
+                        break;
+                    }
                 }
-            }
-            if (hasAdded) triggerCollect();
-        });
+                if (hasAdded) triggerCollect();
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
 
-        observer.observe(document.body, { childList: true, subtree: true });
+            // Периодическая проверка раз в 2 секунды (и детектор ухода со страницы)
+            pollId = setInterval(() => {
+                if (!isGrokSavedPage()) { stop(); return; }
+                triggerCollect();
+            }, 2000);
+        };
 
-        // Периодическая проверка раз в 2 секунды
-        setInterval(triggerCollect, 2000);
+        const stop = () => {
+            if (!observer) return;
+            window.removeEventListener('scroll', triggerCollect, { passive: true });
+            observer.disconnect();
+            observer = null;
+            if (pollId) { clearInterval(pollId); pollId = null; }
+            if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+            watchRoute();
+        };
+
+        // Ждём возврата на /imagine/saved (SPA-навигация без перезагрузки)
+        const watchRoute = () => {
+            if (routeWatchId) return;
+            routeWatchId = setInterval(() => {
+                if (isGrokSavedPage()) start();
+            }, 1000);
+        };
+
+        if (isGrokSavedPage()) start();
+        else watchRoute();
     }
 
     /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */

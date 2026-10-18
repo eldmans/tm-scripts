@@ -2,6 +2,19 @@
 
 Все ключевые изменения, решения и обновления версий фиксируются здесь на понятном человеческом языке.
 
+## [v1.3.33] — 2026-10-19
+### 🧩 Этап 3: общие помощники и жизненный цикл DOM-наблюдателей (поведение не меняется)
+* **Нормализация URL (`src/core/utils.js`):**
+  * Добавлены `stripUrlQuery(url)` (URL без `?…`) и `normUrlKey(url)` (то же + нижний регистр). Ими заменены все inline-копии `(x || '').split('?')[0]` / `.toLowerCase()` в `grok/collect.js`, `loop.js`, `queue.js`, `slideshow.js`, `ui-playlist.js` и `slideshow/engine.js`. Помощники безопасны к `null`/`undefined` (раньше часть копий могла упасть на пустом URL).
+* **Петля R и ключи хранилища (`src/engines/grok/*`, `src/core/hotkeys.js`, `src/slideshow/engine.js`):**
+  * `queue.js` и `ui-playlist.js` читают/сохраняют loop-set через `getGrokLoopSet()` / `saveGrokLoopSet()` из `loop.js` вместо собственного парсинга JSON.
+  * Вместо строковых литералов используются константы `GALLERY_SS_KEY`, `GALLERY_LOOP_KEY` и новая `GALLERY_COLLECT_ACTIVE_KEY`.
+  * Убран фолбэк `hotkeys.js` на несуществующий ключ `mossad_grok_gallery_ss`.
+* **Ожидание условий (`waitForCondition`):**
+  * Перенесён из `grok/helpers.js` в `src/core/utils.js` и теперь используется в `delete.js` (ожидание закрытия диалога удаления, 100 мс / 15 с) и `slideshow.js` (ожидание смены UUID после клика по киноплёнке, 40 мс × 6) вместо ручных `setInterval`.
+* **Автосбор ссылок (`src/engines/grok/collect.js`):**
+  * MutationObserver на `document.body`, scroll-слушатель и 2-секундный интервал работают только на `/imagine/saved`. При SPA-уходе со страницы они отключаются, а лёгкая 1-секундная проверка пути включает их заново при возврате. Логика накопления и дедупликации коллекции не менялась.
+
 ## [v1.3.32] — 2026-10-19
 ### 🔇 Хоткей звука (ScrollLock) снова переключает mute/unmute видео Grok Imagine
 * **Новый поиск кнопки звука `findGrokSoundToggleButton()` (`src/engines/grok/helpers.js`):**
