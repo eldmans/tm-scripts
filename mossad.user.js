@@ -2105,7 +2105,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
 // ============================================================
-    // GROK HELPERS: Button Finders & Actions
+    // GROK HELPERS: Button Finders (см. также sound / upscale / media / download / filmstrip / video-gen)
     // ============================================================
 
     /**
@@ -2151,7 +2151,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }) || null;
     }
 
-    // ============================================================
+// ============================================================
     // GROK: Sound Toggle (Mute / Unmute via Player DOM Button)
     // ============================================================
     // v1.3.32: Grok добавил кнопку, начинающуюся с иконки ноты (выбор музыки / аудио-дорожки).
@@ -2263,7 +2263,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
     }
 
-    // ============================================================
+// ============================================================
     // GROK: PageUp Upscale (RU/EN, Case-insensitive, Submenu -> 720p)
     // ============================================================
     function runGrokUpscale() {
@@ -2316,7 +2316,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     // ============================================================
-    // ============================================================
+
+// ============================================================
     // GROK: Prompt & Media Finders
     // ============================================================
 
@@ -2474,7 +2475,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
     }
 
-    // ============================================================
+// ============================================================
     // GROK: Download with Metadata Injection & Fallback
     // ============================================================
     function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
@@ -2667,9 +2668,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }, true);
     }
 
-
-
-    // ============================================================
+// ============================================================
     // GROK: Filmstrip (Киноплёнка) & Intra-group Navigation Helpers
     // ============================================================
 
@@ -2798,7 +2797,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return false;
     }
 
-    // ============================================================
+// ============================================================
     // GROK: Video Generation Shortcuts (6s & 10s)
     // ============================================================
     let _isGeneratingGrokVideo = false;

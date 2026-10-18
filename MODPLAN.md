@@ -31,7 +31,13 @@ tm-scripts/grok/
 │   ├── engines/              # Изолированная логика по каждому сайту
 │   │   ├── grok/             # Grok Imagine модули:
 │   │   │   ├── constants.js  # Ключи sessionStorage, предикаты страниц
-│   │   │   ├── helpers.js    # Поиск кнопок DOM, звук, апскейл, прямой DL
+│   │   │   ├── helpers.js    # Поиск кнопок DOM (findGrokButton, «три точки»)
+│   │   │   ├── sound.js      # Хоткей звука: скоринг кнопки mute/unmute (v1.3.32)
+│   │   │   ├── upscale.js    # PageUp-апскейл 720p
+│   │   │   ├── media.js      # Промпт, модель, текущее медиа, хеш промпта
+│   │   │   ├── download.js   # triggerGrokDownload + метаданные, перехват промпта в Vault
+│   │   │   ├── filmstrip.js  # Киноплёнка: UUID, активный кадр, шаг
+│   │   │   ├── video-gen.js  # Кнопки 6s / 10s (генерация видео)
 │   │   │   ├── delete.js     # Smart delete, hold post, подтверждение
 │   │   │   ├── collect.js    # Сбор ссылок DOM, email scrape, экспорт .txt
 │   │   │   ├── queue.js      # Fisher-Yates, построение очередей (Gr/Md)
