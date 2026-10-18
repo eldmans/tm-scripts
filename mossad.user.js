@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.32
+// @version      1.3.33
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.32';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.33';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -533,6 +533,20 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         toast.style.color = isError ? '#fca5a5' : '#6ee7b7';
         toast.style.opacity = '1';
         setTimeout(() => toast.style.opacity = '0', 3500);
+    }
+
+    // ============================================
+    // URL NORMALIZATION (общие ключи сравнения URL)
+    // ============================================
+
+    /** URL без query-строки (`?…`). null/undefined → ''. Регистр сохраняется. */
+    function stripUrlQuery(url) {
+        return String(url || '').split('?')[0];
+    }
+
+    /** Ключ сравнения URL: без query-строки и в нижнем регистре. null/undefined → ''. */
+    function normUrlKey(url) {
+        return stripUrlQuery(url).toLowerCase();
     }
 
     // ============================================
@@ -3310,7 +3324,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             if (!href) continue;
             const url = href.startsWith('http') ? href : 'https://grok.com' + href;
             // Нормализуем URL (убираем query-string для дедупликации по базовому URL поста)
-            const baseUrl = url.split('?')[0];
+            const baseUrl = stripUrlQuery(url);
             if (seen.has(baseUrl)) continue;
             seen.add(baseUrl);
             // Карточка — ближайший listitem / masonry-item родитель
@@ -3350,7 +3364,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         // 1. Сохраняем все уже имеющиеся элементы (список только увеличивается!)
         for (const it of existingItems) {
-            const base = (it.url || '').split('?')[0].toLowerCase();
+            const base = normUrlKey(it.url);
             if (!seenUrls.has(base)) {
                 seenUrls.add(base);
                 mergedItems.push(it);
@@ -3360,7 +3374,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         // 2. Добавляем новые элементы, которых ещё не было
         let addedCount = 0;
         for (const it of foundItems) {
-            const base = (it.url || '').split('?')[0].toLowerCase();
+            const base = normUrlKey(it.url);
             if (!seenUrls.has(base)) {
                 seenUrls.add(base);
                 mergedItems.push(it);
@@ -3425,14 +3439,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         const seenUrls = new Set();
         existingItems.forEach(it => {
-            const base = (it.url || '').split('?')[0].toLowerCase();
+            const base = normUrlKey(it.url);
             if (base) seenUrls.add(base);
         });
 
         const foundItems = grokCollectLinks();
         let addedCount = 0;
         for (const it of foundItems) {
-            const base = (it.url || '').split('?')[0].toLowerCase();
+            const base = normUrlKey(it.url);
             if (!seenUrls.has(base)) {
                 seenUrls.add(base);
                 existingItems.push(it);
@@ -3591,7 +3605,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const curUuid = (typeof grokExtractUuid === 'function')
             ? grokExtractUuid(targetUrl)
             : (targetUrl.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
-        const cleanTarget = targetUrl.split('?')[0].toLowerCase();
+        const cleanTarget = normUrlKey(targetUrl);
 
         const isMatch = (item) => {
             if (!item || !item.url) return false;
@@ -3601,7 +3615,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     : (item.url.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
                 if (itemUuid && itemUuid.toLowerCase() === curUuid.toLowerCase()) return true;
             }
-            return (item.url.split('?')[0].toLowerCase() === cleanTarget);
+            return (normUrlKey(item.url) === cleanTarget);
         };
 
         let flatIndex = structure.items.findIndex(isMatch);
@@ -3651,15 +3665,15 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         if (loopUrls.length > 0 || loopGroupIds.length > 0) {
             const loopItems = struct.items.filter(item => {
-                const base = (item.url || '').split('?')[0].toLowerCase();
-                const inUrls = loopUrls.some(u => u.split('?')[0].toLowerCase() === base);
+                const base = normUrlKey(item.url);
+                const inUrls = loopUrls.some(u => normUrlKey(u) === base);
                 const inGrps = loopGroupIds.includes(item.convId || '__noconv__');
                 return inUrls || inGrps;
             });
             if (loopItems.length > 0) {
                 const curLoopIdx = loopItems.findIndex(item => {
                     if (!curPos || !curPos.currentItem) return false;
-                    return (item.url || '').split('?')[0].toLowerCase() === (curPos.currentItem.url || '').split('?')[0].toLowerCase();
+                    return normUrlKey(item.url) === normUrlKey(curPos.currentItem.url);
                 });
                 let targetIdx = 0;
                 if (curLoopIdx !== -1) {
@@ -3750,9 +3764,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 return { item: struct.items[prevIdx], circleCompleted: false };
             }
             if (struct.itemMode === 'rnd' || struct.itemMode === 'off') {
-                const curBase = (curPos.currentItem?.url || '').split('?')[0].toLowerCase();
+                const curBase = normUrlKey(curPos.currentItem?.url);
                 if (!visitedInCircle.includes(curBase)) visitedInCircle.push(curBase);
-                const unvisited = struct.items.filter(it => !visitedInCircle.includes((it.url || '').split('?')[0].toLowerCase()));
+                const unvisited = struct.items.filter(it => !visitedInCircle.includes(normUrlKey(it.url)));
                 if (unvisited.length === 0) {
                     ss.visitedInCircle = [];
                     _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
@@ -3760,7 +3774,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     return { item: rndItem, circleCompleted: true };
                 }
                 const rndItem = unvisited[Math.floor(Math.random() * unvisited.length)];
-                visitedInCircle.push((rndItem.url || '').split('?')[0].toLowerCase());
+                visitedInCircle.push(normUrlKey(rndItem.url));
                 ss.visitedInCircle = visitedInCircle;
                 _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
                 return { item: rndItem, circleCompleted: false };
@@ -3790,7 +3804,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         let curGrp = struct.groups[g];
 
         const curItemForVisited = curGrp.items[i];
-        const curBase = (curItemForVisited?.url || '').split('?')[0].toLowerCase();
+        const curBase = normUrlKey(curItemForVisited?.url);
         if (!visitedInCurGroup.includes(curBase)) visitedInCurGroup.push(curBase);
         if (!visitedGroups.includes(curGrp.id)) visitedGroups.push(curGrp.id);
 
@@ -3813,7 +3827,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
         } else {
             // rnd / off: случайный выбор среди непосещенных в текущей группе
-            const unvisitedInGrp = curGrp.items.filter(it => !visitedInCurGroup.includes((it.url || '').split('?')[0].toLowerCase()));
+            const unvisitedInGrp = curGrp.items.filter(it => !visitedInCurGroup.includes(normUrlKey(it.url)));
             if (unvisitedInGrp.length > 0) {
                 nextItemInGrp = unvisitedInGrp[Math.floor(Math.random() * unvisitedInGrp.length)];
             } else {
@@ -3823,7 +3837,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         if (!groupDone && nextItemInGrp) {
             const newItemIdx = curGrp.items.indexOf(nextItemInGrp);
-            visitedInCurGroup.push((nextItemInGrp.url || '').split('?')[0].toLowerCase());
+            visitedInCurGroup.push(normUrlKey(nextItemInGrp.url));
             ss.visitedInCurGroup = visitedInCurGroup;
             ss.curGrpIdx = g;
             ss.curItemIdx = newItemIdx >= 0 ? newItemIdx : i + 1;
@@ -3878,7 +3892,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             targetItem = targetGrp.items[0];
         }
 
-        ss.visitedInCurGroup = [(targetItem.url || '').split('?')[0].toLowerCase()];
+        ss.visitedInCurGroup = [normUrlKey(targetItem.url)];
         ss.curGrpIdx = nextG;
         ss.curItemIdx = targetGrp.items.indexOf(targetItem);
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
@@ -3941,8 +3955,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     function isGrokItemLooped(url, loopSet = null) {
         if (!url) return false;
         const set = loopSet || getGrokLoopSet();
-        const baseUrl = url.split('?')[0];
-        return set.urls.some(u => (u || '').split('?')[0] === baseUrl);
+        const baseUrl = stripUrlQuery(url);
+        return set.urls.some(u => stripUrlQuery(u) === baseUrl);
     }
 
     function isGrokGroupLooped(convId, loopSet = null) {
@@ -3955,8 +3969,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const set = getGrokLoopSet();
         if (set.urls.length === 0 && set.groupIds.length === 0) return [];
         return allItems.filter(it => {
-            const baseUrl = (it.url || '').split('?')[0];
-            const inUrls = set.urls.some(u => (u || '').split('?')[0] === baseUrl);
+            const baseUrl = stripUrlQuery(it.url);
+            const inUrls = set.urls.some(u => stripUrlQuery(u) === baseUrl);
             const inGrps = it.convId && set.groupIds.includes(it.convId);
             return inUrls || inGrps;
         });
@@ -4119,7 +4133,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         currentLoopCount = 0;
         accumulatedTime = 0;
 
-        const startBase = (startItem.url || '').split('?')[0].toLowerCase();
+        const startBase = normUrlKey(startItem.url);
         const startGid = startItem.convId || '__noconv__';
         const startUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(startItem.url) : '';
 
@@ -4127,7 +4141,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         let startGrpIdx = 0, startItemIdx = 0;
         for (let _g = 0; _g < struct.groups.length; _g++) {
             const _i = struct.groups[_g].items.findIndex(it =>
-                (it.url || '').split('?')[0].toLowerCase() === startBase);
+                normUrlKey(it.url) === startBase);
             if (_i !== -1) { startGrpIdx = _g; startItemIdx = _i; break; }
         }
 
@@ -4169,7 +4183,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
 
-        const curClean = location.href.split('?')[0].toLowerCase();
+        const curClean = normUrlKey(location.href);
         if (curClean === startBase) {
             grokGallerySlideshowTick();
         } else {
@@ -4666,7 +4680,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
         }
 
-        const currentCleanUrl = (overrideUrl || location.href).split('?')[0].toLowerCase();
+        const currentCleanUrl = normUrlKey(overrideUrl || location.href);
         let currentPath = '';
         try {
             currentPath = (overrideUrl ? new URL(overrideUrl, location.origin).pathname : location.pathname).toLowerCase();
@@ -4680,7 +4694,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         items.forEach(el => {
             const itemUrl = (el.dataset.url || '').toLowerCase();
             const itemUuid = (el.dataset.uuid || '').toLowerCase();
-            const cleanItemUrl = itemUrl.split('?')[0];
+            const cleanItemUrl = stripUrlQuery(itemUrl);
 
             let isActive = false;
             if (activeUuid && itemUuid && activeUuid === itemUuid) {
@@ -5045,10 +5059,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     li.dataset.uuid = itemUuid;
                     li.style.cssText = `display:flex;align-items:center;gap:3px;padding:1px 3px;margin:0 0 1px 0;border-radius:3px;font-size:var(--mossad-pl-font-size, 10px);line-height:1.15;border:1px solid transparent;cursor:pointer;transition:all 0.12s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
-                    const baseUrl = (item.url || '').split('?')[0];
-                    const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
+                    const baseUrl = stripUrlQuery(item.url);
+                    const isLooped = loopSet.urls.some(u => stripUrlQuery(u) === baseUrl);
                     const rItem = makeRBtn(isLooped, (btn) => {
-                        const i = loopSet.urls.findIndex(u => u.split('?')[0] === baseUrl);
+                        const i = loopSet.urls.findIndex(u => stripUrlQuery(u) === baseUrl);
                         if (i >= 0) { loopSet.urls.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
                         else { loopSet.urls.push(item.url); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
                         saveLoopSet();
@@ -5099,10 +5113,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 li.dataset.uuid = itemUuid;
                 li.style.cssText = `display:flex;align-items:center;gap:3px;padding:1px 3px;margin:0 0 1px 0;border-radius:3px;font-size:var(--mossad-pl-font-size, 11px);line-height:1.15;border:1px solid transparent;cursor:pointer;transition:all 0.12s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
-                const baseUrl = (item.url || '').split('?')[0];
-                const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
+                const baseUrl = stripUrlQuery(item.url);
+                const isLooped = loopSet.urls.some(u => stripUrlQuery(u) === baseUrl);
                 const rItem = makeRBtn(isLooped, (btn) => {
-                    const i = loopSet.urls.findIndex(u => u.split('?')[0] === baseUrl);
+                    const i = loopSet.urls.findIndex(u => stripUrlQuery(u) === baseUrl);
                     if (i >= 0) { loopSet.urls.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
                     else { loopSet.urls.push(item.url); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
                     saveLoopSet();
@@ -6503,7 +6517,7 @@ function findMediaForDownload() {
             const typeMatch = !(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo);
             if (typeMatch) {
                 // 60-секундный guard от повторного скачивания одной страницы
-                const _dlPageUrl = location.href.split('?')[0].toLowerCase();
+                const _dlPageUrl = normUrlKey(location.href);
                 const _dlLastUrl = sessionStorage.getItem('mossad_auto_dl_url');
                 const _dlLastTime = parseInt(sessionStorage.getItem('mossad_auto_dl_time') || '0', 10);
                 const _dlNow = Date.now();

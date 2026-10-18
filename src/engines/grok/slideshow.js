@@ -155,7 +155,7 @@
         currentLoopCount = 0;
         accumulatedTime = 0;
 
-        const startBase = (startItem.url || '').split('?')[0].toLowerCase();
+        const startBase = normUrlKey(startItem.url);
         const startGid = startItem.convId || '__noconv__';
         const startUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(startItem.url) : '';
 
@@ -163,7 +163,7 @@
         let startGrpIdx = 0, startItemIdx = 0;
         for (let _g = 0; _g < struct.groups.length; _g++) {
             const _i = struct.groups[_g].items.findIndex(it =>
-                (it.url || '').split('?')[0].toLowerCase() === startBase);
+                normUrlKey(it.url) === startBase);
             if (_i !== -1) { startGrpIdx = _g; startItemIdx = _i; break; }
         }
 
@@ -205,7 +205,7 @@
 
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
 
-        const curClean = location.href.split('?')[0].toLowerCase();
+        const curClean = normUrlKey(location.href);
         if (curClean === startBase) {
             grokGallerySlideshowTick();
         } else {

@@ -56,7 +56,7 @@
         const curUuid = (typeof grokExtractUuid === 'function')
             ? grokExtractUuid(targetUrl)
             : (targetUrl.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
-        const cleanTarget = targetUrl.split('?')[0].toLowerCase();
+        const cleanTarget = normUrlKey(targetUrl);
 
         const isMatch = (item) => {
             if (!item || !item.url) return false;
@@ -66,7 +66,7 @@
                     : (item.url.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
                 if (itemUuid && itemUuid.toLowerCase() === curUuid.toLowerCase()) return true;
             }
-            return (item.url.split('?')[0].toLowerCase() === cleanTarget);
+            return (normUrlKey(item.url) === cleanTarget);
         };
 
         let flatIndex = structure.items.findIndex(isMatch);
@@ -116,15 +116,15 @@
 
         if (loopUrls.length > 0 || loopGroupIds.length > 0) {
             const loopItems = struct.items.filter(item => {
-                const base = (item.url || '').split('?')[0].toLowerCase();
-                const inUrls = loopUrls.some(u => u.split('?')[0].toLowerCase() === base);
+                const base = normUrlKey(item.url);
+                const inUrls = loopUrls.some(u => normUrlKey(u) === base);
                 const inGrps = loopGroupIds.includes(item.convId || '__noconv__');
                 return inUrls || inGrps;
             });
             if (loopItems.length > 0) {
                 const curLoopIdx = loopItems.findIndex(item => {
                     if (!curPos || !curPos.currentItem) return false;
-                    return (item.url || '').split('?')[0].toLowerCase() === (curPos.currentItem.url || '').split('?')[0].toLowerCase();
+                    return normUrlKey(item.url) === normUrlKey(curPos.currentItem.url);
                 });
                 let targetIdx = 0;
                 if (curLoopIdx !== -1) {
@@ -215,9 +215,9 @@
                 return { item: struct.items[prevIdx], circleCompleted: false };
             }
             if (struct.itemMode === 'rnd' || struct.itemMode === 'off') {
-                const curBase = (curPos.currentItem?.url || '').split('?')[0].toLowerCase();
+                const curBase = normUrlKey(curPos.currentItem?.url);
                 if (!visitedInCircle.includes(curBase)) visitedInCircle.push(curBase);
-                const unvisited = struct.items.filter(it => !visitedInCircle.includes((it.url || '').split('?')[0].toLowerCase()));
+                const unvisited = struct.items.filter(it => !visitedInCircle.includes(normUrlKey(it.url)));
                 if (unvisited.length === 0) {
                     ss.visitedInCircle = [];
                     _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
@@ -225,7 +225,7 @@
                     return { item: rndItem, circleCompleted: true };
                 }
                 const rndItem = unvisited[Math.floor(Math.random() * unvisited.length)];
-                visitedInCircle.push((rndItem.url || '').split('?')[0].toLowerCase());
+                visitedInCircle.push(normUrlKey(rndItem.url));
                 ss.visitedInCircle = visitedInCircle;
                 _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
                 return { item: rndItem, circleCompleted: false };
@@ -255,7 +255,7 @@
         let curGrp = struct.groups[g];
 
         const curItemForVisited = curGrp.items[i];
-        const curBase = (curItemForVisited?.url || '').split('?')[0].toLowerCase();
+        const curBase = normUrlKey(curItemForVisited?.url);
         if (!visitedInCurGroup.includes(curBase)) visitedInCurGroup.push(curBase);
         if (!visitedGroups.includes(curGrp.id)) visitedGroups.push(curGrp.id);
 
@@ -278,7 +278,7 @@
             }
         } else {
             // rnd / off: случайный выбор среди непосещенных в текущей группе
-            const unvisitedInGrp = curGrp.items.filter(it => !visitedInCurGroup.includes((it.url || '').split('?')[0].toLowerCase()));
+            const unvisitedInGrp = curGrp.items.filter(it => !visitedInCurGroup.includes(normUrlKey(it.url)));
             if (unvisitedInGrp.length > 0) {
                 nextItemInGrp = unvisitedInGrp[Math.floor(Math.random() * unvisitedInGrp.length)];
             } else {
@@ -288,7 +288,7 @@
 
         if (!groupDone && nextItemInGrp) {
             const newItemIdx = curGrp.items.indexOf(nextItemInGrp);
-            visitedInCurGroup.push((nextItemInGrp.url || '').split('?')[0].toLowerCase());
+            visitedInCurGroup.push(normUrlKey(nextItemInGrp.url));
             ss.visitedInCurGroup = visitedInCurGroup;
             ss.curGrpIdx = g;
             ss.curItemIdx = newItemIdx >= 0 ? newItemIdx : i + 1;
@@ -343,7 +343,7 @@
             targetItem = targetGrp.items[0];
         }
 
-        ss.visitedInCurGroup = [(targetItem.url || '').split('?')[0].toLowerCase()];
+        ss.visitedInCurGroup = [normUrlKey(targetItem.url)];
         ss.curGrpIdx = nextG;
         ss.curItemIdx = targetGrp.items.indexOf(targetItem);
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));

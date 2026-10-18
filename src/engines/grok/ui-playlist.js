@@ -44,7 +44,7 @@
             }
         }
 
-        const currentCleanUrl = (overrideUrl || location.href).split('?')[0].toLowerCase();
+        const currentCleanUrl = normUrlKey(overrideUrl || location.href);
         let currentPath = '';
         try {
             currentPath = (overrideUrl ? new URL(overrideUrl, location.origin).pathname : location.pathname).toLowerCase();
@@ -58,7 +58,7 @@
         items.forEach(el => {
             const itemUrl = (el.dataset.url || '').toLowerCase();
             const itemUuid = (el.dataset.uuid || '').toLowerCase();
-            const cleanItemUrl = itemUrl.split('?')[0];
+            const cleanItemUrl = stripUrlQuery(itemUrl);
 
             let isActive = false;
             if (activeUuid && itemUuid && activeUuid === itemUuid) {
@@ -423,10 +423,10 @@
                     li.dataset.uuid = itemUuid;
                     li.style.cssText = `display:flex;align-items:center;gap:3px;padding:1px 3px;margin:0 0 1px 0;border-radius:3px;font-size:var(--mossad-pl-font-size, 10px);line-height:1.15;border:1px solid transparent;cursor:pointer;transition:all 0.12s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
-                    const baseUrl = (item.url || '').split('?')[0];
-                    const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
+                    const baseUrl = stripUrlQuery(item.url);
+                    const isLooped = loopSet.urls.some(u => stripUrlQuery(u) === baseUrl);
                     const rItem = makeRBtn(isLooped, (btn) => {
-                        const i = loopSet.urls.findIndex(u => u.split('?')[0] === baseUrl);
+                        const i = loopSet.urls.findIndex(u => stripUrlQuery(u) === baseUrl);
                         if (i >= 0) { loopSet.urls.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
                         else { loopSet.urls.push(item.url); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
                         saveLoopSet();
@@ -477,10 +477,10 @@
                 li.dataset.uuid = itemUuid;
                 li.style.cssText = `display:flex;align-items:center;gap:3px;padding:1px 3px;margin:0 0 1px 0;border-radius:3px;font-size:var(--mossad-pl-font-size, 11px);line-height:1.15;border:1px solid transparent;cursor:pointer;transition:all 0.12s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
-                const baseUrl = (item.url || '').split('?')[0];
-                const isLooped = loopSet.urls.some(u => u.split('?')[0] === baseUrl);
+                const baseUrl = stripUrlQuery(item.url);
+                const isLooped = loopSet.urls.some(u => stripUrlQuery(u) === baseUrl);
                 const rItem = makeRBtn(isLooped, (btn) => {
-                    const i = loopSet.urls.findIndex(u => u.split('?')[0] === baseUrl);
+                    const i = loopSet.urls.findIndex(u => stripUrlQuery(u) === baseUrl);
                     if (i >= 0) { loopSet.urls.splice(i, 1); btn.style.color = '#374151'; btn.title = 'Зациклить'; }
                     else { loopSet.urls.push(item.url); btn.style.color = '#f87171'; btn.title = 'Зациклено — клик для отмены'; }
                     saveLoopSet();

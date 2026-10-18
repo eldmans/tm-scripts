@@ -358,7 +358,7 @@
             const typeMatch = !(config.downloadType === 'photo' && hasVideo) && !(config.downloadType === 'video' && !hasVideo);
             if (typeMatch) {
                 // 60-секундный guard от повторного скачивания одной страницы
-                const _dlPageUrl = location.href.split('?')[0].toLowerCase();
+                const _dlPageUrl = normUrlKey(location.href);
                 const _dlLastUrl = sessionStorage.getItem('mossad_auto_dl_url');
                 const _dlLastTime = parseInt(sessionStorage.getItem('mossad_auto_dl_time') || '0', 10);
                 const _dlNow = Date.now();

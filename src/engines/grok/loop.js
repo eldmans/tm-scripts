@@ -27,8 +27,8 @@
     function isGrokItemLooped(url, loopSet = null) {
         if (!url) return false;
         const set = loopSet || getGrokLoopSet();
-        const baseUrl = url.split('?')[0];
-        return set.urls.some(u => (u || '').split('?')[0] === baseUrl);
+        const baseUrl = stripUrlQuery(url);
+        return set.urls.some(u => stripUrlQuery(u) === baseUrl);
     }
 
     function isGrokGroupLooped(convId, loopSet = null) {
@@ -41,8 +41,8 @@
         const set = getGrokLoopSet();
         if (set.urls.length === 0 && set.groupIds.length === 0) return [];
         return allItems.filter(it => {
-            const baseUrl = (it.url || '').split('?')[0];
-            const inUrls = set.urls.some(u => (u || '').split('?')[0] === baseUrl);
+            const baseUrl = stripUrlQuery(it.url);
+            const inUrls = set.urls.some(u => stripUrlQuery(u) === baseUrl);
             const inGrps = it.convId && set.groupIds.includes(it.convId);
             return inUrls || inGrps;
         });

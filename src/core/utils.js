@@ -24,6 +24,20 @@
     }
 
     // ============================================
+    // URL NORMALIZATION (общие ключи сравнения URL)
+    // ============================================
+
+    /** URL без query-строки (`?…`). null/undefined → ''. Регистр сохраняется. */
+    function stripUrlQuery(url) {
+        return String(url || '').split('?')[0];
+    }
+
+    /** Ключ сравнения URL: без query-строки и в нижнем регистре. null/undefined → ''. */
+    function normUrlKey(url) {
+        return stripUrlQuery(url).toLowerCase();
+    }
+
+    // ============================================
     // GENERAL HELPERS & RETRY ENGINE
     // ============================================
 

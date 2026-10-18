@@ -30,7 +30,7 @@
             if (!href) continue;
             const url = href.startsWith('http') ? href : 'https://grok.com' + href;
             // Нормализуем URL (убираем query-string для дедупликации по базовому URL поста)
-            const baseUrl = url.split('?')[0];
+            const baseUrl = stripUrlQuery(url);
             if (seen.has(baseUrl)) continue;
             seen.add(baseUrl);
             // Карточка — ближайший listitem / masonry-item родитель
@@ -70,7 +70,7 @@
 
         // 1. Сохраняем все уже имеющиеся элементы (список только увеличивается!)
         for (const it of existingItems) {
-            const base = (it.url || '').split('?')[0].toLowerCase();
+            const base = normUrlKey(it.url);
             if (!seenUrls.has(base)) {
                 seenUrls.add(base);
                 mergedItems.push(it);
@@ -80,7 +80,7 @@
         // 2. Добавляем новые элементы, которых ещё не было
         let addedCount = 0;
         for (const it of foundItems) {
-            const base = (it.url || '').split('?')[0].toLowerCase();
+            const base = normUrlKey(it.url);
             if (!seenUrls.has(base)) {
                 seenUrls.add(base);
                 mergedItems.push(it);
@@ -145,14 +145,14 @@
 
         const seenUrls = new Set();
         existingItems.forEach(it => {
-            const base = (it.url || '').split('?')[0].toLowerCase();
+            const base = normUrlKey(it.url);
             if (base) seenUrls.add(base);
         });
 
         const foundItems = grokCollectLinks();
         let addedCount = 0;
         for (const it of foundItems) {
-            const base = (it.url || '').split('?')[0].toLowerCase();
+            const base = normUrlKey(it.url);
             if (!seenUrls.has(base)) {
                 seenUrls.add(base);
                 existingItems.push(it);
