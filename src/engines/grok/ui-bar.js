@@ -60,7 +60,7 @@
             e.preventDefault();
             if (confirm('Очистить собранную коллекцию?')) {
                 _gSS.removeItem(GALLERY_COLLECTION_KEY);
-                sessionStorage.removeItem('mossad_grok_collect_active');
+                sessionStorage.removeItem(GALLERY_COLLECT_ACTIVE_KEY);
                 btnCollect.textContent = 'Собрать';
                 btnCollect.dataset.collectedCount = '0';
                 btnCollect.style.background = '#1f2937';

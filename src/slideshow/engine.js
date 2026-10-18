@@ -266,7 +266,7 @@
         // 1. Большое слайдшоу (по плейлисту коллекции в Grok): НЕ зависит от D-Pad!
         const isBigGrokSs = (rootDomain === 'grok.com') && (() => {
             if (window._mossadGalleryActive) return true;
-            try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
+            try { return !!JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch { return false; }
         })();
 
         const dirs = config.slideshowDirections;

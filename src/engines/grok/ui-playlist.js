@@ -149,12 +149,8 @@
         _gSS.setItem('mossad_playlist_open', 'true');
 
         // Читаем текущий loop-set
-        let loopSet = { urls: [], groupIds: [] };
-        try {
-            const lr = _gSS.getItem('mossad_grok_loop_set');
-            if (lr) loopSet = JSON.parse(lr);
-        } catch(e) {}
-        const saveLoopSet = () => _gSS.setItem('mossad_grok_loop_set', JSON.stringify(loopSet));
+        let loopSet = getGrokLoopSet(); // loop.js: всегда { urls: [], groupIds: [] }
+        const saveLoopSet = () => saveGrokLoopSet(loopSet);
 
         const savedCustomWidth = (typeof config !== 'undefined' && config.playlistWidth)
             ? config.playlistWidth

@@ -4,6 +4,7 @@
     const GALLERY_COLLECTION_KEY = 'mossad_grok_imagine_collection';
     const GALLERY_SS_KEY         = 'mossad_grok_imagine_ss';
     const GALLERY_LOOP_KEY       = 'mossad_grok_loop_set';
+    const GALLERY_COLLECT_ACTIVE_KEY = 'mossad_grok_collect_active'; // флаг автосбора ссылок
     const _gSS                   = sessionStorage; // короткий псевдоним
 
     /** Проверка: находимся ли мы на странице поста Grok Imagine */

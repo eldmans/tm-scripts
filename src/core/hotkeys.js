@@ -10,9 +10,9 @@
         if (sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true') return true;
         if (sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true') return true;
         if (sessionStorage.getItem('mossad_gallery_paused') === 'true') return true;
-        const rawSs = (typeof _gSS !== 'undefined' && _gSS.getItem)
-            ? _gSS.getItem(GALLERY_SS_KEY)
-            : sessionStorage.getItem('mossad_grok_gallery_ss');
+        // GALLERY_SS_KEY = 'mossad_grok_imagine_ss' (constants.js). Старый фолбэк читал
+        // несуществующий ключ 'mossad_grok_gallery_ss' — убран (v1.3.33).
+        const rawSs = _gSS.getItem(GALLERY_SS_KEY);
         if (rawSs) {
             try {
                 const ss = JSON.parse(rawSs);

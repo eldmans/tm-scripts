@@ -120,7 +120,7 @@
             }
         }
 
-        sessionStorage.setItem('mossad_grok_collect_active', 'true');
+        sessionStorage.setItem(GALLERY_COLLECT_ACTIVE_KEY, 'true');
 
         if (addedCount > 0) {
             showToast(`✅ Добавлено +${addedCount}! Всего в списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
@@ -141,7 +141,7 @@
         let existingData = {};
         try { existingData = JSON.parse(raw); } catch(e) { return; }
         const existingItems = existingData.items || [];
-        if (!existingItems.length && !sessionStorage.getItem('mossad_grok_collect_active')) return;
+        if (!existingItems.length && !sessionStorage.getItem(GALLERY_COLLECT_ACTIVE_KEY)) return;
 
         const seenUrls = new Set();
         existingItems.forEach(it => {

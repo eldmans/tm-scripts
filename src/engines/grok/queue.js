@@ -106,13 +106,9 @@
         const curPos = grokFindCurrentPosition(struct, overrideUrl);
 
         // ── 1. Зацикленный набор (R / loopSet) ──
-        let loopSet = { urls: [], groupIds: [] };
-        try {
-            const lr = _gSS.getItem('mossad_grok_loop_set');
-            if (lr) loopSet = JSON.parse(lr);
-        } catch(e) {}
-        const loopUrls = loopSet.urls || [];
-        const loopGroupIds = loopSet.groupIds || [];
+        const loopSet = getGrokLoopSet(); // loop.js: всегда { urls: [], groupIds: [] }
+        const loopUrls = loopSet.urls;
+        const loopGroupIds = loopSet.groupIds;
 
         if (loopUrls.length > 0 || loopGroupIds.length > 0) {
             const loopItems = struct.items.filter(item => {

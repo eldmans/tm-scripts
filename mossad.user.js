@@ -2025,6 +2025,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     const GALLERY_COLLECTION_KEY = 'mossad_grok_imagine_collection';
     const GALLERY_SS_KEY         = 'mossad_grok_imagine_ss';
     const GALLERY_LOOP_KEY       = 'mossad_grok_loop_set';
+    const GALLERY_COLLECT_ACTIVE_KEY = 'mossad_grok_collect_active'; // флаг автосбора ссылок
     const _gSS                   = sessionStorage; // короткий псевдоним
 
     /** Проверка: находимся ли мы на странице поста Grok Imagine */
@@ -3414,7 +3415,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
         }
 
-        sessionStorage.setItem('mossad_grok_collect_active', 'true');
+        sessionStorage.setItem(GALLERY_COLLECT_ACTIVE_KEY, 'true');
 
         if (addedCount > 0) {
             showToast(`✅ Добавлено +${addedCount}! Всего в списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
@@ -3435,7 +3436,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         let existingData = {};
         try { existingData = JSON.parse(raw); } catch(e) { return; }
         const existingItems = existingData.items || [];
-        if (!existingItems.length && !sessionStorage.getItem('mossad_grok_collect_active')) return;
+        if (!existingItems.length && !sessionStorage.getItem(GALLERY_COLLECT_ACTIVE_KEY)) return;
 
         const seenUrls = new Set();
         existingItems.forEach(it => {
@@ -3655,13 +3656,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const curPos = grokFindCurrentPosition(struct, overrideUrl);
 
         // ── 1. Зацикленный набор (R / loopSet) ──
-        let loopSet = { urls: [], groupIds: [] };
-        try {
-            const lr = _gSS.getItem('mossad_grok_loop_set');
-            if (lr) loopSet = JSON.parse(lr);
-        } catch(e) {}
-        const loopUrls = loopSet.urls || [];
-        const loopGroupIds = loopSet.groupIds || [];
+        const loopSet = getGrokLoopSet(); // loop.js: всегда { urls: [], groupIds: [] }
+        const loopUrls = loopSet.urls;
+        const loopGroupIds = loopSet.groupIds;
 
         if (loopUrls.length > 0 || loopGroupIds.length > 0) {
             const loopItems = struct.items.filter(item => {
@@ -4452,7 +4449,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             e.preventDefault();
             if (confirm('Очистить собранную коллекцию?')) {
                 _gSS.removeItem(GALLERY_COLLECTION_KEY);
-                sessionStorage.removeItem('mossad_grok_collect_active');
+                sessionStorage.removeItem(GALLERY_COLLECT_ACTIVE_KEY);
                 btnCollect.textContent = 'Собрать';
                 btnCollect.dataset.collectedCount = '0';
                 btnCollect.style.background = '#1f2937';
@@ -4785,12 +4782,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         _gSS.setItem('mossad_playlist_open', 'true');
 
         // Читаем текущий loop-set
-        let loopSet = { urls: [], groupIds: [] };
-        try {
-            const lr = _gSS.getItem('mossad_grok_loop_set');
-            if (lr) loopSet = JSON.parse(lr);
-        } catch(e) {}
-        const saveLoopSet = () => _gSS.setItem('mossad_grok_loop_set', JSON.stringify(loopSet));
+        let loopSet = getGrokLoopSet(); // loop.js: всегда { urls: [], groupIds: [] }
+        const saveLoopSet = () => saveGrokLoopSet(loopSet);
 
         const savedCustomWidth = (typeof config !== 'undefined' && config.playlistWidth)
             ? config.playlistWidth
@@ -6425,7 +6418,7 @@ function findMediaForDownload() {
         // 1. Большое слайдшоу (по плейлисту коллекции в Grok): НЕ зависит от D-Pad!
         const isBigGrokSs = (rootDomain === 'grok.com') && (() => {
             if (window._mossadGalleryActive) return true;
-            try { return !!JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem('mossad_grok_imagine_ss') || '{}').active; } catch { return false; }
+            try { return !!JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch { return false; }
         })();
 
         const dirs = config.slideshowDirections;
@@ -7971,9 +7964,9 @@ function findMediaForDownload() {
         if (sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true') return true;
         if (sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true') return true;
         if (sessionStorage.getItem('mossad_gallery_paused') === 'true') return true;
-        const rawSs = (typeof _gSS !== 'undefined' && _gSS.getItem)
-            ? _gSS.getItem(GALLERY_SS_KEY)
-            : sessionStorage.getItem('mossad_grok_gallery_ss');
+        // GALLERY_SS_KEY = 'mossad_grok_imagine_ss' (constants.js). Старый фолбэк читал
+        // несуществующий ключ 'mossad_grok_gallery_ss' — убран (v1.3.33).
+        const rawSs = _gSS.getItem(GALLERY_SS_KEY);
         if (rawSs) {
             try {
                 const ss = JSON.parse(rawSs);
