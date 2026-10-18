@@ -783,24 +783,6 @@
         return null;
     }
 
-    function waitForCondition(checkFn, timeoutMs = 2500, intervalMs = 50) {
-        return new Promise(resolve => {
-            const start = Date.now();
-            const timer = setInterval(() => {
-                let res = null;
-                try { res = checkFn(); } catch(e) {}
-                if (res) {
-                    clearInterval(timer);
-                    return resolve(res);
-                }
-                if (Date.now() - start >= timeoutMs) {
-                    clearInterval(timer);
-                    return resolve(null);
-                }
-            }, intervalMs);
-        });
-    }
-
     async function triggerGrokVideoGeneration(targetSeconds = 6) {
         if (rootDomain !== 'grok.com') return;
         if (_isGeneratingGrokVideo) {

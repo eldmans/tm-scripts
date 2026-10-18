@@ -309,15 +309,11 @@
                 } else if (!config.deleteAutoconfirm) {
                     // При ручном подтверждении ждём закрытия диалога
                     const waitStart = Date.now();
-                    const checkInterval = setInterval(() => {
-                        const dialog = document.querySelector('[role="dialog"]');
-                        if (!dialog || Date.now() - waitStart > 15000) {
-                            clearInterval(checkInterval);
-                            if (!dialog && Date.now() - waitStart < 14500) {
-                                setTimeout(executeTransition, 150);
-                            }
+                    waitForCondition(() => !document.querySelector('[role="dialog"]'), 15000, 100).then(closed => {
+                        if (closed && Date.now() - waitStart < 14500) {
+                            setTimeout(executeTransition, 150);
                         }
-                    }, 100);
+                    });
                 } else {
                     // Фолбэк, если автоподтверждение не вернуло подтверждение
                     await new Promise(r => setTimeout(r, 300));

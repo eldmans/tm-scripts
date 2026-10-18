@@ -38,6 +38,34 @@
     }
 
     // ============================================
+    // POLLING: общий помощник ожидания условия
+    // ============================================
+
+    /**
+     * Опрашивает checkFn каждые intervalMs (первая проверка — через intervalMs).
+     * Резолвится результатом checkFn, как только он truthy, или null по истечении timeoutMs.
+     * Исключения в checkFn гасятся (считаются «ещё нет»). Интервал всегда очищается.
+     * (Перенесено из grok/helpers.js в v1.3.33, чтобы использовать во всех модулях.)
+     */
+    function waitForCondition(checkFn, timeoutMs = 2500, intervalMs = 50) {
+        return new Promise(resolve => {
+            const start = Date.now();
+            const timer = setInterval(() => {
+                let res = null;
+                try { res = checkFn(); } catch(e) {}
+                if (res) {
+                    clearInterval(timer);
+                    return resolve(res);
+                }
+                if (Date.now() - start >= timeoutMs) {
+                    clearInterval(timer);
+                    return resolve(null);
+                }
+            }, intervalMs);
+        });
+    }
+
+    // ============================================
     // GENERAL HELPERS & RETRY ENGINE
     // ============================================
 

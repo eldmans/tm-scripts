@@ -58,15 +58,13 @@
                         console.log('[MOSSAD] grokSpaNavigate: та же conversation → filmstrip click');
                         filmstripBtn.click();
                         try { history.replaceState(null, '', path); } catch(e) {}
-                        let checks = 0;
-                        const checkInterval = setInterval(() => {
-                            checks++;
+                        // До ~240 мс (6 × 40 мс) ждём смены UUID в URL, затем тик в любом случае
+                        waitForCondition(() => {
                             const curUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(location.pathname) : '';
-                            if ((curUuid && targetUuid && curUuid === targetUuid.toLowerCase()) || checks >= 6) {
-                                clearInterval(checkInterval);
-                                if (typeof grokGallerySlideshowTick === 'function') grokGallerySlideshowTick();
-                            }
-                        }, 40);
+                            return !!(curUuid && targetUuid && curUuid === targetUuid.toLowerCase());
+                        }, 240, 40).then(() => {
+                            if (typeof grokGallerySlideshowTick === 'function') grokGallerySlideshowTick();
+                        });
                         return;
                     }
                 }

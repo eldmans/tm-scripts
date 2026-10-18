@@ -550,6 +550,34 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     // ============================================
+    // POLLING: общий помощник ожидания условия
+    // ============================================
+
+    /**
+     * Опрашивает checkFn каждые intervalMs (первая проверка — через intervalMs).
+     * Резолвится результатом checkFn, как только он truthy, или null по истечении timeoutMs.
+     * Исключения в checkFn гасятся (считаются «ещё нет»). Интервал всегда очищается.
+     * (Перенесено из grok/helpers.js в v1.3.33, чтобы использовать во всех модулях.)
+     */
+    function waitForCondition(checkFn, timeoutMs = 2500, intervalMs = 50) {
+        return new Promise(resolve => {
+            const start = Date.now();
+            const timer = setInterval(() => {
+                let res = null;
+                try { res = checkFn(); } catch(e) {}
+                if (res) {
+                    clearInterval(timer);
+                    return resolve(res);
+                }
+                if (Date.now() - start >= timeoutMs) {
+                    clearInterval(timer);
+                    return resolve(null);
+                }
+            }, intervalMs);
+        });
+    }
+
+    // ============================================
     // GENERAL HELPERS & RETRY ENGINE
     // ============================================
 
@@ -2823,24 +2851,6 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return null;
     }
 
-    function waitForCondition(checkFn, timeoutMs = 2500, intervalMs = 50) {
-        return new Promise(resolve => {
-            const start = Date.now();
-            const timer = setInterval(() => {
-                let res = null;
-                try { res = checkFn(); } catch(e) {}
-                if (res) {
-                    clearInterval(timer);
-                    return resolve(res);
-                }
-                if (Date.now() - start >= timeoutMs) {
-                    clearInterval(timer);
-                    return resolve(null);
-                }
-            }, intervalMs);
-        });
-    }
-
     async function triggerGrokVideoGeneration(targetSeconds = 6) {
         if (rootDomain !== 'grok.com') return;
         if (_isGeneratingGrokVideo) {
@@ -3271,15 +3281,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 } else if (!config.deleteAutoconfirm) {
                     // При ручном подтверждении ждём закрытия диалога
                     const waitStart = Date.now();
-                    const checkInterval = setInterval(() => {
-                        const dialog = document.querySelector('[role="dialog"]');
-                        if (!dialog || Date.now() - waitStart > 15000) {
-                            clearInterval(checkInterval);
-                            if (!dialog && Date.now() - waitStart < 14500) {
-                                setTimeout(executeTransition, 150);
-                            }
+                    waitForCondition(() => !document.querySelector('[role="dialog"]'), 15000, 100).then(closed => {
+                        if (closed && Date.now() - waitStart < 14500) {
+                            setTimeout(executeTransition, 150);
                         }
-                    }, 100);
+                    });
                 } else {
                     // Фолбэк, если автоподтверждение не вернуло подтверждение
                     await new Promise(r => setTimeout(r, 300));
@@ -4033,15 +4039,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                         console.log('[MOSSAD] grokSpaNavigate: та же conversation → filmstrip click');
                         filmstripBtn.click();
                         try { history.replaceState(null, '', path); } catch(e) {}
-                        let checks = 0;
-                        const checkInterval = setInterval(() => {
-                            checks++;
+                        // До ~240 мс (6 × 40 мс) ждём смены UUID в URL, затем тик в любом случае
+                        waitForCondition(() => {
                             const curUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(location.pathname) : '';
-                            if ((curUuid && targetUuid && curUuid === targetUuid.toLowerCase()) || checks >= 6) {
-                                clearInterval(checkInterval);
-                                if (typeof grokGallerySlideshowTick === 'function') grokGallerySlideshowTick();
-                            }
-                        }, 40);
+                            return !!(curUuid && targetUuid && curUuid === targetUuid.toLowerCase());
+                        }, 240, 40).then(() => {
+                            if (typeof grokGallerySlideshowTick === 'function') grokGallerySlideshowTick();
+                        });
                         return;
                     }
                 }
