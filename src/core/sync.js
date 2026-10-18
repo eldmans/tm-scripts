@@ -98,7 +98,7 @@
                             const token = config.githubToken;
                             Object.assign(config, decoded);
                             config.githubToken = token;
-                            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+                            persistLocalConfig();
                             if (window.updateWidgetUI) window.updateWidgetUI();
                             resolve(true);
                         } catch (e) { reject(e); }

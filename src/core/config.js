@@ -79,6 +79,52 @@
         return target;
     }
     config = mergeDeep(JSON.parse(JSON.stringify(DEFAULT_CONFIG)), config);
+
+    // ── GitHub-токен: хранится в общем хранилище Tampermonkey (GM_setValue), а НЕ в localStorage сайта ──
+    // v1.3.34: раньше токен лежал в localStorage каждого сайта (`mossad_{domain}_config`) и был
+    // доступен любым скриптам страницы. Теперь: один глобальный ключ GM, в localStorage не пишется.
+    // В памяти (`config.githubToken`) токен остаётся — sync.js и панель работают как раньше.
+    const GITHUB_TOKEN_GM_KEY = 'mossad_github_token';
+    const _hasGmStore = (typeof GM_getValue === 'function' && typeof GM_setValue === 'function');
+
+    /** JSON конфига для localStorage — без githubToken (если доступно GM-хранилище). */
+    function serializeLocalConfig() {
+        if (!_hasGmStore) return JSON.stringify(config);
+        const copy = Object.assign({}, config);
+        delete copy.githubToken;
+        return JSON.stringify(copy);
+    }
+    function persistLocalConfig() {
+        localStorage.setItem(STORAGE_KEY, serializeLocalConfig());
+    }
+    /** Сохранить токен (из панели настроек): в память + GM. */
+    function setGithubToken(token) {
+        config.githubToken = (token || '').trim();
+        if (_hasGmStore) {
+            try { GM_setValue(GITHUB_TOKEN_GM_KEY, config.githubToken); } catch(e) {}
+        }
+    }
+    // Одноразовая миграция: старый токен из localStorage → GM, затем удаляем его из localStorage.
+    // Правим именно «сырой» JSON localStorage (а не весь смерженный config), чтобы не изменить
+    // проверки «что сохранено пользователем» ниже (RedGifs / Grok шаблоны и направления).
+    if (_hasGmStore) {
+        try {
+            const legacyToken = config.githubToken || '';
+            const gmToken = GM_getValue(GITHUB_TOKEN_GM_KEY, '') || '';
+            if (legacyToken && !gmToken) GM_setValue(GITHUB_TOKEN_GM_KEY, legacyToken);
+            config.githubToken = gmToken || legacyToken;
+            const rawCfg = localStorage.getItem(STORAGE_KEY);
+            if (rawCfg) {
+                const parsedCfg = JSON.parse(rawCfg);
+                if (parsedCfg && Object.prototype.hasOwnProperty.call(parsedCfg, 'githubToken')) {
+                    delete parsedCfg.githubToken;
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsedCfg));
+                }
+            }
+        } catch(e) {
+            console.warn('[MOSSAD] githubToken migration failed:', e);
+        }
+    }
     // Для RedGifs дефолтные настройки сайта (направление down, шаблон {userName}-{domain[4]})
     if (rootDomain.includes('redgifs.com')) {
         let storedHasDir = false;
@@ -213,7 +259,7 @@
     const Settings = {
         get: () => config,
         save: () => {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            persistLocalConfig();
             if (typeof GM_setValue === 'function' && config.hk) {
                 try {
                     GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
@@ -224,7 +270,7 @@
         },
         // Сохранить без ре-рендера UI (для текстовых полей — не сбивает фокус)
         saveQuiet: () => {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            persistLocalConfig();
             if (typeof GM_setValue === 'function' && config.hk) {
                 try {
                     GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
@@ -245,7 +291,7 @@
     // Функция быстрого глобального сохранения хоткеев для всех сайтов
     window.saveGlobalHotkeys = function(showToastNotice = true) {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+            persistLocalConfig();
             if (typeof GM_setValue === 'function' && config.hk) {
                 GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
             }
@@ -268,9 +314,11 @@
                     const parsed = JSON.parse(gmHk);
                     if (parsed && typeof parsed === 'object') {
                         config.hk = mergeDeep(config.hk, parsed);
-                        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+                        persistLocalConfig();
                     }
                 }
+                // Подхватываем токен, сохранённый на другом сайте
+                config.githubToken = GM_getValue(GITHUB_TOKEN_GM_KEY, '') || '';
             } catch(e) {}
         }
     });

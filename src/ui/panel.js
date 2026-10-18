@@ -776,7 +776,7 @@
         document.body.appendChild(modal);
         
         modal.querySelector('#mossad-gh-save').onclick = () => {
-            config.githubToken = modal.querySelector('#mossad-gh-token').value.trim();
+            setGithubToken(modal.querySelector('#mossad-gh-token').value);
             Settings.save();
             showToast('✅ Токен сохранён');
         };
