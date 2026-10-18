@@ -81,6 +81,31 @@
     const GROK_CANCEL_WORDS = ['отмена', 'отменить', 'cancel', 'закрыть', 'close', 'нет', 'no'];
     const GROK_CONFIRM_RE = /удалить|delete|подтвердить|confirm/;
     const GROK_CONFIRM_EXACT = ['да', 'yes', 'ok', 'ок'];
+    // v1.3.38: точные подписи кнопки подтверждения в приоритете (англ. UI Grok: «Delete video»)
+    const GROK_CONFIRM_PRIORITY = [
+        'delete video', 'delete image', 'delete post', 'delete',
+        'удалить видео', 'удалить изображение', 'удалить пост', 'удалить'
+    ];
+
+    function _btnLabel(btn) {
+        const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+        const txt = (btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        return { aria, txt };
+    }
+
+    /**
+     * Одиночный клик для шагов удаления (v1.3.38). Общий triggerClick() шлёт синтетический click И вызывает
+     * el.click() — это ДВА клика: на кнопке-триггере диалога второй клик может закрыть только что открытый
+     * диалог, а на подтверждении — отправить второй запрос. Здесь: pointer/mouse down/up + один el.click().
+     */
+    function grokDeleteClickOnce(el, label) {
+        if (!el) return;
+        ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(type => {
+            try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, buttons: 1 })); } catch(e) {}
+        });
+        try { el.click(); } catch(e) {}
+        mossadDebug('delete', `клик: ${label}`, { text: (el.textContent || '').trim().slice(0, 40), aria: el.getAttribute('aria-label') || '' });
+    }
 
     function _isVisibleEl(el) {
         return !!el && el.isConnected && !(el.offsetWidth === 0 && el.offsetHeight === 0 &&
@@ -104,7 +129,14 @@
 
     function findGrokConfirmButtonIn(dialog, excludeBtn = null) {
         if (!dialog || !dialog.isConnected) return null;
-        const btns = Array.from(dialog.querySelectorAll('button, [role="button"]')).filter(_isVisibleEl);
+        const btns = Array.from(dialog.querySelectorAll('button, [role="button"]'))
+            .filter(b => _isVisibleEl(b) && b !== excludeBtn && !b.disabled);
+        // 1) Точное совпадение подписи по приоритету («Delete video» → … → «Удалить»)
+        for (const want of GROK_CONFIRM_PRIORITY) {
+            const exact = btns.find(b => { const l = _btnLabel(b); return l.txt === want || l.aria === want; });
+            if (exact && isGrokConfirmButton(exact, excludeBtn)) return exact;
+        }
+        // 2) Любая кнопка подтверждения (содержит delete/удалить/confirm…, не «Отмена»)
         return btns.find(b => isGrokConfirmButton(b, excludeBtn)) || null;
     }
 
@@ -131,6 +163,7 @@
         try {
             blurActiveInput();
             const initialUrl = location.href;
+            mossadDebug('delete', 'старт удаления', { holdpost: !!config.deleteHoldpost, autoconfirm: !!config.deleteAutoconfirm });
             let finalTargetUrl = null;
 
             let targetFilmstripBtn = null;
@@ -180,6 +213,7 @@
                     if (targetFilmstripUuid) {
                         finalTargetUrl = `/imagine/post/${targetFilmstripUuid}`;
                     }
+                    mossadDebug('delete', 'hold post: цель по киноплёнке', { from: safeCurIdx + 1, to: nextIdx + 1, uuid: targetFilmstripUuid || '' });
                     console.log(`[MOSSAD] hold post: DPad=${dPadDir} (${isFwd ? 'вниз' : 'вверх'}), целевой кадр: ${safeCurIdx + 1} -> ${nextIdx + 1} (UUID: ${targetFilmstripUuid || 'н/д'}, loop=${loop})`);
                 } else {
                     // Б. Киноплёнка из 1 кадра или не найдена — ищем URL соседа по коллекции / DOM
@@ -187,6 +221,7 @@
                     const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
                     finalTargetUrl = getGrokNeighborPostUrl(dPadDir, true);
                     console.log('[MOSSAD] hold post: киноплёнка одиночная/отсутствует, fallback URL соседа:', finalTargetUrl);
+                    mossadDebug('delete', 'hold post: цель — сосед по коллекции/DOM', { url: finalTargetUrl || '' });
                 }
 
                 // В. Крайний фолбэк: шаг стрелками, если нет киноплёнки и не найден URL соседа
@@ -254,18 +289,19 @@
             let deleteClicked = false;
             let clickedDelBtn = null;
 
+            mossadDebug('delete', directDelBtn ? 'кнопка удаления найдена' : 'кнопки удаления нет — пробуем меню «⋯»', { preDialogs: preDialogs.size });
             if (directDelBtn) {
-                triggerClick(directDelBtn, 'Delete Button');
+                grokDeleteClickOnce(directDelBtn, 'Delete Button');
                 clickedDelBtn = directDelBtn;
                 showToast('✕ Удаление...');
                 deleteClicked = true;
             } else {
                 const dotsBtn = findGrok3DotsMenuButton();
                 if (dotsBtn) {
-                    triggerClick(dotsBtn, 'Post actions (for Delete)');
+                    grokDeleteClickOnce(dotsBtn, 'Post actions (for Delete)');
                     const innerDel = await waitForCondition(() => findGrokButton(deleteBtnLabels), 1500, 100);
                     if (innerDel) {
-                        triggerClick(innerDel, 'Delete Button (from menu)');
+                        grokDeleteClickOnce(innerDel, 'Delete Button (from menu)');
                         clickedDelBtn = innerDel;
                         showToast('✕ Удаление...');
                         deleteClicked = true;
@@ -274,6 +310,7 @@
             }
 
             if (!deleteClicked) {
+                mossadDebug('delete', 'СТОП: кнопка удаления не найдена');
                 showToast('⚠️ Кнопка удаления не найдена', true);
                 return;
             }
@@ -282,6 +319,10 @@
             const confirmDialog = await waitForCondition(
                 () => findGrokConfirmDialog(preDialogs, clickedDelBtn), 3000, 50);
 
+            mossadDebug('delete', confirmDialog ? 'диалог подтверждения найден' : 'диалог подтверждения НЕ появился за 3 с', confirmDialog ? {
+                role: confirmDialog.getAttribute('role') || '',
+                btn: ((findGrokConfirmButtonIn(confirmDialog, clickedDelBtn) || {}).textContent || '').trim().slice(0, 30)
+            } : undefined);
             let deleteConfirmed = false;
             if (!confirmDialog) {
                 // Диалог не появился: считаем удаление выполненным, только если есть признаки удаления
@@ -290,6 +331,7 @@
                     (filmstripCountBefore > 1 && grokGetFilmstripItems().length < filmstripCountBefore), 2000, 100);
                 if (removed) {
                     deleteConfirmed = true;
+                    mossadDebug('delete', 'удалено без диалога (есть признаки удаления)');
                 } else {
                     console.warn('[MOSSAD] Delete: диалог подтверждения не найден, переход отменён');
                     showToast('⚠️ Диалог подтверждения не найден — переход отменён', true);
@@ -302,7 +344,12 @@
                     if (!b || !confirmDialog.contains(b)) return;
                     userChoice = isGrokConfirmButton(b, clickedDelBtn) ? 'confirm' : 'cancel';
                 };
-                const onDialogKey = (ev) => { if (ev.key === 'Escape') userChoice = 'cancel'; };
+                const onDialogKey = (ev) => {
+                    if (ev.key === 'Escape') userChoice = 'cancel';
+                    // Enter на сфокусированной кнопке подтверждения (браузер сам превратит его в click)
+                    if (ev.key === 'Enter' && document.activeElement && confirmDialog.contains(document.activeElement) &&
+                        isGrokConfirmButton(document.activeElement, clickedDelBtn)) userChoice = 'confirm';
+                };
                 document.addEventListener('click', onDialogClick, true);
                 document.addEventListener('keydown', onDialogKey, true);
                 const isClosed = () => !isGrokDialogOpen(confirmDialog);
@@ -312,21 +359,49 @@
                         const confirmBtn = await waitForCondition(
                             () => findGrokConfirmButtonIn(confirmDialog, clickedDelBtn), 2000, 50);
                         if (confirmBtn) {
-                            triggerClick(confirmBtn, 'Confirm Delete');
+                            // Даём Radix закончить анимацию открытия (иначе клик может уйти в «пустоту»)
+                            await new Promise(r => setTimeout(r, 120));
+                            grokDeleteClickOnce(confirmBtn, 'Confirm Delete');
                             console.log('[MOSSAD] Delete: подтверждение нажато, ждём закрытия диалога');
                             if (await waitForCondition(isClosed, 5000, 50)) deleteConfirmed = true;
+                            if (!deleteConfirmed && !isClosed()) {
+                                // Вторая попытка: фокус + Enter-эквивалент через повторный одиночный клик
+                                mossadDebug('delete', 'диалог не закрылся за 5 с — повторное подтверждение');
+                                const again = findGrokConfirmButtonIn(confirmDialog, clickedDelBtn);
+                                if (again) {
+                                    try { again.focus({ preventScroll: true }); } catch(e) {}
+                                    grokDeleteClickOnce(again, 'Confirm Delete (retry)');
+                                    if (await waitForCondition(isClosed, 3000, 50)) deleteConfirmed = true;
+                                }
+                            }
+                            mossadDebug('delete', deleteConfirmed ? 'подтверждено, диалог закрыт' : 'автоподтверждение не удалось');
+                        } else {
+                            mossadDebug('delete', 'кнопка подтверждения в диалоге не найдена');
                         }
                         if (!deleteConfirmed && !isClosed()) {
                             showToast('⚠️ Не удалось подтвердить автоматически — подтвердите вручную', true);
                         }
                     } else {
-                        showToast('🗑 Подтвердите удаление в диалоге Grok');
+                        // v1.3.38: без автоподтверждения — ставим фокус на «Delete video», чтобы Enter подтверждал.
+                        // Radix при открытии сам фокусирует «Cancel», поэтому повторяем фокус после монтирования.
+                        const focusConfirm = () => {
+                            if (isClosed() || userChoice) return;
+                            const b = findGrokConfirmButtonIn(confirmDialog, clickedDelBtn);
+                            if (b && document.activeElement !== b) {
+                                try { b.focus({ preventScroll: true }); } catch(e) {}
+                            }
+                        };
+                        focusConfirm();
+                        [60, 200, 450].forEach(ms => setTimeout(focusConfirm, ms));
+                        mossadDebug('delete', 'ручной режим: фокус на кнопке подтверждения (Enter = удалить)');
+                        showToast('🗑 Enter — удалить, Esc — отмена');
                     }
 
                     if (!deleteConfirmed && !isClosed()) {
                         // Ручное подтверждение: ждём закрытия диалога до 60 с
                         await waitForCondition(isClosed, 60000, 100);
                         deleteConfirmed = isClosed() && userChoice === 'confirm';
+                        mossadDebug('delete', 'ручной режим: диалог закрыт', { userChoice, deleteConfirmed });
                         if (isClosed() && userChoice !== 'confirm') {
                             console.log('[MOSSAD] Delete: диалог закрыт без подтверждения — остаёмся на посту');
                         }
@@ -337,6 +412,18 @@
                 }
             }
 
+            // 2б. v1.3.38: ждём признаков фактического удаления (до 4 с), а не фиксированные 150 мс
+            let grokNavigatedItself = false;
+            if (deleteConfirmed && config.deleteHoldpost) {
+                const removedSignal = await waitForCondition(() => {
+                    if (location.href !== initialUrl) return 'url';
+                    if (filmstripCountBefore > 1 && grokGetFilmstripItems().length < filmstripCountBefore) return 'filmstrip';
+                    return null;
+                }, 4000, 100);
+                grokNavigatedItself = removedSignal === 'url';
+                mossadDebug('delete', removedSignal ? `удаление подтверждено признаком: ${removedSignal}` : 'нет явного признака за 4 с (диалог закрыт после подтверждения — продолжаем)', { url: location.pathname });
+            }
+
             // 3. hold post: переход на следующий кадр / пост — только после подтверждённого удаления
             if (config.deleteHoldpost && deleteConfirmed) {
                 const executeTransition = () => {
@@ -345,7 +432,8 @@
                         console.log('[MOSSAD] hold post: переключаем кадр по киноплёнке (SPA, без перезагрузки)...');
                         showToast('🎯 Переход к следующему кадру...');
 
-                        if (targetFilmstripBtn.isConnected) {
+                        if (targetFilmstripBtn.isConnected && !grokNavigatedItself) {
+                            mossadDebug('delete', 'hold post: клик по целевому кадру');
                             targetFilmstripBtn.click();
                             return;
                         }
@@ -354,21 +442,32 @@
                         if (targetFilmstripUuid) {
                             const refetched = grokFindFilmstripItemByUuid(targetFilmstripUuid);
                             if (refetched) {
+                                mossadDebug('delete', 'hold post: клик по целевому кадру (найден заново по UUID)');
                                 refetched.click();
                                 return;
                             }
                         }
 
-                        // Или первый доступный кадр в киноплёнке
-                        const currentItems = grokGetFilmstripItems();
-                        if (currentItems.length > 0) {
-                            currentItems[0].click();
-                            return;
+                        // Если есть URL цели — надёжнее перейти по нему, чем кликать «первый попавшийся» кадр
+                        if (!finalTargetUrl) {
+                            const currentItems = grokGetFilmstripItems();
+                            if (currentItems.length > 0 && !grokNavigatedItself) {
+                                mossadDebug('delete', 'hold post: цель не найдена — первый кадр киноплёнки');
+                                currentItems[0].click();
+                                return;
+                            }
                         }
                     }
 
                     // Б. Межпостовой переход через SPA-роутер (если киноплёнки не было)
                     if (finalTargetUrl) {
+                        const curU = (grokExtractUuid(location.pathname) || '').toLowerCase();
+                        const tgtU = (grokExtractUuid(finalTargetUrl) || '').toLowerCase();
+                        if (curU && tgtU && curU === tgtU) {
+                            mossadDebug('delete', 'hold post: Grok уже открыл целевой пост — переход не нужен');
+                            return;
+                        }
+                        mossadDebug('delete', 'hold post: переход по URL цели', { url: finalTargetUrl });
                         console.log(`[MOSSAD] hold post: переход на сохранённый URL: ${finalTargetUrl}`);
                         showToast('🎯 Переход к соседнему посту...');
                         if (typeof grokSpaNavigate === 'function') {
@@ -379,9 +478,11 @@
                     }
                 };
 
-                // Небольшая задержка (150мс), чтобы сетевой запрос на удаление успел инициироваться
+                // Небольшая пауза, чтобы Grok перерисовал киноплёнку после удаления
                 await new Promise(r => setTimeout(r, 150));
                 executeTransition();
+            } else if (config.deleteHoldpost) {
+                mossadDebug('delete', 'hold post: переход отменён (удаление не подтверждено)');
             }
         } finally {
             setTimeout(() => {
