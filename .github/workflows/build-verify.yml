@@ -1,0 +1,29 @@
+name: build-verify
+
+# Проверяет, что mossad.user.js собран из src/ (python build.py --verify)
+# и что бандл синтаксически корректен (node --check). Секреты не нужны.
+on:
+  push:
+    branches: [grok]
+  pull_request:
+    branches: [grok]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build from src/ and compare with committed bundle
+        run: python build.py --verify
+      - name: Syntax check of committed bundle
+        run: node --check mossad.user.js
