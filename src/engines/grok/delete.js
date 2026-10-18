@@ -94,16 +94,14 @@
             // 1. hold post: определяем целевой кадр / пост перед удалением
             if (config.deleteHoldpost) {
                 // А. Приоритет: кадры на полосе киноплёнки (filmstrip)
-                const items = (typeof grokGetFilmstripItems === 'function')
-                    ? grokGetFilmstripItems()
-                    : Array.from(document.querySelectorAll('[data-filmstrip-item="true"]'));
+                const items = grokGetFilmstripItems();
 
                 if (items.length > 1) {
                     const currentIdx = items.findIndex(btn => 
                         btn.className.includes('ring-white') || 
                         location.pathname.includes(btn.querySelector('img')?.src.match(/generated\/([a-f0-9-]+)\//)?.[1] || '---')
                     );
-                    const safeCurIdx = currentIdx !== -1 ? currentIdx : ((typeof grokGetActiveFilmstripIndex === 'function') ? grokGetActiveFilmstripIndex() : 0);
+                    const safeCurIdx = currentIdx !== -1 ? currentIdx : (grokGetActiveFilmstripIndex());
                     const dirs = config.slideshowDirections;
                     const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
                     const isFwd = (dPadDir === 'down' || dPadDir === 'right');
@@ -133,7 +131,7 @@
 
                     const nextImgSrc = targetFilmstripBtn?.querySelector('img, video, source')?.src || '';
                     const m = nextImgSrc.match(/generated\/([a-f0-9-]+)\//);
-                    targetFilmstripUuid = m ? m[1] : (typeof grokExtractUuid === 'function' ? grokExtractUuid(nextImgSrc) : null);
+                    targetFilmstripUuid = m ? m[1] : (grokExtractUuid(nextImgSrc));
                     if (targetFilmstripUuid) {
                         finalTargetUrl = `/imagine/post/${targetFilmstripUuid}`;
                     }
@@ -272,7 +270,7 @@
                         }
 
                         // Если DOM обновился, ищем по UUID
-                        if (targetFilmstripUuid && typeof grokFindFilmstripItemByUuid === 'function') {
+                        if (targetFilmstripUuid) {
                             const refetched = grokFindFilmstripItemByUuid(targetFilmstripUuid);
                             if (refetched) {
                                 refetched.click();
@@ -281,9 +279,7 @@
                         }
 
                         // Или первый доступный кадр в киноплёнке
-                        const currentItems = (typeof grokGetFilmstripItems === 'function')
-                            ? grokGetFilmstripItems()
-                            : Array.from(document.querySelectorAll('[data-filmstrip-item="true"]'));
+                        const currentItems = grokGetFilmstripItems();
                         if (currentItems.length > 0) {
                             currentItems[0].click();
                             return;

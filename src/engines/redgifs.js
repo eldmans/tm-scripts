@@ -327,9 +327,7 @@
             const scrollAmount = isFwd ? (window.innerHeight * 0.85) : (-window.innerHeight * 0.85);
             window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
 
-            if (typeof triggerUniversalFullScreen === 'function') {
-                triggerUniversalFullScreen();
-            }
+            triggerUniversalFullScreen();
 
             return true;
         }

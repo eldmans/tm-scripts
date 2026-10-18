@@ -24,23 +24,23 @@
 
     function _postPlayerNav(wasPaused) {
         if (wasPaused) {
-            if (typeof setSlideshowPaused === 'function') setSlideshowPaused(true);
+            setSlideshowPaused(true);
             sessionStorage.setItem('mossad_gallery_paused', 'true');
             window._mossadGalleryPaused = true;
-            if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('paused');
+            updateGalleryStatusBtn('paused');
             if (typeof rafId !== 'undefined' && rafId) cancelAnimationFrame(rafId);
             if (typeof slideshowTimeoutId !== 'undefined' && slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         } else {
             setTimeout(() => {
                 if (slideshowActive && !slideshowPaused) {
-                    if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
+                    scheduleNextSlideCycle(0);
                 }
             }, 300);
         }
     }
 
     function playerStepSlide(dir) {
-        if (typeof cancelSlideTimers === 'function') cancelSlideTimers();
+        cancelSlideTimers();
         const isFwd = (dir === 'next');
         const wasPaused = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
                           sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true' ||
@@ -49,12 +49,10 @@
 
         // 1. GROK ENGINE
         if (rootDomain === 'grok.com') {
-            const nextRes = (typeof grokGetNextSlideItem === 'function')
-                ? grokGetNextSlideItem(isFwd ? 'down' : 'up')
-                : null;
+            const nextRes = grokGetNextSlideItem(isFwd ? 'down' : 'up');
             if (nextRes && nextRes.item) {
                 if (nextRes.circleCompleted) {
-                    if (typeof playCircleDoneSound === 'function') playCircleDoneSound();
+                    playCircleDoneSound();
                     let ss = {};
                     try { ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}'); } catch(e) {}
                     ss.circle = (ss.circle || 1) + 1;
@@ -63,21 +61,19 @@
                 }
                 const targetItem = nextRes.item;
                 if (targetItem.type) sessionStorage.setItem('mossad_expected_type', targetItem.type);
-                const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
-                const curPos = (struct && typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct, targetItem.url) : null;
+                const struct = grokGetPlaylistStructure();
+                const curPos = (struct) ? grokFindCurrentPosition(struct, targetItem.url) : null;
                 const posStr = (curPos && curPos.flatIndex !== -1) ? ` ${curPos.flatIndex + 1}/${struct.items.length}` : '';
                 showToast(`${isFwd ? '⏭' : '⏮'}${posStr} • ${targetItem.type === 'video' ? '📹' : '🖼'}`);
                 grokSpaNavigate(targetItem.url);
                 setTimeout(() => {
-                    if (typeof grokHighlightActivePlaylistItem === 'function') {
-                        grokHighlightActivePlaylistItem(targetItem.url);
-                    }
+                    grokHighlightActivePlaylistItem(targetItem.url);
                 }, 100);
                 _postPlayerNav(wasPaused);
                 return;
             }
             // Fallback если коллекция не собрана: навигация по киноплёнке (filmstrip)
-            if (typeof grokStepFilmstrip === 'function' && grokStepFilmstrip(isFwd)) {
+            if (grokStepFilmstrip(isFwd)) {
                 _postPlayerNav(wasPaused);
                 return;
             }
@@ -94,9 +90,7 @@
         if (rootDomain.includes('redgifs.com')) {
             if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
                 window.MOSSAD_ENGINES.redgifs.navigate(isFwd ? 'down' : 'up');
-            } else if (typeof redGifsNavigate === 'function') {
-                redGifsNavigate(isFwd ? 'down' : 'up');
-            }
+            } else redGifsNavigate(isFwd ? 'down' : 'up');
             _postPlayerNav(wasPaused);
             return;
         }
@@ -113,7 +107,7 @@
         const keyToPress = isFwd ? getArrowKey(mainDir) : getOppKey(mainDir);
         document.dispatchEvent(new KeyboardEvent('keydown', { key: keyToPress, bubbles: true }));
         document.dispatchEvent(new KeyboardEvent('keyup', { key: keyToPress, bubbles: true }));
-        if (typeof triggerUniversalFullScreen === 'function') triggerUniversalFullScreen();
+        triggerUniversalFullScreen();
         _postPlayerNav(wasPaused);
     }
 
@@ -145,18 +139,14 @@
         if ((isNextGrp || isPrevGrp) && isGrokPost && hasGrokCollection) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            if (typeof cancelSlideTimers === 'function') cancelSlideTimers();
-            const nextRes = (typeof grokGetNextSlideItem === 'function')
-                ? grokGetNextSlideItem(isNextGrp ? 'next_grp' : 'prev_grp')
-                : null;
+            cancelSlideTimers();
+            const nextRes = grokGetNextSlideItem(isNextGrp ? 'next_grp' : 'prev_grp');
             if (nextRes && nextRes.item) {
                 if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
                 showToast(`📁 Группа: ${isNextGrp ? '↓' : '↑'}`);
                 grokSpaNavigate(nextRes.item.url);
                 setTimeout(() => {
-                    if (typeof grokHighlightActivePlaylistItem === 'function') {
-                        grokHighlightActivePlaylistItem(nextRes.item.url);
-                    }
+                    grokHighlightActivePlaylistItem(nextRes.item.url);
                 }, 100);
             }
             return;
@@ -171,7 +161,7 @@
         if (isNext || isPrev) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            if (typeof cancelSlideTimers === 'function') cancelSlideTimers();
+            cancelSlideTimers();
             playerStepSlide(isNext ? 'next' : 'prev');
         }
     }, true);
@@ -225,7 +215,7 @@
                 existingModal.remove();
                 return;
             }
-            if (typeof openHotkeySettings === 'function') openHotkeySettings();
+            openHotkeySettings();
             return;
         }
 
@@ -256,9 +246,9 @@
                     try { return !!(JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem(GALLERY_SS_KEY) || '{}').active); } catch { return false; }
                 })();
                 if (active) {
-                    if (typeof toggleGalleryPause === 'function') toggleGalleryPause();
+                    toggleGalleryPause();
                 } else {
-                    if (typeof grokStartGallerySlideshow === 'function') grokStartGallerySlideshow();
+                    grokStartGallerySlideshow();
                 }
             } else {
                 startSlideshow();
@@ -269,7 +259,7 @@
         // Стоп большого слайдшоу
         if (config.hk.galleryStop && hotkeyMatches(e, config.hk.galleryStop)) {
             e.preventDefault();
-            if (rootDomain === 'grok.com' && typeof grokStopGallerySlideshow === 'function') {
+            if (rootDomain === 'grok.com') {
                 grokStopGallerySlideshow();
             }
             stopSlideshow();

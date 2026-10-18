@@ -26,16 +26,14 @@
         try {
             const urlObj = new URL(url, location.origin);
             const path = urlObj.pathname + urlObj.search;
-            const targetUuid = (typeof grokExtractUuid === 'function')
-                ? grokExtractUuid(urlObj.pathname)
-                : (urlObj.pathname.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
+            const targetUuid = grokExtractUuid(urlObj.pathname);
 
-            const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
-            const isPostPage = typeof isGrokPostPage === 'function' ? isGrokPostPage() : location.pathname.includes('/imagine/post/');
+            const struct = grokGetPlaylistStructure();
+            const isPostPage = isGrokPostPage();
 
             if (isPostPage && struct) {
-                const targetPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct, url) : null;
-                const currentPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
+                const targetPos = grokFindCurrentPosition(struct, url);
+                const currentPos = grokFindCurrentPosition(struct);
 
                 const isSameGroup = targetPos && currentPos &&
                                     targetPos.grpIndex !== -1 &&
@@ -44,10 +42,10 @@
                 if (isSameGroup) {
                     // Та же conversation → filmstrip click, без перезагрузки страницы
                     let filmstripBtn = null;
-                    if (targetUuid && typeof grokFindFilmstripItemByUuid === 'function') {
+                    if (targetUuid) {
                         filmstripBtn = grokFindFilmstripItemByUuid(targetUuid);
                     }
-                    if (!filmstripBtn && typeof grokGetFilmstripItems === 'function') {
+                    if (!filmstripBtn) {
                         const filmItems = grokGetFilmstripItems();
                         if (targetPos.itemInGrpIndex >= 0 && targetPos.itemInGrpIndex < filmItems.length) {
                             filmstripBtn = filmItems[targetPos.itemInGrpIndex];
@@ -60,10 +58,10 @@
                         try { history.replaceState(null, '', path); } catch(e) {}
                         // До ~240 мс (6 × 40 мс) ждём смены UUID в URL, затем тик в любом случае
                         waitForCondition(() => {
-                            const curUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(location.pathname) : '';
+                            const curUuid = grokExtractUuid(location.pathname);
                             return !!(curUuid && targetUuid && curUuid === targetUuid.toLowerCase());
                         }, 240, 40).then(() => {
-                            if (typeof grokGallerySlideshowTick === 'function') grokGallerySlideshowTick();
+                            grokGallerySlideshowTick();
                         });
                         return;
                     }
@@ -99,7 +97,7 @@
 
     /** Запустить слайдшоу по коллекции (с учётом текущего режима) */
     function grokStartGallerySlideshow() {
-        const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+        const struct = grokGetPlaylistStructure();
         if (!struct || !struct.items.length) {
             showToast('⚠️ Сначала соберите коллекцию (кнопка 📋)', true);
             return;
@@ -107,7 +105,7 @@
 
         // Если уже стоим на элементе из коллекции — стартуем прямо с него!
         let startItem = null;
-        const curPos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
+        const curPos = grokFindCurrentPosition(struct);
         if (curPos && curPos.currentItem) {
             startItem = curPos.currentItem;
         } else {
@@ -139,7 +137,7 @@
     /** Запускает GRP-слайдшоу с конкретной стартовой позиции (для плейлиста) */
     function grokStartGallerySlideshowFrom(startItem) {
         if (!startItem) return;
-        const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+        const struct = grokGetPlaylistStructure();
         if (!struct || !struct.items.length) {
             showToast('⚠️ Коллекция не собрана', true);
             return;
@@ -155,7 +153,7 @@
 
         const startBase = normUrlKey(startItem.url);
         const startGid = startItem.convId || '__noconv__';
-        const startUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(startItem.url) : '';
+        const startUuid = grokExtractUuid(startItem.url);
 
         // Ищем явную позицию стартового элемента в структуре
         let startGrpIdx = 0, startItemIdx = 0;
@@ -194,12 +192,8 @@
         const grIcon = { seq: '↓', rev: '↑', rnd: '↺', off: '−' };
         const modeLabel = `Gr${grIcon[struct.grpMode]||'↓'} Md${grIcon[struct.itemMode]||'↓'}`;
         showToast(`▶ Слайдшоу [${modeLabel}]: ${struct.items.length} ген.`);
-        if (typeof grokTogglePlaylistPanel === 'function') {
-            grokTogglePlaylistPanel(true);
-        }
-        if (typeof grokHighlightActivePlaylistItem === 'function') {
-            grokHighlightActivePlaylistItem(startItem.url);
-        }
+        grokTogglePlaylistPanel(true);
+        grokHighlightActivePlaylistItem(startItem.url);
 
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
 
@@ -262,24 +256,22 @@
         if (!window._mossadGalleryActive) return;
         window._mossadGalleryPaused = !window._mossadGalleryPaused;
         if (window._mossadGalleryPaused) {
-            if (typeof setSlideshowPaused === 'function') setSlideshowPaused(true);
+            setSlideshowPaused(true);
             sessionStorage.setItem('mossad_gallery_paused', 'true');
             updateGalleryStatusBtn('paused');
             showToast('⏸ Пауза');
         } else {
-            if (typeof setSlideshowPaused === 'function') setSlideshowPaused(false);
+            setSlideshowPaused(false);
             sessionStorage.removeItem('mossad_gallery_paused');
             updateGalleryStatusBtn('playing');
             showToast('▶ Продолжаем');
-            if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
+            scheduleNextSlideCycle(0);
         }
     }
 
     /** Выполняет шаг к следующему слайду по логике плейлиста */
     function grokGalleryStepNext() {
-        const nextRes = (typeof grokGetNextSlideItem === 'function')
-            ? grokGetNextSlideItem('auto')
-            : null;
+        const nextRes = grokGetNextSlideItem('auto');
         if (!nextRes || !nextRes.item) return;
 
         if (nextRes.circleCompleted) {
@@ -294,7 +286,7 @@
         let ss = {};
         try { ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}'); } catch(e) {}
         ss.targetUrl = nextRes.item.url;
-        ss.targetUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(nextRes.item.url) : '';
+        ss.targetUuid = grokExtractUuid(nextRes.item.url);
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
 
         if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
@@ -318,7 +310,7 @@
         const isPaused = sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
                          (typeof SESSION_PAUSED_KEY !== 'undefined' && sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true');
         window._mossadGalleryPaused = isPaused;
-        if (typeof setSlideshowPaused === 'function') setSlideshowPaused(isPaused);
+        setSlideshowPaused(isPaused);
 
         // Показываем компактный индикатор (или обновляем существующий)
         let indicator = document.getElementById('mossad-gallery-indicator');
@@ -337,7 +329,7 @@
         }
 
 
-        const struct = (typeof grokGetPlaylistStructure === 'function') ? grokGetPlaylistStructure() : null;
+        const struct = grokGetPlaylistStructure();
 
 
 
@@ -371,9 +363,7 @@
         updateGalleryStatusBtn(isPaused ? 'paused' : 'playing');
 
         // Подсвечиваем активный файл в открытом монолитном списке (плейлисте)
-        if (typeof grokHighlightActivePlaylistItem === 'function') {
-            grokHighlightActivePlaylistItem(ss.targetUrl || null);
-        }
+        grokHighlightActivePlaylistItem(ss.targetUrl || null);
 
         // Устанавливаем функцию перехода: её вызовет triggerNextSlide
         window._mossadGalleryActive = true;
@@ -406,6 +396,6 @@
         pause: toggleGalleryPause,
         stop: grokStopGallerySlideshow,
         start: grokStartGallerySlideshow,
-        highlightActive: (url) => (typeof grokHighlightActivePlaylistItem === 'function' ? grokHighlightActivePlaylistItem(url) : null),
-        togglePlaylist: (force) => (typeof grokTogglePlaylistPanel === 'function' ? grokTogglePlaylistPanel(force) : null)
+        highlightActive: (url) => (grokHighlightActivePlaylistItem(url)),
+        togglePlaylist: (force) => (grokTogglePlaylistPanel(force))
     };

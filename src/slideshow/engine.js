@@ -136,7 +136,7 @@
             if (rootDomain === 'grok.com') {
                 const fsKeywords = ['expand video', 'expand', 'во весь экран', 'полноэкран', 'full screen', 'fullscreen'];
                 const btn = document.querySelector('button[aria-label="Expand video"], button[aria-label*="Expand" i]')
-                    || (typeof findGrokButton === 'function' ? findGrokButton(fsKeywords) : null)
+                    || (findGrokButton(fsKeywords))
                     || Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
                         const aria = (b.getAttribute('aria-label') || '').toLowerCase();
                         const title = (b.getAttribute('title') || '').toLowerCase();
@@ -220,7 +220,7 @@
             window._mossadGalleryPaused = false;
             const ind = document.getElementById('mossad-gallery-indicator');
             if (ind) ind.remove();
-            if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('idle');
+            updateGalleryStatusBtn('idle');
         }
         if (window.updateWidgetUI) window.updateWidgetUI();
     }
@@ -281,10 +281,8 @@
                 if (typeof window._mossadGalleryNextFn === 'function') {
                     window._mossadGalleryNextFn();
                     return;
-                } else if (typeof grokGalleryStepNext === 'function') {
-                    grokGalleryStepNext();
-                    return;
-                }
+                } else grokGalleryStepNext();
+                return;
             }
 
             // Малое слайдшоу управляется D-Pad и петлей R
@@ -303,9 +301,7 @@
                         document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
                     }
                 }
-                if (typeof triggerUniversalFullScreen === 'function') {
-                    triggerUniversalFullScreen();
-                }
+                triggerUniversalFullScreen();
             };
 
             // Попытка 1: исходное нажатие
@@ -618,7 +614,7 @@
         }
         if (window._mossadGalleryActive && !window._mossadGalleryPaused) {
             window._mossadGalleryPaused = true;
-            if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('paused');
+            updateGalleryStatusBtn('paused');
             anyPaused = true;
         }
         if (anyPaused) {
@@ -645,13 +641,13 @@
 
         if (slideshowActive) {
             slideshowPaused = false;
-            if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
+            scheduleNextSlideCycle(0);
         }
         if (window._mossadGalleryActive) {
             window._mossadGalleryPaused = false;
             sessionStorage.removeItem('mossad_gallery_paused');
-            if (typeof updateGalleryStatusBtn === 'function') updateGalleryStatusBtn('playing');
-            if (typeof scheduleNextSlideCycle === 'function') scheduleNextSlideCycle(0);
+            updateGalleryStatusBtn('playing');
+            scheduleNextSlideCycle(0);
         }
         if (window.updateWidgetUI) window.updateWidgetUI();
     }

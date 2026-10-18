@@ -176,7 +176,7 @@
                         urlReq.onsuccess = () => {
                             const res = urlReq.result || null;
                             if (res) {
-                                if (!res.rootFilename && typeof extractRootFilename === 'function') {
+                                if (!res.rootFilename) {
                                     res.rootFilename = extractRootFilename(res.filename);
                                 }
                                 addRecordToMemoryCache(res);
@@ -205,7 +205,7 @@
             const pad = (n) => String(n).padStart(2, '0');
             const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
             const isVid = type === 'video' || (filename && /\.(mp4|webm|mov|mkv)$/i.test(filename));
-            const cleanRoot = rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(filename) : (filename || '').replace(/\.[^/.]+$/, '').trim());
+            const cleanRoot = rootFilename || (extractRootFilename(filename));
 
             const record = {
                 id: hash || `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,

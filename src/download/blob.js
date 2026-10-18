@@ -12,16 +12,14 @@
                     saveAs: false,
                     onload: () => {
                         showToast('✅ Сохранено!');
-                        if (typeof saveFileToHistory === 'function') {
-                            saveFileToHistory({
-                                hash: '',
-                                filename,
-                                rootFilename: (typeof extractRootFilename === 'function') ? extractRootFilename(filename) : '',
-                                url: url || location.href,
-                                postUrl: postUrl || location.href,
-                                domain: rootDomain
-                            });
-                        }
+                        saveFileToHistory({
+                            hash: '',
+                            filename,
+                            rootFilename: extractRootFilename(filename),
+                            url: url || location.href,
+                            postUrl: postUrl || location.href,
+                            domain: rootDomain
+                        });
                     },
                     onerror: (err) => {
                         console.warn('[MOSSAD] GM_download failed, trying fallback:', err);
@@ -99,7 +97,7 @@
                 saveFileToHistory({
                     hash,
                     filename,
-                    rootFilename: (typeof extractRootFilename === 'function') ? extractRootFilename(filename) : '',
+                    rootFilename: extractRootFilename(filename),
                     url: directUrl || location.href,
                     postUrl: postUrl || location.href,
                     size: blob.size,

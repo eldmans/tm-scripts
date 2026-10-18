@@ -115,9 +115,7 @@
         const playlistPanel = document.getElementById('mossad-playlist-panel');
         if (playlistPanel) {
             playlistPanel.remove();
-            if (typeof grokTogglePlaylistPanel === 'function') {
-                grokTogglePlaylistPanel(true);
-            }
+            grokTogglePlaylistPanel(true);
         }
 
         sessionStorage.setItem(GALLERY_COLLECT_ACTIVE_KEY, 'true');
@@ -134,7 +132,7 @@
      * Новые ссылки сразу подхватываются при скролле и добавляются в общий список без подтверждений и без (+N).
      */
     function grokAutoCollectNewLinks() {
-        if (typeof isGrokSavedPage === 'function' && !isGrokSavedPage()) return;
+        if (!isGrokSavedPage()) return;
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
         if (!raw) return; // Ручной клик требуется один раз; до первого сбора автосбор не активен
 
@@ -181,9 +179,7 @@
             const playlistPanel = document.getElementById('mossad-playlist-panel');
             if (playlistPanel) {
                 playlistPanel.remove();
-                if (typeof grokTogglePlaylistPanel === 'function') {
-                    grokTogglePlaylistPanel(true);
-                }
+                grokTogglePlaylistPanel(true);
             }
         } else if (btnCollect && existingItems.length > 0) {
             // Без скобок и (+N): отображается только чистое количество

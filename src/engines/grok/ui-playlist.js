@@ -19,7 +19,7 @@
         if (!panel) return;
 
         // Если URL не передан явно — определяем текущий элемент через grokFindCurrentPosition (учитывая киноплёнку)
-        if (!overrideUrl && typeof grokGetPlaylistStructure === 'function' && typeof grokFindCurrentPosition === 'function') {
+        if (!overrideUrl) {
             const struct = grokGetPlaylistStructure();
             const curPos = grokFindCurrentPosition(struct);
             if (curPos && curPos.currentItem && curPos.currentItem.url) {
@@ -30,17 +30,11 @@
         // Извлекаем активный UUID
         let activeUuid = '';
         if (overrideUrl) {
-            activeUuid = (typeof grokExtractUuid === 'function')
-                ? grokExtractUuid(overrideUrl)
-                : '';
+            activeUuid = grokExtractUuid(overrideUrl);
         } else {
-            activeUuid = (typeof grokExtractUuid === 'function')
-                ? grokExtractUuid(location.pathname)
-                : '';
+            activeUuid = grokExtractUuid(location.pathname);
             if (!activeUuid && location.search) {
-                activeUuid = (typeof grokExtractUuid === 'function')
-                    ? grokExtractUuid(location.search)
-                    : '';
+                activeUuid = grokExtractUuid(location.search);
             }
         }
 
@@ -415,7 +409,7 @@
                     const li = document.createElement('div');
                     li.className = 'mossad-playlist-item';
                     li.dataset.url = item.url || '';
-                    const itemUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(item.url) : '';
+                    const itemUuid = grokExtractUuid(item.url);
                     li.dataset.uuid = itemUuid;
                     li.style.cssText = `display:flex;align-items:center;gap:3px;padding:1px 3px;margin:0 0 1px 0;border-radius:3px;font-size:var(--mossad-pl-font-size, 10px);line-height:1.15;border:1px solid transparent;cursor:pointer;transition:all 0.12s;min-width:0;max-width:100%;box-sizing:border-box;`;
 
@@ -469,7 +463,7 @@
                 const li = document.createElement('div');
                 li.className = 'mossad-playlist-item';
                 li.dataset.url = item.url || '';
-                const itemUuid = (typeof grokExtractUuid === 'function') ? grokExtractUuid(item.url) : '';
+                const itemUuid = grokExtractUuid(item.url);
                 li.dataset.uuid = itemUuid;
                 li.style.cssText = `display:flex;align-items:center;gap:3px;padding:1px 3px;margin:0 0 1px 0;border-radius:3px;font-size:var(--mossad-pl-font-size, 11px);line-height:1.15;border:1px solid transparent;cursor:pointer;transition:all 0.12s;min-width:0;max-width:100%;box-sizing:border-box;`;
 

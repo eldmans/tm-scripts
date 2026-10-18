@@ -155,7 +155,7 @@
      * activeElement -> document -> window, заполняя key, code, keyCode и which.
      */
     function sendDpadKeyEvent(key) {
-        if (typeof blurActiveInput === 'function') blurActiveInput();
+        blurActiveInput();
         const keyCode = key === 'ArrowUp' ? 38 : (key === 'ArrowDown' ? 40 : (key === 'ArrowLeft' ? 37 : 39));
         const eventInit = {
             key: key,
@@ -176,9 +176,7 @@
         try { window.dispatchEvent(new KeyboardEvent('keydown', eventInit)); } catch(e) {}
         try { window.dispatchEvent(new KeyboardEvent('keyup', eventInit)); } catch(e) {}
 
-        if (typeof triggerUniversalFullScreen === 'function') {
-            triggerUniversalFullScreen();
-        }
+        triggerUniversalFullScreen();
     }
     window.sendDpadKeyEvent = sendDpadKeyEvent;
 
@@ -213,9 +211,7 @@
 
         // 1. Pinterest
         if (rootDomain.includes('pinterest.')) {
-            if (typeof selectNextPinterestPin === 'function') {
-                selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: !isSlideshow });
-            }
+            selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: !isSlideshow });
             return true;
         }
 
@@ -223,22 +219,20 @@
         if (rootDomain.includes('redgifs.com')) {
             if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
                 window.MOSSAD_ENGINES.redgifs.navigate(dir);
-            } else if (typeof redGifsNavigate === 'function') {
-                redGifsNavigate(dir);
-            }
+            } else redGifsNavigate(dir);
             return true;
         }
 
         // 3. Grok
         if (rootDomain === 'grok.com') {
             // А. Горизонтальное листание кадров группы по киноплёнке (left / right)
-            if ((dir === 'left' || dir === 'right') && typeof isGrokPostPage === 'function' && isGrokPostPage()) {
-                if (typeof grokStepFilmstrip === 'function') {
+            if ((dir === 'left' || dir === 'right') && isGrokPostPage()) {
+                {
                     const stepRes = grokStepFilmstrip(isFwd);
                     if (stepRes === true) return true;
                     if (stepRes === 'end') {
                         if (isSlideshow && !config.loopFeed) {
-                            if (typeof stopSlideshow === 'function') stopSlideshow();
+                            stopSlideshow();
                             showToast('⏹ Слайдшоу остановлено: конец ленты', true);
                             return false;
                         }
@@ -247,7 +241,7 @@
             }
 
             // Б. Проверяем, есть ли карточки соседних постов в DOM или в сохраненной коллекции
-            const neighborUrl = (typeof getGrokNeighborPostUrl === 'function') ? getGrokNeighborPostUrl(dir) : null;
+            const neighborUrl = getGrokNeighborPostUrl(dir);
             if (neighborUrl) {
                 if (typeof grokSpaNavigate === 'function') {
                     grokSpaNavigate(neighborUrl);
@@ -291,9 +285,7 @@
             }, 600);
         } else if (config.pdAction === 'del' && rootDomain === 'grok.com') {
             setTimeout(() => {
-                if (typeof runSmartDelete === 'function') {
-                    runSmartDelete();
-                }
+                runSmartDelete();
             }, 1000);
         }
     }
@@ -421,7 +413,7 @@
     function renderFilenameTemplate(rawTpl, vars, isDup = false, dblSuffix = '', defaultExt = 'mp4') {
         const tplStr = (rawTpl && rawTpl.trim())
             ? rawTpl.trim()
-            : (typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : '{id8}-{domain}.{ext}');
+            : (getDefaultFilenameTemplate());
 
         const hasDblVar = /\{dbl\}/i.test(tplStr);
 

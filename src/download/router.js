@@ -115,7 +115,7 @@
         const canonicalPostUrl = media.postUrl || location.href;
 
         // Проверка дубликата в истории (для Pinterest, Instagram, RedGifs и др.)
-        if (!bypassDuplicateCheck && typeof checkFileInHistory === 'function' && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(canonicalPostUrl)) {
+        if (!bypassDuplicateCheck && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(canonicalPostUrl)) {
             checkFileInHistory(null, primaryUrl, canonicalPostUrl, media.type).then(record => {
                 if (record) {
                     _activeDuplicateRecord = record;
@@ -139,7 +139,7 @@
 
         const currentDup = duplicateRecord || _activeDuplicateRecord;
         const isDup = Boolean(currentDup && (currentDup.filename || currentDup.rootFilename));
-        const rootBase = isDup ? (currentDup.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(currentDup.filename) : (currentDup.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
+        const rootBase = isDup ? (currentDup.rootFilename || (extractRootFilename(currentDup.filename))) : '';
         const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL` : '';
         
         // Извлечение UUID / ID поста для короткого именования (первые 8 символов)
@@ -191,7 +191,7 @@
         if (media && media.userName) {
             authorName = media.userName;
         } else if (rootDomain.includes('redgifs.com')) {
-            authorName = typeof getRedGifsUserName === 'function' ? getRedGifsUserName() : (window.MOSSAD_ENGINES?.redgifs?.getUserName ? window.MOSSAD_ENGINES.redgifs.getUserName() : '');
+            authorName = getRedGifsUserName();
         } else if (rootDomain.includes('instagram.com')) {
             const m = location.pathname.match(/^\/([A-Za-z0-9_.]+)\//);
             if (m && !['p', 'reel', 'stories', 'explore'].includes(m[1])) authorName = m[1];
@@ -256,9 +256,7 @@
                 root:         rootBase,
             };
 
-            filename = typeof renderFilenameTemplate === 'function'
-                ? renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2)
-                : filename;
+            filename = renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2);
         } else if (isDup) {
             // Без шаблона: добавляем разметку дубликата перед расширением
             const lastDot = filename.lastIndexOf('.');
@@ -279,9 +277,7 @@
             const targetUrl = urls[attemptedIndex++];
             showToast('⏳ Запуск скачивания...');
             triggerDirectBlobDownload(targetUrl, filename, tryNext, canonicalPostUrl);
-            if (typeof performPostDownloadAction === 'function') {
-                performPostDownloadAction();
-            }
+            performPostDownloadAction();
         }
         
         tryNext();

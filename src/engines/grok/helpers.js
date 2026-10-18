@@ -422,14 +422,14 @@
         const prompt = getGrokCurrentPrompt();
         const model = getGrokCurrentModel();
         const promptHash = computeGrokPromptHash(prompt);
-        if (prompt && typeof sendPromptToVault === 'function') {
+        if (prompt) {
             sendPromptToVault(prompt, model, 'grok.com', currentPostUrl);
         }
         const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).slice(-8);
         const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
         const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
         const ext2 = media ? media.ext : (hasVid ? 'mp4' : 'jpg');
-        const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (typeof extractRootFilename === 'function' ? extractRootFilename(duplicateRecord.filename) : (duplicateRecord.filename || '').replace(/\.[^/.]+$/, '').trim())) : '';
+        const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (extractRootFilename(duplicateRecord.filename))) : '';
         const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
 
         // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4
@@ -465,15 +465,11 @@
                 copy:         rootBase,
                 root:         rootBase
             };
-            grokFilename = typeof renderFilenameTemplate === 'function'
-                ? renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2)
-                : grokFilename;
+            grokFilename = renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2);
         }
 
         const onDownloadFinalized = () => {
-            if (typeof performPostDownloadAction === 'function') {
-                performPostDownloadAction();
-            }
+            performPostDownloadAction();
             if (onDoneCallback) onDoneCallback();
         };
 
@@ -557,10 +553,8 @@
                 if (ta && (ta === e.target || ta.contains(e.target))) {
                     const txt = (ta.value !== undefined ? ta.value : (ta.innerText || ta.textContent || '')).trim();
                     if (txt && txt.length > 2) {
-                        const model = typeof getGrokCurrentModel === 'function' ? getGrokCurrentModel() : 'Grok Imagine';
-                        if (typeof sendPromptToVault === 'function') {
-                            sendPromptToVault(txt, model, 'grok.com', location.href);
-                        }
+                        const model = getGrokCurrentModel();
+                        sendPromptToVault(txt, model, 'grok.com', location.href);
                     }
                 }
             }
@@ -690,9 +684,7 @@
                 showToast('🔄 Конец киноплёнки: повтор (R)...');
             }
             setTimeout(() => {
-                if (typeof grokHighlightActivePlaylistItem === 'function') {
-                    grokHighlightActivePlaylistItem();
-                }
+                grokHighlightActivePlaylistItem();
             }, 120);
             return true;
         }
@@ -869,7 +861,7 @@
      * Если уже на /imagine/saved — плавно скроллит в начало ленты.
      */
     function grokNavigateToSaved() {
-        if (typeof isGrokSavedPage === 'function' && isGrokSavedPage()) {
+        if (isGrokSavedPage()) {
             window.scrollTo({ top: 0, behavior: 'smooth' });
             if (document.documentElement) document.documentElement.scrollTo({ top: 0, behavior: 'smooth' });
             if (document.body) document.body.scrollTo({ top: 0, behavior: 'smooth' });
@@ -889,7 +881,7 @@
             try {
                 savedLink.click();
                 setTimeout(() => {
-                    if (typeof isGrokSavedPage === 'function' && !isGrokSavedPage()) {
+                    if (!isGrokSavedPage()) {
                         window.location.href = 'https://grok.com/imagine/saved';
                     }
                 }, 250);

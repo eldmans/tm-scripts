@@ -53,17 +53,13 @@
     function grokFindCurrentPosition(structure, url = null) {
         if (!structure || !structure.items.length) return null;
         const targetUrl = url || location.href;
-        const curUuid = (typeof grokExtractUuid === 'function')
-            ? grokExtractUuid(targetUrl)
-            : (targetUrl.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
+        const curUuid = grokExtractUuid(targetUrl);
         const cleanTarget = normUrlKey(targetUrl);
 
         const isMatch = (item) => {
             if (!item || !item.url) return false;
             if (curUuid) {
-                const itemUuid = (typeof grokExtractUuid === 'function')
-                    ? grokExtractUuid(item.url)
-                    : (item.url.match(/\/imagine\/post\/([a-f0-9-]+)/i) || [])[1];
+                const itemUuid = grokExtractUuid(item.url);
                 if (itemUuid && itemUuid.toLowerCase() === curUuid.toLowerCase()) return true;
             }
             return (normUrlKey(item.url) === cleanTarget);

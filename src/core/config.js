@@ -297,7 +297,7 @@
             }
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleSyncPush();
-            if (showToastNotice && typeof showToast === 'function') {
+            if (showToastNotice) {
                 showToast('✅ Хоткеи сохранены для всех сайтов');
             }
         } catch(e) {

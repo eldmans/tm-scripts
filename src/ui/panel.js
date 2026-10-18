@@ -254,7 +254,7 @@
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
                         <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> Шаблон:
                     </label>
-                    <input id="mossad-in-fn-tpl" type="text" placeholder="${typeof getDefaultFilenameTemplate === 'function' ? getDefaultFilenameTemplate() : (rootDomain === 'grok.com' ? '{conv4}-{id4}-{domain}.{ext}' : (rootDomain.includes('redgifs.com') ? '{userName}-{domain[4]}' : '{id8}-{domain}.{ext}'))}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
+                    <input id="mossad-in-fn-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
                         title="Шаблон: {conv4} {id4} {id8} {id} {domain} {userName} {title} {date} {time} {ext} {n} {dbl} {oldname}"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
                     <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;">💾</button>
@@ -467,7 +467,7 @@
                     reader.onload = async (evt) => {
                         try {
                             const data = JSON.parse(evt.target.result);
-                            if (typeof importDownloadHistory === 'function') {
+                            {
                                 const count = await importDownloadHistory(data);
                                 showToast(`✅ Импортировано ${count} записей в базу хешей!`);
                             }

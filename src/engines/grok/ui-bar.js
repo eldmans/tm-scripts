@@ -72,9 +72,7 @@
         };
 
         if (isGrokSavedPage()) {
-            if (typeof grokInitAutoCollector === 'function') {
-                grokInitAutoCollector();
-            }
+            grokInitAutoCollector();
         }
 
         // ── 3. Кнопка-статус воспроизведения (Слайдшоу / ❚❚ / ▶) ──
@@ -197,11 +195,11 @@
         // ── 6. Быстрые кнопки генерации видео (6s / 10s) ──
         const btnVid6 = mkBtn('mossad-grok-vid6', '6s', 'Генерация видео 6 сек', 'background:#1a2332;color:#38bdf8;');
         btnVid6.onclick = () => {
-            if (typeof triggerGrokVideoGeneration === 'function') triggerGrokVideoGeneration(6);
+            triggerGrokVideoGeneration(6);
         };
         const btnVid10 = mkBtn('mossad-grok-vid10', '10s', 'Генерация видео 10 сек', 'background:#1e1a3a;color:#a78bfa;');
         btnVid10.onclick = () => {
-            if (typeof triggerGrokVideoGeneration === 'function') triggerGrokVideoGeneration(10);
+            triggerGrokVideoGeneration(10);
         };
 
         row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd, btnVid6, btnVid10);
@@ -214,7 +212,7 @@
                 existingModal.remove();
                 return;
             }
-            if (typeof openHotkeySettings === 'function') openHotkeySettings();
+            openHotkeySettings();
         };
 
         // Переносим крестик закрытия на самый верхний ряд (на Grok это mossad-gallery-row)
@@ -235,9 +233,7 @@
         // Если список был открыт ранее — восстанавливаем его монолитно в контейнере виджета
         if (_gSS.getItem('mossad_playlist_open') === 'true' && (savedCount > 0 || parseInt(btnCollect.dataset.collectedCount || '0') > 0)) {
             setTimeout(() => {
-                if (typeof grokTogglePlaylistPanel === 'function') {
-                    grokTogglePlaylistPanel(true);
-                }
+                grokTogglePlaylistPanel(true);
             }, 60);
         }
     }
