@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.37
+// @version      1.3.38
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.37';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.38';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -4185,10 +4185,31 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         window.location.href = url;
     }
 
+    // v1.3.38: ОДИН общий AudioContext на страницу (раньше — new AudioContext() на каждый круг без close():
+    // контексты копились, каждый держал аудиопоток браузера → лаги до перезапуска браузера). ANTI_PATTERNS §17.
+    let _circleAudioCtx = null;
+    let _circleSoundLastAt = 0;
+    const CIRCLE_SOUND_MIN_GAP_MS = 2000; // не чаще одного сигнала за 2 с
+
+    function getCircleAudioCtx() {
+        if (_circleAudioCtx && _circleAudioCtx.state !== 'closed') return _circleAudioCtx;
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        if (!Ctor) return null;
+        _circleAudioCtx = new Ctor();
+        return _circleAudioCtx;
+    }
+
     /** Звуковой сигнал окончания круга (до-ми-соль) */
     function playCircleDoneSound() {
+        const now = Date.now();
+        if (now - _circleSoundLastAt < CIRCLE_SOUND_MIN_GAP_MS) return;
+        _circleSoundLastAt = now;
         try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const ctx = getCircleAudioCtx();
+            if (!ctx) return;
+            if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+                try { ctx.resume().catch(() => {}); } catch(e) {}
+            }
             [523, 659, 784].forEach((freq, i) => {
                 const osc = ctx.createOscillator();
                 const g   = ctx.createGain();
@@ -4199,6 +4220,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 g.gain.setValueAtTime(0.25, t0);
                 g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.35);
                 osc.start(t0); osc.stop(t0 + 0.35);
+                osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch(e) {} };
             });
         } catch(e) { /* AudioContext может быть заблокирован */ }
     }
