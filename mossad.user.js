@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.38
+// @version      1.3.39
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.38';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.39';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -88,6 +88,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
         closePanelOnOutsideClick: true,  // v1.3.37: сворачивать панель настроек виджета кликом вне MOSSAD
+        collectWatchSec: 30,            // v1.3.39: окно досбора ссылок после клика «Собрать» (сек)
+        showSoundToast: true,           // v1.3.39: показывать тост «Звук вкл/выкл» (~5 с, × закрывает только текущий)
         debugSlideshow: false,          // v1.3.38: debug-лог источников шагов слайдшоу и шагов удаления (консоль)
         
         // PINTEREST ENGINE CONFIGS
@@ -102,7 +104,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         
         hk: {
             download:         { key: 'PageDown',   ctrl: false, alt: false, shift: false }, // PageDown — скачать
-            upscale:          { key: 'PageUp',     ctrl: true,  alt: false, shift: false }, // Ctrl+PageUp
+            upscale:          { key: '+',          ctrl: false, alt: false, shift: true },  // v1.3.39: Shift+«+» (осн. ряд и Num+); Ctrl+PageUp/PageDown в Grok переключают беседы.
+                                                                                         // Без поля code: mergeDeep подмешал бы его в старые сохранённые хоткеи.
             deleteVid:        { key: 'Delete',     ctrl: false, alt: false, shift: false },
             sound:            { key: 'ScrollLock', ctrl: false, alt: false, shift: false },
             playPause:        { key: 'Pause',      ctrl: false, alt: false, shift: false },
@@ -297,12 +300,42 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         } catch (e) {}
     }
 
+    migrateUpscaleDefaultHotkey();
+
     // Глобальная синхронизация шаблона имени файла через GM_getValue
     if (typeof GM_getValue === 'function') {
         const gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
         if (gmTpl && typeof gmTpl === 'string') {
             config.filenameTemplate = gmTpl;
         }
+    }
+
+    /**
+     * v1.3.39: старый дефолт «Улучшить» Ctrl+PageUp → Shift+«+» (Ctrl+PageUp/PageDown в Grok переключают
+     * беседы). Мигрируем ОДИН раз и только если у пользователя по-прежнему нетронутый старый дефолт
+     * (объект или слот-массив [Ctrl+PageUp, пусто]). Флаг в GM — общий для всех сайтов.
+     */
+    function migrateUpscaleDefaultHotkey() {
+        const FLAG = 'mossad_mig_upscale_v1339';
+        const hasGm = (typeof GM_getValue === 'function' && typeof GM_setValue === 'function');
+        try { if (hasGm && GM_getValue(FLAG, false)) return false; } catch(e) {}
+        const isOldDefault = (h) => !!h && h.key === 'PageUp' && !!h.ctrl && !h.alt && !h.shift && !h.meta;
+        const cur = config.hk && config.hk.upscale;
+        let untouched = false;
+        if (Array.isArray(cur)) {
+            const filled = cur.filter(h => h && h.key);
+            untouched = filled.length === 1 && isOldDefault(filled[0]);
+        } else {
+            untouched = isOldDefault(cur);
+        }
+        if (untouched) {
+            config.hk.upscale = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk.upscale));
+            try { persistLocalConfig(); } catch(e) {}
+            if (hasGm) { try { GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch(e) {} }
+            console.log('[MOSSAD] Миграция v1.3.39: хоткей «Улучшить» Ctrl+PageUp → Shift+«+»');
+        }
+        if (hasGm) { try { GM_setValue(FLAG, true); } catch(e) {} }
+        return untouched;
     }
 
     const Settings = {
@@ -530,7 +563,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (hk.ctrl)  parts.push('Ctrl');
         if (hk.alt)   parts.push('Alt');
         if (hk.shift) parts.push('Shift');
-        parts.push(hk.key);
+        parts.push(hk.key === '+' ? '«+»' : hk.key);
         return parts.join('+');
     }
     function hotkeyMatches(e, hk) {
@@ -542,6 +575,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         // хоткеи вида Alt+R работали в русской раскладке (там e.key === 'к').
         if (!keyMatch && typeof hk.key === 'string' && /^[a-z0-9]$/i.test(hk.key) && typeof e.code === 'string') {
             keyMatch = e.code === (/[0-9]/.test(hk.key) ? 'Digit' + hk.key : 'Key' + hk.key.toUpperCase());
+        }
+        // v1.3.39: хоткей, записанный с физической клавишей (hk.code), совпадает по e.code в любой раскладке.
+        // «+» на основном ряду (Equal) и на цифровом блоке (NumpadAdd) считаются одной клавишей.
+        const PLUS_CODES = ['Equal', 'NumpadAdd'];
+        if (!keyMatch && typeof e.code === 'string' && (hk.key === '+' || PLUS_CODES.includes(hk.code))) {
+            keyMatch = PLUS_CODES.includes(e.code);
+        } else if (!keyMatch && hk.code && typeof e.code === 'string') {
+            keyMatch = e.code === hk.code;
         }
         return keyMatch &&
             !!e.ctrlKey  === !!hk.ctrl &&
@@ -2280,6 +2321,54 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return best;
     }
 
+    // ── v1.3.39: отдельный тост состояния звука (~5 с) с крестиком ──
+    // × закрывает ТОЛЬКО текущий тост — ничего не запоминается. Показ включается/выключается в F1
+    // (config.showSoundToast, по умолчанию вкл.). Крепится к fullscreen-элементу, если он есть
+    // (иначе в полноэкранном плеере тост в document.body не виден).
+    let _soundToastTimer = null;
+
+    function showSoundToast(message) {
+        if (config.showSoundToast === false) return;
+        const host = document.fullscreenElement || document.body;
+        let t = document.getElementById('mossad-sound-toast');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = 'mossad-sound-toast';
+            t.style.cssText = `
+                position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 2147483646;
+                display: flex; align-items: center; gap: 10px;
+                padding: 8px 10px 8px 16px; background: rgba(20, 20, 20, 0.92); backdrop-filter: blur(10px);
+                border: 1px solid #10b981; border-radius: 10px; color: #6ee7b7;
+                font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 600;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.5); pointer-events: auto;
+                transition: opacity 0.2s ease; opacity: 0;
+            `;
+            const txt = document.createElement('span');
+            txt.className = 'mossad-sound-toast-text';
+            const x = document.createElement('button');
+            x.textContent = '×';
+            x.title = 'Закрыть (только это уведомление)';
+            x.style.cssText = 'background:none;border:none;color:#9ca3af;font-size:16px;line-height:1;cursor:pointer;padding:0 4px;';
+            x.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (_soundToastTimer) { clearTimeout(_soundToastTimer); _soundToastTimer = null; }
+                t.style.opacity = '0';
+                setTimeout(() => { if (t.style.opacity === '0') t.remove(); }, 250);
+            };
+            t.append(txt, x);
+        }
+        if (t.parentNode !== host) host.appendChild(t);
+        t.querySelector('.mossad-sound-toast-text').textContent = message;
+        t.style.opacity = '1';
+        if (_soundToastTimer) clearTimeout(_soundToastTimer);
+        _soundToastTimer = setTimeout(() => {
+            _soundToastTimer = null;
+            t.style.opacity = '0';
+            setTimeout(() => { if (t.style.opacity === '0') t.remove(); }, 250);
+        }, 5000);
+    }
+
     function toggleGrokSound() {
         if (rootDomain !== 'grok.com') return;
         blurActiveInput();
@@ -2295,7 +2384,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 let nowMuted;
                 if (video && video.isConnected) nowMuted = video.muted;
                 else nowMuted = !(labelBefore.includes('включить') || labelBefore.includes('unmute'));
-                showToast(nowMuted ? '🔇 Звук выключен' : '🔊 Звук включен');
+                showSoundToast(nowMuted ? '🔇 Звук выключен' : '🔊 Звук включен');
             }, 150);
             return;
         }
@@ -2306,7 +2395,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const video = getActiveVideo();
         if (video) {
             video.muted = !video.muted;
-            showToast(video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
+            showSoundToast(video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
         } else {
             showToast('⚠️ Видео не найдено', true);
         }
@@ -3596,8 +3685,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     /** Кнопка 1: сохранить коллекцию в sessionStorage (накопительное добавление, список только увеличивается) */
     function grokSaveCollection(btnEl) {
         const foundItems = grokCollectLinks();
+        // v1.3.39: после клика ещё N секунд дособираем ссылки, подгружаемые при скролле
+        grokStartCollectWatch(config.collectWatchSec, 'click');
         if (foundItems.length === 0) {
-            showToast('⚠️ Ссылки не найдены. Проскролльте страницу до конца!', true);
+            showToast(`⚠️ Ссылки пока не найдены — скролльте ленту, досбор ${config.collectWatchSec || 30} с`, true);
             return;
         }
 
@@ -3677,12 +3768,17 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     function grokAutoCollectNewLinks() {
         if (!isGrokSavedPage()) return;
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-        if (!raw) return; // Ручной клик требуется один раз; до первого сбора автосбор не активен
+        const watching = grokIsCollectWatching();
+        if (!raw && !watching) return; // Досбор — только после клика «Собрать» (в окне досбора)
 
         let existingData = {};
-        try { existingData = JSON.parse(raw); } catch(e) { return; }
+        if (raw) {
+            try { existingData = JSON.parse(raw); } catch(e) { return; }
+        } else {
+            existingData = { date: new Date().toISOString().slice(0, 10), items: [], grpMode: 'seq', itemMode: 'fwd' };
+        }
         const existingItems = existingData.items || [];
-        if (!existingItems.length && !sessionStorage.getItem(GALLERY_COLLECT_ACTIVE_KEY)) return;
+        if (!existingItems.length && !watching && !sessionStorage.getItem(GALLERY_COLLECT_ACTIVE_KEY)) return;
 
         const seenUrls = new Set();
         existingItems.forEach(it => {
@@ -3708,6 +3804,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             existingData.date = date;
             existingData.items = existingItems;
             _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(existingData));
+            sessionStorage.setItem(GALLERY_COLLECT_ACTIVE_KEY, 'true');
+            mossadDebug('collect', 'досбор: добавлены ссылки', { added: addedCount, total: existingItems.length });
 
             if (btnCollect) {
                 btnCollect.textContent = String(existingItems.length);
@@ -3734,81 +3832,96 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
     }
 
-    /**
-     * Инициализация слушателей MutationObserver и scroll для автосбора ссылок в ленте /imagine/saved.
-     * v1.3.33: слушатели живут ТОЛЬКО на /imagine/saved. При SPA-уходе со страницы
-     * (обнаруживается первой мутацией DOM или 2-секундной проверкой) observer отключается,
-     * scroll-слушатель и интервал снимаются; вместо них работает лёгкая 1-секундная проверка
-     * pathname, которая заново включает автосбор при возврате на /imagine/saved.
-     * Логика самого автосбора (накопление, дедупликация — ANTI_PATTERNS §2, §8) не менялась.
-     */
-    function grokInitAutoCollector() {
-        if (rootDomain !== 'grok.com') return;
-        if (window._mossadAutoCollectorInit) return;
-        window._mossadAutoCollectorInit = true;
+    // ── v1.3.39: «окно досбора» после клика «Собрать» ──
+    // Замысел владельца: автосбор НЕ стартует сам. После клика «Собрать» скрипт ещё N секунд
+    // (config.collectWatchSec, по умолчанию 30) следит за лентой /imagine/saved и подхватывает
+    // ссылки, подгружаемые при скролле. Каждый новый клик продлевает окно. Окно закрывается по
+    // таймеру, при старте слайдшоу или при уходе со страницы. Пока окно открыто — рядом с кнопкой
+    // виден отсчёт «👁 25с». API переиспользуемое (будущий сценарий «первый Insert — собрать»):
+    //   grokStartCollectWatch(sec?, source?) / grokStopCollectWatch(reason?) / grokIsCollectWatching()
+    // Раньше (v1.3.30–v1.3.38) наблюдатель вешался только если вкладка ОТКРЫЛАСЬ сразу на /imagine/saved
+    // (initGrokGalleryBar) — при SPA-переходе на /imagine/saved досбор не работал вовсе (ANTI_PATTERNS §18).
+    const _collectWatch = { until: 0, observer: null, tickId: null, debounce: null, source: '' };
 
-        let debounceTimer = null;
-        let observer = null;
-        let pollId = null;
-        let routeWatchId = null;
-
-        const triggerCollect = () => {
-            if (!isGrokSavedPage()) return;
-            const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-            if (!raw) return;
-            if (debounceTimer) clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                grokAutoCollectNewLinks();
-            }, 300);
-        };
-
-        const start = () => {
-            if (observer) return;
-            if (routeWatchId) { clearInterval(routeWatchId); routeWatchId = null; }
-
-            window.addEventListener('scroll', triggerCollect, { passive: true });
-
-            observer = new MutationObserver((mutations) => {
-                if (!isGrokSavedPage()) { stop(); return; }
-                let hasAdded = false;
-                for (let i = 0; i < mutations.length; i++) {
-                    if (mutations[i].addedNodes && mutations[i].addedNodes.length > 0) {
-                        hasAdded = true;
-                        break;
-                    }
-                }
-                if (hasAdded) triggerCollect();
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
-
-            // Периодическая проверка раз в 2 секунды (и детектор ухода со страницы)
-            pollId = setInterval(() => {
-                if (!isGrokSavedPage()) { stop(); return; }
-                triggerCollect();
-            }, 2000);
-        };
-
-        const stop = () => {
-            if (!observer) return;
-            window.removeEventListener('scroll', triggerCollect, { passive: true });
-            observer.disconnect();
-            observer = null;
-            if (pollId) { clearInterval(pollId); pollId = null; }
-            if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
-            watchRoute();
-        };
-
-        // Ждём возврата на /imagine/saved (SPA-навигация без перезагрузки)
-        const watchRoute = () => {
-            if (routeWatchId) return;
-            routeWatchId = setInterval(() => {
-                if (isGrokSavedPage()) start();
-            }, 1000);
-        };
-
-        if (isGrokSavedPage()) start();
-        else watchRoute();
+    function grokIsCollectWatching() {
+        return !!_collectWatch.observer && Date.now() < _collectWatch.until;
     }
+
+    function _collectWatchTrigger() {
+        if (!isGrokSavedPage()) return;
+        if (_collectWatch.debounce) clearTimeout(_collectWatch.debounce);
+        _collectWatch.debounce = setTimeout(() => {
+            _collectWatch.debounce = null;
+            grokAutoCollectNewLinks();
+        }, 300);
+    }
+
+    function _collectWatchIndicator(secLeft) {
+        const btn = document.getElementById('mossad-gallery-collect');
+        let ind = document.getElementById('mossad-collect-watch');
+        if (secLeft <= 0 || !btn) { if (ind) ind.remove(); return; }
+        if (!ind) {
+            ind = document.createElement('span');
+            ind.id = 'mossad-collect-watch';
+            ind.title = 'Досбор новых ссылок при скролле (клик — остановить)';
+            ind.style.cssText = 'font-size:10px;color:#6ee7b7;padding:0 3px;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums;';
+            ind.onclick = (e) => { e.stopPropagation(); grokStopCollectWatch('user'); };
+            btn.insertAdjacentElement('afterend', ind);
+        }
+        ind.textContent = `👁${secLeft}с`;
+    }
+
+    function _isAnySlideshowRunning() {
+        try {
+            if (window._mossadGalleryActive) return true;
+            if (typeof slideshowActive !== 'undefined' && slideshowActive) return true;
+        } catch(e) {}
+        return false;
+    }
+
+    function grokStartCollectWatch(sec, source = 'click') {
+        if (rootDomain !== 'grok.com' || !isGrokSavedPage()) return false;
+        const dur = Math.max(5, Math.min(600, Number(sec || config.collectWatchSec || 30)));
+        _collectWatch.until = Date.now() + dur * 1000;
+        _collectWatch.source = source;
+        mossadDebug('collect', 'окно досбора открыто/продлено', { sec: dur, source });
+        if (!_collectWatch.observer) {
+            _collectWatch.observer = new MutationObserver((mutations) => {
+                for (let i = 0; i < mutations.length; i++) {
+                    if (mutations[i].addedNodes && mutations[i].addedNodes.length) { _collectWatchTrigger(); return; }
+                }
+            });
+            _collectWatch.observer.observe(document.body, { childList: true, subtree: true });
+            window.addEventListener('scroll', _collectWatchTrigger, { passive: true, capture: true });
+            _collectWatch.tickId = setInterval(() => {
+                if (!isGrokSavedPage()) { grokStopCollectWatch('left-page'); return; }
+                if (_isAnySlideshowRunning()) { grokStopCollectWatch('slideshow'); return; }
+                const left = Math.ceil((_collectWatch.until - Date.now()) / 1000);
+                if (left <= 0) { grokStopCollectWatch('timeout'); return; }
+                _collectWatchIndicator(left);
+                _collectWatchTrigger(); // страховка: ленивые картинки без мутаций childList
+            }, 1000);
+        }
+        _collectWatchIndicator(dur);
+        return true;
+    }
+
+    function grokStopCollectWatch(reason = 'stop') {
+        if (!_collectWatch.observer) { _collectWatchIndicator(0); return; }
+        _collectWatch.observer.disconnect();
+        _collectWatch.observer = null;
+        window.removeEventListener('scroll', _collectWatchTrigger, { passive: true, capture: true });
+        if (_collectWatch.tickId) { clearInterval(_collectWatch.tickId); _collectWatch.tickId = null; }
+        if (_collectWatch.debounce) { clearTimeout(_collectWatch.debounce); _collectWatch.debounce = null; }
+        // Последний досбор перед закрытием (кроме ухода со страницы / старта слайдшоу)
+        if (reason === 'timeout' || reason === 'user') { try { grokAutoCollectNewLinks(); } catch(e) {} }
+        _collectWatch.until = 0;
+        _collectWatchIndicator(0);
+        mossadDebug('collect', 'окно досбора закрыто', { reason });
+    }
+
+    /** Совместимость: раньше вешал постоянный наблюдатель; теперь досбор — только в окне после клика. */
+    function grokInitAutoCollector() {}
 
     /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */
     function grokDownloadCollection() {
@@ -4578,6 +4691,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             return;
         }
 
+        grokStopCollectWatch('slideshow'); // v1.3.39: окно досбора закрывается при старте слайдшоу
         // Немедленно останавливаем ВСЕ таймеры предыдущего слайда (включая отложенный запуск цикла,
         // v1.3.38) и перехватываем блокировку перехода: устаревшие автошаги не перебьют выбор.
         cancelSlideTimers();
@@ -4936,9 +5050,6 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
         };
 
-        if (isGrokSavedPage()) {
-            grokInitAutoCollector();
-        }
 
         // ── 3. Кнопка-статус воспроизведения (Слайдшоу / ❚❚ / ▶) ──
         const _ssActive = (() => {
@@ -8389,6 +8500,14 @@ function findMediaForDownload() {
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
               Сворачивать панель кликом вне её
             </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Уведомление «🔊 Звук включен / 🔇 Звук выключен» на ~5 с при переключении звука хоткеем. Крестик на нём закрывает только текущее уведомление">
+              <input id="mossad-cb-sound-toast" type="checkbox" style="accent-color:#3b82f6;" ${config.showSoundToast !== false ? 'checked' : ''}>
+              Показывать тост переключения звука
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="После клика «Собрать» на /imagine/saved скрипт столько секунд подхватывает ссылки, подгружаемые при скролле (каждый клик продлевает; закрывается при старте слайдшоу)">
+              Досбор после «Собрать», сек:
+              <input id="mossad-collect-watch-sec" type="number" min="5" max="600" step="5" value="${Number(config.collectWatchSec) || 30}" style="width:56px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
+            </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Пишет в консоль браузера ([MOSSAD DBG]) кто и почему запустил каждый шаг слайдшоу, а также шаги удаления. Для диагностики; по умолчанию выключено">
               <input id="mossad-cb-debug" type="checkbox" style="accent-color:#f59e0b;" ${config.debugSlideshow ? 'checked' : ''}>
               Debug-лог слайдшоу/удаления
@@ -8417,7 +8536,7 @@ function findMediaForDownload() {
             nextGroup:        'Следующая группа (Alt+PageDown)',
             prevGroup:        'Предыдущая группа (Alt+PageUp)',
             download:         'Скачать (PageDown)',
-            upscale:          'Улучшить (Ctrl+PageUp)',
+            upscale:          'Улучшить (Shift+«+» / Shift+Num+)',
             deleteVid:        'Удалить видео (Delete)',
             sound:            'Звук вкл/выкл (ScrollLock)',
             playPause:        'Пауза/Плей видео (Pause)',
@@ -8485,7 +8604,7 @@ function findMediaForDownload() {
                             return;
                         }
                         
-                        const newHk = { key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
+                        const newHk = { key: e.key, code: e.code || '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }; // v1.3.39: + физическая клавиша
                         hkArr[slotIndex] = newHk;
                         config.hk[k] = hkArr;
                         Settings.save();
@@ -8525,6 +8644,14 @@ function findMediaForDownload() {
         
         modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
             Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
+        };
+        modal.querySelector('#mossad-collect-watch-sec').onchange = (e) => {
+            const v = Math.max(5, Math.min(600, parseInt(e.target.value, 10) || 30));
+            e.target.value = String(v);
+            Settings.setQuiet('collectWatchSec', v);
+        };
+        modal.querySelector('#mossad-cb-sound-toast').onchange = (e) => {
+            Settings.setQuiet('showSoundToast', e.target.checked);
         };
         modal.querySelector('#mossad-cb-debug').onchange = (e) => {
             Settings.setQuiet('debugSlideshow', e.target.checked);

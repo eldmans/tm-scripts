@@ -33,6 +33,14 @@
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
               Сворачивать панель кликом вне её
             </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Уведомление «🔊 Звук включен / 🔇 Звук выключен» на ~5 с при переключении звука хоткеем. Крестик на нём закрывает только текущее уведомление">
+              <input id="mossad-cb-sound-toast" type="checkbox" style="accent-color:#3b82f6;" ${config.showSoundToast !== false ? 'checked' : ''}>
+              Показывать тост переключения звука
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="После клика «Собрать» на /imagine/saved скрипт столько секунд подхватывает ссылки, подгружаемые при скролле (каждый клик продлевает; закрывается при старте слайдшоу)">
+              Досбор после «Собрать», сек:
+              <input id="mossad-collect-watch-sec" type="number" min="5" max="600" step="5" value="${Number(config.collectWatchSec) || 30}" style="width:56px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
+            </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Пишет в консоль браузера ([MOSSAD DBG]) кто и почему запустил каждый шаг слайдшоу, а также шаги удаления. Для диагностики; по умолчанию выключено">
               <input id="mossad-cb-debug" type="checkbox" style="accent-color:#f59e0b;" ${config.debugSlideshow ? 'checked' : ''}>
               Debug-лог слайдшоу/удаления
@@ -61,7 +69,7 @@
             nextGroup:        'Следующая группа (Alt+PageDown)',
             prevGroup:        'Предыдущая группа (Alt+PageUp)',
             download:         'Скачать (PageDown)',
-            upscale:          'Улучшить (Ctrl+PageUp)',
+            upscale:          'Улучшить (Shift+«+» / Shift+Num+)',
             deleteVid:        'Удалить видео (Delete)',
             sound:            'Звук вкл/выкл (ScrollLock)',
             playPause:        'Пауза/Плей видео (Pause)',
@@ -129,7 +137,7 @@
                             return;
                         }
                         
-                        const newHk = { key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
+                        const newHk = { key: e.key, code: e.code || '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }; // v1.3.39: + физическая клавиша
                         hkArr[slotIndex] = newHk;
                         config.hk[k] = hkArr;
                         Settings.save();
@@ -169,6 +177,14 @@
         
         modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
             Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
+        };
+        modal.querySelector('#mossad-collect-watch-sec').onchange = (e) => {
+            const v = Math.max(5, Math.min(600, parseInt(e.target.value, 10) || 30));
+            e.target.value = String(v);
+            Settings.setQuiet('collectWatchSec', v);
+        };
+        modal.querySelector('#mossad-cb-sound-toast').onchange = (e) => {
+            Settings.setQuiet('showSoundToast', e.target.checked);
         };
         modal.querySelector('#mossad-cb-debug').onchange = (e) => {
             Settings.setQuiet('debugSlideshow', e.target.checked);

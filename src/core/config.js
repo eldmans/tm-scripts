@@ -26,6 +26,8 @@
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
         closePanelOnOutsideClick: true,  // v1.3.37: сворачивать панель настроек виджета кликом вне MOSSAD
+        collectWatchSec: 30,            // v1.3.39: окно досбора ссылок после клика «Собрать» (сек)
+        showSoundToast: true,           // v1.3.39: показывать тост «Звук вкл/выкл» (~5 с, × закрывает только текущий)
         debugSlideshow: false,          // v1.3.38: debug-лог источников шагов слайдшоу и шагов удаления (консоль)
         
         // PINTEREST ENGINE CONFIGS
@@ -40,7 +42,8 @@
         
         hk: {
             download:         { key: 'PageDown',   ctrl: false, alt: false, shift: false }, // PageDown — скачать
-            upscale:          { key: 'PageUp',     ctrl: true,  alt: false, shift: false }, // Ctrl+PageUp
+            upscale:          { key: '+',          ctrl: false, alt: false, shift: true },  // v1.3.39: Shift+«+» (осн. ряд и Num+); Ctrl+PageUp/PageDown в Grok переключают беседы.
+                                                                                         // Без поля code: mergeDeep подмешал бы его в старые сохранённые хоткеи.
             deleteVid:        { key: 'Delete',     ctrl: false, alt: false, shift: false },
             sound:            { key: 'ScrollLock', ctrl: false, alt: false, shift: false },
             playPause:        { key: 'Pause',      ctrl: false, alt: false, shift: false },
@@ -235,12 +238,42 @@
         } catch (e) {}
     }
 
+    migrateUpscaleDefaultHotkey();
+
     // Глобальная синхронизация шаблона имени файла через GM_getValue
     if (typeof GM_getValue === 'function') {
         const gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
         if (gmTpl && typeof gmTpl === 'string') {
             config.filenameTemplate = gmTpl;
         }
+    }
+
+    /**
+     * v1.3.39: старый дефолт «Улучшить» Ctrl+PageUp → Shift+«+» (Ctrl+PageUp/PageDown в Grok переключают
+     * беседы). Мигрируем ОДИН раз и только если у пользователя по-прежнему нетронутый старый дефолт
+     * (объект или слот-массив [Ctrl+PageUp, пусто]). Флаг в GM — общий для всех сайтов.
+     */
+    function migrateUpscaleDefaultHotkey() {
+        const FLAG = 'mossad_mig_upscale_v1339';
+        const hasGm = (typeof GM_getValue === 'function' && typeof GM_setValue === 'function');
+        try { if (hasGm && GM_getValue(FLAG, false)) return false; } catch(e) {}
+        const isOldDefault = (h) => !!h && h.key === 'PageUp' && !!h.ctrl && !h.alt && !h.shift && !h.meta;
+        const cur = config.hk && config.hk.upscale;
+        let untouched = false;
+        if (Array.isArray(cur)) {
+            const filled = cur.filter(h => h && h.key);
+            untouched = filled.length === 1 && isOldDefault(filled[0]);
+        } else {
+            untouched = isOldDefault(cur);
+        }
+        if (untouched) {
+            config.hk.upscale = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk.upscale));
+            try { persistLocalConfig(); } catch(e) {}
+            if (hasGm) { try { GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch(e) {} }
+            console.log('[MOSSAD] Миграция v1.3.39: хоткей «Улучшить» Ctrl+PageUp → Shift+«+»');
+        }
+        if (hasGm) { try { GM_setValue(FLAG, true); } catch(e) {} }
+        return untouched;
     }
 
     const Settings = {

@@ -53,8 +53,10 @@
     /** Кнопка 1: сохранить коллекцию в sessionStorage (накопительное добавление, список только увеличивается) */
     function grokSaveCollection(btnEl) {
         const foundItems = grokCollectLinks();
+        // v1.3.39: после клика ещё N секунд дособираем ссылки, подгружаемые при скролле
+        grokStartCollectWatch(config.collectWatchSec, 'click');
         if (foundItems.length === 0) {
-            showToast('⚠️ Ссылки не найдены. Проскролльте страницу до конца!', true);
+            showToast(`⚠️ Ссылки пока не найдены — скролльте ленту, досбор ${config.collectWatchSec || 30} с`, true);
             return;
         }
 
@@ -134,12 +136,17 @@
     function grokAutoCollectNewLinks() {
         if (!isGrokSavedPage()) return;
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-        if (!raw) return; // Ручной клик требуется один раз; до первого сбора автосбор не активен
+        const watching = grokIsCollectWatching();
+        if (!raw && !watching) return; // Досбор — только после клика «Собрать» (в окне досбора)
 
         let existingData = {};
-        try { existingData = JSON.parse(raw); } catch(e) { return; }
+        if (raw) {
+            try { existingData = JSON.parse(raw); } catch(e) { return; }
+        } else {
+            existingData = { date: new Date().toISOString().slice(0, 10), items: [], grpMode: 'seq', itemMode: 'fwd' };
+        }
         const existingItems = existingData.items || [];
-        if (!existingItems.length && !sessionStorage.getItem(GALLERY_COLLECT_ACTIVE_KEY)) return;
+        if (!existingItems.length && !watching && !sessionStorage.getItem(GALLERY_COLLECT_ACTIVE_KEY)) return;
 
         const seenUrls = new Set();
         existingItems.forEach(it => {
@@ -165,6 +172,8 @@
             existingData.date = date;
             existingData.items = existingItems;
             _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(existingData));
+            sessionStorage.setItem(GALLERY_COLLECT_ACTIVE_KEY, 'true');
+            mossadDebug('collect', 'досбор: добавлены ссылки', { added: addedCount, total: existingItems.length });
 
             if (btnCollect) {
                 btnCollect.textContent = String(existingItems.length);
@@ -191,81 +200,96 @@
         }
     }
 
-    /**
-     * Инициализация слушателей MutationObserver и scroll для автосбора ссылок в ленте /imagine/saved.
-     * v1.3.33: слушатели живут ТОЛЬКО на /imagine/saved. При SPA-уходе со страницы
-     * (обнаруживается первой мутацией DOM или 2-секундной проверкой) observer отключается,
-     * scroll-слушатель и интервал снимаются; вместо них работает лёгкая 1-секундная проверка
-     * pathname, которая заново включает автосбор при возврате на /imagine/saved.
-     * Логика самого автосбора (накопление, дедупликация — ANTI_PATTERNS §2, §8) не менялась.
-     */
-    function grokInitAutoCollector() {
-        if (rootDomain !== 'grok.com') return;
-        if (window._mossadAutoCollectorInit) return;
-        window._mossadAutoCollectorInit = true;
+    // ── v1.3.39: «окно досбора» после клика «Собрать» ──
+    // Замысел владельца: автосбор НЕ стартует сам. После клика «Собрать» скрипт ещё N секунд
+    // (config.collectWatchSec, по умолчанию 30) следит за лентой /imagine/saved и подхватывает
+    // ссылки, подгружаемые при скролле. Каждый новый клик продлевает окно. Окно закрывается по
+    // таймеру, при старте слайдшоу или при уходе со страницы. Пока окно открыто — рядом с кнопкой
+    // виден отсчёт «👁 25с». API переиспользуемое (будущий сценарий «первый Insert — собрать»):
+    //   grokStartCollectWatch(sec?, source?) / grokStopCollectWatch(reason?) / grokIsCollectWatching()
+    // Раньше (v1.3.30–v1.3.38) наблюдатель вешался только если вкладка ОТКРЫЛАСЬ сразу на /imagine/saved
+    // (initGrokGalleryBar) — при SPA-переходе на /imagine/saved досбор не работал вовсе (ANTI_PATTERNS §18).
+    const _collectWatch = { until: 0, observer: null, tickId: null, debounce: null, source: '' };
 
-        let debounceTimer = null;
-        let observer = null;
-        let pollId = null;
-        let routeWatchId = null;
-
-        const triggerCollect = () => {
-            if (!isGrokSavedPage()) return;
-            const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
-            if (!raw) return;
-            if (debounceTimer) clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                grokAutoCollectNewLinks();
-            }, 300);
-        };
-
-        const start = () => {
-            if (observer) return;
-            if (routeWatchId) { clearInterval(routeWatchId); routeWatchId = null; }
-
-            window.addEventListener('scroll', triggerCollect, { passive: true });
-
-            observer = new MutationObserver((mutations) => {
-                if (!isGrokSavedPage()) { stop(); return; }
-                let hasAdded = false;
-                for (let i = 0; i < mutations.length; i++) {
-                    if (mutations[i].addedNodes && mutations[i].addedNodes.length > 0) {
-                        hasAdded = true;
-                        break;
-                    }
-                }
-                if (hasAdded) triggerCollect();
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
-
-            // Периодическая проверка раз в 2 секунды (и детектор ухода со страницы)
-            pollId = setInterval(() => {
-                if (!isGrokSavedPage()) { stop(); return; }
-                triggerCollect();
-            }, 2000);
-        };
-
-        const stop = () => {
-            if (!observer) return;
-            window.removeEventListener('scroll', triggerCollect, { passive: true });
-            observer.disconnect();
-            observer = null;
-            if (pollId) { clearInterval(pollId); pollId = null; }
-            if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
-            watchRoute();
-        };
-
-        // Ждём возврата на /imagine/saved (SPA-навигация без перезагрузки)
-        const watchRoute = () => {
-            if (routeWatchId) return;
-            routeWatchId = setInterval(() => {
-                if (isGrokSavedPage()) start();
-            }, 1000);
-        };
-
-        if (isGrokSavedPage()) start();
-        else watchRoute();
+    function grokIsCollectWatching() {
+        return !!_collectWatch.observer && Date.now() < _collectWatch.until;
     }
+
+    function _collectWatchTrigger() {
+        if (!isGrokSavedPage()) return;
+        if (_collectWatch.debounce) clearTimeout(_collectWatch.debounce);
+        _collectWatch.debounce = setTimeout(() => {
+            _collectWatch.debounce = null;
+            grokAutoCollectNewLinks();
+        }, 300);
+    }
+
+    function _collectWatchIndicator(secLeft) {
+        const btn = document.getElementById('mossad-gallery-collect');
+        let ind = document.getElementById('mossad-collect-watch');
+        if (secLeft <= 0 || !btn) { if (ind) ind.remove(); return; }
+        if (!ind) {
+            ind = document.createElement('span');
+            ind.id = 'mossad-collect-watch';
+            ind.title = 'Досбор новых ссылок при скролле (клик — остановить)';
+            ind.style.cssText = 'font-size:10px;color:#6ee7b7;padding:0 3px;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums;';
+            ind.onclick = (e) => { e.stopPropagation(); grokStopCollectWatch('user'); };
+            btn.insertAdjacentElement('afterend', ind);
+        }
+        ind.textContent = `👁${secLeft}с`;
+    }
+
+    function _isAnySlideshowRunning() {
+        try {
+            if (window._mossadGalleryActive) return true;
+            if (typeof slideshowActive !== 'undefined' && slideshowActive) return true;
+        } catch(e) {}
+        return false;
+    }
+
+    function grokStartCollectWatch(sec, source = 'click') {
+        if (rootDomain !== 'grok.com' || !isGrokSavedPage()) return false;
+        const dur = Math.max(5, Math.min(600, Number(sec || config.collectWatchSec || 30)));
+        _collectWatch.until = Date.now() + dur * 1000;
+        _collectWatch.source = source;
+        mossadDebug('collect', 'окно досбора открыто/продлено', { sec: dur, source });
+        if (!_collectWatch.observer) {
+            _collectWatch.observer = new MutationObserver((mutations) => {
+                for (let i = 0; i < mutations.length; i++) {
+                    if (mutations[i].addedNodes && mutations[i].addedNodes.length) { _collectWatchTrigger(); return; }
+                }
+            });
+            _collectWatch.observer.observe(document.body, { childList: true, subtree: true });
+            window.addEventListener('scroll', _collectWatchTrigger, { passive: true, capture: true });
+            _collectWatch.tickId = setInterval(() => {
+                if (!isGrokSavedPage()) { grokStopCollectWatch('left-page'); return; }
+                if (_isAnySlideshowRunning()) { grokStopCollectWatch('slideshow'); return; }
+                const left = Math.ceil((_collectWatch.until - Date.now()) / 1000);
+                if (left <= 0) { grokStopCollectWatch('timeout'); return; }
+                _collectWatchIndicator(left);
+                _collectWatchTrigger(); // страховка: ленивые картинки без мутаций childList
+            }, 1000);
+        }
+        _collectWatchIndicator(dur);
+        return true;
+    }
+
+    function grokStopCollectWatch(reason = 'stop') {
+        if (!_collectWatch.observer) { _collectWatchIndicator(0); return; }
+        _collectWatch.observer.disconnect();
+        _collectWatch.observer = null;
+        window.removeEventListener('scroll', _collectWatchTrigger, { passive: true, capture: true });
+        if (_collectWatch.tickId) { clearInterval(_collectWatch.tickId); _collectWatch.tickId = null; }
+        if (_collectWatch.debounce) { clearTimeout(_collectWatch.debounce); _collectWatch.debounce = null; }
+        // Последний досбор перед закрытием (кроме ухода со страницы / старта слайдшоу)
+        if (reason === 'timeout' || reason === 'user') { try { grokAutoCollectNewLinks(); } catch(e) {} }
+        _collectWatch.until = 0;
+        _collectWatchIndicator(0);
+        mossadDebug('collect', 'окно досбора закрыто', { reason });
+    }
+
+    /** Совместимость: раньше вешал постоянный наблюдатель; теперь досбор — только в окне после клика. */
+    function grokInitAutoCollector() {}
 
     /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */
     function grokDownloadCollection() {

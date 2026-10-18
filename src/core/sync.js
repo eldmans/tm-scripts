@@ -156,7 +156,7 @@
         if (hk.ctrl)  parts.push('Ctrl');
         if (hk.alt)   parts.push('Alt');
         if (hk.shift) parts.push('Shift');
-        parts.push(hk.key);
+        parts.push(hk.key === '+' ? '«+»' : hk.key);
         return parts.join('+');
     }
     function hotkeyMatches(e, hk) {
@@ -168,6 +168,14 @@
         // хоткеи вида Alt+R работали в русской раскладке (там e.key === 'к').
         if (!keyMatch && typeof hk.key === 'string' && /^[a-z0-9]$/i.test(hk.key) && typeof e.code === 'string') {
             keyMatch = e.code === (/[0-9]/.test(hk.key) ? 'Digit' + hk.key : 'Key' + hk.key.toUpperCase());
+        }
+        // v1.3.39: хоткей, записанный с физической клавишей (hk.code), совпадает по e.code в любой раскладке.
+        // «+» на основном ряду (Equal) и на цифровом блоке (NumpadAdd) считаются одной клавишей.
+        const PLUS_CODES = ['Equal', 'NumpadAdd'];
+        if (!keyMatch && typeof e.code === 'string' && (hk.key === '+' || PLUS_CODES.includes(hk.code))) {
+            keyMatch = PLUS_CODES.includes(e.code);
+        } else if (!keyMatch && hk.code && typeof e.code === 'string') {
+            keyMatch = e.code === hk.code;
         }
         return keyMatch &&
             !!e.ctrlKey  === !!hk.ctrl &&

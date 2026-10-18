@@ -78,6 +78,54 @@
         return best;
     }
 
+    // ── v1.3.39: отдельный тост состояния звука (~5 с) с крестиком ──
+    // × закрывает ТОЛЬКО текущий тост — ничего не запоминается. Показ включается/выключается в F1
+    // (config.showSoundToast, по умолчанию вкл.). Крепится к fullscreen-элементу, если он есть
+    // (иначе в полноэкранном плеере тост в document.body не виден).
+    let _soundToastTimer = null;
+
+    function showSoundToast(message) {
+        if (config.showSoundToast === false) return;
+        const host = document.fullscreenElement || document.body;
+        let t = document.getElementById('mossad-sound-toast');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = 'mossad-sound-toast';
+            t.style.cssText = `
+                position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 2147483646;
+                display: flex; align-items: center; gap: 10px;
+                padding: 8px 10px 8px 16px; background: rgba(20, 20, 20, 0.92); backdrop-filter: blur(10px);
+                border: 1px solid #10b981; border-radius: 10px; color: #6ee7b7;
+                font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 600;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.5); pointer-events: auto;
+                transition: opacity 0.2s ease; opacity: 0;
+            `;
+            const txt = document.createElement('span');
+            txt.className = 'mossad-sound-toast-text';
+            const x = document.createElement('button');
+            x.textContent = '×';
+            x.title = 'Закрыть (только это уведомление)';
+            x.style.cssText = 'background:none;border:none;color:#9ca3af;font-size:16px;line-height:1;cursor:pointer;padding:0 4px;';
+            x.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (_soundToastTimer) { clearTimeout(_soundToastTimer); _soundToastTimer = null; }
+                t.style.opacity = '0';
+                setTimeout(() => { if (t.style.opacity === '0') t.remove(); }, 250);
+            };
+            t.append(txt, x);
+        }
+        if (t.parentNode !== host) host.appendChild(t);
+        t.querySelector('.mossad-sound-toast-text').textContent = message;
+        t.style.opacity = '1';
+        if (_soundToastTimer) clearTimeout(_soundToastTimer);
+        _soundToastTimer = setTimeout(() => {
+            _soundToastTimer = null;
+            t.style.opacity = '0';
+            setTimeout(() => { if (t.style.opacity === '0') t.remove(); }, 250);
+        }, 5000);
+    }
+
     function toggleGrokSound() {
         if (rootDomain !== 'grok.com') return;
         blurActiveInput();
@@ -93,7 +141,7 @@
                 let nowMuted;
                 if (video && video.isConnected) nowMuted = video.muted;
                 else nowMuted = !(labelBefore.includes('включить') || labelBefore.includes('unmute'));
-                showToast(nowMuted ? '🔇 Звук выключен' : '🔊 Звук включен');
+                showSoundToast(nowMuted ? '🔇 Звук выключен' : '🔊 Звук включен');
             }, 150);
             return;
         }
@@ -104,7 +152,7 @@
         const video = getActiveVideo();
         if (video) {
             video.muted = !video.muted;
-            showToast(video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
+            showSoundToast(video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
         } else {
             showToast('⚠️ Видео не найдено', true);
         }

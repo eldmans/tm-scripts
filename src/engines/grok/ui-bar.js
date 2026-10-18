@@ -71,9 +71,6 @@
             }
         };
 
-        if (isGrokSavedPage()) {
-            grokInitAutoCollector();
-        }
 
         // ── 3. Кнопка-статус воспроизведения (Слайдшоу / ❚❚ / ▶) ──
         const _ssActive = (() => {
