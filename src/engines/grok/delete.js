@@ -76,6 +76,51 @@
         return null;
     }
 
+    // ── Диалог подтверждения удаления (v1.3.37) ──
+    const GROK_DIALOG_SELECTOR = '[role="alertdialog"], [role="dialog"], [aria-modal="true"]';
+    const GROK_CANCEL_WORDS = ['отмена', 'отменить', 'cancel', 'закрыть', 'close', 'нет', 'no'];
+    const GROK_CONFIRM_RE = /удалить|delete|подтвердить|confirm/;
+    const GROK_CONFIRM_EXACT = ['да', 'yes', 'ok', 'ок'];
+
+    function _isVisibleEl(el) {
+        return !!el && el.isConnected && !(el.offsetWidth === 0 && el.offsetHeight === 0 &&
+            (!el.getClientRects || !el.getClientRects().length));
+    }
+
+    /** Все видимые диалоги страницы (кроме окон MOSSAD). */
+    function listGrokDialogs() {
+        return Array.from(document.querySelectorAll(GROK_DIALOG_SELECTOR))
+            .filter(d => _isVisibleEl(d) && !(d.id || '').startsWith('mossad-') && !d.closest('[id^="mossad-"]'));
+    }
+
+    /** Кнопка — подтверждение удаления (а не «Отмена» и не исходная кнопка «Удалить» поста)? */
+    function isGrokConfirmButton(btn, excludeBtn = null) {
+        if (!btn || btn === excludeBtn) return false;
+        const label = ((btn.getAttribute('aria-label') || '') + ' ' + (btn.textContent || '')).trim().toLowerCase();
+        if (!label) return false;
+        if (GROK_CANCEL_WORDS.some(w => label === w || label.startsWith(w + ' '))) return false;
+        return GROK_CONFIRM_RE.test(label) || GROK_CONFIRM_EXACT.includes(label);
+    }
+
+    function findGrokConfirmButtonIn(dialog, excludeBtn = null) {
+        if (!dialog || !dialog.isConnected) return null;
+        const btns = Array.from(dialog.querySelectorAll('button, [role="button"]')).filter(_isVisibleEl);
+        return btns.find(b => isGrokConfirmButton(b, excludeBtn)) || null;
+    }
+
+    /** Новый (появившийся после клика «Удалить») диалог с кнопкой подтверждения; самый верхний. */
+    function findGrokConfirmDialog(preDialogs, excludeBtn = null) {
+        const fresh = listGrokDialogs().filter(d => !preDialogs.has(d) && findGrokConfirmButtonIn(d, excludeBtn));
+        if (fresh.length) return fresh[fresh.length - 1];
+        // Фолбэк: alertdialog, даже если существовал раньше (Grok может переиспользовать узел)
+        const alerts = listGrokDialogs().filter(d => d.getAttribute('role') === 'alertdialog' && findGrokConfirmButtonIn(d, excludeBtn));
+        return alerts.length ? alerts[alerts.length - 1] : null;
+    }
+
+    function isGrokDialogOpen(dialog) {
+        return _isVisibleEl(dialog) && dialog.getAttribute('data-state') !== 'closed';
+    }
+
     let _grokDeleteInProgress = false;
 
     async function runSmartDelete() {
@@ -193,71 +238,107 @@
             }
 
             // 2. Запуск удаления и подтверждения
+            // v1.3.37: страница поста Grok сама является [role="dialog"] (просмотрщик), поэтому старый поиск
+            // `document.querySelector('[role="dialog"]')` находил просмотрщик, «подтверждал» повторным кликом
+            // по кнопке «Удалить» самого поста и сразу уходил на соседа, пока настоящий диалог висел открытым.
+            // Теперь: ищем только НОВЫЙ диалог (появившийся после клика), кнопку подтверждения — только внутри
+            // него, и переходим на соседа ТОЛЬКО после подтверждения и закрытия диалога (ANTI_PATTERNS §16).
             const deleteBtnLabels = [
                 'удалить видео', 'delete video',
                 'удалить изображение', 'delete image',
                 'удалить', 'delete'
             ];
+            const preDialogs = new Set(listGrokDialogs());
 
-            let deleteConfirmed = false;
-            const triggerConfirm = () => {
-                if (!config.deleteAutoconfirm) return Promise.resolve(false);
-                return new Promise((resolve) => {
-                    retryAction((attempt) => {
-                        const confirmKeywords = ['удалить изображение', 'удалить видео', 'удалить', 'delete', 'confirm', 'ok', 'yes', 'да'];
-                        const dialog = document.querySelector('[role="dialog"]') || document;
-                        const confirmBtn = findGrokButton(confirmKeywords, dialog);
-                        if (confirmBtn) {
-                            triggerClick(confirmBtn, 'Confirm Delete');
-                            console.log('[MOSSAD] Delete confirmed on attempt', attempt);
-                            deleteConfirmed = true;
-                            resolve(true);
-                            return true;
-                        }
-                        if (attempt === 4) resolve(false);
-                        return false;
-                    }, [100, 250, 450, 750]);
-                });
-            };
-
-            const directDelBtn = findGrokButton(deleteBtnLabels);
+            let directDelBtn = findGrokButton(deleteBtnLabels);
             let deleteClicked = false;
+            let clickedDelBtn = null;
 
             if (directDelBtn) {
                 triggerClick(directDelBtn, 'Delete Button');
+                clickedDelBtn = directDelBtn;
                 showToast('✕ Удаление...');
                 deleteClicked = true;
             } else {
                 const dotsBtn = findGrok3DotsMenuButton();
                 if (dotsBtn) {
                     triggerClick(dotsBtn, 'Post actions (for Delete)');
-                    deleteClicked = await new Promise((resolve) => {
-                        retryAction((attempt) => {
-                            const innerDel = findGrokButton(deleteBtnLabels);
-                            if (innerDel) {
-                                triggerClick(innerDel, 'Delete Button (from menu)');
-                                showToast('✕ Удаление...');
-                                resolve(true);
-                                return true;
-                            }
-                            if (attempt === 3) resolve(false);
-                            return false;
-                        }, [100, 250, 450]);
-                    });
+                    const innerDel = await waitForCondition(() => findGrokButton(deleteBtnLabels), 1500, 100);
+                    if (innerDel) {
+                        triggerClick(innerDel, 'Delete Button (from menu)');
+                        clickedDelBtn = innerDel;
+                        showToast('✕ Удаление...');
+                        deleteClicked = true;
+                    }
                 }
             }
 
             if (!deleteClicked) {
                 showToast('⚠️ Кнопка удаления не найдена', true);
-                _grokDeleteInProgress = false;
                 return;
             }
 
-            // Ожидаем подтверждения удаления
-            await triggerConfirm();
+            const filmstripCountBefore = grokGetFilmstripItems().length;
+            const confirmDialog = await waitForCondition(
+                () => findGrokConfirmDialog(preDialogs, clickedDelBtn), 3000, 50);
 
-            // 3. hold post: переход на следующий кадр / пост без перезагрузки страницы
-            if (config.deleteHoldpost) {
+            let deleteConfirmed = false;
+            if (!confirmDialog) {
+                // Диалог не появился: считаем удаление выполненным, только если есть признаки удаления
+                const removed = await waitForCondition(() =>
+                    location.href !== initialUrl ||
+                    (filmstripCountBefore > 1 && grokGetFilmstripItems().length < filmstripCountBefore), 2000, 100);
+                if (removed) {
+                    deleteConfirmed = true;
+                } else {
+                    console.warn('[MOSSAD] Delete: диалог подтверждения не найден, переход отменён');
+                    showToast('⚠️ Диалог подтверждения не найден — переход отменён', true);
+                }
+            } else {
+                // Фиксируем ручные клики пользователя по кнопкам диалога (Удалить / Отмена)
+                let userChoice = null; // 'confirm' | 'cancel'
+                const onDialogClick = (ev) => {
+                    const b = ev.target && ev.target.closest && ev.target.closest('button, [role="button"]');
+                    if (!b || !confirmDialog.contains(b)) return;
+                    userChoice = isGrokConfirmButton(b, clickedDelBtn) ? 'confirm' : 'cancel';
+                };
+                const onDialogKey = (ev) => { if (ev.key === 'Escape') userChoice = 'cancel'; };
+                document.addEventListener('click', onDialogClick, true);
+                document.addEventListener('keydown', onDialogKey, true);
+                const isClosed = () => !isGrokDialogOpen(confirmDialog);
+
+                try {
+                    if (config.deleteAutoconfirm) {
+                        const confirmBtn = await waitForCondition(
+                            () => findGrokConfirmButtonIn(confirmDialog, clickedDelBtn), 2000, 50);
+                        if (confirmBtn) {
+                            triggerClick(confirmBtn, 'Confirm Delete');
+                            console.log('[MOSSAD] Delete: подтверждение нажато, ждём закрытия диалога');
+                            if (await waitForCondition(isClosed, 5000, 50)) deleteConfirmed = true;
+                        }
+                        if (!deleteConfirmed && !isClosed()) {
+                            showToast('⚠️ Не удалось подтвердить автоматически — подтвердите вручную', true);
+                        }
+                    } else {
+                        showToast('🗑 Подтвердите удаление в диалоге Grok');
+                    }
+
+                    if (!deleteConfirmed && !isClosed()) {
+                        // Ручное подтверждение: ждём закрытия диалога до 60 с
+                        await waitForCondition(isClosed, 60000, 100);
+                        deleteConfirmed = isClosed() && userChoice === 'confirm';
+                        if (isClosed() && userChoice !== 'confirm') {
+                            console.log('[MOSSAD] Delete: диалог закрыт без подтверждения — остаёмся на посту');
+                        }
+                    }
+                } finally {
+                    document.removeEventListener('click', onDialogClick, true);
+                    document.removeEventListener('keydown', onDialogKey, true);
+                }
+            }
+
+            // 3. hold post: переход на следующий кадр / пост — только после подтверждённого удаления
+            if (config.deleteHoldpost && deleteConfirmed) {
                 const executeTransition = () => {
                     // А. Приоритет: переключение по киноплёнке (только видео, без перезагрузки)
                     if (targetFilmstripBtn) {
@@ -298,23 +379,9 @@
                     }
                 };
 
-                if (deleteConfirmed) {
-                    // Небольшая задержка (150мс), чтобы сетевой запрос на удаление успел инициироваться
-                    await new Promise(r => setTimeout(r, 150));
-                    executeTransition();
-                } else if (!config.deleteAutoconfirm) {
-                    // При ручном подтверждении ждём закрытия диалога
-                    const waitStart = Date.now();
-                    waitForCondition(() => !document.querySelector('[role="dialog"]'), 15000, 100).then(closed => {
-                        if (closed && Date.now() - waitStart < 14500) {
-                            setTimeout(executeTransition, 150);
-                        }
-                    });
-                } else {
-                    // Фолбэк, если автоподтверждение не вернуло подтверждение
-                    await new Promise(r => setTimeout(r, 300));
-                    executeTransition();
-                }
+                // Небольшая задержка (150мс), чтобы сетевой запрос на удаление успел инициироваться
+                await new Promise(r => setTimeout(r, 150));
+                executeTransition();
             }
         } finally {
             setTimeout(() => {
