@@ -124,30 +124,65 @@
         return Math.max(5, Math.min(200, isNaN(n) ? 30 : n));
     }
 
-    /** Высота одной строки списка: по первой отрисованной строке, иначе по размеру шрифта. */
-    function grokPlaylistRowHeight(panel) {
+    /** Высота одной строки списка по первой отрисованной строке; 0 — если ещё не измерить (скрыто / не в layout). */
+    function grokPlaylistMeasuredRowHeight(panel) {
         for (const sel of ['.mossad-playlist-item', '.mossad-playlist-grp-header']) {
             const row = panel.querySelector(sel);
             const h = row ? row.getBoundingClientRect().height : 0;
             if (h > 4) return h + 1; // + margin-bottom 1px
         }
+        return 0;
+    }
+
+    function grokPlaylistRowHeight(panel) {
+        const m = grokPlaylistMeasuredRowHeight(panel);
+        if (m) return m;
         const font = parseFloat(getComputedStyle(panel).getPropertyValue('--mossad-pl-font-size')) || 11;
         return Math.round(font * 1.15 + 5);
     }
 
-    /** Если пользователь не задавал высоту вручную — подогнать под N видимых строк. */
+    /** Число «строк» списка: файлы + заголовки групп (то, что видно в прокрутке). */
+    function grokPlaylistRowCount(panel) {
+        return panel.querySelectorAll('.mossad-playlist-item, .mossad-playlist-grp-header').length;
+    }
+
+    /**
+     * Если пользователь не задавал высоту вручную — подогнать под N видимых строк.
+     * v1.3.41: решение «auto или N строк» — по ЧИСЛУ строк, а не по измеренной высоте.
+     * В v1.3.40 сравнивался body.scrollHeight: при открытии списка на старте страницы
+     * (виджет ещё скрыт / не в layout) он равен 0 → ставилось height:auto → список во всю длину.
+     * Пока строку не измерить, высота считается по шрифту и пересчитывается, когда layout появится.
+     */
     function grokApplyPlaylistAutoHeight(panel) {
         if (!panel || panel.dataset.autoHeight !== '1') return;
+        const rows = grokPlaylistRows();
+        if (grokPlaylistRowCount(panel) <= rows) {
+            panel.style.height = 'auto';
+            panel.dataset.rowsTarget = 'auto';
+            return;
+        }
         const header = panel.firstElementChild;
-        const headerH = header ? header.getBoundingClientRect().height : 0;
+        const headerH = (header && header.getBoundingClientRect().height) || 33;
         const rowH = grokPlaylistRowHeight(panel);
         const body = panel.querySelector('.mossad-playlist-body');
         const bodyChrome = body ? 4 : 0; // padding 2px сверху/снизу
-        const target = Math.round(headerH + bodyChrome + grokPlaylistRows() * rowH + 2); // + рамка
-        // Если строк меньше N — не растягиваем пустоту: даём контенту определить высоту (max-height 85vh)
-        const natural = body ? headerH + body.scrollHeight + 2 : target;
-        panel.style.height = (natural > 0 && natural < target) ? 'auto' : `${target}px`;
+        const target = Math.round(headerH + bodyChrome + rows * rowH + 2); // + рамка
+        panel.style.height = `${target}px`;
         panel.dataset.rowsTarget = String(target);
+        if (!grokPlaylistMeasuredRowHeight(panel)) grokSchedulePlaylistReMeasure(panel);
+    }
+
+    /** Повторный расчёт, когда список станет видимым (до ~5 с, затем — при наведении). */
+    function grokSchedulePlaylistReMeasure(panel) {
+        if (panel._mossadReMeasure) return;
+        let tries = 0;
+        const tick = () => {
+            if (!panel.isConnected || panel.dataset.autoHeight !== '1') { panel._mossadReMeasure = null; return; }
+            if (grokPlaylistMeasuredRowHeight(panel)) { panel._mossadReMeasure = null; grokApplyPlaylistAutoHeight(panel); return; }
+            if (++tries > 25) { panel._mossadReMeasure = null; return; }
+            panel._mossadReMeasure = setTimeout(tick, 200);
+        };
+        panel._mossadReMeasure = setTimeout(tick, 50);
     }
 
     function grokPlaylistEdgeAt(panel, x, y) {
@@ -185,6 +220,8 @@
             if (edge) panel.dataset.edge = edge; else delete panel.dataset.edge;
         });
         panel.addEventListener('mouseleave', () => { if (!drag) delete panel.dataset.edge; });
+        // v1.3.41: если на старте строку было не измерить — досчитать при первом наведении
+        panel.addEventListener('mouseenter', () => { if (!drag) grokApplyPlaylistAutoHeight(panel); });
 
         // capture: перехватываем раньше перетаскивания виджета за шапку
         panel.addEventListener('mousedown', (e) => {

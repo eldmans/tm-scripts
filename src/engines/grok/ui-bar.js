@@ -170,9 +170,7 @@
             const idx = GR_STATES.indexOf(grpModeCfg);
             grpModeCfg = GR_STATES[(idx + 1) % GR_STATES.length];
             saveModeToCollection('grpMode', grpModeCfg);
-            btnGr.textContent = `Gr${GR_ICONS[grpModeCfg]}`;
-            btnGr.title       = GR_TIPS[grpModeCfg];
-            btnGr.style.cssText = BASE_BTN + grBtnCss(grpModeCfg);
+            refreshModeButtons();
         };
 
         // Кнопка Md (порядок внутри группы)
@@ -184,20 +182,70 @@
             const idx = MD_STATES.indexOf(itemModeCfg);
             itemModeCfg = MD_STATES[(idx + 1) % MD_STATES.length];
             saveModeToCollection('itemMode', itemModeCfg);
+            refreshModeButtons();
+        };
+
+        // ── v1.3.41: «Случайно» 🔀 — весь список вперемешку, без учёта групп ──
+        // Это ровно состояние «Gr− Md−» (4-е, приглушённое, у обеих кнопок): queue.js уже умеет
+        // случайный порядок по всей коллекции без повторов за круг, «назад» — по истории (v1.3.38).
+        // Своего флага нет: кнопка горит, когда Gr и Md обе «−». Любой активный Gr/Md гасит её сама.
+        // Прежние Gr/Md запоминаются в коллекции (preRandom) и возвращаются повторным нажатием.
+        const isRandomOn = () => grpModeCfg === 'off' && itemModeCfg === 'off';
+        const RND_TIPS = {
+            on:  '🔀 Случайно: ВКЛ — весь список вперемешку, группы не учитываются. Нажмите, чтобы вернуть прежние Gr/Md',
+            off: '🔀 Случайно: весь список вперемешку без учёта групп (Gr и Md → «−»)',
+        };
+        const rndBtnCss = (on) => (on
+            ? 'background:#3a2a05;color:#fbbf24;border-color:rgba(251,191,36,0.6);'
+            : 'background:#1a1a2e;color:#6b7280;') + 'margin-right:6px;';
+        const btnRnd = mkBtn('mossad-gallery-rndmode', '🔀', RND_TIPS.off, rndBtnCss(false));
+        function refreshModeButtons() {
+            btnGr.textContent = `Gr${GR_ICONS[grpModeCfg]}`;
+            btnGr.title       = GR_TIPS[grpModeCfg];
+            btnGr.style.cssText = BASE_BTN + grBtnCss(grpModeCfg);
             btnMd.textContent = `Md${MD_ICONS[itemModeCfg]}`;
             btnMd.title       = MD_TIPS[itemModeCfg];
             btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
+            const on = isRandomOn();
+            btnRnd.title = on ? RND_TIPS.on : RND_TIPS.off;
+            btnRnd.style.cssText = BASE_BTN + rndBtnCss(on);
+            btnRnd.dataset.active = on ? '1' : '0';
+        }
+        btnRnd.onclick = () => {
+            let data = {};
+            try { data = JSON.parse(_gSS.getItem(GALLERY_COLLECTION_KEY) || '{}') || {}; } catch (e) {}
+            if (isRandomOn()) {
+                const prev = data.preRandom || {};
+                grpModeCfg  = (prev.grpMode  && prev.grpMode  !== 'off') ? prev.grpMode  : 'seq';
+                itemModeCfg = (prev.itemMode && prev.itemMode !== 'off') ? prev.itemMode : 'fwd';
+                delete data.preRandom;
+                showToast(`🔀 Случайно: выкл (Gr${GR_ICONS[grpModeCfg]} Md${MD_ICONS[itemModeCfg]})`);
+            } else {
+                data.preRandom = { grpMode: grpModeCfg, itemMode: itemModeCfg };
+                grpModeCfg = 'off';
+                itemModeCfg = 'off';
+                showToast('🔀 Случайно: весь список вперемешку (без групп)');
+            }
+            data.grpMode = grpModeCfg;
+            data.itemMode = itemModeCfg;
+            try { _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(data)); } catch (e) {}
+            mossadDebug('mode', 'случайный режим', { on: isRandomOn(), grpMode: grpModeCfg, itemMode: itemModeCfg });
+            refreshModeButtons();
         };
+        refreshModeButtons();
 
-        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd);
+        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd, btnRnd);
 
-        // ── Кнопка вызова настроек горячих клавиш (⌨) слева от крестика (✕) ──
-        // v1.3.40: кнопка ⌨ перенесена во второй ряд виджета (справа от 🔄, см. ui/panel.js)
+        // ── Кнопка окна настроек (⌨) слева от крестика (✕), отделена от 🔀 небольшим зазором ──
+        // v1.3.41: возвращена в верхний ряд (в v1.3.40 была во втором ряду)
+        const btnHk = mkBtn('mossad-gallery-hk', '⌨', 'Настройки: горячие клавиши (Ctrl+F1)', 'background:#1f2937;color:#9ca3af;font-size:12px;padding:2px 6px;margin-left:auto;');
+        btnHk.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('hotkeys'); };
+        row.append(btnHk);
 
         // Переносим крестик закрытия на самый верхний ряд (на Grok это mossad-gallery-row)
         const closeBtn = document.getElementById('mossad-btn-close');
         if (closeBtn) {
-            closeBtn.style.marginLeft = 'auto';
+            closeBtn.style.marginLeft = '4px';
             row.append(closeBtn);
         }
 

@@ -110,6 +110,22 @@
         _postPlayerNav(wasPaused);
     }
 
+    // v1.3.41: Insert (большое слайдшоу) на Grok ловим на window в фазе capture — раньше сайта.
+    // Раньше обработчик стоял в фазе bubble и проверял «залипший» GALLERY_SS_KEY.active:
+    // на /imagine/saved после прошлого слайдшоу первое нажатие уходило в toggleGalleryPause(),
+    // которая сразу выходила (слайдшоу на самом деле не идёт) — нажатие «терялось».
+    function grokGalleryPlayPauseKey(e) {
+        if (window.capturingFor !== null || rootDomain !== 'grok.com') return;
+        if (!hotkeyMatches(e, config.hk.galleryPlayPause)) return;
+        // В поле ввода Insert ничего не печатает — пропускаем только «печатающие» клавиши
+        const typingKey = typeof e.key === 'string' && e.key.length === 1 && !(e.ctrlKey || e.altKey || e.metaKey);
+        if (typingKey && isEditableElement(document.activeElement)) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        grokHandleGalleryPlayPause('hotkey');
+    }
+    window.addEventListener('keydown', grokGalleryPlayPauseKey, true);
+
     // Снятие залипшего фокуса с текстовых полей при клике в медиа/фон/элементы вне полей ввода
     window.addEventListener('pointerdown', function (e) {
         if (!e.target) return;
@@ -231,14 +247,7 @@
         if (hotkeyMatches(e, config.hk.galleryPlayPause)) {
             e.preventDefault();
             if (rootDomain === 'grok.com') {
-                const active = window._mossadGalleryActive || (() => {
-                    try { return !!(JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem(GALLERY_SS_KEY) || '{}').active); } catch { return false; }
-                })();
-                if (active) {
-                    toggleGalleryPause();
-                } else {
-                    grokInsertCollectOrStart(); // v1.3.40: нет ссылок → 1-е нажатие собирает, 2-е стартует
-                }
+                grokHandleGalleryPlayPause('hotkey-bubble'); // обычно уже обработано в capture (см. выше)
             } else {
                 startSlideshow();
             }

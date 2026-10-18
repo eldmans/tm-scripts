@@ -204,6 +204,27 @@
         return 'collect';
     }
 
+    /**
+     * v1.3.41: единая точка для Insert. Пауза/продолжение — только если слайдшоу реально идёт
+     * в этой вкладке (window._mossadGalleryActive). «Активный» флаг в sessionStorage без живого
+     * слайдшоу на /imagine/saved — устаревший: чистим его и идём в «собрать → старт».
+     */
+    function grokHandleGalleryPlayPause(source = 'hotkey') {
+        if (window._mossadGalleryActive) {
+            mossadDebug('insert', 'пауза/продолжение', { source });
+            toggleGalleryPause();
+            return 'toggle';
+        }
+        let ssActive = false;
+        try { ssActive = !!JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch (e) {}
+        if (ssActive && isGrokSavedPage()) {
+            mossadDebug('insert', 'устаревший флаг active на Saved — сброшен', { source });
+            _gSS.removeItem(GALLERY_SS_KEY);
+            sessionStorage.removeItem('mossad_gallery_paused');
+        }
+        return grokInsertCollectOrStart();
+    }
+
     function grokStartGallerySlideshow() {
         const struct = grokGetPlaylistStructure();
         if (!struct || !struct.items.length) {
@@ -217,6 +238,10 @@
         if (curPos && curPos.currentItem) {
             startItem = curPos.currentItem;
         } else {
+            // v1.3.41: «Случайно» (Gr− Md−) — старт с любого элемента всей коллекции
+            if (struct.grpMode === 'off' && (struct.itemMode === 'off' || struct.itemMode === 'rnd')) {
+                startItem = struct.items[Math.floor(Math.random() * struct.items.length)];
+            }
             // Выбираем стартовую группу
             let startGrp = null;
             if (struct.grpMode === 'rev') {
@@ -226,7 +251,9 @@
             } else {
                 startGrp = struct.groups[0];
             }
-            if (startGrp && startGrp.items.length) {
+            if (startItem) {
+                // уже выбран (случайный режим)
+            } else if (startGrp && startGrp.items.length) {
                 if (struct.itemMode === 'rev') {
                     startItem = startGrp.items[startGrp.items.length - 1];
                 } else if (struct.itemMode === 'rnd' || struct.itemMode === 'off') {

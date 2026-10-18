@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.40
+// @version      1.3.41
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -10,6 +10,7 @@
 // @grant        GM_download
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_addValueChangeListener
 // @connect      pinimg.com
 // @connect      *.pinimg.com
 // @connect      *
@@ -21,7 +22,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.40';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.41';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -131,10 +132,109 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     };
 
     let config = {};
+    let siteHasSavedConfig = false; // v1.3.41: есть ли у этого сайта свои сохранённые настройки
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
+        siteHasSavedConfig = !!stored;
         config = stored ? JSON.parse(stored) : {};
     } catch (e) {}
+
+    // ── v1.3.41: общие «умолчания» для всех сайтов (GM-хранилище Tampermonkey) ──
+    // Применяются ТОЛЬКО к сайту без сохранённого конфига (вместо заводских DEFAULT_CONFIG).
+    // Сохранённые настройки сайтов не трогаются. Заводские значения — запасной вариант.
+    const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
+    const GLOBAL_DEFAULT_KEYS = [
+        'slideshowDelay', 'videoLoops', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
+        'downloadType', 'pdAction', 'filenameTemplate', 'filenameTemplateEnabled',
+        'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates',
+        'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
+        'playlistRows', 'playlistWidth', 'collectWatchSec',
+        'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS',
+    ];
+    const GlobalDefaults = {
+        KEY: GLOBAL_DEFAULTS_GM_KEY,
+        keys: GLOBAL_DEFAULT_KEYS,
+        /** Только известные ключи и только значения того же типа, что у заводских (мусор отбрасывается). */
+        sanitize(src) {
+            const out = {};
+            if (!src || typeof src !== 'object') return out;
+            for (const k of GLOBAL_DEFAULT_KEYS) {
+                if (!(k in src)) continue;
+                const f = DEFAULT_CONFIG[k], v = src[k];
+                if (Array.isArray(f)) { if (Array.isArray(v)) out[k] = v.filter(x => typeof x === 'string'); }
+                else if (typeof f === 'number') { const n = Number(v); if (isFinite(n)) out[k] = n; }
+                else if (typeof v === typeof f) out[k] = v;
+            }
+            return out;
+        },
+        read() {
+            if (typeof GM_getValue !== 'function') return null;
+            try {
+                const raw = GM_getValue(GLOBAL_DEFAULTS_GM_KEY, '');
+                if (!raw) return null;
+                const o = GlobalDefaults.sanitize(typeof raw === 'string' ? JSON.parse(raw) : raw);
+                return Object.keys(o).length ? o : null;
+            } catch (e) { return null; }
+        },
+        write(obj) {
+            if (typeof GM_setValue !== 'function') return false;
+            GM_setValue(GLOBAL_DEFAULTS_GM_KEY, JSON.stringify(GlobalDefaults.sanitize(obj)));
+            return true;
+        },
+        clear() { if (typeof GM_setValue === 'function') GM_setValue(GLOBAL_DEFAULTS_GM_KEY, ''); },
+        /** Заводские значения (копия). */
+        factory() { return GlobalDefaults.sanitize(JSON.parse(JSON.stringify(DEFAULT_CONFIG))); },
+        /** Действующие умолчания: сохранённые поверх заводских. */
+        effective() { return Object.assign(GlobalDefaults.factory(), GlobalDefaults.read() || {}); },
+        /** Срез текущего конфига сайта. */
+        fromConfig(cfg) { return GlobalDefaults.sanitize(JSON.parse(JSON.stringify(cfg || {}))); },
+        // ── «Применить во всех контейнерах» ──
+        // localStorage у каждого контейнера Firefox (и у каждого сайта) свой, GM-хранилище — общее.
+        // Кнопка пишет в GM «штамп» { id, ts, keys }; каждый контейнер при загрузке (и живьём через
+        // GM_addValueChangeListener) сравнивает его со своим последним применённым (localStorage) и
+        // перезаписывает ТОЛЬКО перечисленные ключи значениями общих умолчаний, затем запоминает штамп.
+        APPLY_KEY: 'mossad_global_defaults_apply',
+        SEEN_LS_KEY: 'mossad_global_defaults_apply_seen',
+        readStamp() {
+            if (typeof GM_getValue !== 'function') return null;
+            try {
+                const raw = GM_getValue('mossad_global_defaults_apply', '');
+                const st = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+                return (st && st.id && Array.isArray(st.keys)) ? st : null;
+            } catch (e) { return null; }
+        },
+        writeStamp(keys) {
+            if (typeof GM_setValue !== 'function') return null;
+            const st = { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, ts: Date.now(), keys: keys.filter(k => GLOBAL_DEFAULT_KEYS.includes(k)) };
+            GM_setValue('mossad_global_defaults_apply', JSON.stringify(st));
+            return st;
+        },
+        /** Применяет штамп к конфигу этого сайта/контейнера, если он ещё не применён. Возвращает список применённых ключей или null. */
+        applyStampIfNew(stamp) {
+            const st = stamp || GlobalDefaults.readStamp();
+            if (!st) return null;
+            let seen = '';
+            try { seen = localStorage.getItem('mossad_global_defaults_apply_seen') || ''; } catch (e) {}
+            if (seen === st.id) return null;
+            const vals = GlobalDefaults.effective();
+            const applied = [];
+            for (const k of st.keys) {
+                if (!(k in vals)) continue;
+                config[k] = JSON.parse(JSON.stringify(vals[k]));
+                applied.push(k);
+            }
+            try {
+                // Сайт без своего конфига не «сохраняем» насильно: он и так живёт на общих умолчаниях
+                // (иначе он перестал бы получать их дальнейшие изменения).
+                if (applied.length && GlobalDefaults.siteHasSavedConfig()) persistLocalConfig();
+                localStorage.setItem('mossad_global_defaults_apply_seen', st.id);
+            } catch (e) {}
+            if (applied.length) console.log('[MOSSAD] Общие умолчания применены (штамп ' + st.id + '):', applied.join(', '));
+            return applied;
+        },
+        loadedWithGlobalDefaults: () => !siteHasSavedConfig && !!GlobalDefaults.read(),
+        siteHasSavedConfig: () => { try { return !!localStorage.getItem(STORAGE_KEY); } catch (e) { return siteHasSavedConfig; } },
+    };
 
     function mergeDeep(target, source) {
         for (const key of Object.keys(source)) {
@@ -145,7 +245,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         Object.assign(target || {}, source);
         return target;
     }
-    config = mergeDeep(JSON.parse(JSON.stringify(DEFAULT_CONFIG)), config);
+    {
+        const base = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+        if (!siteHasSavedConfig) {
+            const gd = GlobalDefaults.read();
+            if (gd) Object.assign(base, JSON.parse(JSON.stringify(gd)));
+        }
+        config = mergeDeep(base, config);
+    }
 
     // ── GitHub-токен: хранится в общем хранилище Tampermonkey (GM_setValue), а НЕ в localStorage сайта ──
     // v1.3.34: раньше токен лежал в localStorage каждого сайта (`mossad_{domain}_config`) и был
@@ -296,6 +403,31 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     delete config.hk.videoGen10s;
 
     migrateUpscaleDefaultHotkey();
+
+    // v1.3.41: «Применить во всех контейнерах» — штамп из GM, если этот контейнер его ещё не применял
+    try { GlobalDefaults.applyStampIfNew(); } catch (e) {}
+    // …и живьём для уже открытых вкладок (Tampermonkey: GM_addValueChangeListener)
+    if (typeof GM_addValueChangeListener === 'function') {
+        try {
+            GM_addValueChangeListener(GLOBAL_DEFAULTS_GM_KEY, () => {
+                // Сайт без своих настроек сразу переходит на новые общие умолчания
+                if (GlobalDefaults.siteHasSavedConfig()) return;
+                const gd = GlobalDefaults.effective();
+                for (const k of Object.keys(gd)) config[k] = JSON.parse(JSON.stringify(gd[k]));
+                if (window.updateWidgetUI) window.updateWidgetUI();
+            });
+            GM_addValueChangeListener('mossad_global_defaults_apply', (name, oldVal, newVal) => {
+                let st = null;
+                try { st = newVal ? (typeof newVal === 'string' ? JSON.parse(newVal) : newVal) : null; } catch (e) {}
+                if (!st || !st.id || !Array.isArray(st.keys)) return;
+                const applied = GlobalDefaults.applyStampIfNew(st);
+                if (applied && applied.length) {
+                    if (window.updateWidgetUI) window.updateWidgetUI();
+                    if (typeof showToast === 'function') showToast(`🌐 Общие умолчания применены (${applied.length})`);
+                }
+            });
+        } catch (e) {}
+    }
 
     // Глобальная синхронизация шаблона имени файла через GM_getValue
     if (typeof GM_getValue === 'function') {
@@ -3568,7 +3700,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             date,
             items: mergedItems,
             grpMode,
-            itemMode
+            itemMode,
+            // v1.3.41: сохраняем Gr/Md, запомненные кнопкой 🔀 «Случайно»
+            ...(existingData.preRandom ? { preRandom: existingData.preRandom } : {})
         }));
 
         if (btnEl) {
@@ -4507,6 +4641,27 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return 'collect';
     }
 
+    /**
+     * v1.3.41: единая точка для Insert. Пауза/продолжение — только если слайдшоу реально идёт
+     * в этой вкладке (window._mossadGalleryActive). «Активный» флаг в sessionStorage без живого
+     * слайдшоу на /imagine/saved — устаревший: чистим его и идём в «собрать → старт».
+     */
+    function grokHandleGalleryPlayPause(source = 'hotkey') {
+        if (window._mossadGalleryActive) {
+            mossadDebug('insert', 'пауза/продолжение', { source });
+            toggleGalleryPause();
+            return 'toggle';
+        }
+        let ssActive = false;
+        try { ssActive = !!JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch (e) {}
+        if (ssActive && isGrokSavedPage()) {
+            mossadDebug('insert', 'устаревший флаг active на Saved — сброшен', { source });
+            _gSS.removeItem(GALLERY_SS_KEY);
+            sessionStorage.removeItem('mossad_gallery_paused');
+        }
+        return grokInsertCollectOrStart();
+    }
+
     function grokStartGallerySlideshow() {
         const struct = grokGetPlaylistStructure();
         if (!struct || !struct.items.length) {
@@ -4520,6 +4675,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (curPos && curPos.currentItem) {
             startItem = curPos.currentItem;
         } else {
+            // v1.3.41: «Случайно» (Gr− Md−) — старт с любого элемента всей коллекции
+            if (struct.grpMode === 'off' && (struct.itemMode === 'off' || struct.itemMode === 'rnd')) {
+                startItem = struct.items[Math.floor(Math.random() * struct.items.length)];
+            }
             // Выбираем стартовую группу
             let startGrp = null;
             if (struct.grpMode === 'rev') {
@@ -4529,7 +4688,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             } else {
                 startGrp = struct.groups[0];
             }
-            if (startGrp && startGrp.items.length) {
+            if (startItem) {
+                // уже выбран (случайный режим)
+            } else if (startGrp && startGrp.items.length) {
                 if (struct.itemMode === 'rev') {
                     startItem = startGrp.items[startGrp.items.length - 1];
                 } else if (struct.itemMode === 'rnd' || struct.itemMode === 'off') {
@@ -5012,9 +5173,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const idx = GR_STATES.indexOf(grpModeCfg);
             grpModeCfg = GR_STATES[(idx + 1) % GR_STATES.length];
             saveModeToCollection('grpMode', grpModeCfg);
-            btnGr.textContent = `Gr${GR_ICONS[grpModeCfg]}`;
-            btnGr.title       = GR_TIPS[grpModeCfg];
-            btnGr.style.cssText = BASE_BTN + grBtnCss(grpModeCfg);
+            refreshModeButtons();
         };
 
         // Кнопка Md (порядок внутри группы)
@@ -5026,20 +5185,70 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const idx = MD_STATES.indexOf(itemModeCfg);
             itemModeCfg = MD_STATES[(idx + 1) % MD_STATES.length];
             saveModeToCollection('itemMode', itemModeCfg);
+            refreshModeButtons();
+        };
+
+        // ── v1.3.41: «Случайно» 🔀 — весь список вперемешку, без учёта групп ──
+        // Это ровно состояние «Gr− Md−» (4-е, приглушённое, у обеих кнопок): queue.js уже умеет
+        // случайный порядок по всей коллекции без повторов за круг, «назад» — по истории (v1.3.38).
+        // Своего флага нет: кнопка горит, когда Gr и Md обе «−». Любой активный Gr/Md гасит её сама.
+        // Прежние Gr/Md запоминаются в коллекции (preRandom) и возвращаются повторным нажатием.
+        const isRandomOn = () => grpModeCfg === 'off' && itemModeCfg === 'off';
+        const RND_TIPS = {
+            on:  '🔀 Случайно: ВКЛ — весь список вперемешку, группы не учитываются. Нажмите, чтобы вернуть прежние Gr/Md',
+            off: '🔀 Случайно: весь список вперемешку без учёта групп (Gr и Md → «−»)',
+        };
+        const rndBtnCss = (on) => (on
+            ? 'background:#3a2a05;color:#fbbf24;border-color:rgba(251,191,36,0.6);'
+            : 'background:#1a1a2e;color:#6b7280;') + 'margin-right:6px;';
+        const btnRnd = mkBtn('mossad-gallery-rndmode', '🔀', RND_TIPS.off, rndBtnCss(false));
+        function refreshModeButtons() {
+            btnGr.textContent = `Gr${GR_ICONS[grpModeCfg]}`;
+            btnGr.title       = GR_TIPS[grpModeCfg];
+            btnGr.style.cssText = BASE_BTN + grBtnCss(grpModeCfg);
             btnMd.textContent = `Md${MD_ICONS[itemModeCfg]}`;
             btnMd.title       = MD_TIPS[itemModeCfg];
             btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
+            const on = isRandomOn();
+            btnRnd.title = on ? RND_TIPS.on : RND_TIPS.off;
+            btnRnd.style.cssText = BASE_BTN + rndBtnCss(on);
+            btnRnd.dataset.active = on ? '1' : '0';
+        }
+        btnRnd.onclick = () => {
+            let data = {};
+            try { data = JSON.parse(_gSS.getItem(GALLERY_COLLECTION_KEY) || '{}') || {}; } catch (e) {}
+            if (isRandomOn()) {
+                const prev = data.preRandom || {};
+                grpModeCfg  = (prev.grpMode  && prev.grpMode  !== 'off') ? prev.grpMode  : 'seq';
+                itemModeCfg = (prev.itemMode && prev.itemMode !== 'off') ? prev.itemMode : 'fwd';
+                delete data.preRandom;
+                showToast(`🔀 Случайно: выкл (Gr${GR_ICONS[grpModeCfg]} Md${MD_ICONS[itemModeCfg]})`);
+            } else {
+                data.preRandom = { grpMode: grpModeCfg, itemMode: itemModeCfg };
+                grpModeCfg = 'off';
+                itemModeCfg = 'off';
+                showToast('🔀 Случайно: весь список вперемешку (без групп)');
+            }
+            data.grpMode = grpModeCfg;
+            data.itemMode = itemModeCfg;
+            try { _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(data)); } catch (e) {}
+            mossadDebug('mode', 'случайный режим', { on: isRandomOn(), grpMode: grpModeCfg, itemMode: itemModeCfg });
+            refreshModeButtons();
         };
+        refreshModeButtons();
 
-        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd);
+        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd, btnRnd);
 
-        // ── Кнопка вызова настроек горячих клавиш (⌨) слева от крестика (✕) ──
-        // v1.3.40: кнопка ⌨ перенесена во второй ряд виджета (справа от 🔄, см. ui/panel.js)
+        // ── Кнопка окна настроек (⌨) слева от крестика (✕), отделена от 🔀 небольшим зазором ──
+        // v1.3.41: возвращена в верхний ряд (в v1.3.40 была во втором ряду)
+        const btnHk = mkBtn('mossad-gallery-hk', '⌨', 'Настройки: горячие клавиши (Ctrl+F1)', 'background:#1f2937;color:#9ca3af;font-size:12px;padding:2px 6px;margin-left:auto;');
+        btnHk.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('hotkeys'); };
+        row.append(btnHk);
 
         // Переносим крестик закрытия на самый верхний ряд (на Grok это mossad-gallery-row)
         const closeBtn = document.getElementById('mossad-btn-close');
         if (closeBtn) {
-            closeBtn.style.marginLeft = 'auto';
+            closeBtn.style.marginLeft = '4px';
             row.append(closeBtn);
         }
 
@@ -5183,30 +5392,65 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return Math.max(5, Math.min(200, isNaN(n) ? 30 : n));
     }
 
-    /** Высота одной строки списка: по первой отрисованной строке, иначе по размеру шрифта. */
-    function grokPlaylistRowHeight(panel) {
+    /** Высота одной строки списка по первой отрисованной строке; 0 — если ещё не измерить (скрыто / не в layout). */
+    function grokPlaylistMeasuredRowHeight(panel) {
         for (const sel of ['.mossad-playlist-item', '.mossad-playlist-grp-header']) {
             const row = panel.querySelector(sel);
             const h = row ? row.getBoundingClientRect().height : 0;
             if (h > 4) return h + 1; // + margin-bottom 1px
         }
+        return 0;
+    }
+
+    function grokPlaylistRowHeight(panel) {
+        const m = grokPlaylistMeasuredRowHeight(panel);
+        if (m) return m;
         const font = parseFloat(getComputedStyle(panel).getPropertyValue('--mossad-pl-font-size')) || 11;
         return Math.round(font * 1.15 + 5);
     }
 
-    /** Если пользователь не задавал высоту вручную — подогнать под N видимых строк. */
+    /** Число «строк» списка: файлы + заголовки групп (то, что видно в прокрутке). */
+    function grokPlaylistRowCount(panel) {
+        return panel.querySelectorAll('.mossad-playlist-item, .mossad-playlist-grp-header').length;
+    }
+
+    /**
+     * Если пользователь не задавал высоту вручную — подогнать под N видимых строк.
+     * v1.3.41: решение «auto или N строк» — по ЧИСЛУ строк, а не по измеренной высоте.
+     * В v1.3.40 сравнивался body.scrollHeight: при открытии списка на старте страницы
+     * (виджет ещё скрыт / не в layout) он равен 0 → ставилось height:auto → список во всю длину.
+     * Пока строку не измерить, высота считается по шрифту и пересчитывается, когда layout появится.
+     */
     function grokApplyPlaylistAutoHeight(panel) {
         if (!panel || panel.dataset.autoHeight !== '1') return;
+        const rows = grokPlaylistRows();
+        if (grokPlaylistRowCount(panel) <= rows) {
+            panel.style.height = 'auto';
+            panel.dataset.rowsTarget = 'auto';
+            return;
+        }
         const header = panel.firstElementChild;
-        const headerH = header ? header.getBoundingClientRect().height : 0;
+        const headerH = (header && header.getBoundingClientRect().height) || 33;
         const rowH = grokPlaylistRowHeight(panel);
         const body = panel.querySelector('.mossad-playlist-body');
         const bodyChrome = body ? 4 : 0; // padding 2px сверху/снизу
-        const target = Math.round(headerH + bodyChrome + grokPlaylistRows() * rowH + 2); // + рамка
-        // Если строк меньше N — не растягиваем пустоту: даём контенту определить высоту (max-height 85vh)
-        const natural = body ? headerH + body.scrollHeight + 2 : target;
-        panel.style.height = (natural > 0 && natural < target) ? 'auto' : `${target}px`;
+        const target = Math.round(headerH + bodyChrome + rows * rowH + 2); // + рамка
+        panel.style.height = `${target}px`;
         panel.dataset.rowsTarget = String(target);
+        if (!grokPlaylistMeasuredRowHeight(panel)) grokSchedulePlaylistReMeasure(panel);
+    }
+
+    /** Повторный расчёт, когда список станет видимым (до ~5 с, затем — при наведении). */
+    function grokSchedulePlaylistReMeasure(panel) {
+        if (panel._mossadReMeasure) return;
+        let tries = 0;
+        const tick = () => {
+            if (!panel.isConnected || panel.dataset.autoHeight !== '1') { panel._mossadReMeasure = null; return; }
+            if (grokPlaylistMeasuredRowHeight(panel)) { panel._mossadReMeasure = null; grokApplyPlaylistAutoHeight(panel); return; }
+            if (++tries > 25) { panel._mossadReMeasure = null; return; }
+            panel._mossadReMeasure = setTimeout(tick, 200);
+        };
+        panel._mossadReMeasure = setTimeout(tick, 50);
     }
 
     function grokPlaylistEdgeAt(panel, x, y) {
@@ -5244,6 +5488,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             if (edge) panel.dataset.edge = edge; else delete panel.dataset.edge;
         });
         panel.addEventListener('mouseleave', () => { if (!drag) delete panel.dataset.edge; });
+        // v1.3.41: если на старте строку было не измерить — досчитать при первом наведении
+        panel.addEventListener('mouseenter', () => { if (!drag) grokApplyPlaylistAutoHeight(panel); });
 
         // capture: перехватываем раньше перетаскивания виджета за шапку
         panel.addEventListener('mousedown', (e) => {
@@ -7929,14 +8175,6 @@ function findMediaForDownload() {
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
-        // v1.3.40: ⌨ — окно настроек на вкладке «Горячие клавиши» (раньше было в верхнем ряду Grok)
-        const btnHkSettings = document.createElement('button');
-        btnHkSettings.id = 'mossad-btn-hk-settings';
-        btnHkSettings.innerHTML = '⌨';
-        btnHkSettings.title = 'Настройки: горячие клавиши (Ctrl+F1)';
-        btnHkSettings.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #9ca3af; cursor: pointer; font-size: 13px; padding: 4px 7px;`;
-        btnHkSettings.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('hotkeys'); };
-
         const btnTogglePanel = document.createElement('button');
         btnTogglePanel.id = 'mossad-btn-toggle-panel';
         btnTogglePanel.innerHTML = '▼';
@@ -7961,8 +8199,8 @@ function findMediaForDownload() {
             window.updateWidgetUI();
         };
 
-        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ⌨ | ▼ | ✕ (на Grok ✕ переносится на верхний ряд)
-        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnHkSettings, btnTogglePanel, btnClose);
+        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ▼ | ✕ (на Grok ⌨ и ✕ — в верхнем ряду, см. ui-bar.js)
+        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnTogglePanel, btnClose);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -8035,7 +8273,7 @@ function findMediaForDownload() {
                             Видео (↺): <input id="mossad-in-loops" type="number" min="1" max="100" value="${config.videoLoops}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                         <label title="Задержка фото" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
-                            Фото (сек): <input id="mossad-in-pdelay" type="number" min="1" max="999" value="${config.slideshowDelay}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
+                            Фото (сек): <input id="mossad-in-pdelay" type="number" min="0" max="999" value="${config.slideshowDelay}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                         <label title="Пауза после видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
                             Пауза (сек): <input id="mossad-in-vdelay" type="number" min="0" max="999" value="${config.delayAfterVideo}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
@@ -8159,9 +8397,12 @@ function findMediaForDownload() {
                 }
             }
             // Инпуты таймеров (Видео круги, Фото задержка, Пауза после видео) доступны ВСЕГДА
-            panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, parseInt(e.target.value) || 1)), 300);
-            panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(1, parseInt(e.target.value) || 3)), 300);
-            panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, parseInt(e.target.value) || 2)), 300);
+            // v1.3.41: 0 с — допустимое значение (раньше «0 || 3» / «0 || 2» превращало 0 в 3 / 2 с, а для фото min был 1).
+            // Пустое/некорректное поле — значение не меняется.
+            const numOr = (v, fallback) => { const n = parseFloat(v); return isFinite(n) ? n : fallback; };
+            panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, Math.round(numOr(e.target.value, config.videoLoops)))), 300);
+            panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(0, numOr(e.target.value, config.slideshowDelay))), 300);
+            panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, numOr(e.target.value, config.delayAfterVideo))), 300);
             panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
             panel.querySelector('#mossad-cb-fn-tpl').onchange = (e) => Settings.set('filenameTemplateEnabled', e.target.checked);
@@ -8290,8 +8531,11 @@ function findMediaForDownload() {
                 localStorage.removeItem(STORAGE_KEY);
                 localStorage.removeItem('mossad_playlist_width');
                 Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+                // v1.3.41: сайт без своих настроек получает общие умолчания (вкладка «🌐 По умолчанию»), если они есть
+                const gd = GlobalDefaults.read();
+                if (gd) Object.assign(config, JSON.parse(JSON.stringify(gd)));
                 window.updateWidgetUI();
-                showToast('✅ Настройки сброшены по умолчанию');
+                showToast(gd ? '✅ Настройки сайта сброшены к общим умолчаниям' : '✅ Настройки сброшены по умолчанию');
             };
         };
 
@@ -8475,6 +8719,130 @@ function findMediaForDownload() {
         modal.remove();
     }
 
+    // ── v1.3.41: вкладка «🌐 По умолчанию» — общие умолчания (GM), см. GlobalDefaults в core/config.js ──
+    const GLOBAL_DEFAULTS_FIELDS = [
+        { k: 'slideshowDelay',    t: 'num', label: 'Фото: показ, сек', step: 0.5, min: 0 },
+        { k: 'videoLoops',        t: 'num', label: 'Видео: кругов (↺)', step: 1, min: 1 },
+        { k: 'delayAfterVideo',   t: 'num', label: 'Пауза после видео, сек', step: 0.5, min: 0 },
+        { k: 'slideshowDirections', t: 'dirs', label: 'Направления D-pad' },
+        { k: 'loopFeed',          t: 'bool', label: 'R: повторять ленту' },
+        { k: 'downloadType',      t: 'sel', label: 'Скачивание', opts: [['none', 'Не скачивать'], ['all', 'Качать всё'], ['photo', 'Качать фото'], ['video', 'Качать видео']] },
+        { k: 'pdAction',          t: 'sel', label: 'После DL', opts: [['none', '—'], ['up', '+1'], ['del', 'del (Grok)']] },
+        { k: 'filenameTemplate',  t: 'text', label: 'Шаблон имени файла' },
+        { k: 'filenameTemplateEnabled', t: 'bool', label: 'Использовать шаблон' },
+        { k: 'allowDuplicates',   t: 'bool', label: 'Дубли: качать без вопроса' },
+        { k: 'deleteHoldpost',    t: 'hold', label: 'hold post (удаление)' },
+        { k: 'stopOnTabSwitch',   t: 'bool', label: 'Tab: стоп при смене вкладки' },
+        { k: 'stopOnBrsrSwitch',  t: 'bool', label: 'Brsr: стоп при уходе из браузера' },
+        { k: 'autoFS',            t: 'bool', label: 'FS: авто полный экран' },
+        { k: 'widgetZoom',        t: 'num', label: 'Масштаб виджета', step: 0.05, min: 0.5 },
+        { k: 'closePanelOnOutsideClick', t: 'bool', label: 'Сворачивать меню кликом вне' },
+        { k: 'showSoundToast',    t: 'bool', label: 'Тост переключения звука' },
+        { k: 'playlistRows',      t: 'num', label: 'Список: видимых строк', step: 1, min: 5 },
+        { k: 'playlistWidth',     t: 'num', label: 'Список: ширина, px (0 = авто)', step: 10, min: 0 },
+        { k: 'collectWatchSec',   t: 'num', label: 'Досбор после «Собрать», сек', step: 5, min: 5 },
+        { k: 'pinterestMode',     t: 'text', label: 'Pinterest: режим (rand / +1 / 1–9)' },
+        { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
+        { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото', step: 5, min: 0 },
+        { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
+        { k: 'pinterestAutoFS',   t: 'bool', label: 'Pinterest: авто FS' },
+    ];
+
+    function initGlobalDefaultsTab(modal) {
+        const form = modal.querySelector('#mossad-def-form');
+        const status = modal.querySelector('#mossad-def-status');
+        if (!form) return;
+        const inputCss = 'background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;';
+        const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        form.innerHTML = GLOBAL_DEFAULTS_FIELDS.map(f => {
+            const id = `mossad-def-${f.k}`;
+            let ctl = '';
+            if (f.t === 'num') ctl = `<input id="${id}" type="number" step="${f.step || 1}" min="${f.min != null ? f.min : ''}" style="width:70px;${inputCss}">`;
+            else if (f.t === 'text') ctl = `<input id="${id}" type="text" style="width:190px;${inputCss}">`;
+            else if (f.t === 'sel') ctl = `<select id="${id}" style="${inputCss}">${f.opts.map(o => `<option value="${esc(o[0])}">${esc(o[1])}</option>`).join('')}</select>`;
+            else if (f.t === 'dirs') ctl = `<span id="${id}" style="display:flex;gap:6px;">${[['up', '↑'], ['down', '↓'], ['left', '←'], ['right', '→']].map(d => `<label style="cursor:pointer;"><input type="checkbox" data-dir="${d[0]}"> ${d[1]}</label>`).join('')}</span>`;
+            else ctl = `<input id="${id}" type="checkbox" style="cursor:pointer;">`;
+            return `<input type="checkbox" class="mossad-def-force" data-k="${f.k}" checked title="Включать в «Применить во всех контейнерах»" style="cursor:pointer;margin:0;">` +
+                   `<label for="${id}" style="cursor:default;">${esc(f.label)}</label>${ctl}`;
+        }).join('');
+        // Заголовок колонки галочек
+        form.insertAdjacentHTML('afterbegin', `<span title="Какие настройки перезаписать во всех контейнерах" style="font-size:10px;color:#9ca3af;">⇄</span><span style="font-size:10px;color:#9ca3af;">настройка (⇄ — применять во всех контейнерах)</span><span></span>`);
+
+        const fill = (vals) => {
+            for (const f of GLOBAL_DEFAULTS_FIELDS) {
+                const el = form.querySelector(`#mossad-def-${f.k}`);
+                const v = vals[f.k];
+                if (!el) continue;
+                if (f.t === 'dirs') {
+                    const arr = Array.isArray(v) ? v : [];
+                    el.querySelectorAll('input[data-dir]').forEach(cb => { cb.checked = arr.includes(cb.dataset.dir); });
+                } else if (f.t === 'bool' || f.t === 'hold') el.checked = !!v;
+                else el.value = v == null ? '' : String(v);
+            }
+        };
+        const collect = () => {
+            const out = {};
+            for (const f of GLOBAL_DEFAULTS_FIELDS) {
+                const el = form.querySelector(`#mossad-def-${f.k}`);
+                if (!el) continue;
+                if (f.t === 'dirs') out[f.k] = Array.from(el.querySelectorAll('input[data-dir]')).filter(cb => cb.checked).map(cb => cb.dataset.dir);
+                else if (f.t === 'bool') out[f.k] = !!el.checked;
+                else if (f.t === 'hold') { out.deleteHoldpost = !!el.checked; out.deleteAutoconfirm = !!el.checked; } // ANTI_PATTERNS §2
+                else if (f.t === 'num') { const n = parseFloat(el.value); if (isFinite(n)) out[f.k] = Math.max(f.min != null ? f.min : -Infinity, n); }
+                else out[f.k] = String(el.value);
+            }
+            return GlobalDefaults.sanitize(out);
+        };
+        const renderStatus = () => {
+            const saved = GlobalDefaults.read();
+            const site = GlobalDefaults.siteHasSavedConfig();
+            status.innerHTML =
+                `Умолчания действуют на сайтах <b>без своих сохранённых настроек</b> (вместо заводских). Настройки сайтов не меняются.<br>` +
+                `Сейчас: ${saved ? '<span style="color:#34d399;">сохранены свои умолчания</span>' : '<span style="color:#fbbf24;">заводские</span>'}` +
+                ` · этот сайт: ${site ? 'свои настройки' : 'без своих настроек — работают умолчания'}` +
+                (() => { const st = GlobalDefaults.readStamp(); return st ? `<br>Последнее «⇄ во всех контейнерах»: ${new Date(st.ts).toLocaleString()} (${st.keys.length} настр.)` : ''; })();
+        };
+        fill(GlobalDefaults.effective());
+        renderStatus();
+
+        modal.querySelector('#mossad-def-save').onclick = () => {
+            if (GlobalDefaults.write(collect())) showToast('🌐 Умолчания сохранены для всех сайтов');
+            else showToast('❌ GM-хранилище недоступно', true);
+            renderStatus();
+        };
+        modal.querySelector('#mossad-def-take').onclick = () => {
+            fill(Object.assign(GlobalDefaults.effective(), GlobalDefaults.fromConfig(config)));
+            showToast('⬇ В форме — настройки этого сайта. Нажмите «Сохранить как умолчания»');
+        };
+        modal.querySelector('#mossad-def-factory').onclick = () => {
+            if (!confirm('Удалить сохранённые умолчания и вернуть заводские? Настройки сайтов не изменятся.')) return;
+            GlobalDefaults.clear();
+            fill(GlobalDefaults.factory());
+            renderStatus();
+            showToast('↺ Умолчания: заводские');
+        };
+        modal.querySelector('#mossad-def-apply-all').onclick = () => {
+            const keys = Array.from(form.querySelectorAll('.mossad-def-force:checked')).map(cb => cb.dataset.k);
+            // hold post управляет двумя флагами (ANTI_PATTERNS §2)
+            if (keys.includes('deleteHoldpost')) keys.push('deleteAutoconfirm');
+            if (!keys.length) { showToast('⚠️ Не отмечено ни одной настройки (⇄)', true); return; }
+            if (!confirm(`Перезаписать ${keys.length} настр. на всех сайтах во всех контейнерах значениями из формы?`)) return;
+            if (!GlobalDefaults.write(collect())) { showToast('❌ GM-хранилище недоступно', true); return; }
+            const st = GlobalDefaults.writeStamp(keys);
+            GlobalDefaults.applyStampIfNew(st); // этот контейнер — сразу (слушатель GM мог уже успеть)
+            if (window.updateWidgetUI) window.updateWidgetUI();
+            renderStatus();
+            showToast(`⇄ Применено: ${keys.length} настр. — остальные контейнеры подхватят при загрузке / сразу`);
+        };
+        modal.querySelector('#mossad-def-apply').onclick = () => {
+            const vals = collect();
+            for (const k of Object.keys(vals)) config[k] = JSON.parse(JSON.stringify(vals[k]));
+            Settings.save();
+            renderStatus();
+            showToast('➜ Значения формы применены к этому сайту');
+        };
+    }
+
     function openSettingsWindow(tab = 'general') {
         const existing = document.getElementById('mossad-hk-modal');
         if (existing && typeof existing._mossadSetTab === 'function') {
@@ -8499,6 +8867,7 @@ function findMediaForDownload() {
             <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px;">
               <button data-tab="general" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⚙ Общие</button>
               <button data-tab="hotkeys" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⌨ Горячие клавиши</button>
+              <button data-tab="defaults" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Общие умолчания для всех сайтов без своих сохранённых настроек">🌐 По умолчанию</button>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
@@ -8546,6 +8915,17 @@ function findMediaForDownload() {
             </div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:calc(85vh - 230px); overflow-y:auto; padding-right:4px;"></div>
               <div><button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ Клавиши по умолчанию</button></div>
+            </div>
+            <div data-pane="defaults" style="display:none; flex-direction:column; gap:6px;">
+              <div id="mossad-def-status" style="font-size:11px;color:#9ca3af;line-height:1.35;"></div>
+              <div id="mossad-def-form" style="display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px; align-items:center; overflow-y:auto; max-height:calc(85vh - 260px); padding-right:4px; font-size:12px; color:#d1d5db;"></div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                <button id="mossad-def-save" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;background:#065f46;border-color:#10b981;" title="Записать форму как умолчания для всех сайтов без своих настроек">💾 Сохранить как умолчания</button>
+                <button id="mossad-def-take" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;" title="Заполнить форму текущими настройками этого сайта (без записи)">⬇ Взять текущие настройки сайта</button>
+                <button id="mossad-def-factory" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;color:#f87171;" title="Удалить сохранённые умолчания — снова действуют заводские">↺ Сбросить к заводским</button>
+                <button id="mossad-def-apply-all" style="background:#1e3a8a;border:1px solid #3b82f6;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;" title="Сохранить умолчания и перезаписать отмеченные (⇄) настройки на всех сайтах во всех контейнерах: при следующей загрузке, а в открытых вкладках — сразу">⇄ Применить во всех контейнерах</button>
+                <button id="mossad-def-apply" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;color:#60a5fa;" title="Записать значения формы в настройки ЭТОГО сайта">➜ Применить к этому сайту</button>
+              </div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <span></span>
@@ -8669,7 +9049,7 @@ function findMediaForDownload() {
 
         // ── Вкладки ──
         const setTab = (t) => {
-            const want = (t === 'general' || t === 'hotkeys') ? t : 'hotkeys';
+            const want = (t === 'general' || t === 'hotkeys' || t === 'defaults') ? t : 'hotkeys';
             modal.dataset.tab = want;
             modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
             modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
@@ -8684,6 +9064,7 @@ function findMediaForDownload() {
         });
         setTab(tab);
         modal.querySelector('#mossad-settings-x').onclick = () => closeSettingsWindow(true);
+        initGlobalDefaultsTab(modal);
         modal.querySelector('#mossad-playlist-rows').onchange = (e) => {
             const v = Math.max(5, Math.min(200, parseInt(e.target.value, 10) || 30));
             e.target.value = String(v);
@@ -8882,6 +9263,22 @@ function findMediaForDownload() {
         _postPlayerNav(wasPaused);
     }
 
+    // v1.3.41: Insert (большое слайдшоу) на Grok ловим на window в фазе capture — раньше сайта.
+    // Раньше обработчик стоял в фазе bubble и проверял «залипший» GALLERY_SS_KEY.active:
+    // на /imagine/saved после прошлого слайдшоу первое нажатие уходило в toggleGalleryPause(),
+    // которая сразу выходила (слайдшоу на самом деле не идёт) — нажатие «терялось».
+    function grokGalleryPlayPauseKey(e) {
+        if (window.capturingFor !== null || rootDomain !== 'grok.com') return;
+        if (!hotkeyMatches(e, config.hk.galleryPlayPause)) return;
+        // В поле ввода Insert ничего не печатает — пропускаем только «печатающие» клавиши
+        const typingKey = typeof e.key === 'string' && e.key.length === 1 && !(e.ctrlKey || e.altKey || e.metaKey);
+        if (typingKey && isEditableElement(document.activeElement)) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        grokHandleGalleryPlayPause('hotkey');
+    }
+    window.addEventListener('keydown', grokGalleryPlayPauseKey, true);
+
     // Снятие залипшего фокуса с текстовых полей при клике в медиа/фон/элементы вне полей ввода
     window.addEventListener('pointerdown', function (e) {
         if (!e.target) return;
@@ -9003,14 +9400,7 @@ function findMediaForDownload() {
         if (hotkeyMatches(e, config.hk.galleryPlayPause)) {
             e.preventDefault();
             if (rootDomain === 'grok.com') {
-                const active = window._mossadGalleryActive || (() => {
-                    try { return !!(JSON.parse((typeof _gSS !== 'undefined' ? _gSS : sessionStorage).getItem(GALLERY_SS_KEY) || '{}').active); } catch { return false; }
-                })();
-                if (active) {
-                    toggleGalleryPause();
-                } else {
-                    grokInsertCollectOrStart(); // v1.3.40: нет ссылок → 1-е нажатие собирает, 2-е стартует
-                }
+                grokHandleGalleryPlayPause('hotkey-bubble'); // обычно уже обработано в capture (см. выше)
             } else {
                 startSlideshow();
             }

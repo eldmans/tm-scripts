@@ -69,10 +69,109 @@
     };
 
     let config = {};
+    let siteHasSavedConfig = false; // v1.3.41: есть ли у этого сайта свои сохранённые настройки
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
+        siteHasSavedConfig = !!stored;
         config = stored ? JSON.parse(stored) : {};
     } catch (e) {}
+
+    // ── v1.3.41: общие «умолчания» для всех сайтов (GM-хранилище Tampermonkey) ──
+    // Применяются ТОЛЬКО к сайту без сохранённого конфига (вместо заводских DEFAULT_CONFIG).
+    // Сохранённые настройки сайтов не трогаются. Заводские значения — запасной вариант.
+    const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
+    const GLOBAL_DEFAULT_KEYS = [
+        'slideshowDelay', 'videoLoops', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
+        'downloadType', 'pdAction', 'filenameTemplate', 'filenameTemplateEnabled',
+        'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates',
+        'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
+        'playlistRows', 'playlistWidth', 'collectWatchSec',
+        'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS',
+    ];
+    const GlobalDefaults = {
+        KEY: GLOBAL_DEFAULTS_GM_KEY,
+        keys: GLOBAL_DEFAULT_KEYS,
+        /** Только известные ключи и только значения того же типа, что у заводских (мусор отбрасывается). */
+        sanitize(src) {
+            const out = {};
+            if (!src || typeof src !== 'object') return out;
+            for (const k of GLOBAL_DEFAULT_KEYS) {
+                if (!(k in src)) continue;
+                const f = DEFAULT_CONFIG[k], v = src[k];
+                if (Array.isArray(f)) { if (Array.isArray(v)) out[k] = v.filter(x => typeof x === 'string'); }
+                else if (typeof f === 'number') { const n = Number(v); if (isFinite(n)) out[k] = n; }
+                else if (typeof v === typeof f) out[k] = v;
+            }
+            return out;
+        },
+        read() {
+            if (typeof GM_getValue !== 'function') return null;
+            try {
+                const raw = GM_getValue(GLOBAL_DEFAULTS_GM_KEY, '');
+                if (!raw) return null;
+                const o = GlobalDefaults.sanitize(typeof raw === 'string' ? JSON.parse(raw) : raw);
+                return Object.keys(o).length ? o : null;
+            } catch (e) { return null; }
+        },
+        write(obj) {
+            if (typeof GM_setValue !== 'function') return false;
+            GM_setValue(GLOBAL_DEFAULTS_GM_KEY, JSON.stringify(GlobalDefaults.sanitize(obj)));
+            return true;
+        },
+        clear() { if (typeof GM_setValue === 'function') GM_setValue(GLOBAL_DEFAULTS_GM_KEY, ''); },
+        /** Заводские значения (копия). */
+        factory() { return GlobalDefaults.sanitize(JSON.parse(JSON.stringify(DEFAULT_CONFIG))); },
+        /** Действующие умолчания: сохранённые поверх заводских. */
+        effective() { return Object.assign(GlobalDefaults.factory(), GlobalDefaults.read() || {}); },
+        /** Срез текущего конфига сайта. */
+        fromConfig(cfg) { return GlobalDefaults.sanitize(JSON.parse(JSON.stringify(cfg || {}))); },
+        // ── «Применить во всех контейнерах» ──
+        // localStorage у каждого контейнера Firefox (и у каждого сайта) свой, GM-хранилище — общее.
+        // Кнопка пишет в GM «штамп» { id, ts, keys }; каждый контейнер при загрузке (и живьём через
+        // GM_addValueChangeListener) сравнивает его со своим последним применённым (localStorage) и
+        // перезаписывает ТОЛЬКО перечисленные ключи значениями общих умолчаний, затем запоминает штамп.
+        APPLY_KEY: 'mossad_global_defaults_apply',
+        SEEN_LS_KEY: 'mossad_global_defaults_apply_seen',
+        readStamp() {
+            if (typeof GM_getValue !== 'function') return null;
+            try {
+                const raw = GM_getValue('mossad_global_defaults_apply', '');
+                const st = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+                return (st && st.id && Array.isArray(st.keys)) ? st : null;
+            } catch (e) { return null; }
+        },
+        writeStamp(keys) {
+            if (typeof GM_setValue !== 'function') return null;
+            const st = { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, ts: Date.now(), keys: keys.filter(k => GLOBAL_DEFAULT_KEYS.includes(k)) };
+            GM_setValue('mossad_global_defaults_apply', JSON.stringify(st));
+            return st;
+        },
+        /** Применяет штамп к конфигу этого сайта/контейнера, если он ещё не применён. Возвращает список применённых ключей или null. */
+        applyStampIfNew(stamp) {
+            const st = stamp || GlobalDefaults.readStamp();
+            if (!st) return null;
+            let seen = '';
+            try { seen = localStorage.getItem('mossad_global_defaults_apply_seen') || ''; } catch (e) {}
+            if (seen === st.id) return null;
+            const vals = GlobalDefaults.effective();
+            const applied = [];
+            for (const k of st.keys) {
+                if (!(k in vals)) continue;
+                config[k] = JSON.parse(JSON.stringify(vals[k]));
+                applied.push(k);
+            }
+            try {
+                // Сайт без своего конфига не «сохраняем» насильно: он и так живёт на общих умолчаниях
+                // (иначе он перестал бы получать их дальнейшие изменения).
+                if (applied.length && GlobalDefaults.siteHasSavedConfig()) persistLocalConfig();
+                localStorage.setItem('mossad_global_defaults_apply_seen', st.id);
+            } catch (e) {}
+            if (applied.length) console.log('[MOSSAD] Общие умолчания применены (штамп ' + st.id + '):', applied.join(', '));
+            return applied;
+        },
+        loadedWithGlobalDefaults: () => !siteHasSavedConfig && !!GlobalDefaults.read(),
+        siteHasSavedConfig: () => { try { return !!localStorage.getItem(STORAGE_KEY); } catch (e) { return siteHasSavedConfig; } },
+    };
 
     function mergeDeep(target, source) {
         for (const key of Object.keys(source)) {
@@ -83,7 +182,14 @@
         Object.assign(target || {}, source);
         return target;
     }
-    config = mergeDeep(JSON.parse(JSON.stringify(DEFAULT_CONFIG)), config);
+    {
+        const base = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+        if (!siteHasSavedConfig) {
+            const gd = GlobalDefaults.read();
+            if (gd) Object.assign(base, JSON.parse(JSON.stringify(gd)));
+        }
+        config = mergeDeep(base, config);
+    }
 
     // ── GitHub-токен: хранится в общем хранилище Tampermonkey (GM_setValue), а НЕ в localStorage сайта ──
     // v1.3.34: раньше токен лежал в localStorage каждого сайта (`mossad_{domain}_config`) и был
@@ -234,6 +340,31 @@
     delete config.hk.videoGen10s;
 
     migrateUpscaleDefaultHotkey();
+
+    // v1.3.41: «Применить во всех контейнерах» — штамп из GM, если этот контейнер его ещё не применял
+    try { GlobalDefaults.applyStampIfNew(); } catch (e) {}
+    // …и живьём для уже открытых вкладок (Tampermonkey: GM_addValueChangeListener)
+    if (typeof GM_addValueChangeListener === 'function') {
+        try {
+            GM_addValueChangeListener(GLOBAL_DEFAULTS_GM_KEY, () => {
+                // Сайт без своих настроек сразу переходит на новые общие умолчания
+                if (GlobalDefaults.siteHasSavedConfig()) return;
+                const gd = GlobalDefaults.effective();
+                for (const k of Object.keys(gd)) config[k] = JSON.parse(JSON.stringify(gd[k]));
+                if (window.updateWidgetUI) window.updateWidgetUI();
+            });
+            GM_addValueChangeListener('mossad_global_defaults_apply', (name, oldVal, newVal) => {
+                let st = null;
+                try { st = newVal ? (typeof newVal === 'string' ? JSON.parse(newVal) : newVal) : null; } catch (e) {}
+                if (!st || !st.id || !Array.isArray(st.keys)) return;
+                const applied = GlobalDefaults.applyStampIfNew(st);
+                if (applied && applied.length) {
+                    if (window.updateWidgetUI) window.updateWidgetUI();
+                    if (typeof showToast === 'function') showToast(`🌐 Общие умолчания применены (${applied.length})`);
+                }
+            });
+        } catch (e) {}
+    }
 
     // Глобальная синхронизация шаблона имени файла через GM_getValue
     if (typeof GM_getValue === 'function') {

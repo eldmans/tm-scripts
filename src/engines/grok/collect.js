@@ -100,7 +100,9 @@
             date,
             items: mergedItems,
             grpMode,
-            itemMode
+            itemMode,
+            // v1.3.41: сохраняем Gr/Md, запомненные кнопкой 🔀 «Случайно»
+            ...(existingData.preRandom ? { preRandom: existingData.preRandom } : {})
         }));
 
         if (btnEl) {

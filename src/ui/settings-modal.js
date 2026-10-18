@@ -26,6 +26,130 @@
         modal.remove();
     }
 
+    // ── v1.3.41: вкладка «🌐 По умолчанию» — общие умолчания (GM), см. GlobalDefaults в core/config.js ──
+    const GLOBAL_DEFAULTS_FIELDS = [
+        { k: 'slideshowDelay',    t: 'num', label: 'Фото: показ, сек', step: 0.5, min: 0 },
+        { k: 'videoLoops',        t: 'num', label: 'Видео: кругов (↺)', step: 1, min: 1 },
+        { k: 'delayAfterVideo',   t: 'num', label: 'Пауза после видео, сек', step: 0.5, min: 0 },
+        { k: 'slideshowDirections', t: 'dirs', label: 'Направления D-pad' },
+        { k: 'loopFeed',          t: 'bool', label: 'R: повторять ленту' },
+        { k: 'downloadType',      t: 'sel', label: 'Скачивание', opts: [['none', 'Не скачивать'], ['all', 'Качать всё'], ['photo', 'Качать фото'], ['video', 'Качать видео']] },
+        { k: 'pdAction',          t: 'sel', label: 'После DL', opts: [['none', '—'], ['up', '+1'], ['del', 'del (Grok)']] },
+        { k: 'filenameTemplate',  t: 'text', label: 'Шаблон имени файла' },
+        { k: 'filenameTemplateEnabled', t: 'bool', label: 'Использовать шаблон' },
+        { k: 'allowDuplicates',   t: 'bool', label: 'Дубли: качать без вопроса' },
+        { k: 'deleteHoldpost',    t: 'hold', label: 'hold post (удаление)' },
+        { k: 'stopOnTabSwitch',   t: 'bool', label: 'Tab: стоп при смене вкладки' },
+        { k: 'stopOnBrsrSwitch',  t: 'bool', label: 'Brsr: стоп при уходе из браузера' },
+        { k: 'autoFS',            t: 'bool', label: 'FS: авто полный экран' },
+        { k: 'widgetZoom',        t: 'num', label: 'Масштаб виджета', step: 0.05, min: 0.5 },
+        { k: 'closePanelOnOutsideClick', t: 'bool', label: 'Сворачивать меню кликом вне' },
+        { k: 'showSoundToast',    t: 'bool', label: 'Тост переключения звука' },
+        { k: 'playlistRows',      t: 'num', label: 'Список: видимых строк', step: 1, min: 5 },
+        { k: 'playlistWidth',     t: 'num', label: 'Список: ширина, px (0 = авто)', step: 10, min: 0 },
+        { k: 'collectWatchSec',   t: 'num', label: 'Досбор после «Собрать», сек', step: 5, min: 5 },
+        { k: 'pinterestMode',     t: 'text', label: 'Pinterest: режим (rand / +1 / 1–9)' },
+        { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
+        { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото', step: 5, min: 0 },
+        { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
+        { k: 'pinterestAutoFS',   t: 'bool', label: 'Pinterest: авто FS' },
+    ];
+
+    function initGlobalDefaultsTab(modal) {
+        const form = modal.querySelector('#mossad-def-form');
+        const status = modal.querySelector('#mossad-def-status');
+        if (!form) return;
+        const inputCss = 'background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;';
+        const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        form.innerHTML = GLOBAL_DEFAULTS_FIELDS.map(f => {
+            const id = `mossad-def-${f.k}`;
+            let ctl = '';
+            if (f.t === 'num') ctl = `<input id="${id}" type="number" step="${f.step || 1}" min="${f.min != null ? f.min : ''}" style="width:70px;${inputCss}">`;
+            else if (f.t === 'text') ctl = `<input id="${id}" type="text" style="width:190px;${inputCss}">`;
+            else if (f.t === 'sel') ctl = `<select id="${id}" style="${inputCss}">${f.opts.map(o => `<option value="${esc(o[0])}">${esc(o[1])}</option>`).join('')}</select>`;
+            else if (f.t === 'dirs') ctl = `<span id="${id}" style="display:flex;gap:6px;">${[['up', '↑'], ['down', '↓'], ['left', '←'], ['right', '→']].map(d => `<label style="cursor:pointer;"><input type="checkbox" data-dir="${d[0]}"> ${d[1]}</label>`).join('')}</span>`;
+            else ctl = `<input id="${id}" type="checkbox" style="cursor:pointer;">`;
+            return `<input type="checkbox" class="mossad-def-force" data-k="${f.k}" checked title="Включать в «Применить во всех контейнерах»" style="cursor:pointer;margin:0;">` +
+                   `<label for="${id}" style="cursor:default;">${esc(f.label)}</label>${ctl}`;
+        }).join('');
+        // Заголовок колонки галочек
+        form.insertAdjacentHTML('afterbegin', `<span title="Какие настройки перезаписать во всех контейнерах" style="font-size:10px;color:#9ca3af;">⇄</span><span style="font-size:10px;color:#9ca3af;">настройка (⇄ — применять во всех контейнерах)</span><span></span>`);
+
+        const fill = (vals) => {
+            for (const f of GLOBAL_DEFAULTS_FIELDS) {
+                const el = form.querySelector(`#mossad-def-${f.k}`);
+                const v = vals[f.k];
+                if (!el) continue;
+                if (f.t === 'dirs') {
+                    const arr = Array.isArray(v) ? v : [];
+                    el.querySelectorAll('input[data-dir]').forEach(cb => { cb.checked = arr.includes(cb.dataset.dir); });
+                } else if (f.t === 'bool' || f.t === 'hold') el.checked = !!v;
+                else el.value = v == null ? '' : String(v);
+            }
+        };
+        const collect = () => {
+            const out = {};
+            for (const f of GLOBAL_DEFAULTS_FIELDS) {
+                const el = form.querySelector(`#mossad-def-${f.k}`);
+                if (!el) continue;
+                if (f.t === 'dirs') out[f.k] = Array.from(el.querySelectorAll('input[data-dir]')).filter(cb => cb.checked).map(cb => cb.dataset.dir);
+                else if (f.t === 'bool') out[f.k] = !!el.checked;
+                else if (f.t === 'hold') { out.deleteHoldpost = !!el.checked; out.deleteAutoconfirm = !!el.checked; } // ANTI_PATTERNS §2
+                else if (f.t === 'num') { const n = parseFloat(el.value); if (isFinite(n)) out[f.k] = Math.max(f.min != null ? f.min : -Infinity, n); }
+                else out[f.k] = String(el.value);
+            }
+            return GlobalDefaults.sanitize(out);
+        };
+        const renderStatus = () => {
+            const saved = GlobalDefaults.read();
+            const site = GlobalDefaults.siteHasSavedConfig();
+            status.innerHTML =
+                `Умолчания действуют на сайтах <b>без своих сохранённых настроек</b> (вместо заводских). Настройки сайтов не меняются.<br>` +
+                `Сейчас: ${saved ? '<span style="color:#34d399;">сохранены свои умолчания</span>' : '<span style="color:#fbbf24;">заводские</span>'}` +
+                ` · этот сайт: ${site ? 'свои настройки' : 'без своих настроек — работают умолчания'}` +
+                (() => { const st = GlobalDefaults.readStamp(); return st ? `<br>Последнее «⇄ во всех контейнерах»: ${new Date(st.ts).toLocaleString()} (${st.keys.length} настр.)` : ''; })();
+        };
+        fill(GlobalDefaults.effective());
+        renderStatus();
+
+        modal.querySelector('#mossad-def-save').onclick = () => {
+            if (GlobalDefaults.write(collect())) showToast('🌐 Умолчания сохранены для всех сайтов');
+            else showToast('❌ GM-хранилище недоступно', true);
+            renderStatus();
+        };
+        modal.querySelector('#mossad-def-take').onclick = () => {
+            fill(Object.assign(GlobalDefaults.effective(), GlobalDefaults.fromConfig(config)));
+            showToast('⬇ В форме — настройки этого сайта. Нажмите «Сохранить как умолчания»');
+        };
+        modal.querySelector('#mossad-def-factory').onclick = () => {
+            if (!confirm('Удалить сохранённые умолчания и вернуть заводские? Настройки сайтов не изменятся.')) return;
+            GlobalDefaults.clear();
+            fill(GlobalDefaults.factory());
+            renderStatus();
+            showToast('↺ Умолчания: заводские');
+        };
+        modal.querySelector('#mossad-def-apply-all').onclick = () => {
+            const keys = Array.from(form.querySelectorAll('.mossad-def-force:checked')).map(cb => cb.dataset.k);
+            // hold post управляет двумя флагами (ANTI_PATTERNS §2)
+            if (keys.includes('deleteHoldpost')) keys.push('deleteAutoconfirm');
+            if (!keys.length) { showToast('⚠️ Не отмечено ни одной настройки (⇄)', true); return; }
+            if (!confirm(`Перезаписать ${keys.length} настр. на всех сайтах во всех контейнерах значениями из формы?`)) return;
+            if (!GlobalDefaults.write(collect())) { showToast('❌ GM-хранилище недоступно', true); return; }
+            const st = GlobalDefaults.writeStamp(keys);
+            GlobalDefaults.applyStampIfNew(st); // этот контейнер — сразу (слушатель GM мог уже успеть)
+            if (window.updateWidgetUI) window.updateWidgetUI();
+            renderStatus();
+            showToast(`⇄ Применено: ${keys.length} настр. — остальные контейнеры подхватят при загрузке / сразу`);
+        };
+        modal.querySelector('#mossad-def-apply').onclick = () => {
+            const vals = collect();
+            for (const k of Object.keys(vals)) config[k] = JSON.parse(JSON.stringify(vals[k]));
+            Settings.save();
+            renderStatus();
+            showToast('➜ Значения формы применены к этому сайту');
+        };
+    }
+
     function openSettingsWindow(tab = 'general') {
         const existing = document.getElementById('mossad-hk-modal');
         if (existing && typeof existing._mossadSetTab === 'function') {
@@ -50,6 +174,7 @@
             <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px;">
               <button data-tab="general" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⚙ Общие</button>
               <button data-tab="hotkeys" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⌨ Горячие клавиши</button>
+              <button data-tab="defaults" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Общие умолчания для всех сайтов без своих сохранённых настроек">🌐 По умолчанию</button>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
@@ -97,6 +222,17 @@
             </div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:calc(85vh - 230px); overflow-y:auto; padding-right:4px;"></div>
               <div><button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ Клавиши по умолчанию</button></div>
+            </div>
+            <div data-pane="defaults" style="display:none; flex-direction:column; gap:6px;">
+              <div id="mossad-def-status" style="font-size:11px;color:#9ca3af;line-height:1.35;"></div>
+              <div id="mossad-def-form" style="display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px; align-items:center; overflow-y:auto; max-height:calc(85vh - 260px); padding-right:4px; font-size:12px; color:#d1d5db;"></div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                <button id="mossad-def-save" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;background:#065f46;border-color:#10b981;" title="Записать форму как умолчания для всех сайтов без своих настроек">💾 Сохранить как умолчания</button>
+                <button id="mossad-def-take" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;" title="Заполнить форму текущими настройками этого сайта (без записи)">⬇ Взять текущие настройки сайта</button>
+                <button id="mossad-def-factory" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;color:#f87171;" title="Удалить сохранённые умолчания — снова действуют заводские">↺ Сбросить к заводским</button>
+                <button id="mossad-def-apply-all" style="background:#1e3a8a;border:1px solid #3b82f6;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;" title="Сохранить умолчания и перезаписать отмеченные (⇄) настройки на всех сайтах во всех контейнерах: при следующей загрузке, а в открытых вкладках — сразу">⇄ Применить во всех контейнерах</button>
+                <button id="mossad-def-apply" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;color:#60a5fa;" title="Записать значения формы в настройки ЭТОГО сайта">➜ Применить к этому сайту</button>
+              </div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <span></span>
@@ -220,7 +356,7 @@
 
         // ── Вкладки ──
         const setTab = (t) => {
-            const want = (t === 'general' || t === 'hotkeys') ? t : 'hotkeys';
+            const want = (t === 'general' || t === 'hotkeys' || t === 'defaults') ? t : 'hotkeys';
             modal.dataset.tab = want;
             modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
             modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
@@ -235,6 +371,7 @@
         });
         setTab(tab);
         modal.querySelector('#mossad-settings-x').onclick = () => closeSettingsWindow(true);
+        initGlobalDefaultsTab(modal);
         modal.querySelector('#mossad-playlist-rows').onchange = (e) => {
             const v = Math.max(5, Math.min(200, parseInt(e.target.value, 10) || 30));
             e.target.value = String(v);

@@ -133,14 +133,6 @@
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
-        // v1.3.40: ⌨ — окно настроек на вкладке «Горячие клавиши» (раньше было в верхнем ряду Grok)
-        const btnHkSettings = document.createElement('button');
-        btnHkSettings.id = 'mossad-btn-hk-settings';
-        btnHkSettings.innerHTML = '⌨';
-        btnHkSettings.title = 'Настройки: горячие клавиши (Ctrl+F1)';
-        btnHkSettings.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #9ca3af; cursor: pointer; font-size: 13px; padding: 4px 7px;`;
-        btnHkSettings.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('hotkeys'); };
-
         const btnTogglePanel = document.createElement('button');
         btnTogglePanel.id = 'mossad-btn-toggle-panel';
         btnTogglePanel.innerHTML = '▼';
@@ -165,8 +157,8 @@
             window.updateWidgetUI();
         };
 
-        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ⌨ | ▼ | ✕ (на Grok ✕ переносится на верхний ряд)
-        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnHkSettings, btnTogglePanel, btnClose);
+        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ▼ | ✕ (на Grok ⌨ и ✕ — в верхнем ряду, см. ui-bar.js)
+        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnTogglePanel, btnClose);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -239,7 +231,7 @@
                             Видео (↺): <input id="mossad-in-loops" type="number" min="1" max="100" value="${config.videoLoops}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                         <label title="Задержка фото" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
-                            Фото (сек): <input id="mossad-in-pdelay" type="number" min="1" max="999" value="${config.slideshowDelay}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
+                            Фото (сек): <input id="mossad-in-pdelay" type="number" min="0" max="999" value="${config.slideshowDelay}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                         <label title="Пауза после видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
                             Пауза (сек): <input id="mossad-in-vdelay" type="number" min="0" max="999" value="${config.delayAfterVideo}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
@@ -363,9 +355,12 @@
                 }
             }
             // Инпуты таймеров (Видео круги, Фото задержка, Пауза после видео) доступны ВСЕГДА
-            panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, parseInt(e.target.value) || 1)), 300);
-            panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(1, parseInt(e.target.value) || 3)), 300);
-            panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, parseInt(e.target.value) || 2)), 300);
+            // v1.3.41: 0 с — допустимое значение (раньше «0 || 3» / «0 || 2» превращало 0 в 3 / 2 с, а для фото min был 1).
+            // Пустое/некорректное поле — значение не меняется.
+            const numOr = (v, fallback) => { const n = parseFloat(v); return isFinite(n) ? n : fallback; };
+            panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, Math.round(numOr(e.target.value, config.videoLoops)))), 300);
+            panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(0, numOr(e.target.value, config.slideshowDelay))), 300);
+            panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, numOr(e.target.value, config.delayAfterVideo))), 300);
             panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
             panel.querySelector('#mossad-cb-fn-tpl').onchange = (e) => Settings.set('filenameTemplateEnabled', e.target.checked);
@@ -494,8 +489,11 @@
                 localStorage.removeItem(STORAGE_KEY);
                 localStorage.removeItem('mossad_playlist_width');
                 Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+                // v1.3.41: сайт без своих настроек получает общие умолчания (вкладка «🌐 По умолчанию»), если они есть
+                const gd = GlobalDefaults.read();
+                if (gd) Object.assign(config, JSON.parse(JSON.stringify(gd)));
                 window.updateWidgetUI();
-                showToast('✅ Настройки сброшены по умолчанию');
+                showToast(gd ? '✅ Настройки сайта сброшены к общим умолчаниям' : '✅ Настройки сброшены по умолчанию');
             };
         };
 
