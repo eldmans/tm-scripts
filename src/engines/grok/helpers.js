@@ -324,10 +324,11 @@
         const currentMediaType = hasVid ? 'video' : 'photo';
 
         // Проверка дубликата в истории
-        if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl)) {
-            checkFileInHistory(null, media ? media.url : null, currentPostUrl, currentMediaType).then(record => {
+        const lockedMediaUrl = media ? media.url : null;
+        if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl) && !isDuplicateConfirmed(lockedMediaUrl)) {
+            checkFileInHistory(null, lockedMediaUrl, currentPostUrl, currentMediaType).then(record => {
                 if (record) {
-                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback));
+                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback), currentPostUrl, lockedMediaUrl);
                 } else {
                     triggerGrokDownload(true, null, onDoneCallback);
                 }
@@ -401,11 +402,11 @@
                 try {
                     showToast('⏳ Запись метаданных...');
                     const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl, model, promptHash);
-                    saveBlobToDisk(enrichedBlob, grokFilename);
+                    saveBlobToDisk(enrichedBlob, grokFilename, media.url, currentPostUrl);
                     onDownloadFinalized();
                 } catch (err) {
                     console.error('[MOSSAD] Metadata injection failed, saving raw blob:', err);
-                    saveBlobToDisk(rawBlob, grokFilename);
+                    saveBlobToDisk(rawBlob, grokFilename, media.url, currentPostUrl);
                     onDownloadFinalized();
                 }
             };

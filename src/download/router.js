@@ -119,7 +119,7 @@
             checkFileInHistory(null, primaryUrl, canonicalPostUrl, media.type).then(record => {
                 if (record) {
                     _activeDuplicateRecord = record;
-                    showDuplicateDownloadNotice(record, () => triggerDownload(true, record));
+                    showDuplicateDownloadNotice(record, () => triggerDownload(true, record), canonicalPostUrl, primaryUrl);
                 } else {
                     _activeDuplicateRecord = null;
                     triggerDownload(true, null);

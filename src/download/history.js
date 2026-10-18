@@ -242,8 +242,12 @@
     /**
      * Показывает компактное Glassmorphic-уведомление справа под виджетом
      * о том, что файл уже скачивался, с таймером подтверждения на 6 секунд.
+     * @param {Object} record          - запись из истории
+     * @param {Function} onConfirmDownload - коллбек, замыкающий URL/media момента нажатия
+     * @param {string} [lockedPostUrl] - URL поста в момент нажатия (фиксируется!)
+     * @param {string} [lockedMediaUrl] - URL медиа в момент нажатия (фиксируется!)
      */
-    function showDuplicateDownloadNotice(record, onConfirmDownload) {
+    function showDuplicateDownloadNotice(record, onConfirmDownload, lockedPostUrl, lockedMediaUrl) {
         // Если включена галочка «Качать дубли»: качаем сразу и показываем укороченное уведомление без таймера
         if (config.allowDuplicates) {
             showToast(`⚠️ Дубликат: ${record.filename || 'файл'} (${record.date || 'ранее'})`, false, 3000);
@@ -300,9 +304,13 @@
 
         notice.querySelector('#mossad-dup-close').onclick = closeNotice;
 
-        // Сохраняем ожидание подтверждения
+        // Сохраняем ожидание подтверждения — фиксируем URL/ID файла МОМЕНТА нажатия,
+        // чтобы подтверждение сработало только для того же файла, а не любого дубля.
+        const lockedId = record.id || record.hash || lockedMediaUrl || lockedPostUrl || '';
         _pendingDuplicateConfirm = {
-            id: record.id || record.hash || record.url,
+            id: lockedId,
+            lockedPostUrl: lockedPostUrl || '',
+            lockedMediaUrl: lockedMediaUrl || '',
             expiresAt: Date.now() + 6000,
             confirm: () => {
                 closeNotice();
@@ -322,11 +330,24 @@
 
     /**
      * Проверяет, активно ли подтверждение повторного скачивания для текущего файла.
+     * Подтверждение действительно ТОЛЬКО для того файла (postUrl или mediaUrl),
+     * по которому было показано уведомление — скроллинг к другому посту не даёт пройти.
+     * @param {string} fileIdentifier - URL поста или медиа для сравнения
      */
     function isDuplicateConfirmed(fileIdentifier) {
-        if (_pendingDuplicateConfirm && Date.now() <= _pendingDuplicateConfirm.expiresAt) {
-            return true;
+        if (!_pendingDuplicateConfirm) return false;
+        if (Date.now() > _pendingDuplicateConfirm.expiresAt) return false;
+        // Если идентификатор совпадает с зафиксированным URL поста или медиа — подтверждено
+        if (fileIdentifier) {
+            const lp = _pendingDuplicateConfirm.lockedPostUrl;
+            const lm = _pendingDuplicateConfirm.lockedMediaUrl;
+            if (lp && fileIdentifier === lp) return true;
+            if (lm && fileIdentifier === lm) return true;
+            // Fallback: если id совпадает (хеш / id записи)
+            if (_pendingDuplicateConfirm.id && fileIdentifier === _pendingDuplicateConfirm.id) return true;
+            return false;
         }
+        // Без идентификатора — не подтверждаем (безопаснее)
         return false;
     }
 
