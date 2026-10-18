@@ -38,6 +38,11 @@
     let lastRAFTime = 0;
     let rafId = null;
     let _videoReachedEndZone = false; // Видео зашло в финальную зону (последние доли секунды)
+    let _endedConsumed = false;       // v1.3.38: событие ended уже засчитано (ended остаётся true до play())
+    let _videoDetachedSince = 0;      // v1.3.38: когда отслеживаемый <video> исчез из DOM
+    let _lastRebindCheck = 0;         // v1.3.38: троттлинг поиска другого играющего видео
+    let _lastCycleVideoSrc = '';      // v1.3.38: src видео предыдущего слайда (не считать старое видео новым)
+    let _lastCycleSlideKey = '';
     let _lastDownloadUrl = null;     // защита от повторного скачивания одного файла
     let _lastDownloadTime = 0;
     const _filenameCounter = new Map(); // счётчик по базовому имени → (001)(002)...
@@ -45,7 +50,26 @@
     let _lastSlideUrl = '';          // URL во время последнего triggerNextSlide
     const SAME_PAGE_LIMIT = 3;       // сколько раз пробовать перед остановкой
 
+    // v1.3.38: ЕДИНСТВЕННЫЙ отложенный запуск цикла слайда. Раньше цикл запускали независимо
+    // тик галереи (setTimeout 300 мс без id), монитор URL (150 мс) и др. — каждый перезапуск
+    // обнулял счётчик кругов видео. Теперь все источники идут через requestSlideCycle():
+    // новый запрос заменяет предыдущий, cancelSlideTimers() отменяет его (ANTI_PATTERNS §17).
+    let _cycleStartTimer = null;
+
+    function requestSlideCycle(delayMs, source) {
+        if (_cycleStartTimer) { clearTimeout(_cycleStartTimer); _cycleStartTimer = null; }
+        mossadDebug('cycle', 'запрос запуска цикла', { source, delayMs });
+        _cycleStartTimer = setTimeout(() => {
+            _cycleStartTimer = null;
+            if (slideshowActive && !slideshowPaused) scheduleNextSlideCycle(0);
+        }, Math.max(0, delayMs || 0));
+    }
+
     function cancelSlideTimers() {
+        if (_cycleStartTimer) {
+            clearTimeout(_cycleStartTimer);
+            _cycleStartTimer = null;
+        }
         if (rafId) {
             cancelAnimationFrame(rafId);
             rafId = null;
@@ -64,7 +88,35 @@
         accumulatedTime = 0;
         lastTime = 0;
         _videoReachedEndZone = false;
+        _endedConsumed = false;
+        _videoDetachedSince = 0;
         currentVideoNode = null;
+    }
+
+    /** Живая длительность видео (videoInitialDuration — только запасной вариант, пока duration ещё NaN). */
+    function liveVideoDuration(v) {
+        const d = v ? v.duration : NaN;
+        return (isFinite(d) && d > 0) ? d : (videoInitialDuration || 0);
+    }
+
+    /**
+     * v1.3.38: перепривязка счётчика кругов к новому <video> того же слайда (React/HLS перемонтировал плеер)
+     * БЕЗ сброса currentLoopCount. Раньше любая смена элемента перезапускала цикл с нуля → 2–4 круга вместо 1.
+     */
+    function rebindVideoNode(v, source) {
+        if (!v) return;
+        mossadDebug('loop', 'перепривязка к новому <video> без сброса счётчика', { source, loops: currentLoopCount });
+        currentVideoNode = v;
+        lastActiveVideo = v;
+        if (isFinite(v.duration) && v.duration > 0) videoInitialDuration = v.duration;
+        _videoReachedEndZone = false;
+        _endedConsumed = !!v.ended;
+        _videoDetachedSince = 0;
+        lastTime = v.currentTime;
+        if (v.paused) { try { v.play().catch(() => {}); } catch(e) {} }
+        if (!rafId && slideshowActive && !slideshowPaused && !isCountingDown) {
+            rafId = requestAnimationFrame(checkVideoLoops);
+        }
     }
     window.cancelSlideTimers = cancelSlideTimers;
     function getActiveVideo() {
@@ -166,13 +218,24 @@
 
     let lastUrlForSlideshow = location.href;
     let lastActiveVideo = null;
-    let _urlMonitorTimer = null;
+
+    /** Ключ «слайда» для монитора: на Grok — UUID поста (смена query/replaceState того же поста — не новый слайд). */
+    function slideKeyOf(url) {
+        if (rootDomain === 'grok.com') {
+            try {
+                const u = grokExtractUuid(new URL(url, location.origin).pathname);
+                if (u) return 'grok:' + u.toLowerCase();
+            } catch(e) {}
+        }
+        return url;
+    }
 
     setInterval(() => {
         if (!slideshowActive || _isRewinding) return;
         
         const currentUrl = location.href;
         const urlChanged = currentUrl !== lastUrlForSlideshow;
+        const slideChanged = urlChanged && slideKeyOf(currentUrl) !== slideKeyOf(lastUrlForSlideshow);
         
         let videoChanged = false;
         let currentVideo = lastActiveVideo;
@@ -181,13 +244,26 @@
             videoChanged = currentVideo !== lastActiveVideo && (currentVideo !== null || lastActiveVideo !== null);
         }
         
-        if (urlChanged || videoChanged) {
+        if (urlChanged && !slideChanged && !videoChanged) {
+            // Тот же пост (например, replaceState с другим query) — не новый слайд
+            lastUrlForSlideshow = currentUrl;
+            return;
+        }
+
+        if (slideChanged || videoChanged || urlChanged) {
             lastUrlForSlideshow = currentUrl;
             lastActiveVideo = currentVideo;
-            
-            if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
-            if (rafId) cancelAnimationFrame(rafId);
-            
+
+            // v1.3.38: на Grok смена <video> внутри того же поста (React перемонтировал плеер) — НЕ новый слайд:
+            // перепривязываемся к новому элементу без сброса счётчика кругов (см. rebindVideoNode).
+            if (!slideChanged && videoChanged && rootDomain === 'grok.com' && currentVideoNode && currentVideo && !isCountingDown) {
+                rebindVideoNode(currentVideo, 'url-monitor');
+                return;
+            }
+
+            if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
+            if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+
             // Сбрасываем таймер в интерфейсе немедленно!
             isCountingDown = false;
             countdownSeconds = 0;
@@ -195,12 +271,8 @@
             if (urlChanged) {
                 triggerUniversalFullScreen();
             }
-            
-            if (_urlMonitorTimer) clearTimeout(_urlMonitorTimer);
-            _urlMonitorTimer = setTimeout(() => {
-                _urlMonitorTimer = null;
-                if (slideshowActive && !slideshowPaused) scheduleNextSlideCycle(0);
-            }, 150);
+
+            requestSlideCycle(150, slideChanged ? 'url-monitor:slide' : 'url-monitor:video');
         }
     }, 250);
 
@@ -259,8 +331,12 @@
         return 'ArrowRight';
     }
 
-    function triggerNextSlide() {
-        if (!slideshowActive || slideshowPaused || _isRewinding) return;
+    function triggerNextSlide(source = 'unknown') {
+        if (!slideshowActive || slideshowPaused || _isRewinding) {
+            mossadDebug('step', 'triggerNextSlide пропущен (неактивно/пауза/перемотка)', { source });
+            return;
+        }
+        mossadDebug('step', 'triggerNextSlide', { source });
         cancelSlideTimers();
 
         // 1. Большое слайдшоу (по плейлисту коллекции в Grok): НЕ зависит от D-Pad!
@@ -279,9 +355,9 @@
             // Большое слайдшоу (Gallery Slideshow): переходим на следующий URL из собранного плейлиста
             if (isBigGrokSs) {
                 if (typeof window._mossadGalleryNextFn === 'function') {
-                    window._mossadGalleryNextFn();
+                    window._mossadGalleryNextFn(source);
                     return;
-                } else grokGalleryStepNext();
+                } else grokGalleryStepNext(source);
                 return;
             }
 
@@ -447,6 +523,8 @@
 
     function scheduleNextSlideCycle(initSec, retryCount = 0) {
         if (!slideshowActive || slideshowPaused) return;
+        // Прямой запуск цикла отменяет отложенный (requestSlideCycle), иначе он перезапустил бы счётчик позже
+        if (_cycleStartTimer) { clearTimeout(_cycleStartTimer); _cycleStartTimer = null; }
         if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
         if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
         
@@ -458,7 +536,7 @@
             sessionStorage.removeItem('mossad_expected_type');
             countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
             isCountingDown = true;
-            runPhotoTimer();
+            runPhotoTimer('photo-timer');
             return;
         }
 
@@ -468,21 +546,40 @@
             }
             if (isNaN(video.duration) || video.duration === 0) {
                 if (retryCount > 40) { // До 8 секунд ожидания параметров видео
-                     triggerNextSlide();
+                     triggerNextSlide('video-meta-timeout');
                      return;
                 }
                 slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 200);
                 return;
             }
+            // v1.3.38: на Grok сразу после перехода ещё может стоять <video> ПРЕДЫДУЩЕГО поста (тот же src).
+            // Ждём смены src (до ~3 с), иначе считали бы круги старого ролика.
+            const slideKey = slideKeyOf(location.href);
+            const vSrc = video.currentSrc || video.src || '';
+            if (rootDomain === 'grok.com' && _lastCycleSlideKey && slideKey !== _lastCycleSlideKey &&
+                vSrc && vSrc === _lastCycleVideoSrc && retryCount < 15) {
+                slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 200);
+                return;
+            }
+            _lastCycleSlideKey = slideKey;
+            _lastCycleVideoSrc = vSrc;
             sessionStorage.removeItem('mossad_expected_type');
             isCountingDown = false;
             currentVideoNode = video;
+            lastActiveVideo = video;
             videoInitialDuration = video.duration;
             currentLoopCount = 0;
             accumulatedTime = 0;
             lastTime = video.currentTime;
             lastRAFTime = performance.now();
             _videoReachedEndZone = false;
+            _videoDetachedSince = 0;
+            _endedConsumed = false;
+            if (video.ended) {
+                // Ролик уже закончился (не зациклен) — начинаем круг заново, а не засчитываем мгновенно
+                try { video.currentTime = 0; video.play().catch(() => {}); } catch(e) {}
+            }
+            mossadDebug('cycle', 'старт подсчёта кругов видео', { need: config.videoLoops, dur: Math.round(video.duration * 10) / 10 });
             rafId = requestAnimationFrame(checkVideoLoops);
         } else {
             // Если в DOM уже есть главная картинка пина и нет контейнеров видео
@@ -495,7 +592,7 @@
                 sessionStorage.removeItem('mossad_expected_type');
                 countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
                 isCountingDown = true;
-                runPhotoTimer();
+                runPhotoTimer('photo-timer');
                 return;
             }
 
@@ -515,44 +612,73 @@
             sessionStorage.removeItem('mossad_expected_type');
             countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
             isCountingDown = true;
-            runPhotoTimer();
+            runPhotoTimer('photo-timer');
         }
     }
 
     function checkVideoLoops(timeNow) {
+        rafId = null;
         if (!slideshowActive || slideshowPaused) return;
         if (!currentVideoNode || !document.body.contains(currentVideoNode)) {
-            scheduleNextSlideCycle(0); // Видео исчезло, перезапуск логики
+            // v1.3.38: элемент перемонтирован — пробуем перепривязаться к новому <video> без сброса счётчика
+            const replacement = getActiveVideo();
+            if (currentVideoNode && replacement && replacement !== currentVideoNode) {
+                rebindVideoNode(replacement, 'detached');
+                if (!rafId) rafId = requestAnimationFrame(checkVideoLoops);
+                return;
+            }
+            if (!_videoDetachedSince) _videoDetachedSince = timeNow || performance.now();
+            if ((timeNow || performance.now()) - _videoDetachedSince < 2000) {
+                rafId = requestAnimationFrame(checkVideoLoops);
+                return;
+            }
+            mossadDebug('cycle', 'видео исчезло >2с — перезапуск цикла');
+            scheduleNextSlideCycle(0); // Видео исчезло надолго, перезапуск логики
             return;
         }
-        
-        // Если пользователь поставил видео на паузу — ставим отсчет слайдшоу на паузу!
+        _videoDetachedSince = 0;
+
+        // Если видео на паузе: либо пользователь поставил паузу (ждём), либо мы следим не за тем элементом
         if (currentVideoNode.paused) {
+            const now = timeNow || performance.now();
+            if (rootDomain === 'grok.com' && now - _lastRebindCheck > 500) {
+                _lastRebindCheck = now;
+                const act = getActiveVideo();
+                if (act && act !== currentVideoNode && !act.paused) {
+                    rebindVideoNode(act, 'paused-other-playing');
+                    if (rafId) return; // rebind уже запланировал следующий кадр
+                }
+            }
             lastRAFTime = timeNow;
             rafId = requestAnimationFrame(checkVideoLoops);
             return;
         }
 
         const ct = currentVideoNode.currentTime;
-        const effDuration = videoInitialDuration || (currentVideoNode && !isNaN(currentVideoNode.duration) ? currentVideoNode.duration : 0);
+        const effDuration = liveVideoDuration(currentVideoNode);
 
         if (effDuration <= 0) {
             rafId = requestAnimationFrame(checkVideoLoops);
             return;
         }
 
+        const isEnded = !!currentVideoNode.ended;
+        if (!isEnded) _endedConsumed = false;
+
         // Финальная зона ролика (последние 0.45с либо нативное событие ended)
-        const isAtEnd = currentVideoNode.ended || (ct >= Math.max(0.5, effDuration - 0.45));
+        const isAtEnd = isEnded || (ct >= Math.max(0.5, effDuration - 0.45));
         if (isAtEnd) {
             _videoReachedEndZone = true;
         }
 
         // Завершение одного цикла/круга видео
         let loopCompleted = false;
-        if (currentVideoNode.ended) {
+        if (isEnded && !_endedConsumed) {
             loopCompleted = true;
-        } else if (_videoReachedEndZone && ct < 1.0) {
-            // Видео было в финальной зоне и зациклилось на начало
+            _endedConsumed = true; // ended остаётся true до следующего play() — засчитываем один раз
+        } else if (!isEnded && _videoReachedEndZone && ct < 1.0 && ct < lastTime) {
+            // Видео было в финальной зоне и зациклилось на начало (время реально «откатилось» на этом же
+            // элементе; v1.3.38: без ct < lastTime короткие ролики <1.45 с засчитывали круг прямо в финальной зоне)
             loopCompleted = true;
         } else if (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0 && ct >= config.pinterestMaxVideoDuration) {
             // Pinterest лимит длительности
@@ -563,16 +689,22 @@
             currentLoopCount++;
             _videoReachedEndZone = false;
             lastTime = ct;
+            mossadDebug('loop', `круг видео ${currentLoopCount}/${config.videoLoops}`, { ended: isEnded });
             if (currentLoopCount >= config.videoLoops) {
                 // Все круги завершены: запускаем паузу после видео
                 countdownSeconds = config.delayAfterVideo;
+                mossadDebug('loop', 'все круги видео завершены', { loops: currentLoopCount, need: config.videoLoops });
                 if (countdownSeconds > 0) {
                     isCountingDown = true;
-                    runPhotoTimer();
+                    runPhotoTimer('video-loops-done');
                 } else {
-                    triggerNextSlide();
+                    triggerNextSlide('video-loops-done');
                 }
                 return;
+            }
+            if (isEnded) {
+                // Незацикленный ролик: запускаем следующий круг сами
+                try { currentVideoNode.currentTime = 0; currentVideoNode.play().catch(() => {}); } catch(e) {}
             }
         }
 
@@ -581,16 +713,16 @@
         rafId = requestAnimationFrame(checkVideoLoops);
     }
 
-    function runPhotoTimer() {
+    function runPhotoTimer(reason = 'photo-timer') {
         if (!slideshowActive || slideshowPaused) return;
         if (countdownSeconds <= 0) {
             isCountingDown = false;
-            triggerNextSlide();
+            triggerNextSlide(reason);
             return;
         }
         slideshowTimeoutId = setTimeout(() => {
             countdownSeconds--;
-            runPhotoTimer();
+            runPhotoTimer(reason);
         }, 1000);
     }
 
@@ -641,13 +773,13 @@
 
         if (slideshowActive) {
             slideshowPaused = false;
-            scheduleNextSlideCycle(0);
+            requestSlideCycle(0, 'resume:' + reason);
         }
         if (window._mossadGalleryActive) {
             window._mossadGalleryPaused = false;
             sessionStorage.removeItem('mossad_gallery_paused');
             updateGalleryStatusBtn('playing');
-            scheduleNextSlideCycle(0);
+            requestSlideCycle(0, 'resume:' + reason);
         }
         if (window.updateWidgetUI) window.updateWidgetUI();
     }

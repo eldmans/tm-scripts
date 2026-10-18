@@ -46,27 +46,21 @@
             currentPath = location.pathname.toLowerCase();
         }
 
-        const items = panel.querySelectorAll('.mossad-playlist-item');
-        let matchedEl = null;
-
-        items.forEach(el => {
+        // v1.3.38: раньше на каждом шаге перебирались и перекрашивались ВСЕ элементы списка (O(N) записей
+        // стилей и textContent). Теперь: ищем совпадение (дёшево, только чтение data-атрибутов), а
+        // перерисовываем лишь прежний активный и новый активный элементы.
+        const isActiveEl = (el) => {
             const itemUrl = (el.dataset.url || '').toLowerCase();
             const itemUuid = (el.dataset.uuid || '').toLowerCase();
+            if (activeUuid && itemUuid) return activeUuid.toLowerCase() === itemUuid;
             const cleanItemUrl = stripUrlQuery(itemUrl);
-
-            let isActive = false;
-            if (activeUuid && itemUuid && activeUuid === itemUuid) {
-                isActive = true;
-            } else if (cleanItemUrl && (cleanItemUrl === currentCleanUrl || (currentPath && cleanItemUrl.endsWith(currentPath)))) {
-                isActive = true;
-            }
-
+            return !!cleanItemUrl && (cleanItemUrl === currentCleanUrl || (currentPath && cleanItemUrl.endsWith(currentPath)));
+        };
+        const paintEl = (el, isActive) => {
             const label = el.querySelector('.mossad-playlist-label');
             const origText = el.dataset.origText || (label ? label.textContent.replace(/^▶\s*/, '') : '');
             if (!el.dataset.origText && origText) el.dataset.origText = origText;
-
             if (isActive) {
-                matchedEl = el;
                 el.style.background = 'rgba(59, 130, 246, 0.28)';
                 el.style.border = '1px solid rgba(96, 165, 250, 0.6)';
                 el.style.borderRadius = '4px';
@@ -93,7 +87,17 @@
                 }
             }
             el.dataset.active = isActive ? 'true' : 'false';
+        };
+
+        let matchedEl = null;
+        const items = panel.querySelectorAll('.mossad-playlist-item');
+        for (const el of items) {
+            if (isActiveEl(el)) { matchedEl = el; break; }
+        }
+        panel.querySelectorAll('.mossad-playlist-item[data-active="true"]').forEach(el => {
+            if (el !== matchedEl) paintEl(el, false);
         });
+        if (matchedEl && matchedEl.dataset.active !== 'true') paintEl(matchedEl, true);
 
         // Сбросить оформление групп, в которых нет активного элемента
         panel.querySelectorAll('.mossad-playlist-group').forEach(grp => {

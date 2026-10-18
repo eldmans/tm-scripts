@@ -3749,9 +3749,23 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
      * - grpMode: режим переключения групп (seq | rev | rnd | off)
      * - itemMode: режим порядка внутри группы (fwd | rev | rnd | off)
      */
+    // v1.3.38: кэш разобранной структуры. Раньше вся коллекция (растёт за сессию, хранится в sessionStorage
+    // до перезапуска браузера) парсилась JSON.parse 5–8 раз на каждый шаг/клавишу. Теперь — только при
+    // изменении сохранённой строки. Результат общий: НЕ мутировать struct/items/groups у вызывающих.
+    let _plStructCacheRaw = null;
+    let _plStructCache = null;
+
     function grokGetPlaylistStructure() {
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
         if (!raw) return null;
+        if (raw === _plStructCacheRaw) return _plStructCache;
+        const built = grokBuildPlaylistStructure(raw);
+        _plStructCacheRaw = raw;
+        _plStructCache = built;
+        return built;
+    }
+
+    function grokBuildPlaylistStructure(raw) {
         let data;
         try { data = JSON.parse(raw); } catch { return null; }
         const items = data.items || [];
@@ -3825,10 +3839,78 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
      * - direction === 'prev_grp': шаг к предыдущей группе
      * - direction === 'auto': шаг автоматического слайдшоу с учётом grpMode и itemMode
      */
+    // ── v1.3.38: история показанных элементов (для «назад» в случайных режимах) и явная синхронизация позиции ──
+    const GALLERY_HISTORY_MAX = 200;
+
+    function grokReadSS() {
+        try { return JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}') || {}; } catch(e) { return {}; }
+    }
+
+    function grokIsRandomMode(struct) {
+        return !!struct && (struct.grpMode === 'rnd' || struct.itemMode === 'rnd' || struct.itemMode === 'off');
+    }
+
+    /** Добавляет url в историю (без повторов подряд), ограничивая размер. Мутирует ss. */
+    function grokHistoryPushInto(ss, url) {
+        if (!url) return;
+        const hist = Array.isArray(ss.history) ? ss.history : [];
+        const key = normUrlKey(url);
+        if (!hist.length || normUrlKey(hist[hist.length - 1]) !== key) hist.push(url);
+        if (hist.length > GALLERY_HISTORY_MAX) hist.splice(0, hist.length - GALLERY_HISTORY_MAX);
+        ss.history = hist;
+    }
+
+    /**
+     * Явно фиксирует «текущий» элемент слайдшоу в SS: targetUrl/targetUuid, curGrpIdx/curItemIdx, отметки
+     * посещения и история. Вызывается при ЛЮБОМ переходе по плейлисту (авто, хоткеи, клик в списке),
+     * чтобы следующий автошаг считался от реально выбранного элемента, а не от устаревшей позиции.
+     */
+    function grokSyncSlidePosition(item, opts = {}) {
+        if (!item || !item.url) return;
+        const struct = opts.struct || grokGetPlaylistStructure();
+        const ss = opts.ss || grokReadSS();
+        if (!ss.active && !opts.force) return; // слайдшоу по коллекции не запущено — позицию не ведём
+        const base = normUrlKey(item.url);
+        ss.targetUrl = item.url;
+        ss.targetUuid = grokExtractUuid(item.url);
+        if (struct) {
+            for (let g = 0; g < struct.groups.length; g++) {
+                const i = struct.groups[g].items.findIndex(it => normUrlKey(it.url) === base);
+                if (i !== -1) {
+                    if (ss.curGrpIdx !== g) ss.visitedInCurGroup = [];
+                    ss.curGrpIdx = g;
+                    ss.curItemIdx = i;
+                    const vg = Array.isArray(ss.visitedGroupsInCircle) ? ss.visitedGroupsInCircle : [];
+                    if (!vg.includes(struct.groups[g].id)) vg.push(struct.groups[g].id);
+                    ss.visitedGroupsInCircle = vg;
+                    break;
+                }
+            }
+        }
+        const vcg = Array.isArray(ss.visitedInCurGroup) ? ss.visitedInCurGroup : [];
+        if (!vcg.includes(base)) vcg.push(base);
+        ss.visitedInCurGroup = vcg;
+        const vc = Array.isArray(ss.visitedInCircle) ? ss.visitedInCircle : [];
+        if (!vc.includes(base)) vc.push(base);
+        ss.visitedInCircle = vc;
+        if (opts.pushHistory !== false) grokHistoryPushInto(ss, item.url);
+        _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+        mossadDebug('pos', 'позиция синхронизирована', { source: opts.source, g: ss.curGrpIdx, i: ss.curItemIdx, hist: (ss.history || []).length });
+    }
+
     function grokGetNextSlideItem(direction = 'auto', overrideUrl = null) {
         const struct = grokGetPlaylistStructure();
         if (!struct || !struct.items.length) return null;
 
+        // v1.3.38: «текущий» элемент — тот, что явно выбран скриптом (ss.targetUrl), а не URL страницы:
+        // URL отстаёт при переключении киноплёнки и может принадлежать предыдущему посту во время перехода.
+        if (!overrideUrl) {
+            const ssPos = grokReadSS();
+            if (ssPos.active && ssPos.targetUrl &&
+                struct.items.some(it => normUrlKey(it.url) === normUrlKey(ssPos.targetUrl))) {
+                overrideUrl = ssPos.targetUrl;
+            }
+        }
         const curPos = grokFindCurrentPosition(struct, overrideUrl);
 
         // ── 1. Зацикленный набор (R / loopSet) ──
@@ -3894,6 +3976,26 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const nextG = (g + 1) % struct.groups.length;
             const nextGrp = struct.groups[nextG];
             return { item: nextGrp.items[0], circleCompleted: nextG === 0 };
+        }
+
+        // ── 4а. «Назад» в случайных режимах — по истории показанных элементов (v1.3.38) ──
+        if (direction === 'up' && grokIsRandomMode(struct)) {
+            const ssH = grokReadSS();
+            const hist = Array.isArray(ssH.history) ? ssH.history.slice() : [];
+            const curKey = normUrlKey((curPos && curPos.currentItem && curPos.currentItem.url) || overrideUrl || location.href);
+            while (hist.length && normUrlKey(hist[hist.length - 1]) === curKey) hist.pop();
+            while (hist.length) {
+                const prevKey = normUrlKey(hist[hist.length - 1]);
+                const prevItem = struct.items.find(it => normUrlKey(it.url) === prevKey);
+                if (prevItem) {
+                    ssH.history = hist; // вершина истории = элемент, на который возвращаемся
+                    _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ssH));
+                    mossadDebug('pos', 'назад по истории', { left: hist.length });
+                    return { item: prevItem, circleCompleted: false, fromHistory: true };
+                }
+                hist.pop(); // элемента уже нет в коллекции
+            }
+            // История пуста — обычный шаг вверх по списку
         }
 
         // ── 4. Ручной переход ВВЕРХ (ArrowUp / PageUp) — СТРОГО ВВЕРХ ПО СПИСКУ ──
@@ -4158,6 +4260,57 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
      * - Та же conversation (группа) → filmstrip click (мгновенно, без перезагрузки)
      * - Другая conversation → window.location.href (полный переход)
      */
+    // ── v1.3.38: блокировка навигации «в полёте» ──
+    // Раньше несколько источников (таймер фото, конец кругов видео, монитор URL, тик, ретраи) могли
+    // запустить шаг подряд, пока предыдущий переход ещё не завершился → «шторм» ~10 переходов/с в
+    // режиме случайных групп. Теперь автошаг игнорируется, пока предыдущий переход не «прибыл» (тик
+    // на новом посте) или не истёк таймаут. Ручные шаги (хоткеи, клик в плейлисте) перехватывают
+    // блокировку (force). ANTI_PATTERNS §17.
+    const GALLERY_NAV_LOCK_MS = 4000;
+    const GALLERY_MIN_DWELL_MS = 600; // автошаг не раньше, чем через 600 мс после прибытия (фото ≥ 1 с)
+    const _galleryNav = { inFlight: false, targetUuid: '', startedAt: 0, source: '', seq: 0, arrivedAt: 0 };
+
+    function grokNavInFlight() {
+        if (!_galleryNav.inFlight) return false;
+        if (Date.now() - _galleryNav.startedAt > GALLERY_NAV_LOCK_MS) {
+            mossadDebug('nav', 'таймаут блокировки перехода — снимаем', { source: _galleryNav.source, target: _galleryNav.targetUuid });
+            _galleryNav.inFlight = false;
+            return false;
+        }
+        return true;
+    }
+
+    /** Захват блокировки перехода. false — автошаг отклонён (переход уже идёт). */
+    function grokBeginNav(url, source, force = false) {
+        if (!force && grokNavInFlight()) {
+            mossadDebug('nav', 'шаг ОТКЛОНЁН: предыдущий переход ещё в полёте', { source, inFlightFrom: _galleryNav.source, target: _galleryNav.targetUuid });
+            return false;
+        }
+        _galleryNav.inFlight = true;
+        _galleryNav.targetUuid = (grokExtractUuid(url || '') || '').toLowerCase();
+        _galleryNav.startedAt = Date.now();
+        _galleryNav.source = source || '?';
+        _galleryNav.seq++;
+        const mySeq = _galleryNav.seq;
+        // Сторож: если «прибытие» так и не случилось (переход не удался), снимаем блокировку и продолжаем
+        setTimeout(() => {
+            if (_galleryNav.inFlight && _galleryNav.seq === mySeq) {
+                mossadDebug('nav', 'сторож: переход не завершился — снимаем блокировку', { source: _galleryNav.source });
+                _galleryNav.inFlight = false;
+                if (slideshowActive && !slideshowPaused) requestSlideCycle(0, 'nav-watchdog');
+            }
+        }, GALLERY_NAV_LOCK_MS + 100);
+        mossadDebug('nav', 'переход начат', { source, target: _galleryNav.targetUuid, seq: _galleryNav.seq, force: !!force });
+        return true;
+    }
+
+    function grokEndNav(reason) {
+        if (!_galleryNav.inFlight) return;
+        mossadDebug('nav', 'переход завершён', { reason, source: _galleryNav.source, ms: Date.now() - _galleryNav.startedAt });
+        _galleryNav.inFlight = false;
+        _galleryNav.arrivedAt = Date.now();
+    }
+
     function grokSpaNavigate(url) {
         if (!url) return;
 
@@ -4205,14 +4358,21 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
                     if (filmstripBtn) {
                         console.log('[MOSSAD] grokSpaNavigate: та же conversation → filmstrip click');
+                        mossadDebug('nav', 'filmstrip click (та же conversation)', { target: targetUuid });
+                        const navSeq = _galleryNav.seq;
                         filmstripBtn.click();
                         try { history.replaceState(null, '', path); } catch(e) {}
-                        // До ~240 мс (6 × 40 мс) ждём смены UUID в URL, затем тик в любом случае
+                        // До 6 проверок × 40 мс ждём смены UUID в URL, затем тик в любом случае
                         waitForCondition(() => {
                             const curUuid = grokExtractUuid(location.pathname);
-                            return !!(curUuid && targetUuid && curUuid === targetUuid.toLowerCase());
+                            return !!(curUuid && targetUuid && curUuid.toLowerCase() === targetUuid.toLowerCase());
                         }, 240, 40).then(() => {
-                            grokGallerySlideshowTick();
+                            // Если за это время начался другой (ручной) переход — его тик сделает он сам
+                            if (navSeq !== _galleryNav.seq) {
+                                mossadDebug('nav', 'тик пропущен: устаревший переход', { navSeq, cur: _galleryNav.seq });
+                                return;
+                            }
+                            grokGallerySlideshowTick('spa-arrived');
                         });
                         return;
                     }
@@ -4224,6 +4384,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         // Другая conversation или нет filmstrip → полный переход по URL
         console.log('[MOSSAD] grokSpaNavigate: другая conversation → location.href', url);
+        mossadDebug('nav', 'location.href (другая conversation)', { url });
         window.location.href = url;
     }
 
@@ -4316,13 +4477,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             return;
         }
 
-        // Немедленно останавливаем любые активные таймеры предыдущего видео/слайда!
-        if (typeof slideshowTimeoutId !== 'undefined' && slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
-        if (typeof rafId !== 'undefined' && rafId) cancelAnimationFrame(rafId);
-        isCountingDown = false;
-        countdownSeconds = 0;
-        currentLoopCount = 0;
-        accumulatedTime = 0;
+        // Немедленно останавливаем ВСЕ таймеры предыдущего слайда (включая отложенный запуск цикла,
+        // v1.3.38) и перехватываем блокировку перехода: устаревшие автошаги не перебьют выбор.
+        cancelSlideTimers();
+        const prevSS = grokReadSS();
 
         const startBase = normUrlKey(startItem.url);
         const startGid = startItem.convId || '__noconv__';
@@ -4346,9 +4504,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             curItemIdx: startItemIdx,
             visitedInCurGroup: [startBase],
             visitedGroupsInCircle: [startGid],
-            visitedInCircle: [startBase]
+            visitedInCircle: [startBase],
+            history: Array.isArray(prevSS.history) ? prevSS.history : []
         };
+        grokHistoryPushInto(ss, startItem.url);
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+        mossadDebug('pos', 'старт с выбранного элемента', { g: startGrpIdx, i: startItemIdx });
         const wasPaused = window._mossadGalleryPaused || sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
                           (typeof SESSION_PAUSED_KEY !== 'undefined' && sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true');
         if (wasPaused) {
@@ -4370,11 +4531,16 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
 
+        grokBeginNav(startItem.url, 'manual-pick', true);
+        const navSeq = _galleryNav.seq;
         const curClean = normUrlKey(location.href);
         if (curClean === startBase) {
-            grokGallerySlideshowTick();
+            grokGallerySlideshowTick('start-here');
         } else {
-            setTimeout(() => { grokSpaNavigate(startItem.url); }, 150);
+            setTimeout(() => {
+                if (navSeq !== _galleryNav.seq) return; // успели выбрать другой элемент
+                grokSpaNavigate(startItem.url);
+            }, 150);
         }
     }
 
@@ -4438,14 +4604,30 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             sessionStorage.removeItem('mossad_gallery_paused');
             updateGalleryStatusBtn('playing');
             showToast('▶ Продолжаем');
-            scheduleNextSlideCycle(0);
+            requestSlideCycle(0, 'gallery-resume');
         }
     }
 
     /** Выполняет шаг к следующему слайду по логике плейлиста */
-    function grokGalleryStepNext() {
+    function grokGalleryStepNext(source = 'auto') {
+        // v1.3.38: автошаг не выполняется, пока предыдущий переход не завершился (см. grokBeginNav)
+        if (grokNavInFlight()) {
+            mossadDebug('nav', 'автошаг ОТКЛОНЁН: переход в полёте', { source, inFlightFrom: _galleryNav.source });
+            return false;
+        }
+        if (_galleryNav.arrivedAt && Date.now() - _galleryNav.arrivedAt < GALLERY_MIN_DWELL_MS) {
+            const elapsed = Date.now() - _galleryNav.arrivedAt;
+            mossadDebug('nav', 'автошаг ОТКЛОНЁН: слишком рано после прибытия', { source, ms: elapsed });
+            // triggerNextSlide уже отменил таймеры — перезапускаем цикл текущего слайда, иначе слайдшоу встанет
+            requestSlideCycle(GALLERY_MIN_DWELL_MS - elapsed + 50, 'dwell-retry');
+            return false;
+        }
         const nextRes = grokGetNextSlideItem('auto');
-        if (!nextRes || !nextRes.item) return;
+        if (!nextRes || !nextRes.item) {
+            mossadDebug('step', 'следующий элемент не найден', { source });
+            return false;
+        }
+        if (!grokBeginNav(nextRes.item.url, 'auto:' + source)) return false;
 
         if (nextRes.circleCompleted) {
             playCircleDoneSound();
@@ -4460,20 +4642,27 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         try { ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}'); } catch(e) {}
         ss.targetUrl = nextRes.item.url;
         ss.targetUuid = grokExtractUuid(nextRes.item.url);
+        grokHistoryPushInto(ss, nextRes.item.url);
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+        mossadDebug('step', 'автошаг', { source, circle: !!nextRes.circleCompleted, target: ss.targetUuid });
 
         if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
         grokSpaNavigate(nextRes.item.url);
+        return true;
     }
 
     /** На странице поста — продолжение Gallery Slideshow через стандартный движок MOSSAD */
-    function grokGallerySlideshowTick() {
+    function grokGallerySlideshowTick(source = 'tick') {
         if (!isGrokPostPage()) return;
+        // Прибыли на пост: переход завершён
+        grokEndNav(source);
         const raw = _gSS.getItem(GALLERY_SS_KEY);
         if (!raw) return;
         let ss;
         try { ss = JSON.parse(raw); } catch { return; }
         if (!ss.active) return;
+        // Все старые таймеры предыдущего слайда — отменить (ровно один новый запуск цикла ниже)
+        cancelSlideTimers();
 
         if (sessionStorage.getItem('mossad_navigating_group') === 'true') {
             sessionStorage.removeItem('mossad_navigating_group');
@@ -4540,10 +4729,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         // Устанавливаем функцию перехода: её вызовет triggerNextSlide
         window._mossadGalleryActive = true;
-        window._mossadGalleryNextFn = () => {
+        window._mossadGalleryNextFn = (stepSource) => {
             const statusEl = document.getElementById('mgi-status');
             if (statusEl) statusEl.textContent = '⏳ Переход...';
-            grokGalleryStepNext();
+            grokGalleryStepNext(stepSource || 'next-fn');
         };
 
         // Запускаем стандартный движок — он сам разберётся фото/видео/циклы/паузы
@@ -4553,7 +4742,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         window.widgetState = 'bar';
         if (window.updateWidgetUI) window.updateWidgetUI();
         if (!isPaused) {
-            setTimeout(() => scheduleNextSlideCycle(0), 300);
+            requestSlideCycle(300, 'tick:' + source);
         }
     }
 
@@ -4563,7 +4752,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         isPaused: () => !!window._mossadGalleryPaused,
         next: () => {
             if (typeof window._mossadGalleryNextFn === 'function') {
-                window._mossadGalleryNextFn();
+                window._mossadGalleryNextFn('facade');
             }
         },
         pause: toggleGalleryPause,
@@ -4861,27 +5050,21 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             currentPath = location.pathname.toLowerCase();
         }
 
-        const items = panel.querySelectorAll('.mossad-playlist-item');
-        let matchedEl = null;
-
-        items.forEach(el => {
+        // v1.3.38: раньше на каждом шаге перебирались и перекрашивались ВСЕ элементы списка (O(N) записей
+        // стилей и textContent). Теперь: ищем совпадение (дёшево, только чтение data-атрибутов), а
+        // перерисовываем лишь прежний активный и новый активный элементы.
+        const isActiveEl = (el) => {
             const itemUrl = (el.dataset.url || '').toLowerCase();
             const itemUuid = (el.dataset.uuid || '').toLowerCase();
+            if (activeUuid && itemUuid) return activeUuid.toLowerCase() === itemUuid;
             const cleanItemUrl = stripUrlQuery(itemUrl);
-
-            let isActive = false;
-            if (activeUuid && itemUuid && activeUuid === itemUuid) {
-                isActive = true;
-            } else if (cleanItemUrl && (cleanItemUrl === currentCleanUrl || (currentPath && cleanItemUrl.endsWith(currentPath)))) {
-                isActive = true;
-            }
-
+            return !!cleanItemUrl && (cleanItemUrl === currentCleanUrl || (currentPath && cleanItemUrl.endsWith(currentPath)));
+        };
+        const paintEl = (el, isActive) => {
             const label = el.querySelector('.mossad-playlist-label');
             const origText = el.dataset.origText || (label ? label.textContent.replace(/^▶\s*/, '') : '');
             if (!el.dataset.origText && origText) el.dataset.origText = origText;
-
             if (isActive) {
-                matchedEl = el;
                 el.style.background = 'rgba(59, 130, 246, 0.28)';
                 el.style.border = '1px solid rgba(96, 165, 250, 0.6)';
                 el.style.borderRadius = '4px';
@@ -4908,7 +5091,17 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 }
             }
             el.dataset.active = isActive ? 'true' : 'false';
+        };
+
+        let matchedEl = null;
+        const items = panel.querySelectorAll('.mossad-playlist-item');
+        for (const el of items) {
+            if (isActiveEl(el)) { matchedEl = el; break; }
+        }
+        panel.querySelectorAll('.mossad-playlist-item[data-active="true"]').forEach(el => {
+            if (el !== matchedEl) paintEl(el, false);
         });
+        if (matchedEl && matchedEl.dataset.active !== 'true') paintEl(matchedEl, true);
 
         // Сбросить оформление групп, в которых нет активного элемента
         panel.querySelectorAll('.mossad-playlist-group').forEach(grp => {
@@ -6360,6 +6553,11 @@ function findMediaForDownload() {
     let lastRAFTime = 0;
     let rafId = null;
     let _videoReachedEndZone = false; // Видео зашло в финальную зону (последние доли секунды)
+    let _endedConsumed = false;       // v1.3.38: событие ended уже засчитано (ended остаётся true до play())
+    let _videoDetachedSince = 0;      // v1.3.38: когда отслеживаемый <video> исчез из DOM
+    let _lastRebindCheck = 0;         // v1.3.38: троттлинг поиска другого играющего видео
+    let _lastCycleVideoSrc = '';      // v1.3.38: src видео предыдущего слайда (не считать старое видео новым)
+    let _lastCycleSlideKey = '';
     let _lastDownloadUrl = null;     // защита от повторного скачивания одного файла
     let _lastDownloadTime = 0;
     const _filenameCounter = new Map(); // счётчик по базовому имени → (001)(002)...
@@ -6367,7 +6565,26 @@ function findMediaForDownload() {
     let _lastSlideUrl = '';          // URL во время последнего triggerNextSlide
     const SAME_PAGE_LIMIT = 3;       // сколько раз пробовать перед остановкой
 
+    // v1.3.38: ЕДИНСТВЕННЫЙ отложенный запуск цикла слайда. Раньше цикл запускали независимо
+    // тик галереи (setTimeout 300 мс без id), монитор URL (150 мс) и др. — каждый перезапуск
+    // обнулял счётчик кругов видео. Теперь все источники идут через requestSlideCycle():
+    // новый запрос заменяет предыдущий, cancelSlideTimers() отменяет его (ANTI_PATTERNS §17).
+    let _cycleStartTimer = null;
+
+    function requestSlideCycle(delayMs, source) {
+        if (_cycleStartTimer) { clearTimeout(_cycleStartTimer); _cycleStartTimer = null; }
+        mossadDebug('cycle', 'запрос запуска цикла', { source, delayMs });
+        _cycleStartTimer = setTimeout(() => {
+            _cycleStartTimer = null;
+            if (slideshowActive && !slideshowPaused) scheduleNextSlideCycle(0);
+        }, Math.max(0, delayMs || 0));
+    }
+
     function cancelSlideTimers() {
+        if (_cycleStartTimer) {
+            clearTimeout(_cycleStartTimer);
+            _cycleStartTimer = null;
+        }
         if (rafId) {
             cancelAnimationFrame(rafId);
             rafId = null;
@@ -6386,7 +6603,35 @@ function findMediaForDownload() {
         accumulatedTime = 0;
         lastTime = 0;
         _videoReachedEndZone = false;
+        _endedConsumed = false;
+        _videoDetachedSince = 0;
         currentVideoNode = null;
+    }
+
+    /** Живая длительность видео (videoInitialDuration — только запасной вариант, пока duration ещё NaN). */
+    function liveVideoDuration(v) {
+        const d = v ? v.duration : NaN;
+        return (isFinite(d) && d > 0) ? d : (videoInitialDuration || 0);
+    }
+
+    /**
+     * v1.3.38: перепривязка счётчика кругов к новому <video> того же слайда (React/HLS перемонтировал плеер)
+     * БЕЗ сброса currentLoopCount. Раньше любая смена элемента перезапускала цикл с нуля → 2–4 круга вместо 1.
+     */
+    function rebindVideoNode(v, source) {
+        if (!v) return;
+        mossadDebug('loop', 'перепривязка к новому <video> без сброса счётчика', { source, loops: currentLoopCount });
+        currentVideoNode = v;
+        lastActiveVideo = v;
+        if (isFinite(v.duration) && v.duration > 0) videoInitialDuration = v.duration;
+        _videoReachedEndZone = false;
+        _endedConsumed = !!v.ended;
+        _videoDetachedSince = 0;
+        lastTime = v.currentTime;
+        if (v.paused) { try { v.play().catch(() => {}); } catch(e) {} }
+        if (!rafId && slideshowActive && !slideshowPaused && !isCountingDown) {
+            rafId = requestAnimationFrame(checkVideoLoops);
+        }
     }
     window.cancelSlideTimers = cancelSlideTimers;
     function getActiveVideo() {
@@ -6488,13 +6733,24 @@ function findMediaForDownload() {
 
     let lastUrlForSlideshow = location.href;
     let lastActiveVideo = null;
-    let _urlMonitorTimer = null;
+
+    /** Ключ «слайда» для монитора: на Grok — UUID поста (смена query/replaceState того же поста — не новый слайд). */
+    function slideKeyOf(url) {
+        if (rootDomain === 'grok.com') {
+            try {
+                const u = grokExtractUuid(new URL(url, location.origin).pathname);
+                if (u) return 'grok:' + u.toLowerCase();
+            } catch(e) {}
+        }
+        return url;
+    }
 
     setInterval(() => {
         if (!slideshowActive || _isRewinding) return;
         
         const currentUrl = location.href;
         const urlChanged = currentUrl !== lastUrlForSlideshow;
+        const slideChanged = urlChanged && slideKeyOf(currentUrl) !== slideKeyOf(lastUrlForSlideshow);
         
         let videoChanged = false;
         let currentVideo = lastActiveVideo;
@@ -6503,13 +6759,26 @@ function findMediaForDownload() {
             videoChanged = currentVideo !== lastActiveVideo && (currentVideo !== null || lastActiveVideo !== null);
         }
         
-        if (urlChanged || videoChanged) {
+        if (urlChanged && !slideChanged && !videoChanged) {
+            // Тот же пост (например, replaceState с другим query) — не новый слайд
+            lastUrlForSlideshow = currentUrl;
+            return;
+        }
+
+        if (slideChanged || videoChanged || urlChanged) {
             lastUrlForSlideshow = currentUrl;
             lastActiveVideo = currentVideo;
-            
-            if (slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
-            if (rafId) cancelAnimationFrame(rafId);
-            
+
+            // v1.3.38: на Grok смена <video> внутри того же поста (React перемонтировал плеер) — НЕ новый слайд:
+            // перепривязываемся к новому элементу без сброса счётчика кругов (см. rebindVideoNode).
+            if (!slideChanged && videoChanged && rootDomain === 'grok.com' && currentVideoNode && currentVideo && !isCountingDown) {
+                rebindVideoNode(currentVideo, 'url-monitor');
+                return;
+            }
+
+            if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
+            if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+
             // Сбрасываем таймер в интерфейсе немедленно!
             isCountingDown = false;
             countdownSeconds = 0;
@@ -6517,12 +6786,8 @@ function findMediaForDownload() {
             if (urlChanged) {
                 triggerUniversalFullScreen();
             }
-            
-            if (_urlMonitorTimer) clearTimeout(_urlMonitorTimer);
-            _urlMonitorTimer = setTimeout(() => {
-                _urlMonitorTimer = null;
-                if (slideshowActive && !slideshowPaused) scheduleNextSlideCycle(0);
-            }, 150);
+
+            requestSlideCycle(150, slideChanged ? 'url-monitor:slide' : 'url-monitor:video');
         }
     }, 250);
 
@@ -6581,8 +6846,12 @@ function findMediaForDownload() {
         return 'ArrowRight';
     }
 
-    function triggerNextSlide() {
-        if (!slideshowActive || slideshowPaused || _isRewinding) return;
+    function triggerNextSlide(source = 'unknown') {
+        if (!slideshowActive || slideshowPaused || _isRewinding) {
+            mossadDebug('step', 'triggerNextSlide пропущен (неактивно/пауза/перемотка)', { source });
+            return;
+        }
+        mossadDebug('step', 'triggerNextSlide', { source });
         cancelSlideTimers();
 
         // 1. Большое слайдшоу (по плейлисту коллекции в Grok): НЕ зависит от D-Pad!
@@ -6601,9 +6870,9 @@ function findMediaForDownload() {
             // Большое слайдшоу (Gallery Slideshow): переходим на следующий URL из собранного плейлиста
             if (isBigGrokSs) {
                 if (typeof window._mossadGalleryNextFn === 'function') {
-                    window._mossadGalleryNextFn();
+                    window._mossadGalleryNextFn(source);
                     return;
-                } else grokGalleryStepNext();
+                } else grokGalleryStepNext(source);
                 return;
             }
 
@@ -6769,6 +7038,8 @@ function findMediaForDownload() {
 
     function scheduleNextSlideCycle(initSec, retryCount = 0) {
         if (!slideshowActive || slideshowPaused) return;
+        // Прямой запуск цикла отменяет отложенный (requestSlideCycle), иначе он перезапустил бы счётчик позже
+        if (_cycleStartTimer) { clearTimeout(_cycleStartTimer); _cycleStartTimer = null; }
         if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
         if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
         
@@ -6780,7 +7051,7 @@ function findMediaForDownload() {
             sessionStorage.removeItem('mossad_expected_type');
             countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
             isCountingDown = true;
-            runPhotoTimer();
+            runPhotoTimer('photo-timer');
             return;
         }
 
@@ -6790,21 +7061,40 @@ function findMediaForDownload() {
             }
             if (isNaN(video.duration) || video.duration === 0) {
                 if (retryCount > 40) { // До 8 секунд ожидания параметров видео
-                     triggerNextSlide();
+                     triggerNextSlide('video-meta-timeout');
                      return;
                 }
                 slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 200);
                 return;
             }
+            // v1.3.38: на Grok сразу после перехода ещё может стоять <video> ПРЕДЫДУЩЕГО поста (тот же src).
+            // Ждём смены src (до ~3 с), иначе считали бы круги старого ролика.
+            const slideKey = slideKeyOf(location.href);
+            const vSrc = video.currentSrc || video.src || '';
+            if (rootDomain === 'grok.com' && _lastCycleSlideKey && slideKey !== _lastCycleSlideKey &&
+                vSrc && vSrc === _lastCycleVideoSrc && retryCount < 15) {
+                slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 200);
+                return;
+            }
+            _lastCycleSlideKey = slideKey;
+            _lastCycleVideoSrc = vSrc;
             sessionStorage.removeItem('mossad_expected_type');
             isCountingDown = false;
             currentVideoNode = video;
+            lastActiveVideo = video;
             videoInitialDuration = video.duration;
             currentLoopCount = 0;
             accumulatedTime = 0;
             lastTime = video.currentTime;
             lastRAFTime = performance.now();
             _videoReachedEndZone = false;
+            _videoDetachedSince = 0;
+            _endedConsumed = false;
+            if (video.ended) {
+                // Ролик уже закончился (не зациклен) — начинаем круг заново, а не засчитываем мгновенно
+                try { video.currentTime = 0; video.play().catch(() => {}); } catch(e) {}
+            }
+            mossadDebug('cycle', 'старт подсчёта кругов видео', { need: config.videoLoops, dur: Math.round(video.duration * 10) / 10 });
             rafId = requestAnimationFrame(checkVideoLoops);
         } else {
             // Если в DOM уже есть главная картинка пина и нет контейнеров видео
@@ -6817,7 +7107,7 @@ function findMediaForDownload() {
                 sessionStorage.removeItem('mossad_expected_type');
                 countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
                 isCountingDown = true;
-                runPhotoTimer();
+                runPhotoTimer('photo-timer');
                 return;
             }
 
@@ -6837,44 +7127,73 @@ function findMediaForDownload() {
             sessionStorage.removeItem('mossad_expected_type');
             countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
             isCountingDown = true;
-            runPhotoTimer();
+            runPhotoTimer('photo-timer');
         }
     }
 
     function checkVideoLoops(timeNow) {
+        rafId = null;
         if (!slideshowActive || slideshowPaused) return;
         if (!currentVideoNode || !document.body.contains(currentVideoNode)) {
-            scheduleNextSlideCycle(0); // Видео исчезло, перезапуск логики
+            // v1.3.38: элемент перемонтирован — пробуем перепривязаться к новому <video> без сброса счётчика
+            const replacement = getActiveVideo();
+            if (currentVideoNode && replacement && replacement !== currentVideoNode) {
+                rebindVideoNode(replacement, 'detached');
+                if (!rafId) rafId = requestAnimationFrame(checkVideoLoops);
+                return;
+            }
+            if (!_videoDetachedSince) _videoDetachedSince = timeNow || performance.now();
+            if ((timeNow || performance.now()) - _videoDetachedSince < 2000) {
+                rafId = requestAnimationFrame(checkVideoLoops);
+                return;
+            }
+            mossadDebug('cycle', 'видео исчезло >2с — перезапуск цикла');
+            scheduleNextSlideCycle(0); // Видео исчезло надолго, перезапуск логики
             return;
         }
-        
-        // Если пользователь поставил видео на паузу — ставим отсчет слайдшоу на паузу!
+        _videoDetachedSince = 0;
+
+        // Если видео на паузе: либо пользователь поставил паузу (ждём), либо мы следим не за тем элементом
         if (currentVideoNode.paused) {
+            const now = timeNow || performance.now();
+            if (rootDomain === 'grok.com' && now - _lastRebindCheck > 500) {
+                _lastRebindCheck = now;
+                const act = getActiveVideo();
+                if (act && act !== currentVideoNode && !act.paused) {
+                    rebindVideoNode(act, 'paused-other-playing');
+                    if (rafId) return; // rebind уже запланировал следующий кадр
+                }
+            }
             lastRAFTime = timeNow;
             rafId = requestAnimationFrame(checkVideoLoops);
             return;
         }
 
         const ct = currentVideoNode.currentTime;
-        const effDuration = videoInitialDuration || (currentVideoNode && !isNaN(currentVideoNode.duration) ? currentVideoNode.duration : 0);
+        const effDuration = liveVideoDuration(currentVideoNode);
 
         if (effDuration <= 0) {
             rafId = requestAnimationFrame(checkVideoLoops);
             return;
         }
 
+        const isEnded = !!currentVideoNode.ended;
+        if (!isEnded) _endedConsumed = false;
+
         // Финальная зона ролика (последние 0.45с либо нативное событие ended)
-        const isAtEnd = currentVideoNode.ended || (ct >= Math.max(0.5, effDuration - 0.45));
+        const isAtEnd = isEnded || (ct >= Math.max(0.5, effDuration - 0.45));
         if (isAtEnd) {
             _videoReachedEndZone = true;
         }
 
         // Завершение одного цикла/круга видео
         let loopCompleted = false;
-        if (currentVideoNode.ended) {
+        if (isEnded && !_endedConsumed) {
             loopCompleted = true;
-        } else if (_videoReachedEndZone && ct < 1.0) {
-            // Видео было в финальной зоне и зациклилось на начало
+            _endedConsumed = true; // ended остаётся true до следующего play() — засчитываем один раз
+        } else if (!isEnded && _videoReachedEndZone && ct < 1.0 && ct < lastTime) {
+            // Видео было в финальной зоне и зациклилось на начало (время реально «откатилось» на этом же
+            // элементе; v1.3.38: без ct < lastTime короткие ролики <1.45 с засчитывали круг прямо в финальной зоне)
             loopCompleted = true;
         } else if (rootDomain.includes('pinterest.') && config.pinterestMaxVideoDuration > 0 && ct >= config.pinterestMaxVideoDuration) {
             // Pinterest лимит длительности
@@ -6885,16 +7204,22 @@ function findMediaForDownload() {
             currentLoopCount++;
             _videoReachedEndZone = false;
             lastTime = ct;
+            mossadDebug('loop', `круг видео ${currentLoopCount}/${config.videoLoops}`, { ended: isEnded });
             if (currentLoopCount >= config.videoLoops) {
                 // Все круги завершены: запускаем паузу после видео
                 countdownSeconds = config.delayAfterVideo;
+                mossadDebug('loop', 'все круги видео завершены', { loops: currentLoopCount, need: config.videoLoops });
                 if (countdownSeconds > 0) {
                     isCountingDown = true;
-                    runPhotoTimer();
+                    runPhotoTimer('video-loops-done');
                 } else {
-                    triggerNextSlide();
+                    triggerNextSlide('video-loops-done');
                 }
                 return;
+            }
+            if (isEnded) {
+                // Незацикленный ролик: запускаем следующий круг сами
+                try { currentVideoNode.currentTime = 0; currentVideoNode.play().catch(() => {}); } catch(e) {}
             }
         }
 
@@ -6903,16 +7228,16 @@ function findMediaForDownload() {
         rafId = requestAnimationFrame(checkVideoLoops);
     }
 
-    function runPhotoTimer() {
+    function runPhotoTimer(reason = 'photo-timer') {
         if (!slideshowActive || slideshowPaused) return;
         if (countdownSeconds <= 0) {
             isCountingDown = false;
-            triggerNextSlide();
+            triggerNextSlide(reason);
             return;
         }
         slideshowTimeoutId = setTimeout(() => {
             countdownSeconds--;
-            runPhotoTimer();
+            runPhotoTimer(reason);
         }, 1000);
     }
 
@@ -6963,13 +7288,13 @@ function findMediaForDownload() {
 
         if (slideshowActive) {
             slideshowPaused = false;
-            scheduleNextSlideCycle(0);
+            requestSlideCycle(0, 'resume:' + reason);
         }
         if (window._mossadGalleryActive) {
             window._mossadGalleryPaused = false;
             sessionStorage.removeItem('mossad_gallery_paused');
             updateGalleryStatusBtn('playing');
-            scheduleNextSlideCycle(0);
+            requestSlideCycle(0, 'resume:' + reason);
         }
         if (window.updateWidgetUI) window.updateWidgetUI();
     }
@@ -7896,13 +8221,16 @@ function findMediaForDownload() {
         // Tracker Time
         setInterval(() => {
             if (window.widgetState === 'hidden') return;
-            const video = getActiveVideo();
+            // v1.3.38: во время слайдшоу показываем то видео, по которому реально считаются круги
+            const tracked = (slideshowActive && currentVideoNode && currentVideoNode.isConnected) ? currentVideoNode : null;
+            const video = tracked || getActiveVideo();
             if (slideshowActive) {
                 timerEl.style.color = '#3b82f6';
                 if (isCountingDown) {
                     timerEl.textContent = countdownSeconds + 'с';
                 } else if (video && !isNaN(video.duration)) {
-                    timerEl.textContent = `${formatTime(video.currentTime)}/${formatTime(video.duration)}`;
+                    const loopsTxt = (tracked && config.videoLoops > 1) ? ` ↺${Math.min(currentLoopCount + 1, config.videoLoops)}/${config.videoLoops}` : '';
+                    timerEl.textContent = `${formatTime(video.currentTime)}/${formatTime(video.duration)}${loopsTxt}`;
                 } else {
                     timerEl.textContent = '⏳...';
                 }
@@ -8204,11 +8532,7 @@ function findMediaForDownload() {
             if (typeof rafId !== 'undefined' && rafId) cancelAnimationFrame(rafId);
             if (typeof slideshowTimeoutId !== 'undefined' && slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         } else {
-            setTimeout(() => {
-                if (slideshowActive && !slideshowPaused) {
-                    scheduleNextSlideCycle(0);
-                }
-            }, 300);
+            requestSlideCycle(300, 'manual-step');
         }
     }
 
@@ -8233,6 +8557,9 @@ function findMediaForDownload() {
                     showToast(`🔄 Круг ${ss.circle} начался!`);
                 }
                 const targetItem = nextRes.item;
+                // v1.3.38: ручной шаг перехватывает блокировку и явно фиксирует позицию (+история)
+                grokBeginNav(targetItem.url, 'manual:' + dir, true);
+                grokSyncSlidePosition(targetItem, { source: 'manual:' + dir });
                 if (targetItem.type) sessionStorage.setItem('mossad_expected_type', targetItem.type);
                 const struct = grokGetPlaylistStructure();
                 const curPos = (struct) ? grokFindCurrentPosition(struct, targetItem.url) : null;
@@ -8313,6 +8640,8 @@ function findMediaForDownload() {
             cancelSlideTimers();
             const nextRes = grokGetNextSlideItem(isNextGrp ? 'next_grp' : 'prev_grp');
             if (nextRes && nextRes.item) {
+                grokBeginNav(nextRes.item.url, isNextGrp ? 'manual:next_grp' : 'manual:prev_grp', true);
+                grokSyncSlidePosition(nextRes.item, { source: 'manual:grp' });
                 if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
                 showToast(`📁 Группа: ${isNextGrp ? '↓' : '↑'}`);
                 grokSpaNavigate(nextRes.item.url);
@@ -8509,7 +8838,7 @@ function findMediaForDownload() {
                 window.open(location.href, '_blank');
                 showToast('📑 Открыта вкладка + Переход...');
             }
-            triggerNextSlide();
+            triggerNextSlide('hotkey:duplicateNext');
         }
     }, true);
 
@@ -8535,9 +8864,7 @@ function findMediaForDownload() {
     if (slideshowActive) {
         if (!_isPausedOnResume) {
             showToast('▶ Слайдшоу возобновлено');
-            setTimeout(() => {
-                scheduleNextSlideCycle(0);
-            }, 500);
+            requestSlideCycle(500, 'page-resume');
         } else {
             showToast('⏸ Слайдшоу на паузе');
         }

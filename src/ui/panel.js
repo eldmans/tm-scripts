@@ -612,13 +612,16 @@
         // Tracker Time
         setInterval(() => {
             if (window.widgetState === 'hidden') return;
-            const video = getActiveVideo();
+            // v1.3.38: во время слайдшоу показываем то видео, по которому реально считаются круги
+            const tracked = (slideshowActive && currentVideoNode && currentVideoNode.isConnected) ? currentVideoNode : null;
+            const video = tracked || getActiveVideo();
             if (slideshowActive) {
                 timerEl.style.color = '#3b82f6';
                 if (isCountingDown) {
                     timerEl.textContent = countdownSeconds + 'с';
                 } else if (video && !isNaN(video.duration)) {
-                    timerEl.textContent = `${formatTime(video.currentTime)}/${formatTime(video.duration)}`;
+                    const loopsTxt = (tracked && config.videoLoops > 1) ? ` ↺${Math.min(currentLoopCount + 1, config.videoLoops)}/${config.videoLoops}` : '';
+                    timerEl.textContent = `${formatTime(video.currentTime)}/${formatTime(video.duration)}${loopsTxt}`;
                 } else {
                     timerEl.textContent = '⏳...';
                 }

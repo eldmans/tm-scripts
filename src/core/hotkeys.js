@@ -31,11 +31,7 @@
             if (typeof rafId !== 'undefined' && rafId) cancelAnimationFrame(rafId);
             if (typeof slideshowTimeoutId !== 'undefined' && slideshowTimeoutId) clearTimeout(slideshowTimeoutId);
         } else {
-            setTimeout(() => {
-                if (slideshowActive && !slideshowPaused) {
-                    scheduleNextSlideCycle(0);
-                }
-            }, 300);
+            requestSlideCycle(300, 'manual-step');
         }
     }
 
@@ -60,6 +56,9 @@
                     showToast(`🔄 Круг ${ss.circle} начался!`);
                 }
                 const targetItem = nextRes.item;
+                // v1.3.38: ручной шаг перехватывает блокировку и явно фиксирует позицию (+история)
+                grokBeginNav(targetItem.url, 'manual:' + dir, true);
+                grokSyncSlidePosition(targetItem, { source: 'manual:' + dir });
                 if (targetItem.type) sessionStorage.setItem('mossad_expected_type', targetItem.type);
                 const struct = grokGetPlaylistStructure();
                 const curPos = (struct) ? grokFindCurrentPosition(struct, targetItem.url) : null;
@@ -140,6 +139,8 @@
             cancelSlideTimers();
             const nextRes = grokGetNextSlideItem(isNextGrp ? 'next_grp' : 'prev_grp');
             if (nextRes && nextRes.item) {
+                grokBeginNav(nextRes.item.url, isNextGrp ? 'manual:next_grp' : 'manual:prev_grp', true);
+                grokSyncSlidePosition(nextRes.item, { source: 'manual:grp' });
                 if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
                 showToast(`📁 Группа: ${isNextGrp ? '↓' : '↑'}`);
                 grokSpaNavigate(nextRes.item.url);
@@ -336,7 +337,7 @@
                 window.open(location.href, '_blank');
                 showToast('📑 Открыта вкладка + Переход...');
             }
-            triggerNextSlide();
+            triggerNextSlide('hotkey:duplicateNext');
         }
     }, true);
 
@@ -362,9 +363,7 @@
     if (slideshowActive) {
         if (!_isPausedOnResume) {
             showToast('▶ Слайдшоу возобновлено');
-            setTimeout(() => {
-                scheduleNextSlideCycle(0);
-            }, 500);
+            requestSlideCycle(500, 'page-resume');
         } else {
             showToast('⏸ Слайдшоу на паузе');
         }

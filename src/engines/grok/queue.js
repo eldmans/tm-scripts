@@ -19,9 +19,23 @@
      * - grpMode: режим переключения групп (seq | rev | rnd | off)
      * - itemMode: режим порядка внутри группы (fwd | rev | rnd | off)
      */
+    // v1.3.38: кэш разобранной структуры. Раньше вся коллекция (растёт за сессию, хранится в sessionStorage
+    // до перезапуска браузера) парсилась JSON.parse 5–8 раз на каждый шаг/клавишу. Теперь — только при
+    // изменении сохранённой строки. Результат общий: НЕ мутировать struct/items/groups у вызывающих.
+    let _plStructCacheRaw = null;
+    let _plStructCache = null;
+
     function grokGetPlaylistStructure() {
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);
         if (!raw) return null;
+        if (raw === _plStructCacheRaw) return _plStructCache;
+        const built = grokBuildPlaylistStructure(raw);
+        _plStructCacheRaw = raw;
+        _plStructCache = built;
+        return built;
+    }
+
+    function grokBuildPlaylistStructure(raw) {
         let data;
         try { data = JSON.parse(raw); } catch { return null; }
         const items = data.items || [];
@@ -95,10 +109,78 @@
      * - direction === 'prev_grp': шаг к предыдущей группе
      * - direction === 'auto': шаг автоматического слайдшоу с учётом grpMode и itemMode
      */
+    // ── v1.3.38: история показанных элементов (для «назад» в случайных режимах) и явная синхронизация позиции ──
+    const GALLERY_HISTORY_MAX = 200;
+
+    function grokReadSS() {
+        try { return JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}') || {}; } catch(e) { return {}; }
+    }
+
+    function grokIsRandomMode(struct) {
+        return !!struct && (struct.grpMode === 'rnd' || struct.itemMode === 'rnd' || struct.itemMode === 'off');
+    }
+
+    /** Добавляет url в историю (без повторов подряд), ограничивая размер. Мутирует ss. */
+    function grokHistoryPushInto(ss, url) {
+        if (!url) return;
+        const hist = Array.isArray(ss.history) ? ss.history : [];
+        const key = normUrlKey(url);
+        if (!hist.length || normUrlKey(hist[hist.length - 1]) !== key) hist.push(url);
+        if (hist.length > GALLERY_HISTORY_MAX) hist.splice(0, hist.length - GALLERY_HISTORY_MAX);
+        ss.history = hist;
+    }
+
+    /**
+     * Явно фиксирует «текущий» элемент слайдшоу в SS: targetUrl/targetUuid, curGrpIdx/curItemIdx, отметки
+     * посещения и история. Вызывается при ЛЮБОМ переходе по плейлисту (авто, хоткеи, клик в списке),
+     * чтобы следующий автошаг считался от реально выбранного элемента, а не от устаревшей позиции.
+     */
+    function grokSyncSlidePosition(item, opts = {}) {
+        if (!item || !item.url) return;
+        const struct = opts.struct || grokGetPlaylistStructure();
+        const ss = opts.ss || grokReadSS();
+        if (!ss.active && !opts.force) return; // слайдшоу по коллекции не запущено — позицию не ведём
+        const base = normUrlKey(item.url);
+        ss.targetUrl = item.url;
+        ss.targetUuid = grokExtractUuid(item.url);
+        if (struct) {
+            for (let g = 0; g < struct.groups.length; g++) {
+                const i = struct.groups[g].items.findIndex(it => normUrlKey(it.url) === base);
+                if (i !== -1) {
+                    if (ss.curGrpIdx !== g) ss.visitedInCurGroup = [];
+                    ss.curGrpIdx = g;
+                    ss.curItemIdx = i;
+                    const vg = Array.isArray(ss.visitedGroupsInCircle) ? ss.visitedGroupsInCircle : [];
+                    if (!vg.includes(struct.groups[g].id)) vg.push(struct.groups[g].id);
+                    ss.visitedGroupsInCircle = vg;
+                    break;
+                }
+            }
+        }
+        const vcg = Array.isArray(ss.visitedInCurGroup) ? ss.visitedInCurGroup : [];
+        if (!vcg.includes(base)) vcg.push(base);
+        ss.visitedInCurGroup = vcg;
+        const vc = Array.isArray(ss.visitedInCircle) ? ss.visitedInCircle : [];
+        if (!vc.includes(base)) vc.push(base);
+        ss.visitedInCircle = vc;
+        if (opts.pushHistory !== false) grokHistoryPushInto(ss, item.url);
+        _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
+        mossadDebug('pos', 'позиция синхронизирована', { source: opts.source, g: ss.curGrpIdx, i: ss.curItemIdx, hist: (ss.history || []).length });
+    }
+
     function grokGetNextSlideItem(direction = 'auto', overrideUrl = null) {
         const struct = grokGetPlaylistStructure();
         if (!struct || !struct.items.length) return null;
 
+        // v1.3.38: «текущий» элемент — тот, что явно выбран скриптом (ss.targetUrl), а не URL страницы:
+        // URL отстаёт при переключении киноплёнки и может принадлежать предыдущему посту во время перехода.
+        if (!overrideUrl) {
+            const ssPos = grokReadSS();
+            if (ssPos.active && ssPos.targetUrl &&
+                struct.items.some(it => normUrlKey(it.url) === normUrlKey(ssPos.targetUrl))) {
+                overrideUrl = ssPos.targetUrl;
+            }
+        }
         const curPos = grokFindCurrentPosition(struct, overrideUrl);
 
         // ── 1. Зацикленный набор (R / loopSet) ──
@@ -164,6 +246,26 @@
             const nextG = (g + 1) % struct.groups.length;
             const nextGrp = struct.groups[nextG];
             return { item: nextGrp.items[0], circleCompleted: nextG === 0 };
+        }
+
+        // ── 4а. «Назад» в случайных режимах — по истории показанных элементов (v1.3.38) ──
+        if (direction === 'up' && grokIsRandomMode(struct)) {
+            const ssH = grokReadSS();
+            const hist = Array.isArray(ssH.history) ? ssH.history.slice() : [];
+            const curKey = normUrlKey((curPos && curPos.currentItem && curPos.currentItem.url) || overrideUrl || location.href);
+            while (hist.length && normUrlKey(hist[hist.length - 1]) === curKey) hist.pop();
+            while (hist.length) {
+                const prevKey = normUrlKey(hist[hist.length - 1]);
+                const prevItem = struct.items.find(it => normUrlKey(it.url) === prevKey);
+                if (prevItem) {
+                    ssH.history = hist; // вершина истории = элемент, на который возвращаемся
+                    _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ssH));
+                    mossadDebug('pos', 'назад по истории', { left: hist.length });
+                    return { item: prevItem, circleCompleted: false, fromHistory: true };
+                }
+                hist.pop(); // элемента уже нет в коллекции
+            }
+            // История пуста — обычный шаг вверх по списку
         }
 
         // ── 4. Ручной переход ВВЕРХ (ArrowUp / PageUp) — СТРОГО ВВЕРХ ПО СПИСКУ ──
