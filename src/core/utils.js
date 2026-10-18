@@ -63,26 +63,67 @@
 
     /**
      * Опрашивает checkFn каждые intervalMs (первая проверка — через intervalMs).
-     * Резолвится результатом checkFn, как только он truthy, или null по истечении timeoutMs.
+     * Резолвится результатом checkFn, как только он truthy, или null, когда исчерпаны попытки.
+     * v1.3.38: семантика «числа попыток» (как до v1.3.33): maxAttempts = ceil(timeoutMs / intervalMs).
+     * При загруженном main thread таймеры срабатывают реже, и чисто «настенные» часы давали меньше
+     * проверок, чем задумано (например, 240/40 мс → всего 1–2 проверки вместо 6). Страховка от
+     * бесконечного ожидания в фоновой вкладке (таймеры ≥1 с): жёсткий потолок 4 × timeoutMs.
      * Исключения в checkFn гасятся (считаются «ещё нет»). Интервал всегда очищается.
-     * (Перенесено из grok/helpers.js в v1.3.33, чтобы использовать во всех модулях.)
      */
     function waitForCondition(checkFn, timeoutMs = 2500, intervalMs = 50) {
         return new Promise(resolve => {
             const start = Date.now();
+            const maxAttempts = Math.max(1, Math.ceil(timeoutMs / intervalMs));
+            const hardCapMs = timeoutMs * 4;
+            let attempts = 0;
             const timer = setInterval(() => {
+                attempts++;
                 let res = null;
                 try { res = checkFn(); } catch(e) {}
                 if (res) {
                     clearInterval(timer);
                     return resolve(res);
                 }
-                if (Date.now() - start >= timeoutMs) {
+                if (attempts >= maxAttempts || Date.now() - start >= hardCapMs) {
                     clearInterval(timer);
                     return resolve(null);
                 }
             }, intervalMs);
         });
+    }
+
+    // ============================================
+    // DEBUG-ЛОГ (v1.3.38): кто и почему запустил шаг слайдшоу / удаление
+    // Включается в F1 → «Debug-лог слайдшоу» (config.debugSlideshow, по умолчанию выкл.).
+    // Пишет в консоль с префиксом [MOSSAD DBG] и в кольцевой буфер (последние 300 записей),
+    // который копируется кнопкой «📋 лог» в окне F1 (mossadDumpDebugLog()).
+    // ============================================
+    const MOSSAD_DEBUG_MAX = 300;
+    const _mossadDebugBuf = [];
+
+    function isMossadDebugOn() {
+        try { return !!(config && config.debugSlideshow); } catch(e) { return false; }
+    }
+
+    function mossadDebug(source, msg, data) {
+        if (!isMossadDebugOn()) return;
+        const entry = {
+            t: new Date().toISOString().slice(11, 23),
+            source: String(source || '?'),
+            msg: String(msg || ''),
+            path: (location.pathname || '').slice(0, 80)
+        };
+        if (data !== undefined) entry.data = data;
+        _mossadDebugBuf.push(entry);
+        if (_mossadDebugBuf.length > MOSSAD_DEBUG_MAX) _mossadDebugBuf.splice(0, _mossadDebugBuf.length - MOSSAD_DEBUG_MAX);
+        try {
+            console.log('%c[MOSSAD DBG]', 'color:#f59e0b;font-weight:bold', entry.t, `[${entry.source}]`, entry.msg, data !== undefined ? data : '');
+        } catch(e) {}
+    }
+
+    function mossadDumpDebugLog() {
+        try { console.table(_mossadDebugBuf.slice()); } catch(e) { console.log(_mossadDebugBuf.slice()); }
+        return _mossadDebugBuf.slice();
     }
 
     // ============================================

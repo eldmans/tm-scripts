@@ -88,6 +88,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
         closePanelOnOutsideClick: true,  // v1.3.37: сворачивать панель настроек виджета кликом вне MOSSAD
+        debugSlideshow: false,          // v1.3.38: debug-лог источников шагов слайдшоу и шагов удаления (консоль)
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
@@ -614,26 +615,67 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
     /**
      * Опрашивает checkFn каждые intervalMs (первая проверка — через intervalMs).
-     * Резолвится результатом checkFn, как только он truthy, или null по истечении timeoutMs.
+     * Резолвится результатом checkFn, как только он truthy, или null, когда исчерпаны попытки.
+     * v1.3.38: семантика «числа попыток» (как до v1.3.33): maxAttempts = ceil(timeoutMs / intervalMs).
+     * При загруженном main thread таймеры срабатывают реже, и чисто «настенные» часы давали меньше
+     * проверок, чем задумано (например, 240/40 мс → всего 1–2 проверки вместо 6). Страховка от
+     * бесконечного ожидания в фоновой вкладке (таймеры ≥1 с): жёсткий потолок 4 × timeoutMs.
      * Исключения в checkFn гасятся (считаются «ещё нет»). Интервал всегда очищается.
-     * (Перенесено из grok/helpers.js в v1.3.33, чтобы использовать во всех модулях.)
      */
     function waitForCondition(checkFn, timeoutMs = 2500, intervalMs = 50) {
         return new Promise(resolve => {
             const start = Date.now();
+            const maxAttempts = Math.max(1, Math.ceil(timeoutMs / intervalMs));
+            const hardCapMs = timeoutMs * 4;
+            let attempts = 0;
             const timer = setInterval(() => {
+                attempts++;
                 let res = null;
                 try { res = checkFn(); } catch(e) {}
                 if (res) {
                     clearInterval(timer);
                     return resolve(res);
                 }
-                if (Date.now() - start >= timeoutMs) {
+                if (attempts >= maxAttempts || Date.now() - start >= hardCapMs) {
                     clearInterval(timer);
                     return resolve(null);
                 }
             }, intervalMs);
         });
+    }
+
+    // ============================================
+    // DEBUG-ЛОГ (v1.3.38): кто и почему запустил шаг слайдшоу / удаление
+    // Включается в F1 → «Debug-лог слайдшоу» (config.debugSlideshow, по умолчанию выкл.).
+    // Пишет в консоль с префиксом [MOSSAD DBG] и в кольцевой буфер (последние 300 записей),
+    // который копируется кнопкой «📋 лог» в окне F1 (mossadDumpDebugLog()).
+    // ============================================
+    const MOSSAD_DEBUG_MAX = 300;
+    const _mossadDebugBuf = [];
+
+    function isMossadDebugOn() {
+        try { return !!(config && config.debugSlideshow); } catch(e) { return false; }
+    }
+
+    function mossadDebug(source, msg, data) {
+        if (!isMossadDebugOn()) return;
+        const entry = {
+            t: new Date().toISOString().slice(11, 23),
+            source: String(source || '?'),
+            msg: String(msg || ''),
+            path: (location.pathname || '').slice(0, 80)
+        };
+        if (data !== undefined) entry.data = data;
+        _mossadDebugBuf.push(entry);
+        if (_mossadDebugBuf.length > MOSSAD_DEBUG_MAX) _mossadDebugBuf.splice(0, _mossadDebugBuf.length - MOSSAD_DEBUG_MAX);
+        try {
+            console.log('%c[MOSSAD DBG]', 'color:#f59e0b;font-weight:bold', entry.t, `[${entry.source}]`, entry.msg, data !== undefined ? data : '');
+        } catch(e) {}
+    }
+
+    function mossadDumpDebugLog() {
+        try { console.table(_mossadDebugBuf.slice()); } catch(e) { console.log(_mossadDebugBuf.slice()); }
+        return _mossadDebugBuf.slice();
     }
 
     // ============================================
@@ -7918,6 +7960,11 @@ function findMediaForDownload() {
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
               Сворачивать панель кликом вне её
             </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Пишет в консоль браузера ([MOSSAD DBG]) кто и почему запустил каждый шаг слайдшоу, а также шаги удаления. Для диагностики; по умолчанию выключено">
+              <input id="mossad-cb-debug" type="checkbox" style="accent-color:#f59e0b;" ${config.debugSlideshow ? 'checked' : ''}>
+              Debug-лог слайдшоу/удаления
+              <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;">📋 лог</button>
+            </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
               <span>v${SCRIPT_VERSION} · 2026-10-19</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
@@ -8049,6 +8096,21 @@ function findMediaForDownload() {
         
         modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
             Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
+        };
+        modal.querySelector('#mossad-cb-debug').onchange = (e) => {
+            Settings.setQuiet('debugSlideshow', e.target.checked);
+            if (e.target.checked) mossadDebug('settings', 'debug-лог включён');
+        };
+        modal.querySelector('#mossad-debug-copy').onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const rows = mossadDumpDebugLog();
+            const text = rows.map(r => `${r.t} [${r.source}] ${r.msg} ${r.path}${r.data !== undefined ? ' ' + JSON.stringify(r.data) : ''}`).join('\n');
+            try {
+                navigator.clipboard.writeText(text).then(
+                    () => showToast(`📋 Debug-лог скопирован (${rows.length} строк)`),
+                    () => showToast('⚠️ Не удалось скопировать — см. консоль', true));
+            } catch(err) { showToast('⚠️ Не удалось скопировать — см. консоль', true); }
         };
         modal.querySelector('#mossad-gh-save').onclick = () => {
             setGithubToken(modal.querySelector('#mossad-gh-token').value);
