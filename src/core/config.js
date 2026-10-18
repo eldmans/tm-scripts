@@ -7,31 +7,32 @@
         slideshowLoopMode: 'off',
         loopFeed: false,              // R в D-pad: повторять текущий плейлист (перемотка в начало при конце ленты)
         slideshowDirections: ['up'],  // листание вверх по умолчанию
-        videoLoops: 2,
-        slideshowDelay: 3,           // фото 3 сек
-        delayAfterVideo: 2,           // пауза 2 сек
+        // v1.3.36: значения по умолчанию — по эталонной панели владельца (только для доменов без сохранённых настроек)
+        videoLoops: 1,                // Видео (↺): 1 круг
+        slideshowDelay: 1,            // Фото: 1 сек
+        delayAfterVideo: 1,           // Пауза: 1 сек
         downloadType: 'none',         // не скачивать
-        pdAction: 'up',               // после DL: +1
-        stopOnTabSwitch: true,        // Tab — включена
-        stopOnBrsrSwitch: false,
-        deleteAutoconfirm: false,
-        deleteHoldpost: false,
+        pdAction: 'none',             // После DL: —
+        stopOnTabSwitch: false,       // Tab — выключена
+        stopOnBrsrSwitch: false,      // Brsr — выключена
+        deleteAutoconfirm: true,      // hold post включён (один чекбокс управляет обоими флагами, ANTI_PATTERNS §2)
+        deleteHoldpost: true,
         allowDuplicates: false,       // Дубли: качать дубликаты сразу без подтверждения
         allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
-        filenameTemplate: '{id8}-{domain}.{ext}',  // шаблон имени файла по умолчанию (8 символов UUID + домен)
-        filenameTemplateEnabled: false,  // использовать шаблон?
+        filenameTemplate: '{id8}-{domain[4]}~{RadugaStud}',  // шаблон имени файла по умолчанию (для всех сайтов)
+        filenameTemplateEnabled: true,   // использовать шаблон?
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
-        widgetZoom: 1.0,                 // масштаб виджета (1.0 = 100%)
+        widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
         pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
         pinterestPhotoPercent: 50,         // 0..100 % (видео = 100 - photo)
         pinterestMaxVideoDuration: 0,      // макс длительность видео в сек (0 = без лимита)
-        pinterestAutoFS: true,             // авто разворачивание во весь экран
-        autoFS: true,                      // универсальный авто Full Screen
+        pinterestAutoFS: false,            // авто разворачивание во весь экран (FS выкл.)
+        autoFS: false,                     // универсальный авто Full Screen (FS выкл.)
         pinterestHistory: [],              // история до 100 посещенных URL
         pinterestHistoryIdx: -1,           // текущий индекс в истории (как в Проводнике)
         
@@ -125,44 +126,28 @@
             console.warn('[MOSSAD] githubToken migration failed:', e);
         }
     }
-    // Для RedGifs дефолтные настройки сайта (направление down, шаблон {userName}-{domain[4]})
+    // Для RedGifs дефолтное направление сайта — down.
+    // v1.3.36: сайтовый шаблон {userName}-{domain[4]} больше не подставляется — для новых доменов
+    // действует общий шаблон из DEFAULT_CONFIG (эталон владельца); сохранённый пользователем шаблон не трогаем.
     if (rootDomain.includes('redgifs.com')) {
         let storedHasDir = false;
-        let storedHasTpl = false;
-        let storedHasTplEnabled = false;
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
             if (raw) {
                 const parsed = JSON.parse(raw);
                 if (parsed.slideshowDirections) storedHasDir = true;
-                if (parsed.filenameTemplate !== undefined) storedHasTpl = true;
-                if (parsed.filenameTemplateEnabled !== undefined) storedHasTplEnabled = true;
             }
         } catch(e) {}
         if (!storedHasDir || (config.slideshowDirections && config.slideshowDirections[0] === 'up')) {
             config.slideshowDirections = ['down'];
         }
-        if (!storedHasTpl) {
-            config.filenameTemplate = '{userName}-{domain[4]}';
-        }
-        if (!storedHasTplEnabled) {
-            config.filenameTemplateEnabled = true;
-        }
     }
 
-    // Для Grok дефолтный шаблон {conv4}-{id4}-{domain}.{ext}
+    // Grok: миграция старого сохранённого шаблона {id8}-{domain}.{ext} → {conv4}-{id4}-{domain}.{ext} (как раньше).
+    // v1.3.36: для новых установок сайтовый шаблон больше не подставляется — действует общий
+    // шаблон из DEFAULT_CONFIG (эталон владельца).
     if (rootDomain === 'grok.com') {
-        let storedHasTpl = false;
-        try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                if (parsed.filenameTemplate !== undefined && parsed.filenameTemplate !== '{id8}-{domain}.{ext}') {
-                    storedHasTpl = true;
-                }
-            }
-        } catch(e) {}
-        if (!storedHasTpl || config.filenameTemplate === '{id8}-{domain}.{ext}') {
+        if (config.filenameTemplate === '{id8}-{domain}.{ext}') {
             config.filenameTemplate = '{conv4}-{id4}-{domain}.{ext}';
         }
     }

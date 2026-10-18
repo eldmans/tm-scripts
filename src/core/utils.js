@@ -391,13 +391,9 @@
      * Возвращает дефолтный шаблон имени файла для текущего сайта (отображается серым плейсхолдером)
      */
     function getDefaultFilenameTemplate() {
-        if (typeof rootDomain !== 'undefined' && rootDomain.includes('redgifs.com')) {
-            return '{userName}-{domain[4]}';
-        }
-        if (typeof rootDomain !== 'undefined' && rootDomain === 'grok.com') {
-            return '{conv4}-{id4}-{domain}.{ext}';
-        }
-        return '{id8}-{domain}.{ext}';
+        // v1.3.36: единый шаблон по умолчанию для всех сайтов (эталон владельца, см. DEFAULT_CONFIG).
+        // Раньше: RedGifs — {userName}-{domain[4]}, Grok — {conv4}-{id4}-{domain}.{ext}, прочие — {id8}-{domain}.{ext}.
+        return DEFAULT_CONFIG.filenameTemplate;
     }
     window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
 
