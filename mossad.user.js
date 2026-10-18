@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.41
+// @version      1.3.42
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -22,7 +22,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.41';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.42';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -2310,6 +2310,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     const GALLERY_LOOP_KEY       = 'mossad_grok_loop_set';
     const GALLERY_COLLECT_ACTIVE_KEY = 'mossad_grok_collect_active'; // флаг автосбора ссылок
     const _gSS                   = sessionStorage; // короткий псевдоним
+    // v1.3.42: кадры киноплёнки (в них бывают <video>/<img> других генераций — это не медиа текущего поста)
+    const GROK_FILMSTRIP_SEL     = '[data-filmstrip-item="true"], button[aria-label*="Thumbnail"], button[aria-label*="thumbnail"]';
 
     /** Проверка: находимся ли мы на странице поста Grok Imagine */
     function isGrokPostPage() {
@@ -2414,7 +2416,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
      * Скоринг: сильные слова в aria/title, иконка громкости, близость к активному <video>.
      * Исключаются: невидимые, «музыкальные» кнопки, кнопки, открывающие меню (aria-haspopup).
      */
-    function findGrokSoundToggleButton() {
+    function findGrokSoundToggleButton(opts = {}) {
+        // v1.3.42: opts.includeHidden — для определения «видео или фото» (grokDetectSlideMedia):
+        // кнопка mute плеера Grok скрыта, пока мышь не над видео, но в DOM она есть. Кликать по ней
+        // хоткеем по-прежнему можно только по видимой (вызов без опций).
+        const includeHidden = !!opts.includeHidden;
         const video = (typeof getActiveVideo === 'function') ? getActiveVideo() : null;
         // Контейнер плеера: несколько уровней вверх от <video>
         const playerRoots = [];
@@ -2425,8 +2431,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         let best = null, bestScore = 0;
         const candidates = document.querySelectorAll('button, [role="button"]');
         for (const el of candidates) {
-            if (el.offsetWidth === 0 && el.offsetHeight === 0 && (!el.getClientRects || !el.getClientRects().length)) continue;
+            if (!includeHidden && el.offsetWidth === 0 && el.offsetHeight === 0 && (!el.getClientRects || !el.getClientRects().length)) continue;
             if (el.closest('#mossad-widget, [id^="mossad-"]')) continue; // свои кнопки MOSSAD не трогаем
+            if (el.closest(GROK_FILMSTRIP_SEL)) continue; // кадры киноплёнки — не плеер
             if (isGrokMusicNoteButton(el)) continue;
             if (el.hasAttribute('aria-haspopup')) continue; // mute не открывает меню
             const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).toLowerCase().trim();
@@ -2738,6 +2745,77 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 return false;
             }, [100, 300, 500]);
         }
+    }
+
+    // ── v1.3.42: быстрое определение «видео или фото» на странице поста ──
+    // Раньше слайдшоу ждало до 6 с (см. CHANGELOG v1.3.42, ANTI_PATTERNS §21). Теперь признаки
+    // берутся только из просмотрщика текущего поста (без киноплёнки и без кнопок MOSSAD).
+
+    /** <video> просмотрщика поста (без кадров киноплёнки и без элементов MOSSAD). */
+    function grokGetViewerVideos() {
+        return Array.from(document.querySelectorAll('video')).filter(v =>
+            v.isConnected && !v.closest(GROK_FILMSTRIP_SEL) && !v.closest('#mossad-widget, [id^="mossad-"]'));
+    }
+
+    /** Главная картинка поста (сгенерированное изображение, не миниатюра и не аватар) или null. */
+    function grokFindMainImage() {
+        const uuid = grokExtractUuid(location.pathname);
+        let best = null, bestScore = 0;
+        for (const img of document.querySelectorAll('img')) {
+            if (img.closest(GROK_FILMSTRIP_SEL) || img.closest('#mossad-widget, [id^="mossad-"]')) continue;
+            const src = (img.currentSrc || img.src || '').toLowerCase();
+            if (!src) continue;
+            if (/avatar|profile|pfp|icon|logo|favicon/.test(src)) continue;
+            const w = img.naturalWidth || img.width || 0;
+            const h = img.naturalHeight || img.height || 0;
+            let score = 0;
+            if (uuid && src.includes(uuid)) score += 10;                     // картинка именно этого поста
+            if (/assets\.grok\.com|imagine-public|share-images|\/generated\//.test(src)) score += 5;
+            if (w >= 150 && h >= 150) score += 3;
+            if (score < 3) continue;
+            if (score > bestScore) { best = img; bestScore = score; }
+        }
+        return best;
+    }
+
+    /**
+     * Признаки медиа текущего поста. Ничего не ждёт — только читает DOM; ожиданием управляет
+     * scheduleNextSlideCycle (src/slideshow/engine.js).
+     *   staleSrc — src <video> предыдущего слайда: такой ролик ещё не сменился, он «старый».
+     * Возвращает { video, staleVideo, soundBtn, mainImg, imageBtn, settled }.
+     */
+    function grokDetectSlideMedia(staleSrc = '') {
+        const vids = grokGetViewerVideos();
+        let video = null, staleVideo = null;
+        for (const v of vids) {
+            const src = v.currentSrc || v.src || '';
+            if (staleSrc && src && src === staleSrc) { staleVideo = staleVideo || v; continue; }
+            if (!video) video = v;
+        }
+        // Если видео несколько — то, что выбрал бы движок (самое видимое), если оно «свежее»
+        if (video && vids.length > 1 && typeof getActiveVideo === 'function') {
+            const act = getActiveVideo();
+            if (act && act !== staleVideo && vids.includes(act)) video = act;
+        }
+        let soundBtn = null;
+        try { soundBtn = findGrokSoundToggleButton({ includeHidden: true }); } catch (e) {}
+        // «Удалить изображение» (видно, если меню поста раскрыто) — железное подтверждение фото
+        const imageBtn = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]')).some(el => {
+            if (el.closest('#mossad-widget, [id^="mossad-"]')) return false;
+            const t = (el.textContent || '').trim();
+            const a = (el.getAttribute('aria-label') || '').trim();
+            return t === 'Удалить изображение' || t === 'Delete image' || a === 'Удалить изображение' || a === 'Delete image';
+        });
+        // Страница «устоялась»: документ загружен и URL уже указывает на целевой пост слайдшоу
+        let settled = document.readyState === 'complete';
+        if (settled) {
+            try {
+                const ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}');
+                const cur = grokExtractUuid(location.pathname);
+                if (ss.active && ss.targetUuid && cur && cur !== String(ss.targetUuid).toLowerCase()) settled = false;
+            } catch (e) {}
+        }
+        return { video, staleVideo, soundBtn, mainImg: grokFindMainImage(), imageBtn, settled };
     }
 
 // ============================================================
@@ -7074,6 +7152,8 @@ function findMediaForDownload() {
         }
 
         let videos = Array.from(document.querySelectorAll('video'));
+        // v1.3.42: на Grok <video> в кадрах киноплёнки — миниатюры других генераций, не плеер поста
+        if (rootDomain === 'grok.com') videos = videos.filter(v => !v.closest(GROK_FILMSTRIP_SEL));
         if (videos.length === 0) return null;
         
         // На Пинтересте ищем видео в главном контейнере сцены пина (closeup-stage / main)
@@ -7428,6 +7508,9 @@ function findMediaForDownload() {
 
         const expected = sessionStorage.getItem('mossad_expected_type');
         if (expected === 'video' || expected === 'image') return expected;
+        // v1.3.42: сбор Grok пишет тип 'photo' (collect.js) — раньше он не распознавался и тип
+        // угадывался по DOM, что на фото давало ложное «видео» и ожидание 6 с.
+        if (expected === 'photo') return 'image';
 
         if (rootDomain.includes('pinterest.')) {
             const pinData = getPinterestMainPinData();
@@ -7476,8 +7559,17 @@ function findMediaForDownload() {
         if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
         if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
         
-        const detectedType = getPinMediaType();
-        const video = getActiveVideo();
+        // v1.3.42: Grok — своё быстрое определение (grokDecideSlideMedia). true — решение принято или
+        // запланирована повторная проверка; иначе — элемент <video>, идём в общий путь видео.
+        let grokVideo = null;
+        if (rootDomain === 'grok.com' && typeof isGrokPostPage === 'function' && isGrokPostPage()) {
+            const res = grokDecideSlideMedia(initSec, retryCount);
+            if (res === true) return;
+            grokVideo = res; // найден свежий <video> просмотрщика — это видео, что бы ни говорил сбор
+        }
+
+        const detectedType = grokVideo ? 'video' : getPinMediaType();
+        const video = grokVideo || getActiveVideo();
 
         if (detectedType === 'image') {
             // Мгновенный запуск фото-таймера на 0 миллисекунде
@@ -7562,6 +7654,87 @@ function findMediaForDownload() {
             isCountingDown = true;
             runPhotoTimer('photo-timer');
         }
+    }
+
+    // ── v1.3.42: определение «видео или фото» на Grok ──
+    // Видео: свежий <video> просмотрщика (не кадр киноплёнки, src не от прошлого слайда) — сразу.
+    // Фото: нет свежего <video> и нет кнопки mute/unmute плеера (в т.ч. скрытой), страница «устоялась»
+    // (readyState complete + URL на целевом посте) и прошло короткое окно с момента прибытия:
+    // GROK_PHOTO_GRACE_MS (тип по сбору — фото) или GROK_UNKNOWN_GRACE_MS (тип неизвестен). Опрос — 100 мс.
+    // Если ролик смонтируется позже, монитор URL/видео (setInterval 250 мс выше) перезапустит цикл
+    // и слайд пойдёт как видео. ANTI_PATTERNS §21.
+    const GROK_PHOTO_GRACE_MS   = 450;  // сбор сказал «фото» (нет таймера на карточке)
+    const GROK_UNKNOWN_GRACE_MS = 700;  // тип неизвестен
+    const GROK_STALE_WAIT_MS    = 3000; // ждать смены старого <video> / «устаканивания» URL не дольше
+    const GROK_VIDEO_WAIT_MS    = 6000; // сбор сказал «видео» или есть кнопка звука, а <video> ещё нет
+    const GROK_DETECT_POLL_MS   = 100;
+    let _grokDetectStartedAt = 0;
+
+    function startPhotoCountdown(initSec, why) {
+        sessionStorage.removeItem('mossad_expected_type');
+        countdownSeconds = (initSec > 0) ? initSec : config.slideshowDelay;
+        isCountingDown = true;
+        mossadDebug('cycle', 'фото: старт таймера', { why, sec: countdownSeconds });
+        runPhotoTimer('photo-timer');
+    }
+
+    /** true — решение принято/перепроверка запланирована; <video> — продолжить общий путь видео с ним. */
+    function grokDecideSlideMedia(initSec, retryCount) {
+        const now = Date.now();
+        if (retryCount === 0 || !_grokDetectStartedAt) _grokDetectStartedAt = now;
+        const slideKey = slideKeyOf(location.href);
+        const staleSrc = (_lastCycleSlideKey && slideKey !== _lastCycleSlideKey) ? _lastCycleVideoSrc : '';
+        const d = grokDetectSlideMedia(staleSrc);
+        const expectedRaw = sessionStorage.getItem('mossad_expected_type');
+        const expected = expectedRaw === 'photo' ? 'image' : expectedRaw;
+        // Окно отсчитываем от прибытия на пост (его фиксирует grokEndNav), а при загрузке страницы — от начала проверки
+        const curUuid = grokExtractUuid(location.pathname);
+        const arrived = (typeof _galleryNav !== 'undefined' && _galleryNav.arrivedAt && _galleryNav.arrivedAt <= _grokDetectStartedAt + 50 &&
+                         now - _galleryNav.arrivedAt < 15000 && (!_galleryNav.targetUuid || _galleryNav.targetUuid === curUuid))
+            ? _galleryNav.arrivedAt : _grokDetectStartedAt;
+        const sinceArrival = now - arrived;
+        const sinceStart = now - _grokDetectStartedAt;
+        const again = () => {
+            slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), GROK_DETECT_POLL_MS);
+            return true;
+        };
+
+        if (d.video) {
+            mossadDebug('cycle', 'Grok: видео найдено', { ms: sinceStart, expected });
+            return d.video; // общий путь видео (ждёт duration, считает круги)
+        }
+        if (d.imageBtn) {
+            startPhotoCountdown(initSec, 'кнопка «Удалить изображение»');
+            return true;
+        }
+        if (d.staleVideo) {
+            // На экране ещё ролик прошлого слайда: ждём смены (как в v1.3.38), затем — по признакам
+            if (sinceStart < GROK_STALE_WAIT_MS) return again();
+            if (expected === 'image' && d.mainImg) { startPhotoCountdown(initSec, 'старое видео не сменилось, сбор: фото'); return true; }
+            return d.staleVideo; // как раньше: принимаем ролик как видео этого слайда
+        }
+        if (expected === 'video' || d.soundBtn) {
+            // Плеер монтируется: ждём <video>. Сбор «видео» — до 6 с (HLS бывает медленным);
+            // одна кнопка звука без подтверждения сбором — до 3 с.
+            const cap = expected === 'video' ? GROK_VIDEO_WAIT_MS : GROK_STALE_WAIT_MS;
+            if (sinceStart < cap) {
+                if (expected === 'video' && retryCount > 0 && retryCount % 10 === 0) {
+                    showToast(`⏳ Загрузка видео-плеера... (${Math.floor(sinceStart / 1000)}/${cap / 1000}с)`);
+                }
+                return again();
+            }
+            mossadDebug('cycle', 'Grok: видео так и не появилось — считаем фото', { ms: sinceStart, expected, soundBtn: !!d.soundBtn });
+            startPhotoCountdown(initSec, 'нет <video> за ' + cap + ' мс');
+            return true;
+        }
+        // Нет ни видео, ни кнопки звука → фото, как только страница устоялась и прошло окно
+        const grace = expected === 'image' ? GROK_PHOTO_GRACE_MS : GROK_UNKNOWN_GRACE_MS;
+        if (!d.settled && sinceStart < GROK_STALE_WAIT_MS) return again();
+        if (!d.mainImg && sinceStart < GROK_UNKNOWN_GRACE_MS * 2) return again(); // картинка ещё не отрисовалась
+        if (sinceArrival < grace || sinceStart < 100) return again();
+        mossadDebug('cycle', 'Grok: фото определено', { ms: sinceStart, sinceArrival, expected, img: !!d.mainImg });
+        startPhotoCountdown(initSec, 'нет <video> и кнопки звука');
+        return true;
     }
 
     function checkVideoLoops(timeNow) {

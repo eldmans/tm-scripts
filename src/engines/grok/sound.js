@@ -44,7 +44,11 @@
      * Скоринг: сильные слова в aria/title, иконка громкости, близость к активному <video>.
      * Исключаются: невидимые, «музыкальные» кнопки, кнопки, открывающие меню (aria-haspopup).
      */
-    function findGrokSoundToggleButton() {
+    function findGrokSoundToggleButton(opts = {}) {
+        // v1.3.42: opts.includeHidden — для определения «видео или фото» (grokDetectSlideMedia):
+        // кнопка mute плеера Grok скрыта, пока мышь не над видео, но в DOM она есть. Кликать по ней
+        // хоткеем по-прежнему можно только по видимой (вызов без опций).
+        const includeHidden = !!opts.includeHidden;
         const video = (typeof getActiveVideo === 'function') ? getActiveVideo() : null;
         // Контейнер плеера: несколько уровней вверх от <video>
         const playerRoots = [];
@@ -55,8 +59,9 @@
         let best = null, bestScore = 0;
         const candidates = document.querySelectorAll('button, [role="button"]');
         for (const el of candidates) {
-            if (el.offsetWidth === 0 && el.offsetHeight === 0 && (!el.getClientRects || !el.getClientRects().length)) continue;
+            if (!includeHidden && el.offsetWidth === 0 && el.offsetHeight === 0 && (!el.getClientRects || !el.getClientRects().length)) continue;
             if (el.closest('#mossad-widget, [id^="mossad-"]')) continue; // свои кнопки MOSSAD не трогаем
+            if (el.closest(GROK_FILMSTRIP_SEL)) continue; // кадры киноплёнки — не плеер
             if (isGrokMusicNoteButton(el)) continue;
             if (el.hasAttribute('aria-haspopup')) continue; // mute не открывает меню
             const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).toLowerCase().trim();

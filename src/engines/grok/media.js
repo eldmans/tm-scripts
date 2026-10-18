@@ -155,3 +155,74 @@
             }, [100, 300, 500]);
         }
     }
+
+    // ── v1.3.42: быстрое определение «видео или фото» на странице поста ──
+    // Раньше слайдшоу ждало до 6 с (см. CHANGELOG v1.3.42, ANTI_PATTERNS §21). Теперь признаки
+    // берутся только из просмотрщика текущего поста (без киноплёнки и без кнопок MOSSAD).
+
+    /** <video> просмотрщика поста (без кадров киноплёнки и без элементов MOSSAD). */
+    function grokGetViewerVideos() {
+        return Array.from(document.querySelectorAll('video')).filter(v =>
+            v.isConnected && !v.closest(GROK_FILMSTRIP_SEL) && !v.closest('#mossad-widget, [id^="mossad-"]'));
+    }
+
+    /** Главная картинка поста (сгенерированное изображение, не миниатюра и не аватар) или null. */
+    function grokFindMainImage() {
+        const uuid = grokExtractUuid(location.pathname);
+        let best = null, bestScore = 0;
+        for (const img of document.querySelectorAll('img')) {
+            if (img.closest(GROK_FILMSTRIP_SEL) || img.closest('#mossad-widget, [id^="mossad-"]')) continue;
+            const src = (img.currentSrc || img.src || '').toLowerCase();
+            if (!src) continue;
+            if (/avatar|profile|pfp|icon|logo|favicon/.test(src)) continue;
+            const w = img.naturalWidth || img.width || 0;
+            const h = img.naturalHeight || img.height || 0;
+            let score = 0;
+            if (uuid && src.includes(uuid)) score += 10;                     // картинка именно этого поста
+            if (/assets\.grok\.com|imagine-public|share-images|\/generated\//.test(src)) score += 5;
+            if (w >= 150 && h >= 150) score += 3;
+            if (score < 3) continue;
+            if (score > bestScore) { best = img; bestScore = score; }
+        }
+        return best;
+    }
+
+    /**
+     * Признаки медиа текущего поста. Ничего не ждёт — только читает DOM; ожиданием управляет
+     * scheduleNextSlideCycle (src/slideshow/engine.js).
+     *   staleSrc — src <video> предыдущего слайда: такой ролик ещё не сменился, он «старый».
+     * Возвращает { video, staleVideo, soundBtn, mainImg, imageBtn, settled }.
+     */
+    function grokDetectSlideMedia(staleSrc = '') {
+        const vids = grokGetViewerVideos();
+        let video = null, staleVideo = null;
+        for (const v of vids) {
+            const src = v.currentSrc || v.src || '';
+            if (staleSrc && src && src === staleSrc) { staleVideo = staleVideo || v; continue; }
+            if (!video) video = v;
+        }
+        // Если видео несколько — то, что выбрал бы движок (самое видимое), если оно «свежее»
+        if (video && vids.length > 1 && typeof getActiveVideo === 'function') {
+            const act = getActiveVideo();
+            if (act && act !== staleVideo && vids.includes(act)) video = act;
+        }
+        let soundBtn = null;
+        try { soundBtn = findGrokSoundToggleButton({ includeHidden: true }); } catch (e) {}
+        // «Удалить изображение» (видно, если меню поста раскрыто) — железное подтверждение фото
+        const imageBtn = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]')).some(el => {
+            if (el.closest('#mossad-widget, [id^="mossad-"]')) return false;
+            const t = (el.textContent || '').trim();
+            const a = (el.getAttribute('aria-label') || '').trim();
+            return t === 'Удалить изображение' || t === 'Delete image' || a === 'Удалить изображение' || a === 'Delete image';
+        });
+        // Страница «устоялась»: документ загружен и URL уже указывает на целевой пост слайдшоу
+        let settled = document.readyState === 'complete';
+        if (settled) {
+            try {
+                const ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}');
+                const cur = grokExtractUuid(location.pathname);
+                if (ss.active && ss.targetUuid && cur && cur !== String(ss.targetUuid).toLowerCase()) settled = false;
+            } catch (e) {}
+        }
+        return { video, staleVideo, soundBtn, mainImg: grokFindMainImage(), imageBtn, settled };
+    }
