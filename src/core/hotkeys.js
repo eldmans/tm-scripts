@@ -201,13 +201,10 @@
         if (hotkeyMatches(e, config.hk.help)) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const existingModal = document.getElementById('mossad-hk-modal');
-            if (existingModal) {
-                if (typeof window.saveGlobalHotkeys === 'function') window.saveGlobalHotkeys(true);
-                existingModal.remove();
-                return;
-            }
-            openHotkeySettings();
+            // Ctrl+F1 (и любые переназначенные слоты help): открыть/закрыть окно настроек.
+            // Если окно открыто — закрыть с сохранением (с любой вкладки), как раньше.
+            if (document.getElementById('mossad-hk-modal')) { closeSettingsWindow(true); return; }
+            openSettingsWindow('hotkeys');
             return;
         }
 
@@ -240,7 +237,7 @@
                 if (active) {
                     toggleGalleryPause();
                 } else {
-                    grokStartGallerySlideshow();
+                    grokInsertCollectOrStart(); // v1.3.40: нет ссылок → 1-е нажатие собирает, 2-е стартует
                 }
             } else {
                 startSlideshow();

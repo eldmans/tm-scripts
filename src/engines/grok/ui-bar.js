@@ -189,36 +189,16 @@
             btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
         };
 
-        // ── 6. Быстрые кнопки генерации видео (6s / 10s) ──
-        const btnVid6 = mkBtn('mossad-grok-vid6', '6s', 'Генерация видео 6 сек', 'background:#1a2332;color:#38bdf8;');
-        btnVid6.onclick = () => {
-            triggerGrokVideoGeneration(6);
-        };
-        const btnVid10 = mkBtn('mossad-grok-vid10', '10s', 'Генерация видео 10 сек', 'background:#1e1a3a;color:#a78bfa;');
-        btnVid10.onclick = () => {
-            triggerGrokVideoGeneration(10);
-        };
-
-        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd, btnVid6, btnVid10);
+        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd);
 
         // ── Кнопка вызова настроек горячих клавиш (⌨) слева от крестика (✕) ──
-        const btnHk = mkBtn('mossad-gallery-hk', '⌨', 'Настройки горячих клавиш', 'background:#1f2937;color:#9ca3af;font-size:12px;padding:2px 6px;margin-left:auto;');
-        btnHk.onclick = () => {
-            const existingModal = document.getElementById('mossad-hk-modal');
-            if (existingModal) {
-                existingModal.remove();
-                return;
-            }
-            openHotkeySettings();
-        };
+        // v1.3.40: кнопка ⌨ перенесена во второй ряд виджета (справа от 🔄, см. ui/panel.js)
 
         // Переносим крестик закрытия на самый верхний ряд (на Grok это mossad-gallery-row)
         const closeBtn = document.getElementById('mossad-btn-close');
         if (closeBtn) {
-            closeBtn.style.marginLeft = '4px';
-            row.append(btnHk, closeBtn);
-        } else {
-            row.append(btnHk);
+            closeBtn.style.marginLeft = 'auto';
+            row.append(closeBtn);
         }
 
         container.insertBefore(row, container.firstChild);

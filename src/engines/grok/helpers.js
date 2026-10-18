@@ -1,5 +1,5 @@
 // ============================================================
-    // GROK HELPERS: Button Finders (см. также sound / upscale / media / download / filmstrip / video-gen)
+    // GROK HELPERS: Button Finders (см. также sound / upscale / media / download / filmstrip / navigation)
     // ============================================================
 
     /**

@@ -37,7 +37,7 @@ tm-scripts/grok/
 │   │   │   ├── media.js      # Промпт, модель, текущее медиа, хеш промпта
 │   │   │   ├── download.js   # triggerGrokDownload + метаданные, перехват промпта в Vault
 │   │   │   ├── filmstrip.js  # Киноплёнка: UUID, активный кадр, шаг
-│   │   │   ├── video-gen.js  # Кнопки 6s / 10s (генерация видео)
+│   │   │   ├── navigation.js # grokNavigateToSaved (бывш. video-gen.js; 6s / 10s удалены в v1.3.40)
 │   │   │   ├── delete.js     # Smart delete, hold post, подтверждение
 │   │   │   ├── collect.js    # Сбор ссылок DOM, email scrape, экспорт .txt
 │   │   │   ├── queue.js      # Fisher-Yates, построение очередей (Gr/Md)

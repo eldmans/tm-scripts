@@ -116,6 +116,135 @@
         }
     }
 
+    // ── v1.3.40: высота «N строк» и ресайз за любой край/угол ──
+    const PLAYLIST_EDGE_PX = 6;
+
+    function grokPlaylistRows() {
+        const n = parseInt(config.playlistRows, 10);
+        return Math.max(5, Math.min(200, isNaN(n) ? 30 : n));
+    }
+
+    /** Высота одной строки списка: по первой отрисованной строке, иначе по размеру шрифта. */
+    function grokPlaylistRowHeight(panel) {
+        for (const sel of ['.mossad-playlist-item', '.mossad-playlist-grp-header']) {
+            const row = panel.querySelector(sel);
+            const h = row ? row.getBoundingClientRect().height : 0;
+            if (h > 4) return h + 1; // + margin-bottom 1px
+        }
+        const font = parseFloat(getComputedStyle(panel).getPropertyValue('--mossad-pl-font-size')) || 11;
+        return Math.round(font * 1.15 + 5);
+    }
+
+    /** Если пользователь не задавал высоту вручную — подогнать под N видимых строк. */
+    function grokApplyPlaylistAutoHeight(panel) {
+        if (!panel || panel.dataset.autoHeight !== '1') return;
+        const header = panel.firstElementChild;
+        const headerH = header ? header.getBoundingClientRect().height : 0;
+        const rowH = grokPlaylistRowHeight(panel);
+        const body = panel.querySelector('.mossad-playlist-body');
+        const bodyChrome = body ? 4 : 0; // padding 2px сверху/снизу
+        const target = Math.round(headerH + bodyChrome + grokPlaylistRows() * rowH + 2); // + рамка
+        // Если строк меньше N — не растягиваем пустоту: даём контенту определить высоту (max-height 85vh)
+        const natural = body ? headerH + body.scrollHeight + 2 : target;
+        panel.style.height = (natural > 0 && natural < target) ? 'auto' : `${target}px`;
+        panel.dataset.rowsTarget = String(target);
+    }
+
+    function grokPlaylistEdgeAt(panel, x, y) {
+        const r = panel.getBoundingClientRect();
+        if (x < r.left - 1 || x > r.right + 1 || y < r.top - 1 || y > r.bottom + 1) return '';
+        let edge = '';
+        if (y - r.top <= PLAYLIST_EDGE_PX) edge += 'n';
+        else if (r.bottom - y <= PLAYLIST_EDGE_PX) edge += 's';
+        if (x - r.left <= PLAYLIST_EDGE_PX) edge += 'w';
+        else if (r.right - x <= PLAYLIST_EDGE_PX) edge += 'e';
+        return edge;
+    }
+
+    const PLAYLIST_EDGE_CURSOR = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize' };
+
+    function grokEnsurePlaylistResizeStyle() {
+        if (document.getElementById('mossad-playlist-resize-style')) return;
+        const st = document.createElement('style');
+        st.id = 'mossad-playlist-resize-style';
+        // Пока курсор в зоне края — все потомки (шапка с grab, кнопки) показывают курсор ресайза
+        st.textContent = Object.keys(PLAYLIST_EDGE_CURSOR).map(k =>
+            `#mossad-playlist-panel[data-edge="${k}"], #mossad-playlist-panel[data-edge="${k}"] * { cursor: ${PLAYLIST_EDGE_CURSOR[k]} !important; }`
+        ).join('\n');
+        (document.head || document.documentElement).appendChild(st);
+    }
+
+    function grokAttachPlaylistEdgeResize(panel, container) {
+        grokEnsurePlaylistResizeStyle();
+        const inWidget = !!(container && panel.parentNode === container);
+        let drag = null;
+
+        panel.addEventListener('mousemove', (e) => {
+            if (drag) return;
+            const edge = grokPlaylistEdgeAt(panel, e.clientX, e.clientY);
+            if (edge) panel.dataset.edge = edge; else delete panel.dataset.edge;
+        });
+        panel.addEventListener('mouseleave', () => { if (!drag) delete panel.dataset.edge; });
+
+        // capture: перехватываем раньше перетаскивания виджета за шапку
+        panel.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            const edge = grokPlaylistEdgeAt(panel, e.clientX, e.clientY);
+            if (!edge) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const r = panel.getBoundingClientRect();
+            const moveEl = inWidget ? container : panel; // что сдвигать при тяге за левый/верхний край
+            const mr = moveEl.getBoundingClientRect();
+            drag = { edge, x: e.clientX, y: e.clientY, w: r.width, h: r.height, left: mr.left, top: mr.top, moved: false };
+            panel.dataset.edge = edge;
+            const maxW = window.innerWidth * 0.95, maxH = window.innerHeight * 0.85;
+
+            const onMove = (ev) => {
+                const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+                if (drag.edge.includes('e')) panel.style.width = Math.round(Math.max(140, Math.min(maxW, drag.w + dx))) + 'px';
+                if (drag.edge.includes('s')) panel.style.height = Math.round(Math.max(90, Math.min(maxH, drag.h + dy))) + 'px';
+                if (drag.edge.includes('w')) {
+                    const nw = Math.max(140, Math.min(maxW, drag.w - dx));
+                    panel.style.width = Math.round(nw) + 'px';
+                    if (inWidget || moveEl.style.left) {
+                        moveEl.style.left = Math.round(Math.max(0, drag.left + (drag.w - nw))) + 'px';
+                        moveEl.style.right = 'auto';
+                    }
+                }
+                if (drag.edge.includes('n')) {
+                    const nh = Math.max(90, Math.min(maxH, drag.h - dy));
+                    panel.style.height = Math.round(nh) + 'px';
+                    moveEl.style.top = Math.round(Math.max(0, drag.top + (drag.h - nh))) + 'px';
+                }
+                drag.moved = true;
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove, true);
+                document.removeEventListener('mouseup', onUp, true);
+                const d = drag; drag = null;
+                delete panel.dataset.edge;
+                if (!d || !d.moved) return;
+                const fr = panel.getBoundingClientRect();
+                if (/[ew]/.test(d.edge)) {
+                    const w = Math.round(fr.width);
+                    localStorage.setItem('mossad_playlist_width', String(w));
+                    if (typeof Settings !== 'undefined') Settings.setQuiet('playlistWidth', w);
+                }
+                if (/[ns]/.test(d.edge)) {
+                    panel.dataset.autoHeight = '0';
+                    localStorage.setItem('mossad_playlist_height', String(Math.round(fr.height)));
+                }
+                if (inWidget && /[nw]/.test(d.edge)) {
+                    try { localStorage.setItem('mossad_widget_pos', JSON.stringify({ left: container.style.left, top: container.style.top })); } catch (err) {}
+                }
+                mossadDebug('playlist', 'ресайз', { edge: d.edge, w: Math.round(fr.width), h: Math.round(fr.height) });
+            };
+            document.addEventListener('mousemove', onMove, true);
+            document.addEventListener('mouseup', onUp, true);
+        }, true);
+    }
+
     /** Список (плейлист): открыть/закрыть. Монолитно крепится к меню виджета MOSSAD */
     function grokTogglePlaylistPanel(forceOpen = false) {
         const existing = document.getElementById('mossad-playlist-panel');
@@ -170,7 +299,7 @@
             panel.style.cssText = `
                 box-sizing: border-box; width: ${initialWidth}; ${savedCustomHeight > 0 ? `height: ${initialHeight};` : ''}
                 min-width: 140px; max-width: 95vw; min-height: 90px; max-height: 85vh;
-                overflow-y: auto; overflow-x: hidden; resize: both;
+                display: flex; flex-direction: column; overflow: hidden; position: relative;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
                 font-family: system-ui, -apple-system, sans-serif; font-size: var(--mossad-pl-font-size, 11px); color: #d1d5db;
@@ -185,7 +314,7 @@
                 position: fixed; top: 70px; right: 16px; z-index: 9999999;
                 width: ${savedCustomWidth > 0 ? `${savedCustomWidth}px` : '240px'}; ${savedCustomHeight > 0 ? `height: ${initialHeight};` : ''}
                 min-width: 140px; max-width: 95vw; min-height: 90px; max-height: 85vh;
-                overflow-y: auto; overflow-x: hidden; resize: both;
+                display: flex; flex-direction: column; overflow: hidden;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
                 font-family: system-ui, -apple-system, sans-serif; font-size: var(--mossad-pl-font-size, 11px); color: #d1d5db;
@@ -206,36 +335,18 @@
             }
         });
 
-        // Сохраняем пользовательские размеры при интерактивном ресайзе мышью
-        if (window.ResizeObserver) {
-            let lastW = savedCustomWidth || 0;
-            let lastH = savedCustomHeight || 0;
-            const ro = new ResizeObserver(entries => {
-                for (const entry of entries) {
-                    const w = Math.round(entry.contentRect.width);
-                    const h = Math.round(entry.contentRect.height);
-                    if (w >= 120 && Math.abs(w - lastW) > 6) {
-                        lastW = w;
-                        localStorage.setItem('mossad_playlist_width', String(w));
-                        if (typeof Settings !== 'undefined') {
-                            Settings.setQuiet('playlistWidth', w);
-                        }
-                    }
-                    if (h >= 80 && Math.abs(h - lastH) > 6) {
-                        lastH = h;
-                        localStorage.setItem('mossad_playlist_height', String(h));
-                    }
-                }
-            });
-            ro.observe(panel);
-        }
+        // v1.3.40: размер меняется мышью за ЛЮБОЙ край/угол (зона ~6px, см. grokAttachPlaylistEdgeResize),
+        // сохраняется только по окончании ручного ресайза. Прежний ResizeObserver записывал и
+        // автоматические размеры (100% / auto) как «пользовательские» — из-за этого сброс не работал.
+        panel.dataset.autoHeight = savedCustomHeight > 0 ? '0' : '1';
+        const defaultWidthCss = container ? '100%' : '240px';
 
         // ── Заголовок (липкий вверху с поддержкой перетаскивания всего меню) ──
         const header = document.createElement('div');
         header.style.cssText = `
             display: flex; align-items: center; justify-content: space-between;
             padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            gap: 6px; position: sticky; top: 0; background: rgba(14, 14, 18, 0.98);
+            gap: 6px; flex: 0 0 auto; background: rgba(14, 14, 18, 0.98);
             backdrop-filter: blur(16px); z-index: 2; border-top-left-radius: 12px; border-top-right-radius: 12px;
             cursor: grab; min-width: 0; max-width: 100%; box-sizing: border-box;
         `;
@@ -246,17 +357,20 @@
         const titleEl = document.createElement('span');
         titleEl.style.cssText = `font-weight: 700; font-size: calc(var(--mossad-pl-font-size, 11px) + 2px); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;`;
         titleEl.textContent = `📋 Список (${items.length})`;
-        titleEl.title = 'Двойной клик — сбросить ширину и высоту списка';
-        titleEl.ondblclick = () => {
-            panel.style.width = '100%';
-            panel.style.height = 'auto';
+        titleEl.title = 'Двойной клик — сбросить размер списка (как кнопка ⤢)';
+        // v1.3.40: двойной клик и кнопка ⤢ сбрасывают к одному размеру: N строк (F1) × ширина по умолчанию
+        const resetPlaylistSize = () => {
+            panel.style.width = defaultWidthCss;
             localStorage.removeItem('mossad_playlist_width');
             localStorage.removeItem('mossad_playlist_height');
             if (typeof Settings !== 'undefined') {
                 Settings.setQuiet('playlistWidth', 0);
             }
-            showToast('↔ Размеры списка сброшены');
+            panel.dataset.autoHeight = '1';
+            grokApplyPlaylistAutoHeight(panel);
+            showToast(`↔ Размер списка сброшен: ${grokPlaylistRows()} строк`);
         };
+        titleEl.ondblclick = (e) => { e.stopPropagation(); resetPlaylistSize(); };
 
         // Кнопки масштабирования шрифта списка (A− / A+)
         const fontControls = document.createElement('div');
@@ -274,6 +388,7 @@
                 currentFontSize--;
                 panel.style.setProperty('--mossad-pl-font-size', `${currentFontSize}px`);
                 localStorage.setItem('mossad_playlist_font_size', String(currentFontSize));
+                grokApplyPlaylistAutoHeight(panel);
             }
         };
 
@@ -289,6 +404,7 @@
                 currentFontSize++;
                 panel.style.setProperty('--mossad-pl-font-size', `${currentFontSize}px`);
                 localStorage.setItem('mossad_playlist_font_size', String(currentFontSize));
+                grokApplyPlaylistAutoHeight(panel);
             }
         };
         fontControls.append(btnFontDec, btnFontInc);
@@ -317,11 +433,23 @@
             grokUpdatePlaylistBtnState(false);
         };
 
-        header.append(titleEl, fontControls, btnClearLoop, btnClose);
+        // v1.3.40: сброс размера (справа от A+, слева от ×)
+        const btnResetSize = document.createElement('button');
+        btnResetSize.id = 'mossad-playlist-reset-size';
+        btnResetSize.textContent = '⤢';
+        btnResetSize.title = 'Сбросить размер списка (строк по умолчанию — в настройках, вкладка «Общие»)';
+        btnResetSize.style.cssText = `background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#9ca3af;padding:1px 5px;font-size:11px;font-weight:700;cursor:pointer;line-height:1.2;flex-shrink:0;`;
+        btnResetSize.onmouseenter = () => { btnResetSize.style.color = '#ffffff'; };
+        btnResetSize.onmouseleave = () => { btnResetSize.style.color = '#9ca3af'; };
+        btnResetSize.onclick = (e) => { e.stopPropagation(); resetPlaylistSize(); };
+
+        header.append(titleEl, fontControls, btnClearLoop, btnResetSize, btnClose);
         panel.appendChild(header);
 
         const body = document.createElement('div');
-        body.style.cssText = `padding: 2px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden;`;
+        body.className = 'mossad-playlist-body';
+        // v1.3.40: прокручивается тело, а не вся панель (полоса прокрутки не перекрывает зону ресайза края)
+        body.style.cssText = `padding: 2px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden; overflow-y: auto; flex: 1 1 auto; min-height: 0; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;`;
 
         // ── Утилита: кнопка R ──
         const makeRBtn = (isActive, onToggle) => {
@@ -530,6 +658,10 @@
         }
 
         grokUpdatePlaylistBtnState(true);
+
+        // v1.3.40: высота по умолчанию = N строк; ресайз за любой край
+        grokApplyPlaylistAutoHeight(panel);
+        grokAttachPlaylistEdgeResize(panel, container);
 
         // Подсвечиваем активный элемент сразу при открытии списка
         grokHighlightActivePlaylistItem();

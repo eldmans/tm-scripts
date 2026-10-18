@@ -133,6 +133,14 @@
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
+        // v1.3.40: ⌨ — окно настроек на вкладке «Горячие клавиши» (раньше было в верхнем ряду Grok)
+        const btnHkSettings = document.createElement('button');
+        btnHkSettings.id = 'mossad-btn-hk-settings';
+        btnHkSettings.innerHTML = '⌨';
+        btnHkSettings.title = 'Настройки: горячие клавиши (Ctrl+F1)';
+        btnHkSettings.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #9ca3af; cursor: pointer; font-size: 13px; padding: 4px 7px;`;
+        btnHkSettings.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('hotkeys'); };
+
         const btnTogglePanel = document.createElement('button');
         btnTogglePanel.id = 'mossad-btn-toggle-panel';
         btnTogglePanel.innerHTML = '▼';
@@ -157,8 +165,8 @@
             window.updateWidgetUI();
         };
 
-        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ▼ | ✕ (на Grok ✕ переносится на верхний ряд)
-        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnTogglePanel, btnClose);
+        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ⌨ | ▼ | ✕ (на Grok ✕ переносится на верхний ряд)
+        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnHkSettings, btnTogglePanel, btnClose);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -479,8 +487,7 @@
                 };
             }
             panel.querySelector('#mossad-btn-hk').onclick = () => {
-                if (document.getElementById('mossad-hk-modal')) return;
-                openHotkeySettings();
+                openSettingsWindow('general'); // v1.3.40: «⚙ Настройки» → вкладка «Общие»
             };
             panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
                 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;

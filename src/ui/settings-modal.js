@@ -1,8 +1,37 @@
     // ============================================
-    // SETTINGS MODAL (F1): горячие клавиши, GitHub-синхронизация, история скачиваний
-    // (вынесено из ui/panel.js в v1.3.35, код не менялся)
+    // SETTINGS WINDOW (Ctrl+F1): вкладки «Общие» и «Горячие клавиши» (v1.3.40),
+    // GitHub-синхронизация, опции виджета (вынесено из ui/panel.js в v1.3.35)
     // ============================================
-    function openHotkeySettings() {
+    // v1.3.40: окно настроек с вкладками «⚙ Общие» и «⌨ Горячие клавиши».
+    // openHotkeySettings(tab) оставлен как совместимое имя (Ctrl+F1, кнопки ⌨ / ⚙ Настройки).
+    function openHotkeySettings(tab = 'hotkeys') {
+        return openSettingsWindow(tab);
+    }
+
+    /** Переключает/закрывает окно настроек: если открыто на той же вкладке — закрыть, иначе показать вкладку. */
+    function toggleSettingsWindow(tab = 'hotkeys') {
+        const modal = document.getElementById('mossad-hk-modal');
+        if (modal && modal.dataset.tab === tab) { closeSettingsWindow(true); return; }
+        openSettingsWindow(tab);
+    }
+
+    function closeSettingsWindow(save = true) {
+        const modal = document.getElementById('mossad-hk-modal');
+        if (!modal) return;
+        if (save) {
+            if (typeof window.saveGlobalHotkeys === 'function') window.saveGlobalHotkeys(true);
+            else Settings.save();
+        }
+        if (typeof modal._mossadCleanup === 'function') modal._mossadCleanup();
+        modal.remove();
+    }
+
+    function openSettingsWindow(tab = 'general') {
+        const existing = document.getElementById('mossad-hk-modal');
+        if (existing && typeof existing._mossadSetTab === 'function') {
+            existing._mossadSetTab(tab);
+            return existing;
+        }
         const modal = document.createElement('div');
         modal.id = 'mossad-hk-modal';
         modal.style.cssText = `
@@ -10,15 +39,19 @@
             background: rgba(20, 20, 20, 0.95); backdrop-filter: blur(10px);
             border: 1px solid #374151; border-radius: 12px; padding: 20px; z-index: 9999999;
             color: #e5e7eb; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; gap: 10px;
-            min-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+            width: 460px; max-width: 94vw; max-height: 90vh; box-sizing: border-box; box-shadow: 0 10px 40px rgba(0,0,0,0.8);
         `;
         
         modal.innerHTML = `
-            <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
-            <div style="background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.3); border-radius:6px; padding:6px 10px; margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px;">
-              <span style="color:#34d399;">💡 При закрытии окна настройки автоматически сохраняются для всех сайтов</span>
-              <button id="mossad-hk-save-all" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:3px 8px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;" title="Сохранить для всех сайтов прямо сейчас">💾 Сохранить</button>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <h3 style="margin:0; color:#fff; font-size:16px;">⚙ Настройки MOSSAD</h3>
+              <button id="mossad-settings-x" title="Закрыть (настройки сохраняются)" style="background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">×</button>
             </div>
+            <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px;">
+              <button data-tab="general" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⚙ Общие</button>
+              <button data-tab="hotkeys" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⌨ Горячие клавиши</button>
+            </div>
+            <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
               <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">GitHub Sync Token:</div>
               <div style="display:flex;gap:6px;">
@@ -41,6 +74,10 @@
               Досбор после «Собрать», сек:
               <input id="mossad-collect-watch-sec" type="number" min="5" max="600" step="5" value="${Number(config.collectWatchSec) || 30}" style="width:56px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
             </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Высота списка (плейлиста) при открытии — столько строк видно без прокрутки (если размер не менялся вручную; кнопка ⤢ в списке сбрасывает к этому значению)">
+              Список: видимых строк при открытии:
+              <input id="mossad-playlist-rows" type="number" min="5" max="200" step="1" value="${Number(config.playlistRows) || 30}" style="width:56px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
+            </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Пишет в консоль браузера ([MOSSAD DBG]) кто и почему запустил каждый шаг слайдшоу, а также шаги удаления. Для диагностики; по умолчанию выключено">
               <input id="mossad-cb-debug" type="checkbox" style="accent-color:#f59e0b;" ${config.debugSlideshow ? 'checked' : ''}>
               Debug-лог слайдшоу/удаления
@@ -52,9 +89,17 @@
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
             </div>
-            <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
+            </div>
+            <div data-pane="hotkeys" style="display:none; flex-direction:column; gap:8px;">
+            <div style="background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.3); border-radius:6px; padding:6px 10px; margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px;">
+              <span style="color:#34d399;">💡 При закрытии окна настройки автоматически сохраняются для всех сайтов</span>
+              <button id="mossad-hk-save-all" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:3px 8px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;" title="Сохранить для всех сайтов прямо сейчас">💾 Сохранить</button>
+            </div>
+            <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:calc(85vh - 230px); overflow-y:auto; padding-right:4px;"></div>
+              <div><button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ Клавиши по умолчанию</button></div>
+            </div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
-                <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ По умолчанию</button>
+                <span></span>
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-hk-save-close" style="background:#10b981; border:none; padding:6px 14px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold; font-size:12px;">💾 Сохранить и закрыть</button>
                     <button id="mossad-hk-close" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#9ca3af; cursor:pointer; font-weight:bold; font-size:12px;">Закрыть</button>
@@ -77,13 +122,11 @@
             history:          'Переход в Saved Grok (Home)', 
             slideshowPanel:   'Меню: полное / краткое / скрыть (Ctrl+Insert)',
             slideshowStart:   'Малое слайдшоу / ракета (Shift+Insert)',
-            galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert)',
+            galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert; без ссылок — 1-е нажатие собирает)',
             galleryStop:      'Стоп большого слайдшоу',
             duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             rewind:           'Мотать в начало (Alt+R)',
-            snapWidget:       'Привязать к левому верхнему краю (F8)',
-            videoGen6s:       'Видео 6с Grok',
-            videoGen10s:      'Видео 10с Grok'
+            snapWidget:       'Привязать к левому верхнему краю (F8)'
         };
         
         Object.keys(keysMap).forEach(k => {
@@ -174,7 +217,30 @@
         });
         
         document.body.appendChild(modal);
-        
+
+        // ── Вкладки ──
+        const setTab = (t) => {
+            const want = (t === 'general' || t === 'hotkeys') ? t : 'hotkeys';
+            modal.dataset.tab = want;
+            modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
+            modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
+                const on = b.dataset.tab === want;
+                b.style.background = on ? '#1f2937' : 'transparent';
+                b.style.color = on ? '#ffffff' : '#9ca3af';
+            });
+        };
+        modal._mossadSetTab = setTab;
+        modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
+            b.onclick = (e) => { e.preventDefault(); setTab(b.dataset.tab); };
+        });
+        setTab(tab);
+        modal.querySelector('#mossad-settings-x').onclick = () => closeSettingsWindow(true);
+        modal.querySelector('#mossad-playlist-rows').onchange = (e) => {
+            const v = Math.max(5, Math.min(200, parseInt(e.target.value, 10) || 30));
+            e.target.value = String(v);
+            Settings.setQuiet('playlistRows', v);
+        };
+
         modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
             Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
         };
@@ -211,21 +277,15 @@
             try {
                 await pullConfigFromGitHub();
                 showToast('✅ Конфиг получен с GitHub');
-                modal.remove();
-                openHotkeySettings();
+                const curTab = modal.dataset.tab;
+                closeSettingsWindow(false);
+                openSettingsWindow(curTab);
             } catch (e) {
                 showToast('❌ Ошибка: ' + e.message, true);
             }
         };
 
-        const closeAndSaveModal = () => {
-            if (typeof window.saveGlobalHotkeys === 'function') {
-                window.saveGlobalHotkeys(true);
-            } else {
-                Settings.save();
-            }
-            modal.remove();
-        };
+        const closeAndSaveModal = () => closeSettingsWindow(true);
 
         modal.querySelector('#mossad-hk-save-all').onclick = () => {
             if (typeof window.saveGlobalHotkeys === 'function') {
@@ -240,11 +300,12 @@
 
         const onEscClose = (e) => {
             if (e.key === 'Escape' && window.capturingFor === null) {
-                document.removeEventListener('keydown', onEscClose);
                 closeAndSaveModal();
             }
         };
         document.addEventListener('keydown', onEscClose);
+        // v1.3.40: слушатель Esc снимается при ЛЮБОМ закрытии окна (раньше при закрытии кнопкой/хоткеем он оставался висеть)
+        modal._mossadCleanup = () => document.removeEventListener('keydown', onEscClose);
 
         modal.querySelector('#mossad-hk-reset').onclick = () => {
             if (!confirm('Сбросить все горячие клавиши по умолчанию?')) return;
@@ -254,8 +315,8 @@
             } else {
                 Settings.save();
             }
-            modal.remove();
-            openHotkeySettings(); // переоткрыть с обновлёнными клавишами
+            closeSettingsWindow(false);
+            openSettingsWindow('hotkeys'); // переоткрыть с обновлёнными клавишами
             showToast('✅ Клавиши сброшены по умолчанию для всех сайтов');
         };
     }

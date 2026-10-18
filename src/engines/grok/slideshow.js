@@ -177,6 +177,33 @@
 
 
     /** Запустить слайдшоу по коллекции (с учётом текущего режима) */
+    /**
+     * v1.3.40: Insert (большое слайдшоу) на Grok.
+     *  - ссылки уже собраны → старт как раньше;
+     *  - ссылок нет и мы на /imagine/saved → 1-е нажатие: сбор видимых + окно досбора
+     *    (grokStartCollectWatch через grokSaveCollection), тост «Insert ещё раз — старт»;
+     *    2-е нажатие → grokStartGallerySlideshow() (он сам гасит окно досбора).
+     *  - ссылок нет и не Saved → прежний тост «Сначала соберите коллекцию».
+     * Возвращает 'start' | 'collect'.
+     */
+    function grokInsertCollectOrStart() {
+        const struct = grokGetPlaylistStructure();
+        const hasLinks = !!(struct && struct.items && struct.items.length);
+        if (hasLinks || grokIsCollectWatching() || !isGrokSavedPage()) {
+            mossadDebug('insert', 'старт слайдшоу', { hasLinks, watching: grokIsCollectWatching() });
+            grokStartGallerySlideshow();
+            return 'start';
+        }
+        grokSaveCollection(document.getElementById('mossad-gallery-collect'));
+        const sec = config.collectWatchSec || 30;
+        const hkPP = config.hk && config.hk.galleryPlayPause;
+        const hk0 = Array.isArray(hkPP) ? hkPP[0] : hkPP;
+        const label = hk0 && hk0.key ? formatHotkey(hk0) : 'Insert';
+        showToast(`📋 Сбор начат (${sec} с) — скролльте ленту. ${label} ещё раз — старт слайдшоу`);
+        mossadDebug('insert', 'первое нажатие: сбор + окно досбора', { sec });
+        return 'collect';
+    }
+
     function grokStartGallerySlideshow() {
         const struct = grokGetPlaylistStructure();
         if (!struct || !struct.items.length) {

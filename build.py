@@ -20,7 +20,7 @@ MODULES = [
     "src/engines/grok/media.js",
     "src/engines/grok/download.js",
     "src/engines/grok/filmstrip.js",
-    "src/engines/grok/video-gen.js",
+    "src/engines/grok/navigation.js",
     "src/engines/grok/delete.js",
     "src/engines/grok/collect.js",
     "src/engines/grok/queue.js",

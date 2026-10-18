@@ -23,6 +23,7 @@
         githubConfigPath: 'mossad-config.json',
         filenameTemplate: '{id8}-{domain[4]}~{RadugaStud}',  // шаблон имени файла по умолчанию (для всех сайтов)
         filenameTemplateEnabled: true,   // использовать шаблон?
+        playlistRows: 30,                // v1.3.40: видимых строк списка при открытии / по ⤢
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
         closePanelOnOutsideClick: true,  // v1.3.37: сворачивать панель настроек виджета кликом вне MOSSAD
@@ -64,8 +65,6 @@
             prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
-            videoGen6s:       { key: '',           ctrl: false, alt: false, shift: false }, // Пусто (отключено)
-            videoGen10s:      { key: '',           ctrl: false, alt: false, shift: false }, // Пусто (отключено)
         }
     };
 
@@ -209,13 +208,6 @@
         config.hk.slideshowStart = { key: 'Insert', ctrl: false, alt: false, shift: true };
     }
 
-    // Миграция v1.3.25: отключение хоткеев видеогенерации Grok (Shift+Enter / Ctrl+Enter)
-    if (config.hk.videoGen6s && config.hk.videoGen6s.key === 'Enter') {
-        config.hk.videoGen6s = { key: '', ctrl: false, alt: false, shift: false };
-    }
-    if (config.hk.videoGen10s && config.hk.videoGen10s.key === 'Enter') {
-        config.hk.videoGen10s = { key: '', ctrl: false, alt: false, shift: false };
-    }
 
     // Миграция v1.3.24: history (Home) и slideshowPanel (Ctrl+Insert)
     if (!config.hk.history) {
@@ -237,6 +229,9 @@
             }
         } catch (e) {}
     }
+    // v1.3.40: генерация видео 6s / 10s удалена — чистим старые хоткеи (локальные и глобальные, после слияния)
+    delete config.hk.videoGen6s;
+    delete config.hk.videoGen10s;
 
     migrateUpscaleDefaultHotkey();
 

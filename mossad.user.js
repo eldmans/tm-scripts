@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.39
+// @version      1.3.40
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -21,7 +21,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.39';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.40';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -85,6 +85,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         githubConfigPath: 'mossad-config.json',
         filenameTemplate: '{id8}-{domain[4]}~{RadugaStud}',  // шаблон имени файла по умолчанию (для всех сайтов)
         filenameTemplateEnabled: true,   // использовать шаблон?
+        playlistRows: 30,                // v1.3.40: видимых строк списка при открытии / по ⤢
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
         closePanelOnOutsideClick: true,  // v1.3.37: сворачивать панель настроек виджета кликом вне MOSSAD
@@ -126,8 +127,6 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
-            videoGen6s:       { key: '',           ctrl: false, alt: false, shift: false }, // Пусто (отключено)
-            videoGen10s:      { key: '',           ctrl: false, alt: false, shift: false }, // Пусто (отключено)
         }
     };
 
@@ -271,13 +270,6 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         config.hk.slideshowStart = { key: 'Insert', ctrl: false, alt: false, shift: true };
     }
 
-    // Миграция v1.3.25: отключение хоткеев видеогенерации Grok (Shift+Enter / Ctrl+Enter)
-    if (config.hk.videoGen6s && config.hk.videoGen6s.key === 'Enter') {
-        config.hk.videoGen6s = { key: '', ctrl: false, alt: false, shift: false };
-    }
-    if (config.hk.videoGen10s && config.hk.videoGen10s.key === 'Enter') {
-        config.hk.videoGen10s = { key: '', ctrl: false, alt: false, shift: false };
-    }
 
     // Миграция v1.3.24: history (Home) и slideshowPanel (Ctrl+Insert)
     if (!config.hk.history) {
@@ -299,6 +291,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
         } catch (e) {}
     }
+    // v1.3.40: генерация видео 6s / 10s удалена — чистим старые хоткеи (локальные и глобальные, после слияния)
+    delete config.hk.videoGen6s;
+    delete config.hk.videoGen10s;
 
     migrateUpscaleDefaultHotkey();
 
@@ -2195,7 +2190,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
 // ============================================================
-    // GROK HELPERS: Button Finders (см. также sound / upscale / media / download / filmstrip / video-gen)
+    // GROK HELPERS: Button Finders (см. также sound / upscale / media / download / filmstrip / navigation)
     // ============================================================
 
     /**
@@ -2936,168 +2931,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
 // ============================================================
-    // GROK: Video Generation Shortcuts (6s & 10s)
+    // GROK: навигация в Saved (/imagine/saved)
+    // (v1.3.40: кнопки/хоткеи генерации видео 6s / 10s удалены вместе с video-gen.js)
     // ============================================================
-    let _isGeneratingGrokVideo = false;
-
-    function findMakeVideoButton() {
-        const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
-        // 1. По aria-label или title
-        const byLabel = buttons.find(b => {
-            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
-            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-            const title = (b.getAttribute('title') || '').toLowerCase();
-            return aria === 'make video' || aria.includes('make video') || aria.includes('создать видео') ||
-                   title === 'make video' || title.includes('make video');
-        });
-        if (byLabel) return byLabel;
-
-        // 2. По SVG стрелке отправки (path: M6 11L12 5M12 5L18 11M12 5V19)
-        const bySvg = buttons.find(b => {
-            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
-            const path = b.querySelector('path');
-            const d = path ? (path.getAttribute('d') || '') : '';
-            return (d.includes('M6 11L12 5') || d.includes('5V19')) && (b.closest('div.relative.z-10') || (b.className && b.className.includes('rounded-full')));
-        });
-        return bySvg || null;
-    }
-
-    function findGrokVideoModeRadio() {
-        const candidates = Array.from(document.querySelectorAll('button[role="radio"], [role="radio"]'));
-        return candidates.find(b => {
-            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-            const txt = (b.textContent || '').trim().toLowerCase();
-            return aria === 'video' || aria.includes('video') || aria === 'видео' || txt === 'video' || txt === 'видео';
-        }) || null;
-    }
-
-    function isGrokVideoModeActive() {
-        const radio = findGrokVideoModeRadio();
-        if (radio) {
-            return radio.getAttribute('aria-checked') === 'true';
-        }
-        // Fallback: если Make video уже есть на экране
-        const makeBtn = findMakeVideoButton();
-        return Boolean(makeBtn);
-    }
-
-    function findVideoDurationButton() {
-        const candidates = Array.from(document.querySelectorAll('button, [role="button"]'));
-        return candidates.find(b => {
-            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
-            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-            if (aria === 'video duration' || aria.includes('video duration') || aria.includes('длительность')) return true;
-            if (b.getAttribute('aria-haspopup') === 'menu' && (b.textContent.trim() === '6s' || b.textContent.trim() === '10s')) return true;
-            return false;
-        }) || null;
-    }
-
-    function findDurationMenuItem(targetSeconds) {
-        const targetStr = `${targetSeconds}s`.toLowerCase();
-        // 1. Поиск элементов меню Radix UI
-        const candidates = Array.from(document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [data-radix-collection-item], [role="menu"] button, [role="menu"] [tabindex]'));
-        for (const item of candidates) {
-            if (item.offsetWidth === 0 && item.offsetHeight === 0 && (!item.getClientRects || !item.getClientRects().length)) continue;
-            const spans = Array.from(item.querySelectorAll('span'));
-            if (spans.some(s => s.textContent.trim().toLowerCase() === targetStr)) {
-                return item;
-            }
-            if (item.textContent.trim().toLowerCase() === targetStr) {
-                return item;
-            }
-        }
-        // 2. Поиск любого открытого span с точным текстом "6s" или "10s"
-        const allSpans = Array.from(document.querySelectorAll('[role="menu"] span, div[data-radix-popper-content-wrapper] span, span'));
-        const matchedSpan = allSpans.find(s => {
-            if (s.offsetWidth === 0 && s.offsetHeight === 0 && (!s.getClientRects || !s.getClientRects().length)) return false;
-            return s.textContent.trim().toLowerCase() === targetStr;
-        });
-        if (matchedSpan) {
-            return matchedSpan.closest('[role="menuitem"], [role="menuitemradio"], [data-radix-collection-item], button, [tabindex]') || matchedSpan;
-        }
-        return null;
-    }
-
-    async function triggerGrokVideoGeneration(targetSeconds = 6) {
-        if (rootDomain !== 'grok.com') return;
-        if (_isGeneratingGrokVideo) {
-            showToast('⏳ Уже выполняется выбор режима видео...');
-            return;
-        }
-        _isGeneratingGrokVideo = true;
-
-        try {
-            const targetStr = `${targetSeconds}s`.toLowerCase();
-
-            // ── Шаг 1: Проверка режима «Видео» ──
-            if (!isGrokVideoModeActive()) {
-                const videoRadio = findGrokVideoModeRadio();
-                if (videoRadio) {
-                    showToast('🎥 Переключение в режим видео...');
-                    triggerClick(videoRadio, 'Switch to Video Mode');
-                    const switched = await waitForCondition(() => isGrokVideoModeActive(), 2500);
-                    if (!switched) {
-                        showToast('⚠️ Не удалось переключить в режим видео', true);
-                        _isGeneratingGrokVideo = false;
-                        return;
-                    }
-                } else {
-                    console.log('[MOSSAD] Video mode radio not found, proceeding with Make video check');
-                }
-            }
-
-            // Небольшая пауза для рендера контролов длительности
-            await new Promise(r => setTimeout(r, 100));
-
-            // ── Шаг 2: Проверка и выбор длительности (6s / 10s) ──
-            const durBtn = await waitForCondition(() => findVideoDurationButton(), 2000);
-            if (durBtn) {
-                const curText = durBtn.textContent.trim().toLowerCase();
-                if (!curText.includes(targetStr)) {
-                    showToast(`⏱ Выбор длительности ${targetSeconds}с...`);
-                    triggerClick(durBtn, 'Open Video Duration Menu');
-
-                    const menuItem = await waitForCondition(() => findDurationMenuItem(targetSeconds), 2000);
-                    if (menuItem) {
-                        triggerClick(menuItem, `Select ${targetSeconds}s`);
-                        // Ждем обновления текста на кнопке длительности
-                        await waitForCondition(() => {
-                            const updated = durBtn.textContent.trim().toLowerCase();
-                            return updated.includes(targetStr);
-                        }, 1500);
-                    } else {
-                        showToast(`⚠️ Пункт ${targetSeconds}с не найден в меню`, true);
-                    }
-                }
-            }
-
-            // Небольшая пауза перед кликом по финальной кнопке
-            await new Promise(r => setTimeout(r, 120));
-
-            // ── Шаг 3: Нажатие кнопки Make video ──
-            const makeBtn = await waitForCondition(() => findMakeVideoButton(), 2500);
-            if (!makeBtn) {
-                showToast('⚠️ Кнопка «Make video» не найдена', true);
-                _isGeneratingGrokVideo = false;
-                return;
-            }
-
-            if (makeBtn.disabled || makeBtn.getAttribute('aria-disabled') === 'true') {
-                showToast('⚠️ Кнопка «Make video» неактивна (введите промпт)', true);
-                _isGeneratingGrokVideo = false;
-                return;
-            }
-
-            triggerClick(makeBtn, `Make Video (${targetSeconds}s)`);
-            showToast(`🎬 Генерация видео ${targetSeconds}с запущена!`);
-        } catch (err) {
-            console.error('[MOSSAD] Error in triggerGrokVideoGeneration:', err);
-            showToast('❌ Ошибка генерации видео: ' + err.message, true);
-        } finally {
-            _isGeneratingGrokVideo = false;
-        }
-    }
-    window.triggerGrokVideoGeneration = triggerGrokVideoGeneration;
 
     /**
      * Универсальная навигация в Saved Grok (/imagine/saved) из любого места grok.com.
@@ -4644,6 +4480,33 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
 
     /** Запустить слайдшоу по коллекции (с учётом текущего режима) */
+    /**
+     * v1.3.40: Insert (большое слайдшоу) на Grok.
+     *  - ссылки уже собраны → старт как раньше;
+     *  - ссылок нет и мы на /imagine/saved → 1-е нажатие: сбор видимых + окно досбора
+     *    (grokStartCollectWatch через grokSaveCollection), тост «Insert ещё раз — старт»;
+     *    2-е нажатие → grokStartGallerySlideshow() (он сам гасит окно досбора).
+     *  - ссылок нет и не Saved → прежний тост «Сначала соберите коллекцию».
+     * Возвращает 'start' | 'collect'.
+     */
+    function grokInsertCollectOrStart() {
+        const struct = grokGetPlaylistStructure();
+        const hasLinks = !!(struct && struct.items && struct.items.length);
+        if (hasLinks || grokIsCollectWatching() || !isGrokSavedPage()) {
+            mossadDebug('insert', 'старт слайдшоу', { hasLinks, watching: grokIsCollectWatching() });
+            grokStartGallerySlideshow();
+            return 'start';
+        }
+        grokSaveCollection(document.getElementById('mossad-gallery-collect'));
+        const sec = config.collectWatchSec || 30;
+        const hkPP = config.hk && config.hk.galleryPlayPause;
+        const hk0 = Array.isArray(hkPP) ? hkPP[0] : hkPP;
+        const label = hk0 && hk0.key ? formatHotkey(hk0) : 'Insert';
+        showToast(`📋 Сбор начат (${sec} с) — скролльте ленту. ${label} ещё раз — старт слайдшоу`);
+        mossadDebug('insert', 'первое нажатие: сбор + окно досбора', { sec });
+        return 'collect';
+    }
+
     function grokStartGallerySlideshow() {
         const struct = grokGetPlaylistStructure();
         if (!struct || !struct.items.length) {
@@ -5168,36 +5031,16 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
         };
 
-        // ── 6. Быстрые кнопки генерации видео (6s / 10s) ──
-        const btnVid6 = mkBtn('mossad-grok-vid6', '6s', 'Генерация видео 6 сек', 'background:#1a2332;color:#38bdf8;');
-        btnVid6.onclick = () => {
-            triggerGrokVideoGeneration(6);
-        };
-        const btnVid10 = mkBtn('mossad-grok-vid10', '10s', 'Генерация видео 10 сек', 'background:#1e1a3a;color:#a78bfa;');
-        btnVid10.onclick = () => {
-            triggerGrokVideoGeneration(10);
-        };
-
-        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd, btnVid6, btnVid10);
+        row.append(btnCollect, btnStatus, btnStop, btnGr, btnMd);
 
         // ── Кнопка вызова настроек горячих клавиш (⌨) слева от крестика (✕) ──
-        const btnHk = mkBtn('mossad-gallery-hk', '⌨', 'Настройки горячих клавиш', 'background:#1f2937;color:#9ca3af;font-size:12px;padding:2px 6px;margin-left:auto;');
-        btnHk.onclick = () => {
-            const existingModal = document.getElementById('mossad-hk-modal');
-            if (existingModal) {
-                existingModal.remove();
-                return;
-            }
-            openHotkeySettings();
-        };
+        // v1.3.40: кнопка ⌨ перенесена во второй ряд виджета (справа от 🔄, см. ui/panel.js)
 
         // Переносим крестик закрытия на самый верхний ряд (на Grok это mossad-gallery-row)
         const closeBtn = document.getElementById('mossad-btn-close');
         if (closeBtn) {
-            closeBtn.style.marginLeft = '4px';
-            row.append(btnHk, closeBtn);
-        } else {
-            row.append(btnHk);
+            closeBtn.style.marginLeft = 'auto';
+            row.append(closeBtn);
         }
 
         container.insertBefore(row, container.firstChild);
@@ -5332,6 +5175,135 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
     }
 
+    // ── v1.3.40: высота «N строк» и ресайз за любой край/угол ──
+    const PLAYLIST_EDGE_PX = 6;
+
+    function grokPlaylistRows() {
+        const n = parseInt(config.playlistRows, 10);
+        return Math.max(5, Math.min(200, isNaN(n) ? 30 : n));
+    }
+
+    /** Высота одной строки списка: по первой отрисованной строке, иначе по размеру шрифта. */
+    function grokPlaylistRowHeight(panel) {
+        for (const sel of ['.mossad-playlist-item', '.mossad-playlist-grp-header']) {
+            const row = panel.querySelector(sel);
+            const h = row ? row.getBoundingClientRect().height : 0;
+            if (h > 4) return h + 1; // + margin-bottom 1px
+        }
+        const font = parseFloat(getComputedStyle(panel).getPropertyValue('--mossad-pl-font-size')) || 11;
+        return Math.round(font * 1.15 + 5);
+    }
+
+    /** Если пользователь не задавал высоту вручную — подогнать под N видимых строк. */
+    function grokApplyPlaylistAutoHeight(panel) {
+        if (!panel || panel.dataset.autoHeight !== '1') return;
+        const header = panel.firstElementChild;
+        const headerH = header ? header.getBoundingClientRect().height : 0;
+        const rowH = grokPlaylistRowHeight(panel);
+        const body = panel.querySelector('.mossad-playlist-body');
+        const bodyChrome = body ? 4 : 0; // padding 2px сверху/снизу
+        const target = Math.round(headerH + bodyChrome + grokPlaylistRows() * rowH + 2); // + рамка
+        // Если строк меньше N — не растягиваем пустоту: даём контенту определить высоту (max-height 85vh)
+        const natural = body ? headerH + body.scrollHeight + 2 : target;
+        panel.style.height = (natural > 0 && natural < target) ? 'auto' : `${target}px`;
+        panel.dataset.rowsTarget = String(target);
+    }
+
+    function grokPlaylistEdgeAt(panel, x, y) {
+        const r = panel.getBoundingClientRect();
+        if (x < r.left - 1 || x > r.right + 1 || y < r.top - 1 || y > r.bottom + 1) return '';
+        let edge = '';
+        if (y - r.top <= PLAYLIST_EDGE_PX) edge += 'n';
+        else if (r.bottom - y <= PLAYLIST_EDGE_PX) edge += 's';
+        if (x - r.left <= PLAYLIST_EDGE_PX) edge += 'w';
+        else if (r.right - x <= PLAYLIST_EDGE_PX) edge += 'e';
+        return edge;
+    }
+
+    const PLAYLIST_EDGE_CURSOR = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize' };
+
+    function grokEnsurePlaylistResizeStyle() {
+        if (document.getElementById('mossad-playlist-resize-style')) return;
+        const st = document.createElement('style');
+        st.id = 'mossad-playlist-resize-style';
+        // Пока курсор в зоне края — все потомки (шапка с grab, кнопки) показывают курсор ресайза
+        st.textContent = Object.keys(PLAYLIST_EDGE_CURSOR).map(k =>
+            `#mossad-playlist-panel[data-edge="${k}"], #mossad-playlist-panel[data-edge="${k}"] * { cursor: ${PLAYLIST_EDGE_CURSOR[k]} !important; }`
+        ).join('\n');
+        (document.head || document.documentElement).appendChild(st);
+    }
+
+    function grokAttachPlaylistEdgeResize(panel, container) {
+        grokEnsurePlaylistResizeStyle();
+        const inWidget = !!(container && panel.parentNode === container);
+        let drag = null;
+
+        panel.addEventListener('mousemove', (e) => {
+            if (drag) return;
+            const edge = grokPlaylistEdgeAt(panel, e.clientX, e.clientY);
+            if (edge) panel.dataset.edge = edge; else delete panel.dataset.edge;
+        });
+        panel.addEventListener('mouseleave', () => { if (!drag) delete panel.dataset.edge; });
+
+        // capture: перехватываем раньше перетаскивания виджета за шапку
+        panel.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            const edge = grokPlaylistEdgeAt(panel, e.clientX, e.clientY);
+            if (!edge) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const r = panel.getBoundingClientRect();
+            const moveEl = inWidget ? container : panel; // что сдвигать при тяге за левый/верхний край
+            const mr = moveEl.getBoundingClientRect();
+            drag = { edge, x: e.clientX, y: e.clientY, w: r.width, h: r.height, left: mr.left, top: mr.top, moved: false };
+            panel.dataset.edge = edge;
+            const maxW = window.innerWidth * 0.95, maxH = window.innerHeight * 0.85;
+
+            const onMove = (ev) => {
+                const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+                if (drag.edge.includes('e')) panel.style.width = Math.round(Math.max(140, Math.min(maxW, drag.w + dx))) + 'px';
+                if (drag.edge.includes('s')) panel.style.height = Math.round(Math.max(90, Math.min(maxH, drag.h + dy))) + 'px';
+                if (drag.edge.includes('w')) {
+                    const nw = Math.max(140, Math.min(maxW, drag.w - dx));
+                    panel.style.width = Math.round(nw) + 'px';
+                    if (inWidget || moveEl.style.left) {
+                        moveEl.style.left = Math.round(Math.max(0, drag.left + (drag.w - nw))) + 'px';
+                        moveEl.style.right = 'auto';
+                    }
+                }
+                if (drag.edge.includes('n')) {
+                    const nh = Math.max(90, Math.min(maxH, drag.h - dy));
+                    panel.style.height = Math.round(nh) + 'px';
+                    moveEl.style.top = Math.round(Math.max(0, drag.top + (drag.h - nh))) + 'px';
+                }
+                drag.moved = true;
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove, true);
+                document.removeEventListener('mouseup', onUp, true);
+                const d = drag; drag = null;
+                delete panel.dataset.edge;
+                if (!d || !d.moved) return;
+                const fr = panel.getBoundingClientRect();
+                if (/[ew]/.test(d.edge)) {
+                    const w = Math.round(fr.width);
+                    localStorage.setItem('mossad_playlist_width', String(w));
+                    if (typeof Settings !== 'undefined') Settings.setQuiet('playlistWidth', w);
+                }
+                if (/[ns]/.test(d.edge)) {
+                    panel.dataset.autoHeight = '0';
+                    localStorage.setItem('mossad_playlist_height', String(Math.round(fr.height)));
+                }
+                if (inWidget && /[nw]/.test(d.edge)) {
+                    try { localStorage.setItem('mossad_widget_pos', JSON.stringify({ left: container.style.left, top: container.style.top })); } catch (err) {}
+                }
+                mossadDebug('playlist', 'ресайз', { edge: d.edge, w: Math.round(fr.width), h: Math.round(fr.height) });
+            };
+            document.addEventListener('mousemove', onMove, true);
+            document.addEventListener('mouseup', onUp, true);
+        }, true);
+    }
+
     /** Список (плейлист): открыть/закрыть. Монолитно крепится к меню виджета MOSSAD */
     function grokTogglePlaylistPanel(forceOpen = false) {
         const existing = document.getElementById('mossad-playlist-panel');
@@ -5386,7 +5358,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             panel.style.cssText = `
                 box-sizing: border-box; width: ${initialWidth}; ${savedCustomHeight > 0 ? `height: ${initialHeight};` : ''}
                 min-width: 140px; max-width: 95vw; min-height: 90px; max-height: 85vh;
-                overflow-y: auto; overflow-x: hidden; resize: both;
+                display: flex; flex-direction: column; overflow: hidden; position: relative;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
                 font-family: system-ui, -apple-system, sans-serif; font-size: var(--mossad-pl-font-size, 11px); color: #d1d5db;
@@ -5401,7 +5373,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 position: fixed; top: 70px; right: 16px; z-index: 9999999;
                 width: ${savedCustomWidth > 0 ? `${savedCustomWidth}px` : '240px'}; ${savedCustomHeight > 0 ? `height: ${initialHeight};` : ''}
                 min-width: 140px; max-width: 95vw; min-height: 90px; max-height: 85vh;
-                overflow-y: auto; overflow-x: hidden; resize: both;
+                display: flex; flex-direction: column; overflow: hidden;
                 background: rgba(14, 14, 18, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
                 font-family: system-ui, -apple-system, sans-serif; font-size: var(--mossad-pl-font-size, 11px); color: #d1d5db;
@@ -5422,36 +5394,18 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
         });
 
-        // Сохраняем пользовательские размеры при интерактивном ресайзе мышью
-        if (window.ResizeObserver) {
-            let lastW = savedCustomWidth || 0;
-            let lastH = savedCustomHeight || 0;
-            const ro = new ResizeObserver(entries => {
-                for (const entry of entries) {
-                    const w = Math.round(entry.contentRect.width);
-                    const h = Math.round(entry.contentRect.height);
-                    if (w >= 120 && Math.abs(w - lastW) > 6) {
-                        lastW = w;
-                        localStorage.setItem('mossad_playlist_width', String(w));
-                        if (typeof Settings !== 'undefined') {
-                            Settings.setQuiet('playlistWidth', w);
-                        }
-                    }
-                    if (h >= 80 && Math.abs(h - lastH) > 6) {
-                        lastH = h;
-                        localStorage.setItem('mossad_playlist_height', String(h));
-                    }
-                }
-            });
-            ro.observe(panel);
-        }
+        // v1.3.40: размер меняется мышью за ЛЮБОЙ край/угол (зона ~6px, см. grokAttachPlaylistEdgeResize),
+        // сохраняется только по окончании ручного ресайза. Прежний ResizeObserver записывал и
+        // автоматические размеры (100% / auto) как «пользовательские» — из-за этого сброс не работал.
+        panel.dataset.autoHeight = savedCustomHeight > 0 ? '0' : '1';
+        const defaultWidthCss = container ? '100%' : '240px';
 
         // ── Заголовок (липкий вверху с поддержкой перетаскивания всего меню) ──
         const header = document.createElement('div');
         header.style.cssText = `
             display: flex; align-items: center; justify-content: space-between;
             padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            gap: 6px; position: sticky; top: 0; background: rgba(14, 14, 18, 0.98);
+            gap: 6px; flex: 0 0 auto; background: rgba(14, 14, 18, 0.98);
             backdrop-filter: blur(16px); z-index: 2; border-top-left-radius: 12px; border-top-right-radius: 12px;
             cursor: grab; min-width: 0; max-width: 100%; box-sizing: border-box;
         `;
@@ -5462,17 +5416,20 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const titleEl = document.createElement('span');
         titleEl.style.cssText = `font-weight: 700; font-size: calc(var(--mossad-pl-font-size, 11px) + 2px); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;`;
         titleEl.textContent = `📋 Список (${items.length})`;
-        titleEl.title = 'Двойной клик — сбросить ширину и высоту списка';
-        titleEl.ondblclick = () => {
-            panel.style.width = '100%';
-            panel.style.height = 'auto';
+        titleEl.title = 'Двойной клик — сбросить размер списка (как кнопка ⤢)';
+        // v1.3.40: двойной клик и кнопка ⤢ сбрасывают к одному размеру: N строк (F1) × ширина по умолчанию
+        const resetPlaylistSize = () => {
+            panel.style.width = defaultWidthCss;
             localStorage.removeItem('mossad_playlist_width');
             localStorage.removeItem('mossad_playlist_height');
             if (typeof Settings !== 'undefined') {
                 Settings.setQuiet('playlistWidth', 0);
             }
-            showToast('↔ Размеры списка сброшены');
+            panel.dataset.autoHeight = '1';
+            grokApplyPlaylistAutoHeight(panel);
+            showToast(`↔ Размер списка сброшен: ${grokPlaylistRows()} строк`);
         };
+        titleEl.ondblclick = (e) => { e.stopPropagation(); resetPlaylistSize(); };
 
         // Кнопки масштабирования шрифта списка (A− / A+)
         const fontControls = document.createElement('div');
@@ -5490,6 +5447,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 currentFontSize--;
                 panel.style.setProperty('--mossad-pl-font-size', `${currentFontSize}px`);
                 localStorage.setItem('mossad_playlist_font_size', String(currentFontSize));
+                grokApplyPlaylistAutoHeight(panel);
             }
         };
 
@@ -5505,6 +5463,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 currentFontSize++;
                 panel.style.setProperty('--mossad-pl-font-size', `${currentFontSize}px`);
                 localStorage.setItem('mossad_playlist_font_size', String(currentFontSize));
+                grokApplyPlaylistAutoHeight(panel);
             }
         };
         fontControls.append(btnFontDec, btnFontInc);
@@ -5533,11 +5492,23 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             grokUpdatePlaylistBtnState(false);
         };
 
-        header.append(titleEl, fontControls, btnClearLoop, btnClose);
+        // v1.3.40: сброс размера (справа от A+, слева от ×)
+        const btnResetSize = document.createElement('button');
+        btnResetSize.id = 'mossad-playlist-reset-size';
+        btnResetSize.textContent = '⤢';
+        btnResetSize.title = 'Сбросить размер списка (строк по умолчанию — в настройках, вкладка «Общие»)';
+        btnResetSize.style.cssText = `background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#9ca3af;padding:1px 5px;font-size:11px;font-weight:700;cursor:pointer;line-height:1.2;flex-shrink:0;`;
+        btnResetSize.onmouseenter = () => { btnResetSize.style.color = '#ffffff'; };
+        btnResetSize.onmouseleave = () => { btnResetSize.style.color = '#9ca3af'; };
+        btnResetSize.onclick = (e) => { e.stopPropagation(); resetPlaylistSize(); };
+
+        header.append(titleEl, fontControls, btnClearLoop, btnResetSize, btnClose);
         panel.appendChild(header);
 
         const body = document.createElement('div');
-        body.style.cssText = `padding: 2px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden;`;
+        body.className = 'mossad-playlist-body';
+        // v1.3.40: прокручивается тело, а не вся панель (полоса прокрутки не перекрывает зону ресайза края)
+        body.style.cssText = `padding: 2px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden; overflow-y: auto; flex: 1 1 auto; min-height: 0; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;`;
 
         // ── Утилита: кнопка R ──
         const makeRBtn = (isActive, onToggle) => {
@@ -5746,6 +5717,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
 
         grokUpdatePlaylistBtnState(true);
+
+        // v1.3.40: высота по умолчанию = N строк; ресайз за любой край
+        grokApplyPlaylistAutoHeight(panel);
+        grokAttachPlaylistEdgeResize(panel, container);
 
         // Подсвечиваем активный элемент сразу при открытии списка
         grokHighlightActivePlaylistItem();
@@ -7954,6 +7929,14 @@ function findMediaForDownload() {
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         };
 
+        // v1.3.40: ⌨ — окно настроек на вкладке «Горячие клавиши» (раньше было в верхнем ряду Grok)
+        const btnHkSettings = document.createElement('button');
+        btnHkSettings.id = 'mossad-btn-hk-settings';
+        btnHkSettings.innerHTML = '⌨';
+        btnHkSettings.title = 'Настройки: горячие клавиши (Ctrl+F1)';
+        btnHkSettings.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #9ca3af; cursor: pointer; font-size: 13px; padding: 4px 7px;`;
+        btnHkSettings.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('hotkeys'); };
+
         const btnTogglePanel = document.createElement('button');
         btnTogglePanel.id = 'mossad-btn-toggle-panel';
         btnTogglePanel.innerHTML = '▼';
@@ -7978,8 +7961,8 @@ function findMediaForDownload() {
             window.updateWidgetUI();
         };
 
-        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ▼ | ✕ (на Grok ✕ переносится на верхний ряд)
-        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnTogglePanel, btnClose);
+        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ⌨ | ▼ | ✕ (на Grok ✕ переносится на верхний ряд)
+        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnHkSettings, btnTogglePanel, btnClose);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -8300,8 +8283,7 @@ function findMediaForDownload() {
                 };
             }
             panel.querySelector('#mossad-btn-hk').onclick = () => {
-                if (document.getElementById('mossad-hk-modal')) return;
-                openHotkeySettings();
+                openSettingsWindow('general'); // v1.3.40: «⚙ Настройки» → вкладка «Общие»
             };
             panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
                 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
@@ -8466,10 +8448,39 @@ function findMediaForDownload() {
     }
 
 // ============================================
-    // SETTINGS MODAL (F1): горячие клавиши, GitHub-синхронизация, история скачиваний
-    // (вынесено из ui/panel.js в v1.3.35, код не менялся)
+    // SETTINGS WINDOW (Ctrl+F1): вкладки «Общие» и «Горячие клавиши» (v1.3.40),
+    // GitHub-синхронизация, опции виджета (вынесено из ui/panel.js в v1.3.35)
     // ============================================
-    function openHotkeySettings() {
+    // v1.3.40: окно настроек с вкладками «⚙ Общие» и «⌨ Горячие клавиши».
+    // openHotkeySettings(tab) оставлен как совместимое имя (Ctrl+F1, кнопки ⌨ / ⚙ Настройки).
+    function openHotkeySettings(tab = 'hotkeys') {
+        return openSettingsWindow(tab);
+    }
+
+    /** Переключает/закрывает окно настроек: если открыто на той же вкладке — закрыть, иначе показать вкладку. */
+    function toggleSettingsWindow(tab = 'hotkeys') {
+        const modal = document.getElementById('mossad-hk-modal');
+        if (modal && modal.dataset.tab === tab) { closeSettingsWindow(true); return; }
+        openSettingsWindow(tab);
+    }
+
+    function closeSettingsWindow(save = true) {
+        const modal = document.getElementById('mossad-hk-modal');
+        if (!modal) return;
+        if (save) {
+            if (typeof window.saveGlobalHotkeys === 'function') window.saveGlobalHotkeys(true);
+            else Settings.save();
+        }
+        if (typeof modal._mossadCleanup === 'function') modal._mossadCleanup();
+        modal.remove();
+    }
+
+    function openSettingsWindow(tab = 'general') {
+        const existing = document.getElementById('mossad-hk-modal');
+        if (existing && typeof existing._mossadSetTab === 'function') {
+            existing._mossadSetTab(tab);
+            return existing;
+        }
         const modal = document.createElement('div');
         modal.id = 'mossad-hk-modal';
         modal.style.cssText = `
@@ -8477,15 +8488,19 @@ function findMediaForDownload() {
             background: rgba(20, 20, 20, 0.95); backdrop-filter: blur(10px);
             border: 1px solid #374151; border-radius: 12px; padding: 20px; z-index: 9999999;
             color: #e5e7eb; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; gap: 10px;
-            min-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+            width: 460px; max-width: 94vw; max-height: 90vh; box-sizing: border-box; box-shadow: 0 10px 40px rgba(0,0,0,0.8);
         `;
         
         modal.innerHTML = `
-            <h3 style="margin:0 0 4px 0; color:#fff; font-size:16px;">Настройки горячих клавиш</h3>
-            <div style="background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.3); border-radius:6px; padding:6px 10px; margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px;">
-              <span style="color:#34d399;">💡 При закрытии окна настройки автоматически сохраняются для всех сайтов</span>
-              <button id="mossad-hk-save-all" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:3px 8px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;" title="Сохранить для всех сайтов прямо сейчас">💾 Сохранить</button>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <h3 style="margin:0; color:#fff; font-size:16px;">⚙ Настройки MOSSAD</h3>
+              <button id="mossad-settings-x" title="Закрыть (настройки сохраняются)" style="background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">×</button>
             </div>
+            <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px;">
+              <button data-tab="general" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⚙ Общие</button>
+              <button data-tab="hotkeys" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⌨ Горячие клавиши</button>
+            </div>
+            <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
               <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">GitHub Sync Token:</div>
               <div style="display:flex;gap:6px;">
@@ -8508,6 +8523,10 @@ function findMediaForDownload() {
               Досбор после «Собрать», сек:
               <input id="mossad-collect-watch-sec" type="number" min="5" max="600" step="5" value="${Number(config.collectWatchSec) || 30}" style="width:56px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
             </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Высота списка (плейлиста) при открытии — столько строк видно без прокрутки (если размер не менялся вручную; кнопка ⤢ в списке сбрасывает к этому значению)">
+              Список: видимых строк при открытии:
+              <input id="mossad-playlist-rows" type="number" min="5" max="200" step="1" value="${Number(config.playlistRows) || 30}" style="width:56px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
+            </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Пишет в консоль браузера ([MOSSAD DBG]) кто и почему запустил каждый шаг слайдшоу, а также шаги удаления. Для диагностики; по умолчанию выключено">
               <input id="mossad-cb-debug" type="checkbox" style="accent-color:#f59e0b;" ${config.debugSlideshow ? 'checked' : ''}>
               Debug-лог слайдшоу/удаления
@@ -8519,9 +8538,17 @@ function findMediaForDownload() {
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
             </div>
-            <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;"></div>
+            </div>
+            <div data-pane="hotkeys" style="display:none; flex-direction:column; gap:8px;">
+            <div style="background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.3); border-radius:6px; padding:6px 10px; margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px;">
+              <span style="color:#34d399;">💡 При закрытии окна настройки автоматически сохраняются для всех сайтов</span>
+              <button id="mossad-hk-save-all" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:3px 8px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;" title="Сохранить для всех сайтов прямо сейчас">💾 Сохранить</button>
+            </div>
+            <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:calc(85vh - 230px); overflow-y:auto; padding-right:4px;"></div>
+              <div><button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ Клавиши по умолчанию</button></div>
+            </div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
-                <button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ По умолчанию</button>
+                <span></span>
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-hk-save-close" style="background:#10b981; border:none; padding:6px 14px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold; font-size:12px;">💾 Сохранить и закрыть</button>
                     <button id="mossad-hk-close" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#9ca3af; cursor:pointer; font-weight:bold; font-size:12px;">Закрыть</button>
@@ -8544,13 +8571,11 @@ function findMediaForDownload() {
             history:          'Переход в Saved Grok (Home)', 
             slideshowPanel:   'Меню: полное / краткое / скрыть (Ctrl+Insert)',
             slideshowStart:   'Малое слайдшоу / ракета (Shift+Insert)',
-            galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert)',
+            galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert; без ссылок — 1-е нажатие собирает)',
             galleryStop:      'Стоп большого слайдшоу',
             duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             rewind:           'Мотать в начало (Alt+R)',
-            snapWidget:       'Привязать к левому верхнему краю (F8)',
-            videoGen6s:       'Видео 6с Grok',
-            videoGen10s:      'Видео 10с Grok'
+            snapWidget:       'Привязать к левому верхнему краю (F8)'
         };
         
         Object.keys(keysMap).forEach(k => {
@@ -8641,7 +8666,30 @@ function findMediaForDownload() {
         });
         
         document.body.appendChild(modal);
-        
+
+        // ── Вкладки ──
+        const setTab = (t) => {
+            const want = (t === 'general' || t === 'hotkeys') ? t : 'hotkeys';
+            modal.dataset.tab = want;
+            modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
+            modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
+                const on = b.dataset.tab === want;
+                b.style.background = on ? '#1f2937' : 'transparent';
+                b.style.color = on ? '#ffffff' : '#9ca3af';
+            });
+        };
+        modal._mossadSetTab = setTab;
+        modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
+            b.onclick = (e) => { e.preventDefault(); setTab(b.dataset.tab); };
+        });
+        setTab(tab);
+        modal.querySelector('#mossad-settings-x').onclick = () => closeSettingsWindow(true);
+        modal.querySelector('#mossad-playlist-rows').onchange = (e) => {
+            const v = Math.max(5, Math.min(200, parseInt(e.target.value, 10) || 30));
+            e.target.value = String(v);
+            Settings.setQuiet('playlistRows', v);
+        };
+
         modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
             Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
         };
@@ -8678,21 +8726,15 @@ function findMediaForDownload() {
             try {
                 await pullConfigFromGitHub();
                 showToast('✅ Конфиг получен с GitHub');
-                modal.remove();
-                openHotkeySettings();
+                const curTab = modal.dataset.tab;
+                closeSettingsWindow(false);
+                openSettingsWindow(curTab);
             } catch (e) {
                 showToast('❌ Ошибка: ' + e.message, true);
             }
         };
 
-        const closeAndSaveModal = () => {
-            if (typeof window.saveGlobalHotkeys === 'function') {
-                window.saveGlobalHotkeys(true);
-            } else {
-                Settings.save();
-            }
-            modal.remove();
-        };
+        const closeAndSaveModal = () => closeSettingsWindow(true);
 
         modal.querySelector('#mossad-hk-save-all').onclick = () => {
             if (typeof window.saveGlobalHotkeys === 'function') {
@@ -8707,11 +8749,12 @@ function findMediaForDownload() {
 
         const onEscClose = (e) => {
             if (e.key === 'Escape' && window.capturingFor === null) {
-                document.removeEventListener('keydown', onEscClose);
                 closeAndSaveModal();
             }
         };
         document.addEventListener('keydown', onEscClose);
+        // v1.3.40: слушатель Esc снимается при ЛЮБОМ закрытии окна (раньше при закрытии кнопкой/хоткеем он оставался висеть)
+        modal._mossadCleanup = () => document.removeEventListener('keydown', onEscClose);
 
         modal.querySelector('#mossad-hk-reset').onclick = () => {
             if (!confirm('Сбросить все горячие клавиши по умолчанию?')) return;
@@ -8721,8 +8764,8 @@ function findMediaForDownload() {
             } else {
                 Settings.save();
             }
-            modal.remove();
-            openHotkeySettings(); // переоткрыть с обновлёнными клавишами
+            closeSettingsWindow(false);
+            openSettingsWindow('hotkeys'); // переоткрыть с обновлёнными клавишами
             showToast('✅ Клавиши сброшены по умолчанию для всех сайтов');
         };
     }
@@ -8930,13 +8973,10 @@ function findMediaForDownload() {
         if (hotkeyMatches(e, config.hk.help)) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const existingModal = document.getElementById('mossad-hk-modal');
-            if (existingModal) {
-                if (typeof window.saveGlobalHotkeys === 'function') window.saveGlobalHotkeys(true);
-                existingModal.remove();
-                return;
-            }
-            openHotkeySettings();
+            // Ctrl+F1 (и любые переназначенные слоты help): открыть/закрыть окно настроек.
+            // Если окно открыто — закрыть с сохранением (с любой вкладки), как раньше.
+            if (document.getElementById('mossad-hk-modal')) { closeSettingsWindow(true); return; }
+            openSettingsWindow('hotkeys');
             return;
         }
 
@@ -8969,7 +9009,7 @@ function findMediaForDownload() {
                 if (active) {
                     toggleGalleryPause();
                 } else {
-                    grokStartGallerySlideshow();
+                    grokInsertCollectOrStart(); // v1.3.40: нет ссылок → 1-е нажатие собирает, 2-е стартует
                 }
             } else {
                 startSlideshow();
