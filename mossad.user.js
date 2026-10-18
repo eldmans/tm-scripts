@@ -7765,6 +7765,10 @@ function findMediaForDownload() {
         grokGallerySlideshowTick();
     }
 
+// ============================================
+    // SETTINGS MODAL (F1): горячие клавиши, GitHub-синхронизация, история скачиваний
+    // (вынесено из ui/panel.js в v1.3.35, код не менялся)
+    // ============================================
     function openHotkeySettings() {
         const modal = document.createElement('div');
         modal.id = 'mossad-hk-modal';

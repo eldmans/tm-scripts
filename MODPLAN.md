@@ -52,7 +52,8 @@ tm-scripts/grok/
 │   ├── slideshow/
 │   │   └── engine.js         # Движок авто-слайдшоу, таймеры фото/видео, D-pad
 │   └── ui/
-│       └── panel.js          # Glassmorphism виджет и панель настроек
+│       ├── panel.js          # Glassmorphism виджет (initWidget) и запуск UI
+│       └── settings-modal.js # Модалка настроек F1: хоткеи, GitHub-синхронизация, история
 ├── archive/                  # Устаревшие standalone-скрипты (grok-hotkeys*, universal_media_enhancer) — в git, только история
 └── _archive/                 # Локальные бэкапы (в .gitignore, не коммитятся)
 ```

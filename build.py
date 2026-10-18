@@ -34,6 +34,7 @@ MODULES = [
     "src/slideshow/engine.js",
     "src/engines/pinterest.js",
     "src/ui/panel.js",
+    "src/ui/settings-modal.js",
     "src/core/hotkeys.js"
 ]
 
@@ -66,8 +67,8 @@ def bump_version():
         with open(domain_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(d)
             
-    # 3. Update panel.js (footer date)
-    panel_path = "src/ui/panel.js"
+    # 3. Update settings-modal.js (footer date)
+    panel_path = "src/ui/settings-modal.js"  # футер модалки настроек: vX.X.X · дата
     if os.path.exists(panel_path):
         with open(panel_path, "r", encoding="utf-8") as f:
             p = f.read()
