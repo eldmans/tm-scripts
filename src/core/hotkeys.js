@@ -126,9 +126,7 @@
     // Ранний перехват клавиш слайдера (PageUp / PageDown, ArrowDown / ArrowUp) ДО сайта на window в фазе capture
     window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
         if (window.capturingFor !== null) return;
-        const activeEl = document.activeElement;
-        const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
-        if (isEditing) return;
+        if (isEditableElement(document.activeElement)) return;
 
         const isGrokPost = (rootDomain === 'grok.com' && isGrokPostPage());
         const hasGrokCollection = isGrokPost && !!_gSS.getItem(GALLERY_COLLECTION_KEY);
@@ -170,14 +168,7 @@
         if (window.capturingFor !== null) return;
 
         const activeEl = document.activeElement;
-        const isEditing = activeEl && (
-            activeEl.tagName === 'INPUT' || 
-            activeEl.tagName === 'TEXTAREA' || 
-            activeEl.isContentEditable || 
-            activeEl.getAttribute('role') === 'textbox' ||
-            !!activeEl.closest('[contenteditable="true"]') ||
-            !!activeEl.closest('input, textarea, [role="textbox"]')
-        );
+        const isEditing = isEditableElement(activeEl);
 
         // 1. Навигация Home / Saved Grok (срабатывает из любого места grok.com)
         const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;

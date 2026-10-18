@@ -536,7 +536,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (!hk) return false;
         if (Array.isArray(hk)) return hk.some(k => hotkeyMatches(e, k));
         if (!hk.key) return false;
-        const keyMatch = e.key === hk.key || (typeof e.key === 'string' && typeof hk.key === 'string' && e.key.toLowerCase() === hk.key.toLowerCase());
+        let keyMatch = e.key === hk.key || (typeof e.key === 'string' && typeof hk.key === 'string' && e.key.toLowerCase() === hk.key.toLowerCase());
+        // v1.3.37: латинские буквы/цифры сверяем и по физической клавише (e.code), чтобы
+        // хоткеи вида Alt+R работали в русской раскладке (там e.key === 'к').
+        if (!keyMatch && typeof hk.key === 'string' && /^[a-z0-9]$/i.test(hk.key) && typeof e.code === 'string') {
+            keyMatch = e.code === (/[0-9]/.test(hk.key) ? 'Digit' + hk.key : 'Key' + hk.key.toUpperCase());
+        }
         return keyMatch &&
             !!e.ctrlKey  === !!hk.ctrl &&
             !!e.altKey   === !!hk.alt &&
@@ -581,6 +586,26 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     /** Ключ сравнения URL: без query-строки и в нижнем регистре. null/undefined → ''. */
     function normUrlKey(url) {
         return stripUrlQuery(url).toLowerCase();
+    }
+
+    // ============================================
+    // FOCUS: единая проверка «пользователь сейчас печатает»
+    // ============================================
+
+    // Типы <input>, в которых нет ввода текста: хоткеи при фокусе на них должны работать.
+    const NON_TEXT_INPUT_TYPES = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image']);
+
+    /**
+     * true, если элемент — поле ввода текста (input с текстом, textarea, select, contenteditable,
+     * role="textbox" или что-то внутри них). Используется всеми обработчиками хоткеев (v1.3.37).
+     */
+    function isEditableElement(el) {
+        if (!el || el === document.body || el === document.documentElement) return false;
+        if (el.tagName === 'INPUT') return !NON_TEXT_INPUT_TYPES.has(String(el.type || '').toLowerCase());
+        if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true;
+        if (el.isContentEditable) return true;
+        if (el.getAttribute && el.getAttribute('role') === 'textbox') return true;
+        return !!(el.closest && el.closest('textarea, [contenteditable="true"], [contenteditable=""], [role="textbox"]'));
     }
 
     // ============================================
@@ -8190,9 +8215,7 @@ function findMediaForDownload() {
     // Ранний перехват клавиш слайдера (PageUp / PageDown, ArrowDown / ArrowUp) ДО сайта на window в фазе capture
     window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
         if (window.capturingFor !== null) return;
-        const activeEl = document.activeElement;
-        const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
-        if (isEditing) return;
+        if (isEditableElement(document.activeElement)) return;
 
         const isGrokPost = (rootDomain === 'grok.com' && isGrokPostPage());
         const hasGrokCollection = isGrokPost && !!_gSS.getItem(GALLERY_COLLECTION_KEY);
@@ -8234,14 +8257,7 @@ function findMediaForDownload() {
         if (window.capturingFor !== null) return;
 
         const activeEl = document.activeElement;
-        const isEditing = activeEl && (
-            activeEl.tagName === 'INPUT' || 
-            activeEl.tagName === 'TEXTAREA' || 
-            activeEl.isContentEditable || 
-            activeEl.getAttribute('role') === 'textbox' ||
-            !!activeEl.closest('[contenteditable="true"]') ||
-            !!activeEl.closest('input, textarea, [role="textbox"]')
-        );
+        const isEditing = isEditableElement(activeEl);
 
         // 1. Навигация Home / Saved Grok (срабатывает из любого места grok.com)
         const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;

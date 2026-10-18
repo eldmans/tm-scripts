@@ -38,6 +38,26 @@
     }
 
     // ============================================
+    // FOCUS: единая проверка «пользователь сейчас печатает»
+    // ============================================
+
+    // Типы <input>, в которых нет ввода текста: хоткеи при фокусе на них должны работать.
+    const NON_TEXT_INPUT_TYPES = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image']);
+
+    /**
+     * true, если элемент — поле ввода текста (input с текстом, textarea, select, contenteditable,
+     * role="textbox" или что-то внутри них). Используется всеми обработчиками хоткеев (v1.3.37).
+     */
+    function isEditableElement(el) {
+        if (!el || el === document.body || el === document.documentElement) return false;
+        if (el.tagName === 'INPUT') return !NON_TEXT_INPUT_TYPES.has(String(el.type || '').toLowerCase());
+        if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true;
+        if (el.isContentEditable) return true;
+        if (el.getAttribute && el.getAttribute('role') === 'textbox') return true;
+        return !!(el.closest && el.closest('textarea, [contenteditable="true"], [contenteditable=""], [role="textbox"]'));
+    }
+
+    // ============================================
     // POLLING: общий помощник ожидания условия
     // ============================================
 

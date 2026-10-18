@@ -163,7 +163,12 @@
         if (!hk) return false;
         if (Array.isArray(hk)) return hk.some(k => hotkeyMatches(e, k));
         if (!hk.key) return false;
-        const keyMatch = e.key === hk.key || (typeof e.key === 'string' && typeof hk.key === 'string' && e.key.toLowerCase() === hk.key.toLowerCase());
+        let keyMatch = e.key === hk.key || (typeof e.key === 'string' && typeof hk.key === 'string' && e.key.toLowerCase() === hk.key.toLowerCase());
+        // v1.3.37: латинские буквы/цифры сверяем и по физической клавише (e.code), чтобы
+        // хоткеи вида Alt+R работали в русской раскладке (там e.key === 'к').
+        if (!keyMatch && typeof hk.key === 'string' && /^[a-z0-9]$/i.test(hk.key) && typeof e.code === 'string') {
+            keyMatch = e.code === (/[0-9]/.test(hk.key) ? 'Digit' + hk.key : 'Key' + hk.key.toUpperCase());
+        }
         return keyMatch &&
             !!e.ctrlKey  === !!hk.ctrl &&
             !!e.altKey   === !!hk.alt &&
