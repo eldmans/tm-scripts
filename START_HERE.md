@@ -51,6 +51,11 @@
    ```bash
    python build.py --bump
    ```
+   Перед коммитом проверь, что бандл совпадает со сборкой из `src/` (так же проверяет CI — GitHub Actions `build-verify` на каждый push/PR в `grok`):
+   ```bash
+   python build.py --verify
+   ```
+   *(Синтаксис проверяется через `node --check`, если Node.js есть в PATH; иначе — через Chrome/Edge на Windows.)*
 4. Фиксируем в Git:
    ```bash
    git add .

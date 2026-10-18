@@ -10,7 +10,8 @@
 
 ```
 tm-scripts/grok/
-├── build.py                  # Главный сборщик проекта (проверка UTF-8, emoji, bump версии)
+├── build.py                  # Главный сборщик проекта (проверка UTF-8, emoji, bump версии, --verify)
+├── .github/workflows/        # CI: build-verify (python build.py --verify + node --check)
 ├── mossad.user.js            # Результирующий бандл юзерскрипта (генерируется, не править руками!)
 ├── mossad-config.json        # Конфиг для GitHub Sync
 ├── ANTI_PATTERNS.md          # База граблей и неудачных гипотез (ЧИТАТЬ ПЕРВЫМ ДЕЛОМ)
@@ -61,6 +62,7 @@ tm-scripts/grok/
 3. **После правок:**
    * Выполняем `python build.py` (или `python build.py --bump` при выпуске релиза).
    * Проверяем, что сборщик выдал `BUILD SUCCESS` и `OK` по эмодзи.
+   * `python build.py --verify` — должен выдать `VERIFY OK` (бандл == сборка из `src/`). То же самое проверяет CI на push/PR в `grok`.
    * `git add .` -> `git commit -m "..."` -> `git push origin grok`.
 
 ---

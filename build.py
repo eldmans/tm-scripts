@@ -72,14 +72,41 @@ def bump_version():
     print(f"BUMPED: v{old_ver} -> v{new_ver} (date: {today})")
     return new_ver
 
-def verify_syntax(code_str):
+def verify_syntax_node(code_str):
+    """Кроссплатформенная проверка синтаксиса через `node --check`.
+    Возвращает True/False, либо None если node не найден в PATH."""
+    import shutil, subprocess, tempfile
+    node_bin = shutil.which("node")
+    if not node_bin:
+        return None
+    fd, temp_path = tempfile.mkstemp(prefix="mossad_syntax_", suffix=".js")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(code_str.encode("utf-8"))
+        res = subprocess.run([node_bin, "--check", temp_path], capture_output=True, text=True,
+                             encoding="utf-8", errors="ignore", timeout=60)
+        if res.returncode != 0:
+            print("CRITICAL ERROR: JS Syntax error detected (node --check):")
+            print((res.stderr or res.stdout).strip())
+            return False
+        print("SYNTAX OK: node --check")
+        return True
+    except Exception as ex:
+        print(f"Warning during node syntax check: {ex}")
+        return None
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+def verify_syntax_browser(code_str):
+    """Фолбэк для Windows: headless Chrome/Edge."""
     browsers = [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
     ]
     browser_bin = next((b for b in browsers if os.path.exists(b)), None)
     if not browser_bin:
-        return True
+        return None
     html = f"""<!DOCTYPE html>
 <html><head><script>
 window.__err = null;
@@ -100,6 +127,7 @@ document.getElementById("res").innerText = window.__err ? ("ERROR: " + window.__
                 if "ERROR:" in l:
                     print(f"CRITICAL ERROR: JS Syntax error detected: {l.strip()}")
             return False
+        print("SYNTAX OK: headless browser")
         return True
     except Exception as ex:
         print(f"Warning during syntax check: {ex}")
@@ -108,9 +136,25 @@ document.getElementById("res").innerText = window.__err ? ("ERROR: " + window.__
         if os.path.exists(temp_file):
             os.remove(temp_file)
 
+def verify_syntax(code_str):
+    """Проверка синтаксиса: сначала `node --check` (любая ОС), затем Chrome/Edge (Windows).
+    Если ни один инструмент не найден — предупреждение, сборка не блокируется
+    (кроме режима --verify, см. build())."""
+    res = verify_syntax_node(code_str)
+    if res is None:
+        res = verify_syntax_browser(code_str)
+    if res is None:
+        print("WARNING: syntax check skipped (no node in PATH, no Chrome/Edge found)")
+        return None
+    return res
+
 def build():
     bump = "--bump" in sys.argv
     check_only = "--check" in sys.argv
+    verify_only = "--verify" in sys.argv
+    if verify_only and bump:
+        print("ERROR: --verify нельзя совмещать с --bump")
+        sys.exit(1)
     
     if bump:
         version = bump_version()
@@ -132,19 +176,50 @@ def build():
     code += "\n\n".join(body_parts)
     code += "\n\n})();\n"
     
-    if not verify_syntax(code):
+    syntax_ok = verify_syntax(code)
+    if syntax_ok is False:
         print("BUILD FAILED: Syntax verification failed! Fix the JavaScript error before building.")
+        sys.exit(1)
+    if syntax_ok is None and verify_only:
+        print("VERIFY FAILED: no syntax checker available (install Node.js)")
         sys.exit(1)
 
     raw_bytes = code.encode("utf-8")
     
     required_emojis = ["❌", "✅", "🖼", "📹", "💾"]
-    for emo in required_emojis:
-        if emo.encode("utf-8") not in raw_bytes:
-            print(f"WARNING: Emoji {emo} not found in output code!")
+    missing_emojis = [emo for emo in required_emojis if emo.encode("utf-8") not in raw_bytes]
+    for emo in missing_emojis:
+        print(f"WARNING: Emoji {emo} not found in output code!")
+    if missing_emojis and verify_only:
+        print("VERIFY FAILED: required emoji missing (UTF-8 corruption?)")
+        sys.exit(1)
             
     if check_only:
         print(f"CHECK OK: {len(MODULES)} modules, version {version}, {len(raw_bytes)} bytes.")
+        return
+
+    if verify_only:
+        # Сравниваем сборку из src/ с закоммиченным бандлом, ничего не записывая на диск.
+        # CRLF нормализуем, чтобы проверка не ломалась на Windows с core.autocrlf=true.
+        if not os.path.exists(OUTPUT_FILE):
+            print(f"VERIFY FAILED: {OUTPUT_FILE} not found")
+            sys.exit(1)
+        with open(OUTPUT_FILE, "rb") as f:
+            committed = f.read().replace(b"\r\n", b"\n")
+        if committed != raw_bytes:
+            import difflib
+            diff = list(difflib.unified_diff(
+                committed.decode("utf-8", errors="replace").splitlines(),
+                code.splitlines(),
+                fromfile=f"{OUTPUT_FILE} (committed)", tofile="build from src/", lineterm="", n=1))
+            print(f"VERIFY FAILED: {OUTPUT_FILE} differs from build of src/ ({len(diff)} diff lines).")
+            print("Не правьте бандл вручную: внесите правку в src/ и запустите `python build.py`.")
+            for line in diff[:60]:
+                print(line)
+            if len(diff) > 60:
+                print(f"... ({len(diff) - 60} more lines)")
+            sys.exit(1)
+        print(f"VERIFY OK: {OUTPUT_FILE} == build of src/ (v{version}, {len(raw_bytes)} bytes, {len(MODULES)} modules)")
         return
         
     with open(OUTPUT_FILE, "wb") as f:
@@ -153,4 +228,10 @@ def build():
     print(f"BUILD SUCCESS: {OUTPUT_FILE} (v{version}, {len(raw_bytes)} bytes, {len(MODULES)} modules)")
 
 if __name__ == "__main__":
+    # Не падаем на Windows-консолях без UTF-8 при печати эмодзи/кириллицы в диффе
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(errors="replace")
+        except Exception:
+            pass
     build()
