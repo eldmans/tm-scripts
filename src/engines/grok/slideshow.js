@@ -433,6 +433,7 @@
         if (!grokBeginNav(nextRes.item.url, 'auto:' + source)) return false;
 
         if (nextRes.circleCompleted) {
+            mossadPerfSnapshot('circle');
             playCircleDoneSound();
             resetSlideTrackingState('circle'); // v1.3.43: новый круг — забыть «прошлое видео» прошлого круга
             let ss = {};
@@ -459,6 +460,10 @@
     /** На странице поста — продолжение Gallery Slideshow через стандартный движок MOSSAD */
     function grokGallerySlideshowTick(source = 'tick') {
         if (!isGrokPostPage()) return;
+        const _pt = performance.now();
+        try { return _grokGallerySlideshowTick(source); } finally { mossadPerfStep('galleryTick', _pt); }
+    }
+    function _grokGallerySlideshowTick(source) {
         // Прибыли на пост: переход завершён
         grokEndNav(source);
         const raw = _gSS.getItem(GALLERY_SS_KEY);

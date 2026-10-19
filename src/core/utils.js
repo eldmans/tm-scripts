@@ -1,4 +1,35 @@
     // ============================================
+    // v1.3.44: СЧЁТЧИКИ ТАЙМЕРОВ/НАБЛЮДАТЕЛЕЙ MOSSAD (диагностика утечек)
+    // setInterval / clearInterval / MutationObserver внутри бандла перекрыты тонкими обёртками
+    // (та же сигнатура, только учёт активных id/наблюдателей). Код сайта это не затрагивает.
+    // Срез пишется в debug-лог (mossadPerfSnapshot) — см. ANTI_PATTERNS §23.
+    // ============================================
+    const _mossadActive = { intervals: new Set(), observers: new Set() };
+    const _nativeSetInterval = window.setInterval.bind(window);
+    const _nativeClearInterval = window.clearInterval.bind(window);
+    const setInterval = (fn, ms, ...args) => {
+        const id = _nativeSetInterval(fn, ms, ...args);
+        _mossadActive.intervals.add(id);
+        return id;
+    };
+    const clearInterval = (id) => {
+        _mossadActive.intervals.delete(id);
+        return _nativeClearInterval(id);
+    };
+    // Фабрика (не подкласс): `new MutationObserver(cb)` вернёт настоящий наблюдатель с учётом observe/disconnect.
+    // Подкласс нативного конструктора в песочнице Tampermonkey (Firefox, Xray) ненадёжен.
+    const _NativeMO = window.MutationObserver;
+    function MutationObserver(cb) {
+        const o = new _NativeMO(cb);
+        try {
+            const obs = o.observe.bind(o), dis = o.disconnect.bind(o);
+            o.observe = (...a) => { _mossadActive.observers.add(o); return obs(...a); };
+            o.disconnect = () => { _mossadActive.observers.delete(o); return dis(); };
+        } catch (e) {}
+        return o;
+    }
+
+    // ============================================
     // TOAST NOTIFICATIONS
     // ============================================
     function showToast(message, isError = false) {
@@ -119,6 +150,56 @@
         try {
             console.log('%c[MOSSAD DBG]', 'color:#f59e0b;font-weight:bold', entry.t, `[${entry.source}]`, entry.msg, data !== undefined ? data : '');
         } catch(e) {}
+    }
+
+    // ── v1.3.44: диагностика производительности (только при включённом debug-логе) ──
+    // Лаг главного потока: интервал 250 мс; если между срабатываниями прошло на 200+ мс больше — страница
+    // (сайт, браузер или MOSSAD) была занята. В фоновой вкладке браузер сам замедляет таймеры — не считаем.
+    const _mossadPerf = { timer: null, last: 0, lagMax: 0, lagCount: 0, slideAt: 0 };
+
+    function mossadPerfStart() {
+        if (_mossadPerf.timer || !isMossadDebugOn()) return;
+        _mossadPerf.last = performance.now();
+        _mossadPerf.timer = setInterval(() => {
+            const now = performance.now();
+            const lag = now - _mossadPerf.last - 250;
+            _mossadPerf.last = now;
+            if (document.hidden) return;
+            if (!isMossadDebugOn()) { clearInterval(_mossadPerf.timer); _mossadPerf.timer = null; return; }
+            if (lag > _mossadPerf.lagMax) _mossadPerf.lagMax = lag;
+            if (lag > 200) {
+                _mossadPerf.lagCount++;
+                mossadDebug('perf', 'главный поток занят (лаг)', { ms: Math.round(lag) });
+            }
+        }, 250);
+    }
+
+    /** Срез на каждом слайде: активные таймеры/наблюдатели MOSSAD, <video> и узлы DOM, лаг за слайд. */
+    function mossadPerfSnapshot(where) {
+        if (!isMossadDebugOn()) return;
+        mossadPerfStart();
+        const now = performance.now();
+        const data = {
+            where,
+            intervals: _mossadActive.intervals.size,
+            observers: _mossadActive.observers.size,
+            videos: document.getElementsByTagName('video').length,
+            nodes: document.getElementsByTagName('*').length,
+            lagMaxMs: Math.round(_mossadPerf.lagMax),
+            lags: _mossadPerf.lagCount,
+            slideMs: _mossadPerf.slideAt ? Math.round(now - _mossadPerf.slideAt) : 0
+        };
+        try { if (performance.memory) data.heapMB = Math.round(performance.memory.usedJSHeapSize / 1048576); } catch (e) {}
+        _mossadPerf.slideAt = now;
+        _mossadPerf.lagMax = 0;
+        _mossadPerf.lagCount = 0;
+        mossadDebug('perf', 'срез', data);
+    }
+
+    /** Время шага (мс) — пишем в лог, только если шаг занял больше порога. */
+    function mossadPerfStep(name, t0, thresholdMs = 30) {
+        const ms = performance.now() - t0;
+        if (ms >= thresholdMs) mossadDebug('perf', 'долгий шаг', { name, ms: Math.round(ms) });
     }
 
     function mossadDumpDebugLog() {

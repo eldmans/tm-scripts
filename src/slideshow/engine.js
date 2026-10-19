@@ -278,6 +278,7 @@
                 triggerUniversalFullScreen();
             }
 
+            if (slideChanged) mossadPerfSnapshot('slide');
             requestSlideCycle(150, slideChanged ? 'url-monitor:slide' : 'url-monitor:video');
         }
     }, 250);
@@ -543,7 +544,9 @@
         // запланирована повторная проверка; иначе — элемент <video>, идём в общий путь видео.
         let grokVideo = null;
         if (rootDomain === 'grok.com' && typeof isGrokPostPage === 'function' && isGrokPostPage()) {
+            const _pt = performance.now();
             const res = grokDecideSlideMedia(initSec, retryCount);
+            mossadPerfStep('grokDecideSlideMedia', _pt);
             if (res === true) return;
             grokVideo = res; // найден свежий <video> просмотрщика — это видео, что бы ни говорил сбор
         }
