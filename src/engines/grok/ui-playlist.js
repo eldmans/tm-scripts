@@ -393,7 +393,7 @@
 
         const titleEl = document.createElement('span');
         titleEl.style.cssText = `font-weight: 700; font-size: calc(var(--mossad-pl-font-size, 11px) + 2px); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;`;
-        titleEl.textContent = `📋 Список (${items.length})`;
+        mossadLabelEl(titleEl, 'playlistTitle', '', ` (${items.length})`);
         titleEl.title = 'Двойной клик — сбросить размер списка (как кнопка ⤢)';
         // v1.3.40: двойной клик и кнопка ⤢ сбрасывают к одному размеру: N строк (F1) × ширина по умолчанию
         const resetPlaylistSize = () => {
@@ -414,7 +414,7 @@
         fontControls.style.cssText = `display: flex; align-items: center; gap: 3px; flex-shrink: 0;`;
 
         const btnFontDec = document.createElement('button');
-        btnFontDec.textContent = 'A−';
+        mossadLabelEl(btnFontDec, 'fontDec');
         btnFontDec.title = 'Уменьшить шрифт списка';
         btnFontDec.style.cssText = `background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#9ca3af;padding:1px 5px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.2;transition:all 0.15s;`;
         btnFontDec.onmouseenter = () => { btnFontDec.style.color = '#ffffff'; btnFontDec.style.background = 'rgba(255,255,255,0.14)'; };
@@ -430,7 +430,7 @@
         };
 
         const btnFontInc = document.createElement('button');
-        btnFontInc.textContent = 'A+';
+        mossadLabelEl(btnFontInc, 'fontInc');
         btnFontInc.title = 'Увеличить шрифт списка';
         btnFontInc.style.cssText = `background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#9ca3af;padding:1px 5px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.2;transition:all 0.15s;`;
         btnFontInc.onmouseenter = () => { btnFontInc.style.color = '#ffffff'; btnFontInc.style.background = 'rgba(255,255,255,0.14)'; };
@@ -448,7 +448,7 @@
 
         // Кнопка «отключить все R» — появляется если зациклено 2+ элементов
         const btnClearLoop = document.createElement('button');
-        btnClearLoop.textContent = 'R ✕';
+        mossadLabelEl(btnClearLoop, 'clearLoops');
         btnClearLoop.title = 'Отключить все зацикленные';
         btnClearLoop.style.cssText = `background:#7f1d1d;border:none;border-radius:4px;color:#fca5a5;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer;display:${(loopSet.urls.length + loopSet.groupIds.length) > 1 ? 'inline-block' : 'none'};`;
         btnClearLoop.onclick = () => {
@@ -459,7 +459,7 @@
         };
 
         const btnClose = document.createElement('button');
-        btnClose.textContent = '×';
+        mossadLabelEl(btnClose, 'closeList');
         btnClose.title = 'Закрыть список';
         btnClose.style.cssText = `background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0;transition:color 0.15s;`;
         btnClose.onmouseenter = () => btnClose.style.color = '#f87171';
@@ -473,7 +473,7 @@
         // v1.3.40: сброс размера (справа от A+, слева от ×)
         const btnResetSize = document.createElement('button');
         btnResetSize.id = 'mossad-playlist-reset-size';
-        btnResetSize.textContent = '⤢';
+        mossadLabelEl(btnResetSize, 'resetSize');
         btnResetSize.title = 'Сбросить размер списка (строк по умолчанию — в настройках, вкладка «Общие»)';
         btnResetSize.style.cssText = `background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#9ca3af;padding:1px 5px;font-size:11px;font-weight:700;cursor:pointer;line-height:1.2;flex-shrink:0;`;
         btnResetSize.onmouseenter = () => { btnResetSize.style.color = '#ffffff'; };
@@ -491,7 +491,7 @@
         // ── Утилита: кнопка R ──
         const makeRBtn = (isActive, onToggle) => {
             const btn = document.createElement('button');
-            btn.textContent = 'R';
+            mossadLabelEl(btn, 'loopItem');
             btn.style.cssText = `
                 background:none;border:none;cursor:pointer;font-weight:700;font-size:var(--mossad-pl-font-size, 10px);
                 padding:0 2px;line-height:1;flex-shrink:0;transition:color 0.15s;
@@ -561,7 +561,7 @@
 
                 const grpCount = document.createElement('span');
                 grpCount.style.cssText = `color:#6b7280;font-size:calc(var(--mossad-pl-font-size, 11px) - 1px);flex-shrink:0;white-space:nowrap;line-height:1.15;`;
-                grpCount.textContent = `${gItems.length} ген.`;
+                mossadLabelEl(grpCount, 'groupCount', `${gItems.length} `);
 
                 grpHeader.onclick = (e) => {
                     if (e.target === grpHeader || e.target === grpCount) {

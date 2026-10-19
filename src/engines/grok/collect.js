@@ -200,7 +200,7 @@
         }));
 
         if (btnEl) {
-            btnEl.textContent = String(mergedItems.length);
+            mossadUnlabelEl(btnEl).textContent = String(mergedItems.length);
             btnEl.title = `Коллекция (${mergedItems.length}): открыть список`;
             btnEl.style.background = '#065f46';
             btnEl.style.color = '#e5e7eb';
@@ -281,7 +281,7 @@
             mossadDebug('collect', 'досбор: добавлены ссылки', { added: addedCount, total: existingItems.length });
 
             if (btnCollect) {
-                btnCollect.textContent = String(existingItems.length);
+                mossadUnlabelEl(btnCollect).textContent = String(existingItems.length);
                 btnCollect.title = `Коллекция (${existingItems.length}): открыть список`;
                 btnCollect.style.background = '#065f46';
                 btnCollect.style.color = '#e5e7eb';
@@ -297,7 +297,7 @@
             }
         } else if (btnCollect && existingItems.length > 0) {
             // Без скобок и (+N): отображается только чистое количество
-            btnCollect.textContent = String(existingItems.length);
+            mossadUnlabelEl(btnCollect).textContent = String(existingItems.length);
             btnCollect.title = `Коллекция (${existingItems.length}): открыть список`;
             btnCollect.style.background = '#065f46';
             btnCollect.style.color = '#e5e7eb';

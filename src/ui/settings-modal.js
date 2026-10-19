@@ -10,7 +10,7 @@
 
     // ── v1.3.45: память последней вкладки (UI-состояние — localStorage, как размеры списка/позиция виджета) ──
     const SETTINGS_TAB_LS_KEY = 'mossad_settings_tab';
-    const SETTINGS_TABS = ['general', 'hotkeys', 'defaults'];
+    const SETTINGS_TABS = ['general', 'hotkeys', 'defaults', 'labels'];
     function getLastSettingsTab(fallback = 'hotkeys') {
         try {
             const t = localStorage.getItem(SETTINGS_TAB_LS_KEY);
@@ -201,7 +201,72 @@
         };
     }
 
-    /** tab: 'general' | 'hotkeys' | 'defaults'; не задан / 'last' — последняя открытая вкладка (v1.3.45). */
+    // ── v1.3.46: вкладка «✏ Подписи» — textarea «ключ = подпись» + кликабельная палитра значков ──
+    // Всё строится только при открытии вкладки (не при открытии окна) и не работает в фоне:
+    // один делегированный обработчик на палитре, сохранение — по кнопке и при закрытии окна.
+    function initLabelsTab(modal) {
+        const pane = modal.querySelector('[data-pane="labels"]');
+        if (!pane || pane.dataset.built) return;
+        pane.dataset.built = '1';
+        const btnCss = 'background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;';
+        pane.innerHTML = `
+            <div style="font-size:11px;color:#9ca3af;line-height:1.35;">Свои подписи кнопок — для всех сайтов и контейнеров. Формат <code>ключ = подпись</code>, <code>#</code> — комментарий, пустая подпись — по умолчанию. Клик по значку ниже вставляет его в позицию курсора.</div>
+            <textarea id="mossad-labels-ta" spellcheck="false" wrap="off" style="width:100%;box-sizing:border-box;height:calc(85vh - 330px);min-height:180px;resize:vertical;background:#0b1220;border:1px solid #374151;border-radius:6px;color:#e5e7eb;padding:6px 8px;font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;tab-size:4;"></textarea>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+              <button id="mossad-labels-save" style="${btnCss}background:#065f46;border-color:#10b981;" title="Сохранить и сразу применить">💾 Применить</button>
+              <button id="mossad-labels-reset" style="${btnCss}color:#f87171;" title="Вернуть все подписи по умолчанию">↺ По умолчанию</button>
+              <span id="mossad-labels-status" style="font-size:11px;color:#9ca3af;"></span>
+            </div>
+            <div style="font:11px ui-monospace,Consolas,monospace;color:#6b7280;"># Шаблоны значков</div>
+            <div id="mossad-labels-palette" style="display:flex;flex-direction:column;gap:2px;max-height:120px;overflow-y:auto;font-size:15px;line-height:1.5;user-select:text;"></div>`;
+        const ta = pane.querySelector('#mossad-labels-ta');
+        const status = pane.querySelector('#mossad-labels-status');
+        const palette = pane.querySelector('#mossad-labels-palette');
+        palette.innerHTML = LABEL_PALETTE.map(([title, list]) =>
+            `<div><span style="font-size:10px;color:#6b7280;display:inline-block;min-width:62px;">${title}</span>` +
+            list.split(' ').filter(Boolean).map(e => `<span data-emo="${e}" title="Вставить" style="cursor:pointer;padding:0 3px;border-radius:3px;">${e}</span>`).join('') +
+            `</div>`).join('');
+
+        ta.value = mossadLabelsToText();
+        let saved = ta.value;
+        let sel = { s: ta.value.length, e: ta.value.length };
+        const remember = () => { sel = { s: ta.selectionStart, e: ta.selectionEnd }; };
+        ['keyup', 'mouseup', 'select', 'blur', 'input'].forEach(ev => ta.addEventListener(ev, remember));
+        // Не уводить фокус из textarea при клике по палитре
+        palette.addEventListener('mousedown', (e) => { if (e.target.closest('[data-emo]')) e.preventDefault(); });
+        palette.addEventListener('click', (e) => {
+            const el = e.target.closest ? e.target.closest('[data-emo]') : null;
+            if (!el) return;
+            const emo = el.dataset.emo;
+            const s = Math.min(sel.s, ta.value.length), en = Math.min(Math.max(sel.e, s), ta.value.length);
+            ta.focus();
+            if (typeof ta.setRangeText === 'function') ta.setRangeText(emo, s, en, 'end');
+            else { ta.value = ta.value.slice(0, s) + emo + ta.value.slice(en); ta.selectionStart = ta.selectionEnd = s + emo.length; }
+            remember();
+        });
+
+        const apply = (quiet) => {
+            const { overrides, unknown } = mossadParseLabelsText(ta.value);
+            const n = mossadSetLabelOverrides(overrides);
+            saved = ta.value;
+            status.textContent = `Своих подписей: ${n}` + (unknown.length ? ` · пропущены неизвестные: ${unknown.slice(0, 5).join(', ')}${unknown.length > 5 ? '…' : ''}` : '');
+            if (!quiet) showToast(`✏ Подписи применены (${n})`);
+        };
+        pane.querySelector('#mossad-labels-save').onclick = () => apply(false);
+        pane.querySelector('#mossad-labels-reset').onclick = () => {
+            if (!confirm('Вернуть все подписи по умолчанию?')) return;
+            mossadSetLabelOverrides({});
+            ta.value = mossadLabelsToText({});
+            saved = ta.value;
+            status.textContent = 'Подписи по умолчанию';
+            showToast('↺ Подписи по умолчанию');
+        };
+        // При закрытии окна: сохраняем, только если текст менялся
+        modal._mossadLabelsFlush = () => { if (ta.value !== saved) apply(true); };
+        status.textContent = `Своих подписей: ${Object.keys(mossadGetLabelOverrides()).length}`;
+    }
+
+    /** tab: 'general' | 'hotkeys' | 'defaults' | 'labels'; не задан / 'last' — последняя открытая вкладка (v1.3.45). */
     function openSettingsWindow(tab) {
         if (!SETTINGS_TABS.includes(tab)) tab = getLastSettingsTab();
         const existing = document.getElementById('mossad-hk-modal');
@@ -221,13 +286,14 @@
         
         modal.innerHTML = `
             <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-              <h3 style="margin:0; color:#fff; font-size:16px;">⚙ Настройки MOSSAD</h3>
+              <h3 style="margin:0; color:#fff; font-size:16px;" data-mossad-label="settingsTitle">${LH('settingsTitle')}</h3>
               <button id="mossad-settings-x" title="Закрыть (настройки сохраняются)" style="background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">×</button>
             </div>
             <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px;">
-              <button data-tab="general" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⚙ Общие</button>
-              <button data-tab="hotkeys" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;">⌨ Горячие клавиши</button>
-              <button data-tab="defaults" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Общие умолчания для всех сайтов без своих сохранённых настроек">🌐 По умолчанию</button>
+              <button data-tab="general" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" data-mossad-label="tabGeneral">${LH('tabGeneral')}</button>
+              <button data-tab="hotkeys" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" data-mossad-label="tabHotkeys">${LH('tabHotkeys')}</button>
+              <button data-tab="defaults" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Общие умолчания для всех сайтов без своих сохранённых настроек" data-mossad-label="tabDefaults">${LH('tabDefaults')}</button>
+              <button data-tab="labels" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Свои подписи кнопок MOSSAD (для всех сайтов)" data-mossad-label="tabLabels">${LH('tabLabels')}</button>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
@@ -259,13 +325,13 @@
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Пишет в консоль браузера ([MOSSAD DBG]) кто и почему запустил каждый шаг слайдшоу, а также шаги удаления. Для диагностики; по умолчанию выключено">
               <input id="mossad-cb-debug" type="checkbox" style="accent-color:#f59e0b;" ${config.debugSlideshow ? 'checked' : ''}>
               Debug-лог слайдшоу/удаления
-              <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;">📋 лог</button>
+              <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
               <span>v${SCRIPT_VERSION} · 2026-10-19</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
-                 style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;">🔄 Обновить</a>
+                 style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
             </div>
             </div>
             <div data-pane="hotkeys" style="display:none; flex-direction:column; gap:8px;">
@@ -274,8 +340,8 @@
             </div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:calc(85vh - 230px); overflow-y:auto; padding-right:4px;"></div>
               <div style="display:flex; gap:6px; align-items:center;">
-                <button id="mossad-hk-reset" title="Вернуть заводские горячие клавиши (для всех сайтов)" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ По умолчанию</button>
-                <button id="mossad-hk-order-reset" title="Вернуть исходный порядок строк" style="background:transparent; border:1px solid #374151; padding:4px 8px; border-radius:6px; color:#9ca3af; cursor:pointer; font-size:11px;">↕ Порядок</button>
+                <button id="mossad-hk-reset" title="Вернуть заводские горячие клавиши (для всех сайтов)" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkReset">${LH('hkReset')}</button>
+                <button id="mossad-hk-order-reset" title="Вернуть исходный порядок строк" style="background:transparent; border:1px solid #374151; padding:4px 8px; border-radius:6px; color:#9ca3af; cursor:pointer; font-size:11px;" data-mossad-label="hkOrderReset">${LH('hkOrderReset')}</button>
               </div>
             </div>
             <div data-pane="defaults" style="display:none; flex-direction:column; gap:6px;">
@@ -289,10 +355,11 @@
                 <button id="mossad-def-apply" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;color:#60a5fa;" title="Записать значения формы в настройки ЭТОГО сайта">➜ Применить к этому сайту</button>
               </div>
             </div>
+            <div data-pane="labels" style="display:none; flex-direction:column; gap:6px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <span></span>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-hk-close" title="Закрыть (настройки сохраняются)" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px;">Закрыть</button>
+                    <button id="mossad-hk-close" title="Закрыть (настройки сохраняются)" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="close">${LH('close')}</button>
                 </div>
             </div>
         `;
@@ -494,9 +561,10 @@
 
         // ── Вкладки ──
         const setTab = (t) => {
-            const want = (t === 'general' || t === 'hotkeys' || t === 'defaults') ? t : 'hotkeys';
+            const want = SETTINGS_TABS.includes(t) ? t : 'hotkeys';
             modal.dataset.tab = want;
             rememberSettingsTab(want); // v1.3.45
+            if (want === 'labels') initLabelsTab(modal); // v1.3.46: строится лениво, при первом открытии вкладки
             modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
             modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
                 const on = b.dataset.tab === want;
@@ -578,6 +646,7 @@
                 const v = Math.max(5, Math.min(600, parseInt(cwEl.value, 10) || 30));
                 if (v !== Number(config.collectWatchSec)) config.collectWatchSec = v;
             }
+            if (typeof modal._mossadLabelsFlush === 'function') modal._mossadLabelsFlush(); // v1.3.46
             const tokEl = modal.querySelector('#mossad-gh-token');
             if (tokEl && tokEl.value !== (config.githubToken || '')) setGithubToken(tokEl.value);
         };

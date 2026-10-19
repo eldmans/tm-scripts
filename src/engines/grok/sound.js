@@ -110,7 +110,7 @@
             const txt = document.createElement('span');
             txt.className = 'mossad-sound-toast-text';
             const x = document.createElement('button');
-            x.textContent = '×';
+            mossadLabelEl(x, 'toastClose');
             x.title = 'Закрыть (только это уведомление)';
             x.style.cssText = 'background:none;border:none;color:#9ca3af;font-size:16px;line-height:1;cursor:pointer;padding:0 4px;';
             x.onclick = (e) => {

@@ -368,7 +368,7 @@
         if (!btn) return;
 
         if (state === 'playing') {
-            btn.textContent = '❚❚';
+            mossadLabelEl(btn, 'pause');
             btn.title = 'Пауза';
             btn.style.background = '#059669';
             btn.style.color = '#ffffff';
@@ -376,14 +376,14 @@
             btn.style.letterSpacing = '1px';
             if (btnStop) btnStop.style.display = 'inline-block';
         } else if (state === 'paused') {
-            btn.textContent = '▶';
+            mossadLabelEl(btn, 'resume');
             btn.title = 'Продолжить';
             btn.style.background = '#d97706';
             btn.style.color = '#ffffff';
             btn.style.fontSize = '12px';
             if (btnStop) btnStop.style.display = 'inline-block';
         } else {
-            btn.textContent = 'Слайдшоу';
+            mossadLabelEl(btn, 'slideshow');
             btn.title = 'Запустить слайдшоу по генерациям';
             btn.style.background = '#1e3a5f';
             btn.style.color = '#93c5fd';

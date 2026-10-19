@@ -112,7 +112,7 @@
 
         const btnStart = document.createElement('button');
         btnStart.id = 'mossad-btn-start';
-        btnStart.innerHTML = '🚀';
+        mossadLabelEl(btnStart, 'start');
         btnStart.title = 'Старт слайдшоу (Insert)';
         btnStart.style.cssText = `
             cursor: pointer; border: none; border-radius: 6px; padding: 4px 8px;
@@ -121,12 +121,12 @@
         `;
 
         const btnDL = document.createElement('button');
-        btnDL.innerHTML = '💾';
+        mossadLabelEl(btnDL, 'download');
         btnDL.title = 'Скачать';
         btnDL.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #10b981; cursor: pointer; font-size: 13px; padding: 4px 7px;`;
 
         const btnUpdate = document.createElement('button');
-        btnUpdate.innerHTML = '🔄';
+        mossadLabelEl(btnUpdate, 'update');
         btnUpdate.title = 'Обновить скрипт (Win+Alt+R)';
         btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 13px; padding: 4px 7px; transition: transform 0.2s ease;`;
         btnUpdate.onclick = () => {
@@ -135,7 +135,7 @@
 
         const btnTogglePanel = document.createElement('button');
         btnTogglePanel.id = 'mossad-btn-toggle-panel';
-        btnTogglePanel.innerHTML = '▼';
+        mossadLabelEl(btnTogglePanel, 'togglePanel');
         btnTogglePanel.title = 'Меню настроек';
         btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; padding: 2px 6px; line-height: 1; transition: transform 0.2s, color 0.2s; margin-left: auto;`;
         btnTogglePanel.onmouseenter = () => { btnTogglePanel.style.color = '#fff'; };
@@ -147,7 +147,7 @@
 
         const btnClose = document.createElement('button');
         btnClose.id = 'mossad-btn-close';
-        btnClose.innerHTML = '✕';
+        mossadLabelEl(btnClose, 'hideWidget');
         btnClose.title = 'Скрыть виджет (Ctrl+Insert)';
         btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: color 0.2s; margin-left: 4px;`;
         btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
@@ -216,48 +216,46 @@
                     ` : `
                     <div style="display: grid; grid-template-columns: 24px 24px 24px; grid-template-rows: 24px 24px 24px; gap: 2px; align-items: center; justify-items: center;">
                         <div></div>
-                        <button class="mossad-dpad" data-dir="up" title="Листать вверх" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">▲</button>
+                        <button class="mossad-dpad" data-dir="up" title="Листать вверх" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadUp">${LH('dpadUp')}</button>
                         <div></div>
-                        <button class="mossad-dpad" data-dir="left" title="Листать влево" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">◀</button>
-                        <button id="mossad-dpad-loop" title="Повторять плейлист (R): перемотка на начало при конце ленты" style="background: ${config.loopFeed ? '#10b981' : '#1f2937'}; border: 1px solid ${config.loopFeed ? '#059669' : '#374151'}; color: ${config.loopFeed ? '#fff' : '#9ca3af'}; width:24px; height:24px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px; padding:0; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">R</button>
-                        <button class="mossad-dpad" data-dir="right" title="Листать вправо" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">▶</button>
+                        <button class="mossad-dpad" data-dir="left" title="Листать влево" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadLeft">${LH('dpadLeft')}</button>
+                        <button id="mossad-dpad-loop" title="Повторять плейлист (R): перемотка на начало при конце ленты" style="background: ${config.loopFeed ? '#10b981' : '#1f2937'}; border: 1px solid ${config.loopFeed ? '#059669' : '#374151'}; color: ${config.loopFeed ? '#fff' : '#9ca3af'}; width:24px; height:24px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px; padding:0; display:flex; align-items:center; justify-content:center; transition:all 0.2s;" data-mossad-label="dpadLoop">${LH('dpadLoop')}</button>
+                        <button class="mossad-dpad" data-dir="right" title="Листать вправо" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadRight">${LH('dpadRight')}</button>
                         <div></div>
-                        <button class="mossad-dpad" data-dir="down" title="Листать вниз" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;">▼</button>
+                        <button class="mossad-dpad" data-dir="down" title="Листать вниз" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadDown">${LH('dpadDown')}</button>
                         <div></div>
                     </div>
                     `}
                     <div style="display: flex; flex-direction: column; gap: 4px; min-width: 95px;">
                         <label title="Круги видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
-                            Видео (↺): <input id="mossad-in-loops" type="number" min="1" max="100" value="${config.videoLoops}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
+                            <span data-mossad-label="loopsLabel">${LH('loopsLabel')}</span> <input id="mossad-in-loops" type="number" min="1" max="100" value="${config.videoLoops}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                         <label title="Задержка фото" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
-                            Фото (сек): <input id="mossad-in-pdelay" type="number" min="0" max="999" value="${config.slideshowDelay}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
+                            <span data-mossad-label="photoLabel">${LH('photoLabel')}</span> <input id="mossad-in-pdelay" type="number" min="0" max="999" value="${config.slideshowDelay}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                         <label title="Пауза после видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
-                            Пауза (сек): <input id="mossad-in-vdelay" type="number" min="0" max="999" value="${config.delayAfterVideo}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
+                            <span data-mossad-label="pauseLabel">${LH('pauseLabel')}</span> <input id="mossad-in-vdelay" type="number" min="0" max="999" value="${config.delayAfterVideo}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                     </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; gap: 6px;">
-                    <button id="mossad-btn-export-list" style="background:#1f2937; border:1px solid #374151; border-radius:4px; padding:2px 8px; color:#fbbf24; cursor:pointer; font-weight:bold; font-size:11px; display:flex; align-items:center; gap:4px;" title="Скачать список собранных ссылок (.txt)">
-                        💾 Список
-                    </button>
+                    <button id="mossad-btn-export-list" style="background:#1f2937; border:1px solid #374151; border-radius:4px; padding:2px 8px; color:#fbbf24; cursor:pointer; font-weight:bold; font-size:11px; display:flex; align-items:center; gap:4px;" title="Скачать список собранных ссылок (.txt)" data-mossad-label="exportList">${LH('exportList')}</button>
                     <div style="display:flex; align-items:center; gap:3px; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:1px 5px;">
                         <span style="font-size:10px; color:#9ca3af;" title="Масштаб интерфейса MOSSAD">🔍</span>
-                        <button id="mossad-btn-zoom-dec" style="background:transparent; border:none; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px; padding:0 3px;" title="Уменьшить масштаб виджета">−</button>
+                        <button id="mossad-btn-zoom-dec" style="background:transparent; border:none; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px; padding:0 3px;" title="Уменьшить масштаб виджета" data-mossad-label="zoomDec">${LH('zoomDec')}</button>
                         <span id="mossad-zoom-val" style="font-size:10px; color:#60a5fa; cursor:pointer; min-width:32px; text-align:center;" title="Клик — сбросить на 100%">${Math.round((config.widgetZoom || 1) * 100)}%</span>
-                        <button id="mossad-btn-zoom-inc" style="background:transparent; border:none; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px; padding:0 3px;" title="Увеличить масштаб виджета">+</button>
+                        <button id="mossad-btn-zoom-inc" style="background:transparent; border:none; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px; padding:0 3px;" title="Увеличить масштаб виджета" data-mossad-label="zoomInc">${LH('zoomInc')}</button>
                     </div>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
-                        <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> Шаблон:
+                        <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> <span data-mossad-label=\"tplLabel\">${LH('tplLabel')}</span>
                     </label>
                     <input id="mossad-in-fn-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
                         title="Шаблон: {conv4} {id4} {id8} {id} {domain} {userName} {title} {date} {time} {ext} {n} {dbl} {oldname}"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
-                    <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;">💾</button>
+                    <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="saveTplGlobal">${LH('saveTplGlobal')}</button>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -291,9 +289,9 @@
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;">⚙ Настройки</button>
-                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py)">📥 База</button>
-                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию">↺ Сброс</button>
+                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;" data-mossad-label="settings">${LH('settings')}</button>
+                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py)" data-mossad-label="importDb">${LH('importDb')}</button>
+                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию" data-mossad-label="resetCfg">${LH('resetCfg')}</button>
                     <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
             `;

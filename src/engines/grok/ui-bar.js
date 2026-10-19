@@ -23,7 +23,8 @@
         // ── Утилита создания маленьких кнопок ──
         const mkBtn = (id, text, title, css) => {
             const b = document.createElement('button');
-            b.id = id; b.textContent = text; b.title = title;
+            b.id = id; b.title = title;
+            if (Object.prototype.hasOwnProperty.call(LABEL_DEFAULTS, text)) mossadLabelEl(b, text); else b.textContent = text; // v1.3.46: ключ подписи
             b.style.cssText = `cursor:pointer;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;font-weight:700;font-size:11px;transition:all 0.2s;${css}`;
             return b;
         };
@@ -36,7 +37,7 @@
             const cRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
             if (cRaw) savedCount = (JSON.parse(cRaw).items || []).length;
         } catch(e) {}
-        btnCollect.textContent = savedCount > 0 ? String(savedCount) : 'Собрать';
+        if (savedCount > 0) btnCollect.textContent = String(savedCount); else mossadLabelEl(btnCollect, 'collect');
         btnCollect.title = savedCount > 0 ? `Коллекция (${savedCount}): открыть список` : 'Собрать коллекцию ссылок';
         btnCollect.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:3px 7px;font-weight:700;font-size:11px;background:#1f2937;color:#e5e7eb;transition:all 0.2s;`;
 
@@ -61,7 +62,7 @@
             if (confirm('Очистить собранную коллекцию?')) {
                 _gSS.removeItem(GALLERY_COLLECTION_KEY);
                 sessionStorage.removeItem(GALLERY_COLLECT_ACTIVE_KEY);
-                btnCollect.textContent = 'Собрать';
+                mossadLabelEl(btnCollect, 'collect');
                 btnCollect.dataset.collectedCount = '0';
                 btnCollect.style.background = '#1f2937';
                 btnCollect.style.color = '#e5e7eb';
@@ -87,12 +88,12 @@
         btnStatus.id = 'mossad-gallery-status';
         btnStatus.style.cssText = `cursor:pointer;border:none;border-radius:6px;padding:3px 7px;font-weight:700;font-size:11px;transition:all 0.2s;`;
         if (_ssActive) {
-            btnStatus.textContent = _isPaused ? '▶' : '❚❚';
+            mossadLabelEl(btnStatus, _isPaused ? 'resume' : 'pause');
             btnStatus.title = _isPaused ? 'Продолжить' : 'Пауза';
             btnStatus.style.background = _isPaused ? '#d97706' : '#059669';
             btnStatus.style.color = '#ffffff';
         } else {
-            btnStatus.textContent = 'Слайдшоу';
+            mossadLabelEl(btnStatus, 'slideshow');
             btnStatus.title = 'Запустить слайдшоу по генерациям';
             btnStatus.style.background = '#1e3a5f';
             btnStatus.style.color = '#93c5fd';
@@ -109,7 +110,7 @@
         };
 
         // ── 4. Кнопка [■] стоп — появляется только когда слайдшоу запущено ──
-        const btnStop = mkBtn('mossad-gallery-stop', '■', 'Остановить слайдшоу', 'background:#1f2937;color:#f87171;');
+        const btnStop = mkBtn('mossad-gallery-stop', 'stop', 'Остановить слайдшоу', 'background:#1f2937;color:#f87171;');
         btnStop.style.display = _ssActive ? 'inline-block' : 'none';
         btnStop.onclick = () => {
             grokStopGallerySlideshow();
@@ -163,7 +164,7 @@
 
         // Кнопка Gr (порядок групп)
         const btnGr = mkBtn('mossad-gallery-grmode',
-            `Gr${GR_ICONS[grpModeCfg]}`,
+            'grPrefix',
             GR_TIPS[grpModeCfg] || '',
             grBtnCss(grpModeCfg));
         btnGr.onclick = () => {
@@ -175,7 +176,7 @@
 
         // Кнопка Md (порядок внутри группы)
         const btnMd = mkBtn('mossad-gallery-mdmode',
-            `Md${MD_ICONS[itemModeCfg]}`,
+            'mdPrefix',
             MD_TIPS[itemModeCfg] || '',
             mdBtnCss(itemModeCfg));
         btnMd.onclick = () => {
@@ -198,12 +199,12 @@
         const rndBtnCss = (on) => (on
             ? 'background:#3a2a05;color:#fbbf24;border-color:rgba(251,191,36,0.6);'
             : 'background:#1a1a2e;color:#6b7280;') + 'margin-right:6px;';
-        const btnRnd = mkBtn('mossad-gallery-rndmode', '🔀', RND_TIPS.off, rndBtnCss(false));
+        const btnRnd = mkBtn('mossad-gallery-rndmode', 'random', RND_TIPS.off, rndBtnCss(false));
         function refreshModeButtons() {
-            btnGr.textContent = `Gr${GR_ICONS[grpModeCfg]}`;
+            mossadLabelEl(btnGr, 'grPrefix', '', GR_ICONS[grpModeCfg]);
             btnGr.title       = GR_TIPS[grpModeCfg];
             btnGr.style.cssText = BASE_BTN + grBtnCss(grpModeCfg);
-            btnMd.textContent = `Md${MD_ICONS[itemModeCfg]}`;
+            mossadLabelEl(btnMd, 'mdPrefix', '', MD_ICONS[itemModeCfg]);
             btnMd.title       = MD_TIPS[itemModeCfg];
             btnMd.style.cssText = BASE_BTN + mdBtnCss(itemModeCfg);
             const on = isRandomOn();
@@ -238,7 +239,7 @@
 
         // ── Кнопка окна настроек (⌨) слева от крестика (✕), отделена от 🔀 небольшим зазором ──
         // v1.3.41: возвращена в верхний ряд (в v1.3.40 была во втором ряду)
-        const btnHk = mkBtn('mossad-gallery-hk', '⌨', 'Настройки: горячие клавиши (Ctrl+F1)', 'background:#1f2937;color:#9ca3af;font-size:12px;padding:2px 6px;margin-left:auto;');
+        const btnHk = mkBtn('mossad-gallery-hk', 'settingsHk', 'Настройки: горячие клавиши (Ctrl+F1)', 'background:#1f2937;color:#9ca3af;font-size:12px;padding:2px 6px;margin-left:auto;');
         btnHk.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('hotkeys'); };
         row.append(btnHk);
 

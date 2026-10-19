@@ -9,6 +9,7 @@ MODULES = [
     "src/core/config.js",
     "src/core/sync.js",
     "src/core/utils.js",
+    "src/ui/labels.js",
     "src/engines/noodle.js",
     "src/download/blob.js",
     "src/download/history.js",
