@@ -55,6 +55,26 @@
         return false;
     }
 
+    /**
+     * v1.3.47: ЕДИНЫЙ шлюз хоткеев слайдшоу. Шаг вперёд/назад, смена группы (Gr/Md), стоп, перемотка в начало,
+     * «дубль + слайд» работают ТОЛЬКО пока слайдшоу (большое или малое) идёт или стоит на паузе.
+     * После «Стоп» нажатие проходит сайту нетронутым (без preventDefault) — у Grok свои ←/→.
+     * Не входят: запуск (Insert / Shift+Insert), окно настроек, меню, звук, пауза видео, скачать,
+     * улучшить, удалить, Home, привязка виджета.
+     */
+    const SLIDESHOW_ONLY_HOTKEYS = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'galleryStop', 'rewind', 'duplicateNext'];
+    function mossadSlideshowHotkeysEnabled() {
+        return isSlideshowActiveOrPaused();
+    }
+    /** Какой хоткей слайдшоу совпал с нажатием (или null). */
+    function mossadMatchSlideshowHotkey(e) {
+        for (const k of SLIDESHOW_ONLY_HOTKEYS) {
+            const hk = config.hk && config.hk[k];
+            if (hk && hotkeyMatches(e, hk)) return k;
+        }
+        return null;
+    }
+
     function _postPlayerNav(wasPaused) {
         if (wasPaused) {
             setSlideshowPaused(true);
@@ -177,6 +197,10 @@
         if (window.capturingFor !== null) return;
         if (isEditableElement(document.activeElement)) return;
 
+        // v1.3.47: раньше стрелки и Alt+PageDown/Up перехватывались и без слайдшоу — достаточно было
+        // коллекции в sessionStorage и страницы поста (hasGrokCollection). После «Стоп» коллекция остаётся,
+        // поэтому ←/→ продолжали листать слайды. Теперь — только при идущем/приостановленном слайдшоу.
+        if (!mossadSlideshowHotkeysEnabled()) return;
         const isGrokPost = (rootDomain === 'grok.com' && isGrokPostPage());
         const hasGrokCollection = isGrokPost && !!_gSS.getItem(GALLERY_COLLECTION_KEY);
 
@@ -202,8 +226,7 @@
             return;
         }
 
-        // Перехватываем ТОЛЬКО пока слайдшоу активно/на паузе, либо на посте Grok с коллекцией
-        if (!isSlideshowActiveOrPaused() && !hasGrokCollection) return;
+        // Шлюз уже пройден выше (слайдшоу идёт или на паузе)
 
         const isNext = hotkeyMatches(e, config.hk.nextSlide);
         const isPrev = hotkeyMatches(e, config.hk.prevSlide);
@@ -249,6 +272,16 @@
 
         if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
 
+        // v1.3.47: хоткеи слайдшоу (стоп, перемотка, дубль+слайд) без слайдшоу — не наши: отдаём сайту
+        const ssKey = mossadMatchSlideshowHotkey(e);
+        const isUpdateCombo = hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR'));
+        if (ssKey && !isUpdateCombo && !mossadSlideshowHotkeysEnabled()) {
+            // …кроме сочетаний, которые одновременно назначены на «не-слайдшоу» действие
+            const other = ['help', 'slideshowPanel', 'galleryPlayPause', 'slideshowStart', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'snapWidget', 'history']
+                .some(k => config.hk[k] && hotkeyMatches(e, config.hk[k]));
+            if (!other) { mossadDebug('hotkey', 'хоткей слайдшоу без слайдшоу — пропущен сайту', { hk: ssKey }); return; }
+        }
+
         if (hotkeyMatches(e, config.hk.help)) {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -290,7 +323,7 @@
         }
 
         // Стоп большого слайдшоу
-        if (config.hk.galleryStop && hotkeyMatches(e, config.hk.galleryStop)) {
+        if (config.hk.galleryStop && hotkeyMatches(e, config.hk.galleryStop) && mossadSlideshowHotkeysEnabled()) {
             e.preventDefault();
             if (rootDomain === 'grok.com') {
                 grokStopGallerySlideshow();
@@ -364,13 +397,13 @@
         if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR'))) {
             e.preventDefault();
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
-        } else if (hotkeyMatches(e, config.hk.rewind) && !e.metaKey) {
+        } else if (hotkeyMatches(e, config.hk.rewind) && !e.metaKey && mossadSlideshowHotkeysEnabled()) {
             e.preventDefault();
             doRewind();
         }
 
         // Дублирование страницы в фоновой вкладке + принудительный переход (Ctrl + Пробел)
-        if (hotkeyMatches(e, config.hk.duplicateNext)) {
+        if (hotkeyMatches(e, config.hk.duplicateNext) && mossadSlideshowHotkeysEnabled()) {
             e.preventDefault();
             if (typeof GM_openInTab === 'function') {
                 GM_openInTab(location.href, { active: false, insert: true });

@@ -40,6 +40,35 @@
         try { if (typeof GM_setValue === 'function') GM_setValue(HK_ORDER_KEY, json); } catch (e) {}
         try { localStorage.setItem(HK_ORDER_KEY, json); } catch (e) {}
     }
+    // v1.3.47: закреплённые строки (🔒) — не перетаскиваются и не сдвигаются, когда двигают другие
+    const HK_PINNED_KEY = 'mossad_hk_pinned';
+    function getHotkeyPinned() {
+        let raw = null;
+        try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_PINNED_KEY, null); } catch (e) {}
+        if (raw == null) { try { raw = localStorage.getItem(HK_PINNED_KEY); } catch (e) {} }
+        try {
+            const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            return Array.isArray(arr) ? arr.filter(x => typeof x === 'string') : [];
+        } catch (e) { return []; }
+    }
+    function saveHotkeyPinned(list) {
+        const json = JSON.stringify(Array.from(new Set(list || [])));
+        try { if (typeof GM_setValue === 'function') GM_setValue(HK_PINNED_KEY, json); } catch (e) {}
+        try { localStorage.setItem(HK_PINNED_KEY, json); } catch (e) {}
+    }
+    /**
+     * Порядок с учётом закреплённых: закреплённые остаются на своих местах из prev,
+     * остальные заполняют свободные места в порядке want.
+     */
+    function hkOrderKeepPinned(want, prev, pinned) {
+        const pin = new Set(pinned || []);
+        const out = new Array(prev.length).fill(null);
+        prev.forEach((k, i) => { if (pin.has(k)) out[i] = k; });
+        const flow = want.filter(k => !pin.has(k) && prev.includes(k));
+        let j = 0;
+        for (let i = 0; i < out.length; i++) if (out[i] === null) out[i] = flow[j++];
+        return out.filter(k => k != null);
+    }
     function clearHotkeyOrder() {
         try { if (typeof GM_deleteValue === 'function') GM_deleteValue(HK_ORDER_KEY); else if (typeof GM_setValue === 'function') GM_setValue(HK_ORDER_KEY, '[]'); } catch (e) {}
         try { localStorage.removeItem(HK_ORDER_KEY); } catch (e) {}
@@ -463,14 +492,85 @@
                 btn.textContent = formatHotkey(cur());
             };
 
-            slotDiv.append(btn, resetBtn, disableBtn);
+            // v1.3.47: справа от «—» — ⤒ наверх, ⤓ вниз, 🔒 закрепить (обработка — делегированно на списке)
+            const mkMini = (cls, key, title) => {
+                const b = document.createElement('button');
+                b.className = cls;
+                b.title = title;
+                b.style.cssText = 'background:transparent; border:none; color:#9ca3af; cursor:pointer; padding:0 2px; font-size:12px; line-height:1;';
+                mossadLabelEl(b, key);
+                return b;
+            };
+            const sep = document.createElement('span');
+            sep.style.cssText = 'width:1px; height:14px; background:#374151; margin:0 3px;';
+            slotDiv.append(btn, resetBtn, disableBtn, sep,
+                mkMini('mossad-hk-top', 'hkTop', 'Переместить строку в самый верх'),
+                mkMini('mossad-hk-bottom', 'hkBottom', 'Переместить строку в самый низ'),
+                mkMini('mossad-hk-pin', 'hkPin', 'Закрепить строку на месте'));
             row.append(label, slotDiv);
             return row;
         };
+        /** Вид строки по закреплению: ручка не тянется, ⤒/⤓ неактивны, значок 🔒/🔓. */
+        const paintPinned = (row, pinned) => {
+            row.dataset.pinned = pinned ? '1' : '';
+            const label = row.querySelector('.mossad-hk-handle');
+            if (label) {
+                label.style.cursor = pinned ? 'default' : 'grab';
+                label.title = pinned ? 'Строка закреплена (🔓 — открепить)' : 'Перетащите, чтобы изменить порядок';
+            }
+            const pinBtn = row.querySelector('.mossad-hk-pin');
+            if (pinBtn) {
+                mossadLabelEl(pinBtn, pinned ? 'hkUnpin' : 'hkPin');
+                pinBtn.title = pinned ? 'Открепить строку' : 'Закрепить строку на месте';
+                pinBtn.style.color = pinned ? '#fbbf24' : '#9ca3af';
+            }
+            row.querySelectorAll('.mossad-hk-top, .mossad-hk-bottom').forEach(b => {
+                b.disabled = !!pinned;
+                b.style.opacity = pinned ? '0.3' : '1';
+                b.style.cursor = pinned ? 'default' : 'pointer';
+            });
+            row.style.borderColor = pinned ? 'rgba(251,191,36,0.45)' : '#374151';
+        };
         const renderHotkeyList = () => {
             list.innerHTML = '';
-            orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()).forEach(k => list.append(renderHotkeyRow(k)));
+            const pinned = new Set(getHotkeyPinned());
+            orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()).forEach(k => {
+                const row = renderHotkeyRow(k);
+                paintPinned(row, pinned.has(k));
+                list.append(row);
+            });
         };
+        /** Расставить строки в DOM по порядку ключей и сохранить порядок. */
+        const commitOrder = (order) => {
+            const byKey = {};
+            Array.from(list.children).forEach(r => { if (r.dataset && r.dataset.hk) byKey[r.dataset.hk] = r; });
+            order.forEach(k => { if (byKey[k]) list.appendChild(byKey[k]); });
+            saveHotkeyOrder(order);
+        };
+        // Делегированные клики: ⤒ / ⤓ / 🔒
+        list.addEventListener('click', (e) => {
+            const b = e.target && e.target.closest ? e.target.closest('.mossad-hk-top, .mossad-hk-bottom, .mossad-hk-pin') : null;
+            if (!b || !list.contains(b)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const row = b.closest('[data-hk]');
+            const k = row && row.dataset.hk;
+            if (!k) return;
+            const cur = Array.from(list.children).filter(r => r.dataset && r.dataset.hk).map(r => r.dataset.hk);
+            const pinned = getHotkeyPinned();
+            if (b.classList.contains('mossad-hk-pin')) {
+                const isPinned = pinned.includes(k);
+                const next = isPinned ? pinned.filter(x => x !== k) : pinned.concat(k);
+                saveHotkeyPinned(next);
+                saveHotkeyOrder(cur); // место закреплённой строки фиксируется в сохранённом порядке
+                paintPinned(row, !isPinned);
+                return;
+            }
+            if (pinned.includes(k)) return; // закреплённую строку ⤒/⤓ не двигают
+            const rest = cur.filter(x => x !== k);
+            const want = b.classList.contains('mossad-hk-top') ? [k].concat(rest) : rest.concat(k);
+            commitOrder(hkOrderKeepPinned(want, cur, pinned));
+        });
         renderHotkeyList();
         list.style.position = 'relative';
 
@@ -539,8 +639,10 @@
             delete modal.dataset.dragging;
             // Клик после перетаскивания не должен считаться «кликом вне окна»
             modal._mossadSuppressClickUntil = Date.now() + 300;
-            const order = hkRows().map(r => r.dataset.hk);
-            if (order.join('|') !== d.orderBefore) saveHotkeyOrder(order);
+            // v1.3.47: закреплённые строки возвращаются на свои места, остальные — в новом порядке
+            const dropped = hkRows().map(r => r.dataset.hk);
+            const order = hkOrderKeepPinned(dropped, d.orderBefore.split('|'), getHotkeyPinned());
+            if (order.join('|') !== d.orderBefore) commitOrder(order);
         };
         list.addEventListener('pointerdown', (e) => {
             const label = e.target && e.target.closest ? e.target.closest('.mossad-hk-handle') : null;
@@ -549,6 +651,7 @@
             if (window.capturingFor !== null && window.capturingFor !== undefined) return; // идёт запись клавиши
             e.preventDefault(); // не выделять текст
             const row = label.closest('[data-hk]');
+            if (row && row.dataset.pinned) return; // v1.3.47: закреплённую строку не тянут
             hkDrag = { row, label, pointerId: e.pointerId, startY: e.clientY, startScroll: list.scrollTop, active: false, ph: null, orderBefore: hkRows().map(r => r.dataset.hk).join('|') };
             try { if (label.setPointerCapture && e.pointerId != null) label.setPointerCapture(e.pointerId); } catch (err) {}
             document.addEventListener('pointermove', onDragMove, true);
