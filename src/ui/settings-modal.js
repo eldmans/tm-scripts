@@ -10,7 +10,7 @@
 
     // ── v1.3.45: память последней вкладки (UI-состояние — localStorage, как размеры списка/позиция виджета) ──
     const SETTINGS_TAB_LS_KEY = 'mossad_settings_tab';
-    const SETTINGS_TABS = ['general', 'hotkeys', 'defaults', 'labels'];
+    const SETTINGS_TABS = ['general', 'hotkeys', 'defaults', 'labels', 'todos'];
     function getLastSettingsTab(fallback = 'hotkeys') {
         try {
             const t = localStorage.getItem(SETTINGS_TAB_LS_KEY);
@@ -75,7 +75,7 @@
     // Закреплённые (🔒) строки НЕ меняются ни сбросом, ни рассылкой: ни клавиша, ни место.
     const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
     const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget'];
+    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos'];
     function readHotkeyDefaults() {
         let raw = null;
         try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -413,6 +413,7 @@
               <button data-tab="hotkeys" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" data-mossad-label="tabHotkeys">${LH('tabHotkeys')}</button>
               <button data-tab="defaults" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Общие умолчания для всех сайтов без своих сохранённых настроек" data-mossad-label="tabDefaults">${LH('tabDefaults')}</button>
               <button data-tab="labels" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Свои подписи кнопок MOSSAD (для всех сайтов)" data-mossad-label="tabLabels">${LH('tabLabels')}</button>
+              <button data-tab="todos" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Задачи для ассистента (текст + фото)" data-mossad-label="tabTodos">${LH('tabTodos')}</button>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
@@ -477,6 +478,7 @@
               </div>
             </div>
             <div data-pane="labels" style="display:none; flex-direction:column; gap:6px;"></div>
+            <div data-pane="todos" style="display:none; flex-direction:column; gap:6px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <span></span>
                 <div style="display:flex; gap:6px;">
@@ -504,7 +506,8 @@
             galleryStop:      'Стоп большого слайдшоу',
             duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             rewind:           'Мотать в начало (Alt+R)',
-            snapWidget:       'Привязать к левому верхнему краю (F8)'
+            snapWidget:       'Привязать к левому верхнему краю (F8)',
+            openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)'
         };
         
         const renderHotkeyRow = (k) => {
@@ -761,6 +764,7 @@
             modal.dataset.tab = want;
             rememberSettingsTab(want); // v1.3.45
             if (want === 'labels') initLabelsTab(modal); // v1.3.46: строится лениво, при первом открытии вкладки
+            if (want === 'todos') initTodosTab(modal);   // v1.3.49: тоже лениво (фото читаются только здесь)
             modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
             modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
                 const on = b.dataset.tab === want;
@@ -843,6 +847,7 @@
                 if (v !== Number(config.collectWatchSec)) config.collectWatchSec = v;
             }
             if (typeof modal._mossadLabelsFlush === 'function') modal._mossadLabelsFlush(); // v1.3.46
+            if (typeof modal._mossadTodosFlush === 'function') modal._mossadTodosFlush();   // v1.3.49
             const tokEl = modal.querySelector('#mossad-gh-token');
             if (tokEl && tokEl.value !== (config.githubToken || '')) setGithubToken(tokEl.value);
         };

@@ -292,6 +292,14 @@
             return;
         }
 
+        // v1.3.49: «📝 Тудушки» (по умолчанию не назначено): открыть окно настроек сразу на этой вкладке / закрыть
+        if (config.hk.openTodos && config.hk.openTodos.key && hotkeyMatches(e, config.hk.openTodos)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            toggleSettingsWindow('todos');
+            return;
+        }
+
         // Новая 3-позиционная логика переключения по Ctrl+Insert (циклическое переключение):
         // 1-е нажатие: Открывается полное меню (все 3 блока/строки, включая панель настроек снизу)
         // 2-е нажатие: Сворачивается до сокращённого меню (только 2 верхние строки)

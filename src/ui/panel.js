@@ -158,7 +158,14 @@
         };
 
         // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ▼ | ✕ (на Grok ⌨ и ✕ — в верхнем ряду, см. ui-bar.js)
-        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnTogglePanel, btnClose);
+        // v1.3.49: «2DO» — справа от 🔄: окно настроек сразу на вкладке «📝 Тудушки»
+        const btnTodo = document.createElement('button');
+        btnTodo.id = 'mossad-btn-todo';
+        mossadLabelEl(btnTodo, 'todoBtn');
+        btnTodo.title = 'Тудушки — задачи для ассистента (текст + фото)';
+        btnTodo.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #fbbf24; cursor: pointer; font-size: 11px; font-weight: 700; padding: 4px 6px;`;
+        btnTodo.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('todos'); };
+        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnTodo, btnTogglePanel, btnClose);
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
