@@ -98,6 +98,7 @@
                             const token = config.githubToken;
                             Object.assign(config, decoded);
                             config.githubToken = token;
+                            try { normalizeAllHotkeys(); } catch (e) {} // v1.3.45: одна привязка на действие
                             persistLocalConfig();
                             if (window.updateWidgetUI) window.updateWidgetUI();
                             resolve(true);

@@ -255,7 +255,7 @@
             // Ctrl+F1 (и любые переназначенные слоты help): открыть/закрыть окно настроек.
             // Если окно открыто — закрыть с сохранением (с любой вкладки), как раньше.
             if (document.getElementById('mossad-hk-modal')) { closeSettingsWindow(true); return; }
-            openSettingsWindow('hotkeys');
+            openSettingsWindow(); // v1.3.45: последняя открытая вкладка
             return;
         }
 

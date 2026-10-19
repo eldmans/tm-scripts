@@ -320,8 +320,8 @@
             sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
             sessionStorage.setItem(SESSION_STATE_KEY, 'bar');
             // Закрываем модальное окно настроек горячих клавиш (если открыто)
-            const hkModal = document.getElementById('mossad-hk-modal');
-            if (hkModal) hkModal.remove();
+            // v1.3.45: через общий путь закрытия — с сохранением и снятием слушателей (раньше просто remove())
+            if (document.getElementById('mossad-hk-modal')) closeSettingsWindow(true);
             // Сворачиваем большое меню с D-Pad в компактную полоску (bar)
             window.widgetState = 'bar';
             if (window.updateWidgetUI) window.updateWidgetUI();

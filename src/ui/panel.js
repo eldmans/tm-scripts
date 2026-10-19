@@ -482,7 +482,7 @@
                 };
             }
             panel.querySelector('#mossad-btn-hk').onclick = () => {
-                openSettingsWindow('general'); // v1.3.40: «⚙ Настройки» → вкладка «Общие»
+                openSettingsWindow(); // v1.3.45: последняя открытая вкладка (раньше всегда «Общие»)
             };
             panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
                 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;

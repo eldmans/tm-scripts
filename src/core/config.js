@@ -56,10 +56,7 @@
             galleryStop:      { key: '',           ctrl: false, alt: false, shift: false }, // Пусто — стоп большого слайдшоу
             focusWidget:      { key: 'F7',         ctrl: false, alt: false, shift: false },
             snapWidget:       { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
-            nextSlide:        [
-                { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
-                { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)
-            ],
+            nextSlide:        { key: 'ArrowRight', ctrl: false, alt: false, shift: false }, // v1.3.45: одна привязка (резервный Пробел убран)
             prevSlide:        { key: 'ArrowLeft',  ctrl: false, alt: false, shift: false },
             nextGroup:        { key: 'PageDown',   ctrl: false, alt: true,  shift: false }, // Alt+PageDown
             prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
@@ -208,6 +205,41 @@
     function persistLocalConfig() {
         localStorage.setItem(STORAGE_KEY, serializeLocalConfig());
     }
+    /**
+     * v1.3.45: одна привязка на действие. Старый формат — массив слотов [основная, резерв] (или объект
+     * после mergeDeep с числовыми ключами '0'/'1'). Берём основную; если она пустая, а резерв задан —
+     * резерв становится основной. Возвращает чистый объект {key, code?, ctrl, alt, shift, meta?}.
+     */
+    function normalizeHotkeyBinding(v) {
+        const clean = (h) => {
+            const o = { key: (h && typeof h.key === 'string') ? h.key : '', ctrl: !!(h && h.ctrl), alt: !!(h && h.alt), shift: !!(h && h.shift) };
+            if (h && h.meta) o.meta = true;
+            if (h && typeof h.code === 'string' && h.code) o.code = h.code;
+            return o;
+        };
+        if (!v || typeof v !== 'object') return clean(null);
+        const isSlots = Array.isArray(v) || Object.prototype.hasOwnProperty.call(v, '0') || Object.prototype.hasOwnProperty.call(v, '1');
+        if (!isSlots) return clean(v);
+        const slots = [v[0], v[1]];
+        const pick = slots.find(h => h && typeof h === 'object' && h.key);
+        return clean(pick || null);
+    }
+    function isHotkeyBindingClean(v) {
+        if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+        return JSON.stringify(v) === JSON.stringify(normalizeHotkeyBinding(v));
+    }
+    /** Нормализует все config.hk; true — если что-то изменилось (нужно сохранить). */
+    function normalizeAllHotkeys() {
+        if (!config.hk || typeof config.hk !== 'object') return false;
+        let changed = false;
+        for (const k of Object.keys(config.hk)) {
+            if (!isHotkeyBindingClean(config.hk[k])) {
+                config.hk[k] = normalizeHotkeyBinding(config.hk[k]);
+                changed = true;
+            }
+        }
+        return changed;
+    }
     /** Сохранить токен (из панели настроек): в память + GM. */
     function setGithubToken(token) {
         config.githubToken = (token || '').trim();
@@ -285,10 +317,7 @@
             config.hk.nextSlide = config.hk.nextSlide.map(h => isOldNextPd(h) ? { key: 'ArrowRight', ctrl: false, alt: false, shift: false } : h);
         }
     } else if (!config.hk.nextSlide || isOldNextPd(config.hk.nextSlide)) {
-        config.hk.nextSlide = [
-            { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
-            { key: ' ', ctrl: false, alt: false, shift: false }
-        ];
+        config.hk.nextSlide = { key: 'ArrowRight', ctrl: false, alt: false, shift: false };
     }
 
     if (!config.hk.prevSlide || isOldPrevPu(config.hk.prevSlide)) {
@@ -340,6 +369,12 @@
     delete config.hk.videoGen10s;
 
     migrateUpscaleDefaultHotkey();
+
+    // v1.3.45: одна привязка на действие — свёртка старых слотов [основная, резерв] в объект
+    if (normalizeAllHotkeys()) {
+        try { persistLocalConfig(); } catch (e) {}
+        if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch (e) {} }
+    }
 
     // v1.3.41: «Применить во всех контейнерах» — штамп из GM, если этот контейнер его ещё не применял
     try { GlobalDefaults.applyStampIfNew(); } catch (e) {}
@@ -460,6 +495,7 @@
                     const parsed = JSON.parse(gmHk);
                     if (parsed && typeof parsed === 'object') {
                         config.hk = mergeDeep(config.hk, parsed);
+                        normalizeAllHotkeys();
                         persistLocalConfig();
                     }
                 }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.44
+// @version      1.3.45
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -22,7 +22,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.44';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.45';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -119,10 +119,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             galleryStop:      { key: '',           ctrl: false, alt: false, shift: false }, // Пусто — стоп большого слайдшоу
             focusWidget:      { key: 'F7',         ctrl: false, alt: false, shift: false },
             snapWidget:       { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
-            nextSlide:        [
-                { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
-                { key: ' ',          ctrl: false, alt: false, shift: false }  // Пробел (резерв)
-            ],
+            nextSlide:        { key: 'ArrowRight', ctrl: false, alt: false, shift: false }, // v1.3.45: одна привязка (резервный Пробел убран)
             prevSlide:        { key: 'ArrowLeft',  ctrl: false, alt: false, shift: false },
             nextGroup:        { key: 'PageDown',   ctrl: false, alt: true,  shift: false }, // Alt+PageDown
             prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
@@ -271,6 +268,41 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     function persistLocalConfig() {
         localStorage.setItem(STORAGE_KEY, serializeLocalConfig());
     }
+    /**
+     * v1.3.45: одна привязка на действие. Старый формат — массив слотов [основная, резерв] (или объект
+     * после mergeDeep с числовыми ключами '0'/'1'). Берём основную; если она пустая, а резерв задан —
+     * резерв становится основной. Возвращает чистый объект {key, code?, ctrl, alt, shift, meta?}.
+     */
+    function normalizeHotkeyBinding(v) {
+        const clean = (h) => {
+            const o = { key: (h && typeof h.key === 'string') ? h.key : '', ctrl: !!(h && h.ctrl), alt: !!(h && h.alt), shift: !!(h && h.shift) };
+            if (h && h.meta) o.meta = true;
+            if (h && typeof h.code === 'string' && h.code) o.code = h.code;
+            return o;
+        };
+        if (!v || typeof v !== 'object') return clean(null);
+        const isSlots = Array.isArray(v) || Object.prototype.hasOwnProperty.call(v, '0') || Object.prototype.hasOwnProperty.call(v, '1');
+        if (!isSlots) return clean(v);
+        const slots = [v[0], v[1]];
+        const pick = slots.find(h => h && typeof h === 'object' && h.key);
+        return clean(pick || null);
+    }
+    function isHotkeyBindingClean(v) {
+        if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+        return JSON.stringify(v) === JSON.stringify(normalizeHotkeyBinding(v));
+    }
+    /** Нормализует все config.hk; true — если что-то изменилось (нужно сохранить). */
+    function normalizeAllHotkeys() {
+        if (!config.hk || typeof config.hk !== 'object') return false;
+        let changed = false;
+        for (const k of Object.keys(config.hk)) {
+            if (!isHotkeyBindingClean(config.hk[k])) {
+                config.hk[k] = normalizeHotkeyBinding(config.hk[k]);
+                changed = true;
+            }
+        }
+        return changed;
+    }
     /** Сохранить токен (из панели настроек): в память + GM. */
     function setGithubToken(token) {
         config.githubToken = (token || '').trim();
@@ -348,10 +380,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             config.hk.nextSlide = config.hk.nextSlide.map(h => isOldNextPd(h) ? { key: 'ArrowRight', ctrl: false, alt: false, shift: false } : h);
         }
     } else if (!config.hk.nextSlide || isOldNextPd(config.hk.nextSlide)) {
-        config.hk.nextSlide = [
-            { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
-            { key: ' ', ctrl: false, alt: false, shift: false }
-        ];
+        config.hk.nextSlide = { key: 'ArrowRight', ctrl: false, alt: false, shift: false };
     }
 
     if (!config.hk.prevSlide || isOldPrevPu(config.hk.prevSlide)) {
@@ -403,6 +432,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     delete config.hk.videoGen10s;
 
     migrateUpscaleDefaultHotkey();
+
+    // v1.3.45: одна привязка на действие — свёртка старых слотов [основная, резерв] в объект
+    if (normalizeAllHotkeys()) {
+        try { persistLocalConfig(); } catch (e) {}
+        if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch (e) {} }
+    }
 
     // v1.3.41: «Применить во всех контейнерах» — штамп из GM, если этот контейнер его ещё не применял
     try { GlobalDefaults.applyStampIfNew(); } catch (e) {}
@@ -523,6 +558,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     const parsed = JSON.parse(gmHk);
                     if (parsed && typeof parsed === 'object') {
                         config.hk = mergeDeep(config.hk, parsed);
+                        normalizeAllHotkeys();
                         persistLocalConfig();
                     }
                 }
@@ -632,6 +668,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                             const token = config.githubToken;
                             Object.assign(config, decoded);
                             config.githubToken = token;
+                            try { normalizeAllHotkeys(); } catch (e) {} // v1.3.45: одна привязка на действие
                             persistLocalConfig();
                             if (window.updateWidgetUI) window.updateWidgetUI();
                             resolve(true);
@@ -7647,8 +7684,8 @@ function findMediaForDownload() {
             sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
             sessionStorage.setItem(SESSION_STATE_KEY, 'bar');
             // Закрываем модальное окно настроек горячих клавиш (если открыто)
-            const hkModal = document.getElementById('mossad-hk-modal');
-            if (hkModal) hkModal.remove();
+            // v1.3.45: через общий путь закрытия — с сохранением и снятием слушателей (раньше просто remove())
+            if (document.getElementById('mossad-hk-modal')) closeSettingsWindow(true);
             // Сворачиваем большое меню с D-Pad в компактную полоску (bar)
             window.widgetState = 'bar';
             if (window.updateWidgetUI) window.updateWidgetUI();
@@ -9067,7 +9104,7 @@ function findMediaForDownload() {
                 };
             }
             panel.querySelector('#mossad-btn-hk').onclick = () => {
-                openSettingsWindow('general'); // v1.3.40: «⚙ Настройки» → вкладка «Общие»
+                openSettingsWindow(); // v1.3.45: последняя открытая вкладка (раньше всегда «Общие»)
             };
             panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
                 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
@@ -9244,6 +9281,54 @@ function findMediaForDownload() {
         return openSettingsWindow(tab);
     }
 
+    // ── v1.3.45: память последней вкладки (UI-состояние — localStorage, как размеры списка/позиция виджета) ──
+    const SETTINGS_TAB_LS_KEY = 'mossad_settings_tab';
+    const SETTINGS_TABS = ['general', 'hotkeys', 'defaults'];
+    function getLastSettingsTab(fallback = 'hotkeys') {
+        try {
+            const t = localStorage.getItem(SETTINGS_TAB_LS_KEY);
+            if (SETTINGS_TABS.includes(t)) return t;
+        } catch (e) {}
+        return fallback;
+    }
+    function rememberSettingsTab(t) {
+        if (!SETTINGS_TABS.includes(t)) return;
+        try { localStorage.setItem(SETTINGS_TAB_LS_KEY, t); } catch (e) {}
+    }
+
+    // ── v1.3.45: порядок строк на вкладке «Горячие клавиши» (перетаскиванием). Хоткеи общие для всех
+    // сайтов — порядок тоже общий: GM (+ копия в localStorage, если GM недоступен). ──
+    const HK_ORDER_KEY = 'mossad_hk_order';
+    function getHotkeyOrder() {
+        let raw = null;
+        try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_ORDER_KEY, null); } catch (e) {}
+        if (raw == null) { try { raw = localStorage.getItem(HK_ORDER_KEY); } catch (e) {} }
+        try {
+            const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            return Array.isArray(arr) ? arr.filter(x => typeof x === 'string') : [];
+        } catch (e) { return []; }
+    }
+    function saveHotkeyOrder(order) {
+        const json = JSON.stringify(Array.isArray(order) ? order : []);
+        try { if (typeof GM_setValue === 'function') GM_setValue(HK_ORDER_KEY, json); } catch (e) {}
+        try { localStorage.setItem(HK_ORDER_KEY, json); } catch (e) {}
+    }
+    function clearHotkeyOrder() {
+        try { if (typeof GM_deleteValue === 'function') GM_deleteValue(HK_ORDER_KEY); else if (typeof GM_setValue === 'function') GM_setValue(HK_ORDER_KEY, '[]'); } catch (e) {}
+        try { localStorage.removeItem(HK_ORDER_KEY); } catch (e) {}
+    }
+    /** Ключи в порядке отображения: сохранённый порядок (только известные), затем новые — в заводском порядке. */
+    function orderedHotkeyKeys(keys, order) {
+        const known = new Set(keys);
+        const seen = new Set();
+        const out = [];
+        for (const k of (order || [])) {
+            if (known.has(k) && !seen.has(k)) { out.push(k); seen.add(k); }
+        }
+        for (const k of keys) if (!seen.has(k)) out.push(k);
+        return out;
+    }
+
     /** Переключает/закрывает окно настроек: если открыто на той же вкладке — закрыть, иначе показать вкладку. */
     function toggleSettingsWindow(tab = 'hotkeys') {
         const modal = document.getElementById('mossad-hk-modal');
@@ -9255,6 +9340,9 @@ function findMediaForDownload() {
         const modal = document.getElementById('mossad-hk-modal');
         if (!modal) return;
         if (save) {
+            // v1.3.45: кнопки «Сохранить» больше нет — всё, что не успело сохраниться (поле в фокусе:
+            // change не пришёл; токен без 💾), применяется здесь; затем общий путь сохранения хоткеев
+            if (typeof modal._mossadFlush === 'function') { try { modal._mossadFlush(); } catch (e) {} }
             if (typeof window.saveGlobalHotkeys === 'function') window.saveGlobalHotkeys(true);
             else Settings.save();
         }
@@ -9386,7 +9474,9 @@ function findMediaForDownload() {
         };
     }
 
-    function openSettingsWindow(tab = 'general') {
+    /** tab: 'general' | 'hotkeys' | 'defaults'; не задан / 'last' — последняя открытая вкладка (v1.3.45). */
+    function openSettingsWindow(tab) {
+        if (!SETTINGS_TABS.includes(tab)) tab = getLastSettingsTab();
         const existing = document.getElementById('mossad-hk-modal');
         if (existing && typeof existing._mossadSetTab === 'function') {
             existing._mossadSetTab(tab);
@@ -9453,11 +9543,13 @@ function findMediaForDownload() {
             </div>
             <div data-pane="hotkeys" style="display:none; flex-direction:column; gap:8px;">
             <div style="background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.3); border-radius:6px; padding:6px 10px; margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px;">
-              <span style="color:#34d399;">💡 При закрытии окна настройки автоматически сохраняются для всех сайтов</span>
-              <button id="mossad-hk-save-all" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:3px 8px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;" title="Сохранить для всех сайтов прямо сейчас">💾 Сохранить</button>
+              <span style="color:#34d399;">💡 Изменения сохраняются сразу и при закрытии окна — для всех сайтов. Порядок строк — перетаскиванием за название</span>
             </div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:calc(85vh - 230px); overflow-y:auto; padding-right:4px;"></div>
-              <div><button id="mossad-hk-reset" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ Клавиши по умолчанию</button></div>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <button id="mossad-hk-reset" title="Вернуть заводские горячие клавиши (для всех сайтов)" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;">↺ По умолчанию</button>
+                <button id="mossad-hk-order-reset" title="Вернуть исходный порядок строк" style="background:transparent; border:1px solid #374151; padding:4px 8px; border-radius:6px; color:#9ca3af; cursor:pointer; font-size:11px;">↕ Порядок</button>
+              </div>
             </div>
             <div data-pane="defaults" style="display:none; flex-direction:column; gap:6px;">
               <div id="mossad-def-status" style="font-size:11px;color:#9ca3af;line-height:1.35;"></div>
@@ -9473,8 +9565,7 @@ function findMediaForDownload() {
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <span></span>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-hk-save-close" style="background:#10b981; border:none; padding:6px 14px; border-radius:6px; color:#fff; cursor:pointer; font-weight:bold; font-size:12px;">💾 Сохранить и закрыть</button>
-                    <button id="mossad-hk-close" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#9ca3af; cursor:pointer; font-weight:bold; font-size:12px;">Закрыть</button>
+                    <button id="mossad-hk-close" title="Закрыть (настройки сохраняются)" style="background:#374151; border:1px solid #4b5563; padding:6px 14px; border-radius:6px; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px;">Закрыть</button>
                 </div>
             </div>
         `;
@@ -9501,103 +9592,184 @@ function findMediaForDownload() {
             snapWidget:       'Привязать к левому верхнему краю (F8)'
         };
         
-        Object.keys(keysMap).forEach(k => {
+        const renderHotkeyRow = (k) => {
             const row = document.createElement('div');
-            row.style.cssText = `display:flex; justify-content:space-between; align-items:center; background:#1f2937; padding:8px 12px; border-radius:6px; border:1px solid #374151;`;
-            
+            row.dataset.hk = k;
+            row.style.cssText = `display:flex; justify-content:space-between; align-items:center; background:#1f2937; padding:8px 12px; border-radius:6px; border:1px solid #374151; box-sizing:border-box;`;
+
+            // v1.3.45: вся левая часть (название) — ручка перетаскивания; поле клавиши — нет
             const label = document.createElement('span');
+            label.className = 'mossad-hk-handle';
             label.textContent = keysMap[k];
-            label.style.fontSize = '13px';
-            label.style.flex = '1';
-            
-            const slotsContainer = document.createElement('div');
-            slotsContainer.style.cssText = 'display:flex; gap:6px; align-items:center;';
-            
-            let hkArr = Array.isArray(config.hk[k]) ? [...config.hk[k]] : [config.hk[k], null];
-            while (hkArr.length < 2) hkArr.push(null);
-            
-            const createSlot = (slotIndex) => {
-                const slotDiv = document.createElement('div');
-                slotDiv.style.cssText = 'display:flex; gap:2px; align-items:center;';
-                
-                const btn = document.createElement('button');
-                btn.style.cssText = `background:#374151; border:none; color:#3b82f6; padding:4px 10px; border-radius:4px; cursor:pointer; min-width:60px; font-weight:bold; font-size:12px; text-align:center;`;
-                btn.textContent = formatHotkey(hkArr[slotIndex]);
-                
-                const resetBtn = document.createElement('button');
-                resetBtn.innerHTML = '↺';
-                resetBtn.title = 'Сброс слота';
-                resetBtn.style.cssText = `background:transparent; border:none; color:#9ca3af; cursor:pointer; padding:0 2px; font-size:12px;`;
-                
-                const disableBtn = document.createElement('button');
-                disableBtn.innerHTML = '—';
-                disableBtn.title = 'Отключить слот';
-                disableBtn.style.cssText = `background:transparent; border:none; color:#ef4444; cursor:pointer; padding:0 2px; font-size:12px; font-weight:bold;`;
-                
-                btn.onclick = () => {
-                    btn.textContent = '...';
-                    btn.style.color = '#ef4444';
-                    
-                    window.capturingFor = k;
-                    const handler = (e) => {
-                        e.preventDefault(); e.stopPropagation();
-                        if (['Control', 'Shift', 'Alt', 'Meta', 'AltGraph'].includes(e.key)) return;
-                        
-                        document.removeEventListener('keydown', handler, true);
-                        window.capturingFor = null;
-                        
-                        if (e.key === 'Escape') {
-                            btn.textContent = formatHotkey(hkArr[slotIndex]);
-                            btn.style.color = '#3b82f6';
-                            return;
-                        }
-                        
-                        // v1.3.43: буква, нажатая в русской раскладке, сохраняется латиницей (Ctrl+и → Ctrl+b);
-                        // сверка всё равно идёт и по физической клавише (code), в любой раскладке.
-                        const usKey = mossadUsKeyForCode(e.code || '');
-                        const recKey = (usKey && /^[a-z]$/.test(usKey) && typeof e.key === 'string' && /[^\x00-\x7f]/.test(e.key)) ? usKey : e.key;
-                        const newHk = { key: recKey, code: e.code || '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }; // v1.3.39: + физическая клавиша
-                        hkArr[slotIndex] = newHk;
-                        config.hk[k] = hkArr;
-                        Settings.save();
-                        
-                        btn.textContent = formatHotkey(newHk);
+            label.title = 'Перетащите, чтобы изменить порядок';
+            label.style.cssText = 'font-size:13px; flex:1; cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none; padding-right:8px;';
+
+            const slotDiv = document.createElement('div');
+            slotDiv.style.cssText = 'display:flex; gap:2px; align-items:center;';
+
+            // v1.3.45: одна привязка на действие (резервный слот убран; см. normalizeHotkeyBinding)
+            const cur = () => normalizeHotkeyBinding(config.hk[k]);
+            const setHk = (h) => { config.hk[k] = normalizeHotkeyBinding(h); Settings.save(); };
+
+            const btn = document.createElement('button');
+            btn.className = 'mossad-hk-key';
+            btn.style.cssText = `background:#374151; border:none; color:#3b82f6; padding:4px 10px; border-radius:4px; cursor:pointer; min-width:60px; font-weight:bold; font-size:12px; text-align:center;`;
+            btn.textContent = formatHotkey(cur());
+
+            const resetBtn = document.createElement('button');
+            resetBtn.className = 'mossad-hk-key-reset';
+            resetBtn.textContent = '↺';
+            resetBtn.title = 'Клавиша по умолчанию';
+            resetBtn.style.cssText = `background:transparent; border:none; color:#9ca3af; cursor:pointer; padding:0 2px; font-size:12px;`;
+
+            const disableBtn = document.createElement('button');
+            disableBtn.className = 'mossad-hk-key-off';
+            disableBtn.textContent = '—';
+            disableBtn.title = 'Отключить';
+            disableBtn.style.cssText = `background:transparent; border:none; color:#ef4444; cursor:pointer; padding:0 2px; font-size:12px; font-weight:bold;`;
+
+            btn.onclick = () => {
+                btn.textContent = '...';
+                btn.style.color = '#ef4444';
+
+                window.capturingFor = k;
+                const handler = (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (['Control', 'Shift', 'Alt', 'Meta', 'AltGraph'].includes(e.key)) return;
+
+                    document.removeEventListener('keydown', handler, true);
+                    window.capturingFor = null;
+
+                    if (e.key === 'Escape') {
+                        btn.textContent = formatHotkey(cur());
                         btn.style.color = '#3b82f6';
-                    };
-                    document.addEventListener('keydown', handler, true);
+                        return;
+                    }
+
+                    // v1.3.43: буква, нажатая в русской раскладке, сохраняется латиницей (Ctrl+и → Ctrl+b);
+                    // сверка всё равно идёт и по физической клавише (code), в любой раскладке.
+                    const usKey = mossadUsKeyForCode(e.code || '');
+                    const recKey = (usKey && /^[a-z]$/.test(usKey) && typeof e.key === 'string' && /[^\x00-\x7f]/.test(e.key)) ? usKey : e.key;
+                    const newHk = { key: recKey, code: e.code || '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }; // v1.3.39: + физическая клавиша
+                    setHk(newHk);
+
+                    btn.textContent = formatHotkey(cur());
+                    btn.style.color = '#3b82f6';
                 };
-                
-                resetBtn.onclick = () => {
-                    const defArr = Array.isArray(DEFAULT_CONFIG.hk[k]) ? DEFAULT_CONFIG.hk[k] : [DEFAULT_CONFIG.hk[k], null];
-                    const defHk = slotIndex < defArr.length ? defArr[slotIndex] : null;
-                    hkArr[slotIndex] = defHk;
-                    config.hk[k] = hkArr;
-                    Settings.save();
-                    btn.textContent = formatHotkey(defHk);
-                };
-                
-                disableBtn.onclick = () => {
-                    hkArr[slotIndex] = null;
-                    config.hk[k] = hkArr;
-                    Settings.save();
-                    btn.textContent = formatHotkey(null);
-                };
-                
-                slotDiv.append(btn, resetBtn, disableBtn);
-                return slotDiv;
+                document.addEventListener('keydown', handler, true);
             };
-            
-            slotsContainer.append(createSlot(0), createSlot(1));
-            row.append(label, slotsContainer);
-            list.append(row);
+
+            resetBtn.onclick = () => {
+                setHk(DEFAULT_CONFIG.hk[k]);
+                btn.textContent = formatHotkey(cur());
+            };
+
+            disableBtn.onclick = () => {
+                setHk(null);
+                btn.textContent = formatHotkey(cur());
+            };
+
+            slotDiv.append(btn, resetBtn, disableBtn);
+            row.append(label, slotDiv);
+            return row;
+        };
+        const renderHotkeyList = () => {
+            list.innerHTML = '';
+            orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()).forEach(k => list.append(renderHotkeyRow(k)));
+        };
+        renderHotkeyList();
+        list.style.position = 'relative';
+
+        // ── v1.3.45: перетаскивание строк (pointer events, не HTML5 DnD) ──
+        // Тянем за название: строка «всплывает» (absolute внутри списка), на её месте — пунктирный
+        // заполнитель, который перескакивает между строками по середине их высоты. Отпустили — строка
+        // встаёт на место заполнителя, порядок пишется в GM. Сдвиг < 4 px — не перетаскивание.
+        let hkDrag = null;
+        const hkRows = () => Array.from(list.children).filter(el => el.dataset && el.dataset.hk);
+        const onDragMove = (e) => {
+            const d = hkDrag;
+            if (!d || (d.pointerId != null && e.pointerId != null && e.pointerId !== d.pointerId)) return;
+            const dy = e.clientY - d.startY;
+            if (!d.active) {
+                if (Math.abs(dy) < 4) return;
+                d.active = true;
+                const h = d.row.offsetHeight || d.row.getBoundingClientRect().height || 36;
+                d.ph = document.createElement('div');
+                d.ph.className = 'mossad-hk-placeholder';
+                d.ph.style.cssText = `height:${h}px; border:1px dashed #3b82f6; border-radius:6px; background:rgba(59,130,246,0.08); box-sizing:border-box; flex:none;`;
+                d.startTop = d.row.offsetTop;
+                list.insertBefore(d.ph, d.row);
+                d.row.style.position = 'absolute';
+                d.row.style.left = '0';
+                d.row.style.right = '4px';
+                d.row.style.zIndex = '2';
+                d.row.style.opacity = '0.92';
+                d.row.style.boxShadow = '0 6px 18px rgba(0,0,0,0.55)';
+                d.row.style.pointerEvents = 'none';
+                d.label.style.cursor = 'grabbing';
+                d.prevBodyCursor = document.body.style.cursor;
+                document.body.style.cursor = 'grabbing';
+                modal.dataset.dragging = '1';
+            }
+            e.preventDefault();
+            d.row.style.top = `${d.startTop + dy + (list.scrollTop - d.startScroll)}px`;
+            // Куда встать: перед первой строкой, чья середина ниже указателя
+            const others = hkRows().filter(r => r !== d.row);
+            let before = null;
+            for (const r of others) {
+                const rc = r.getBoundingClientRect();
+                if (e.clientY < rc.top + rc.height / 2) { before = r; break; }
+            }
+            if (before) { if (d.ph.nextSibling !== before) list.insertBefore(d.ph, before); }
+            else if (list.lastChild !== d.ph) list.appendChild(d.ph);
+            // Автопрокрутка у краёв списка
+            const lr = list.getBoundingClientRect();
+            if (lr.height > 0) {
+                if (e.clientY < lr.top + 24) list.scrollTop -= 12;
+                else if (e.clientY > lr.bottom - 24) list.scrollTop += 12;
+            }
+        };
+        const endDrag = (e) => {
+            const d = hkDrag;
+            if (!d || (e && d.pointerId != null && e.pointerId != null && e.pointerId !== d.pointerId)) return;
+            hkDrag = null;
+            document.removeEventListener('pointermove', onDragMove, true);
+            document.removeEventListener('pointerup', endDrag, true);
+            document.removeEventListener('pointercancel', endDrag, true);
+            try { if (d.label.releasePointerCapture && d.pointerId != null) d.label.releasePointerCapture(d.pointerId); } catch (err) {}
+            d.label.style.cursor = 'grab';
+            if (!d.active) return;
+            ['position', 'left', 'right', 'top', 'zIndex', 'opacity', 'boxShadow', 'pointerEvents'].forEach(p => { d.row.style[p] = ''; });
+            if (d.ph && d.ph.parentNode === list) { list.insertBefore(d.row, d.ph); d.ph.remove(); }
+            document.body.style.cursor = d.prevBodyCursor || '';
+            delete modal.dataset.dragging;
+            // Клик после перетаскивания не должен считаться «кликом вне окна»
+            modal._mossadSuppressClickUntil = Date.now() + 300;
+            const order = hkRows().map(r => r.dataset.hk);
+            if (order.join('|') !== d.orderBefore) saveHotkeyOrder(order);
+        };
+        list.addEventListener('pointerdown', (e) => {
+            const label = e.target && e.target.closest ? e.target.closest('.mossad-hk-handle') : null;
+            if (!label || !list.contains(label) || hkDrag) return;
+            if (e.button != null && e.button !== 0) return;
+            if (window.capturingFor !== null && window.capturingFor !== undefined) return; // идёт запись клавиши
+            e.preventDefault(); // не выделять текст
+            const row = label.closest('[data-hk]');
+            hkDrag = { row, label, pointerId: e.pointerId, startY: e.clientY, startScroll: list.scrollTop, active: false, ph: null, orderBefore: hkRows().map(r => r.dataset.hk).join('|') };
+            try { if (label.setPointerCapture && e.pointerId != null) label.setPointerCapture(e.pointerId); } catch (err) {}
+            document.addEventListener('pointermove', onDragMove, true);
+            document.addEventListener('pointerup', endDrag, true);
+            document.addEventListener('pointercancel', endDrag, true);
         });
-        
+        modal._mossadEndDrag = () => endDrag(null);
+
         document.body.appendChild(modal);
 
         // ── Вкладки ──
         const setTab = (t) => {
             const want = (t === 'general' || t === 'hotkeys' || t === 'defaults') ? t : 'hotkeys';
             modal.dataset.tab = want;
+            rememberSettingsTab(want); // v1.3.45
             modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
             modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
                 const on = b.dataset.tab === want;
@@ -9664,16 +9836,45 @@ function findMediaForDownload() {
 
         const closeAndSaveModal = () => closeSettingsWindow(true);
 
-        modal.querySelector('#mossad-hk-save-all').onclick = () => {
-            if (typeof window.saveGlobalHotkeys === 'function') {
-                window.saveGlobalHotkeys(true);
-            } else {
-                Settings.save();
+        // v1.3.45: единственная кнопка «Закрыть» (= ×, Esc, клик вне окна) — всегда с сохранением
+        modal.querySelector('#mossad-hk-close').onclick = closeAndSaveModal;
+
+        // Досохранение при закрытии: числовое поле в фокусе (change ещё не пришёл) и токен без 💾
+        modal._mossadFlush = () => {
+            const rowsEl = modal.querySelector('#mossad-playlist-rows');
+            if (rowsEl) {
+                const v = Math.max(5, Math.min(200, parseInt(rowsEl.value, 10) || 30));
+                if (v !== Number(config.playlistRows)) config.playlistRows = v;
             }
+            const cwEl = modal.querySelector('#mossad-collect-watch-sec');
+            if (cwEl) {
+                const v = Math.max(5, Math.min(600, parseInt(cwEl.value, 10) || 30));
+                if (v !== Number(config.collectWatchSec)) config.collectWatchSec = v;
+            }
+            const tokEl = modal.querySelector('#mossad-gh-token');
+            if (tokEl && tokEl.value !== (config.githubToken || '')) setGithubToken(tokEl.value);
         };
 
-        modal.querySelector('#mossad-hk-save-close').onclick = closeAndSaveModal;
-        modal.querySelector('#mossad-hk-close').onclick = closeAndSaveModal;
+        // v1.3.45: клик вне окна настроек (и вне любых элементов MOSSAD) закрывает его с сохранением.
+        // Только реальные клики (isTrusted — программные .click() скрипта по кнопкам Grok не в счёт),
+        // начатые тоже снаружи; не во время записи клавиши и не сразу после перетаскивания строки.
+        const isInsideMossadEl = (el) => !!(el && el.closest && el.closest('[id^="mossad-"]'));
+        let downOutside = false;
+        const onDocPointerDown = (e) => { downOutside = !isInsideMossadEl(e.target); };
+        const onDocClick = (e) => {
+            const wasOutside = downOutside;
+            downOutside = false;
+            if (!e.isTrusted || !wasOutside) return;
+            if (isInsideMossadEl(e.target)) return;
+            if (window.capturingFor !== null && window.capturingFor !== undefined) return;
+            if (modal.dataset.dragging || Date.now() < (modal._mossadSuppressClickUntil || 0)) return;
+            if (!document.getElementById('mossad-hk-modal')) return;
+            closeSettingsWindow(true);
+        };
+        modal._mossadOnOutsideClick = onDocClick;     // для тестов (isTrusted не подделать)
+        modal._mossadOnOutsidePointerDown = onDocPointerDown;
+        document.addEventListener('pointerdown', onDocPointerDown, true);
+        document.addEventListener('click', onDocClick, true);
 
         const onEscClose = (e) => {
             if (e.key === 'Escape' && window.capturingFor === null) {
@@ -9682,11 +9883,17 @@ function findMediaForDownload() {
         };
         document.addEventListener('keydown', onEscClose);
         // v1.3.40: слушатель Esc снимается при ЛЮБОМ закрытии окна (раньше при закрытии кнопкой/хоткеем он оставался висеть)
-        modal._mossadCleanup = () => document.removeEventListener('keydown', onEscClose);
+        modal._mossadCleanup = () => {
+            document.removeEventListener('keydown', onEscClose);
+            document.removeEventListener('pointerdown', onDocPointerDown, true);
+            document.removeEventListener('click', onDocClick, true);
+            if (typeof modal._mossadEndDrag === 'function') modal._mossadEndDrag();
+        };
 
         modal.querySelector('#mossad-hk-reset').onclick = () => {
             if (!confirm('Сбросить все горячие клавиши по умолчанию?')) return;
             config.hk = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk));
+            normalizeAllHotkeys();
             if (typeof window.saveGlobalHotkeys === 'function') {
                 window.saveGlobalHotkeys(false);
             } else {
@@ -9696,6 +9903,12 @@ function findMediaForDownload() {
             openSettingsWindow('hotkeys'); // переоткрыть с обновлёнными клавишами
             showToast('✅ Клавиши сброшены по умолчанию для всех сайтов');
         };
+        modal.querySelector('#mossad-hk-order-reset').onclick = () => {
+            clearHotkeyOrder();
+            renderHotkeyList();
+            showToast('↕ Исходный порядок клавиш');
+        };
+        return modal;
     }
 
 // ============================================
@@ -9955,7 +10168,7 @@ function findMediaForDownload() {
             // Ctrl+F1 (и любые переназначенные слоты help): открыть/закрыть окно настроек.
             // Если окно открыто — закрыть с сохранением (с любой вкладки), как раньше.
             if (document.getElementById('mossad-hk-modal')) { closeSettingsWindow(true); return; }
-            openSettingsWindow('hotkeys');
+            openSettingsWindow(); // v1.3.45: последняя открытая вкладка
             return;
         }
 
