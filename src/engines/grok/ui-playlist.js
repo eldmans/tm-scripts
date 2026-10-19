@@ -596,7 +596,7 @@
                     const label = document.createElement('span');
                     label.className = 'mossad-playlist-label';
                     label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;transition:color 0.12s;`;
-                    const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 22)}`;
+                    const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : (item.type ? '🖼' : '❔')} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 22)}`;
                     label.textContent = baseText;
                     li.dataset.origText = baseText;
                     label.title = item.url;
@@ -650,7 +650,7 @@
                 const label = document.createElement('span');
                 label.className = 'mossad-playlist-label';
                 label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;transition:color 0.12s;`;
-                const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 26)}`;
+                const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : (item.type ? '🖼' : '❔')} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 26)}`;
                 label.textContent = baseText;
                 li.dataset.origText = baseText;
                 label.title = item.url;

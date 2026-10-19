@@ -166,6 +166,48 @@
             v.isConnected && !v.closest(GROK_FILMSTRIP_SEL) && !v.closest('#mossad-widget, [id^="mossad-"]'));
     }
 
+    /**
+     * v1.3.43: лучший <video> поста из списка. Раньше брали «самое видимое», при равенстве — первое в DOM.
+     * После круга (повтор) Grok может держать в DOM старый элемент того же поста (на паузе, «замёрзший»
+     * на ~1 с) раньше свежего — слайдшоу считало круги по нему и висело. Теперь важнее: src с UUID
+     * текущего поста, видео играет, есть данные (readyState), затем видимая площадь.
+     */
+    /** v1.3.43: src ролика указывает на ДРУГУЮ генерацию (…/generated/<uuid>/…), не на текущий пост. */
+    function grokIsForeignVideo(v) {
+        const uuid = grokExtractUuid(location.pathname);
+        if (!uuid || !v) return false;
+        const src = (v.currentSrc || v.src || '').toLowerCase();
+        const m = src.match(/(?:generated|post)\/([a-f0-9-]{36})/);
+        return !!(m && m[1] !== uuid);
+    }
+
+    function grokPickBestVideo(videos) {
+        if (!videos || !videos.length) return null;
+        if (videos.length === 1) return videos[0];
+        const uuid = grokExtractUuid(location.pathname);
+        let best = null, bestScore = -1;
+        for (const v of videos) {
+            const src = (v.currentSrc || v.src || '').toLowerCase();
+            let area = 0;
+            try {
+                const r = v.getBoundingClientRect();
+                const vh = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+                const vw = Math.max(0, Math.min(r.right, window.innerWidth) - Math.max(r.left, 0));
+                area = vh * vw;
+            } catch (e) {}
+            let score = 0;
+            if (uuid && src.includes(uuid)) score += 8;
+            else if (grokIsForeignVideo(v)) score -= 8; // ролик другой генерации
+            if (!v.paused && !v.ended) score += 4;
+            if (v.readyState >= 2) score += 1;
+            if (area > 0) score += 2;
+            // площадь — только для различения равных (0..1)
+            score += Math.min(1, area / Math.max(1, window.innerWidth * window.innerHeight));
+            if (score > bestScore) { best = v; bestScore = score; }
+        }
+        return best;
+    }
+
     /** Главная картинка поста (сгенерированное изображение, не миниатюра и не аватар) или null. */
     function grokFindMainImage() {
         const uuid = grokExtractUuid(location.pathname);
@@ -191,21 +233,24 @@
      * Признаки медиа текущего поста. Ничего не ждёт — только читает DOM; ожиданием управляет
      * scheduleNextSlideCycle (src/slideshow/engine.js).
      *   staleSrc — src <video> предыдущего слайда: такой ролик ещё не сменился, он «старый».
-     * Возвращает { video, staleVideo, soundBtn, mainImg, imageBtn, settled }.
+     * Возвращает { video, staleVideo, soundBtn, mainImg, imageBtn, makeVideoBtn, settled }.
      */
     function grokDetectSlideMedia(staleSrc = '') {
         const vids = grokGetViewerVideos();
         let video = null, staleVideo = null;
-        for (const v of vids) {
+        // v1.3.43: «чужой» ролик — src с UUID другой генерации (остался от прошлого слайда/круга) — как старый
+        const isOld = (v) => {
             const src = v.currentSrc || v.src || '';
-            if (staleSrc && src && src === staleSrc) { staleVideo = staleVideo || v; continue; }
-            if (!video) video = v;
+            if (staleSrc && src && src === staleSrc) return true;
+            return grokIsForeignVideo(v);
+        };
+        const fresh = [];
+        for (const v of vids) {
+            if (isOld(v)) { staleVideo = staleVideo || v; continue; }
+            fresh.push(v);
         }
-        // Если видео несколько — то, что выбрал бы движок (самое видимое), если оно «свежее»
-        if (video && vids.length > 1 && typeof getActiveVideo === 'function') {
-            const act = getActiveVideo();
-            if (act && act !== staleVideo && vids.includes(act)) video = act;
-        }
+        // Если «свежих» видео несколько — лучшее (v1.3.43: UUID поста в src, играет, видимо)
+        video = fresh.length > 1 ? grokPickBestVideo(fresh) : (fresh[0] || null);
         let soundBtn = null;
         try { soundBtn = findGrokSoundToggleButton({ includeHidden: true }); } catch (e) {}
         // «Удалить изображение» (видно, если меню поста раскрыто) — железное подтверждение фото
@@ -224,5 +269,12 @@
                 if (ss.active && ss.targetUuid && cur && cur !== String(ss.targetUuid).toLowerCase()) settled = false;
             } catch (e) {}
         }
-        return { video, staleVideo, soundBtn, mainImg: grokFindMainImage(), imageBtn, settled };
+        // v1.3.43: «Make video» (сделать видео из картинки) бывает только у фото — сильный признак фото
+        let makeVideoBtn = null;
+        try {
+            makeVideoBtn = Array.from(document.querySelectorAll('button, [role="button"], a')).find(el =>
+                !el.closest(GROK_FILMSTRIP_SEL) && !el.closest('#mossad-widget, [id^="mossad-"]') &&
+                GROK_MAKE_VIDEO_RE.test([el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].map(x => x || '').join(' '))) || null;
+        } catch (e) {}
+        return { video, staleVideo, soundBtn, mainImg: grokFindMainImage(), imageBtn, makeVideoBtn, settled };
     }

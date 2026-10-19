@@ -127,7 +127,11 @@
 
         let videos = Array.from(document.querySelectorAll('video'));
         // v1.3.42: на Grok <video> в кадрах киноплёнки — миниатюры других генераций, не плеер поста
-        if (rootDomain === 'grok.com') videos = videos.filter(v => !v.closest(GROK_FILMSTRIP_SEL));
+        if (rootDomain === 'grok.com') {
+            videos = videos.filter(v => !v.closest(GROK_FILMSTRIP_SEL));
+            if (videos.length === 0) return null;
+            return grokPickBestVideo(videos); // v1.3.43: UUID поста / играет / видимо (не «первое в DOM»)
+        }
         if (videos.length === 0) return null;
         
         // На Пинтересте ищем видео в главном контейнере сцены пина (closeup-stage / main)
@@ -497,7 +501,9 @@
 
         // Быстрое определение по кнопкам Grok (появляются раньше видео-плеера)
         if (rootDomain === 'grok.com') {
-            const allBtns = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]'));
+            // v1.3.43: кнопка «Make video» (у фото) — не признак видео
+            const allBtns = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]'))
+                .filter(el => !/make\s*video/i.test([el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].map(x => x || '').join(' ')));
             const btnTexts = allBtns.map(el => (el.textContent || '').trim());
             const btnArias = allBtns.map(el => (el.getAttribute('aria-label') || '').toLowerCase());
             // "Удалить изображение" — железное подтверждение что это фото
@@ -643,6 +649,24 @@
     const GROK_VIDEO_WAIT_MS    = 6000; // сбор сказал «видео» или есть кнопка звука, а <video> ещё нет
     const GROK_DETECT_POLL_MS   = 100;
     let _grokDetectStartedAt = 0;
+    const GROK_STALL_MS      = 1500;  // v1.3.43: время видео не идёт столько — восстанавливаем
+    const GROK_STALL_SKIP_MS = 10000; // не помогло — следующий слайд
+    let _stallNode = null, _stallCt = -1, _stallSince = 0, _stallLastFix = 0;
+
+    /**
+     * v1.3.43: сброс «памяти» прошлых слайдов при повторе (круг слайдшоу / перемотка ленты в начало).
+     * Те же посты показываются снова: src «прошлого видео» и lastActiveVideo из прошлого круга не
+     * должны влиять на первый слайд нового круга.
+     */
+    function resetSlideTrackingState(reason) {
+        mossadDebug('cycle', 'сброс состояния слайдов (повтор)', { reason });
+        _lastCycleSlideKey = '';
+        _lastCycleVideoSrc = '';
+        lastActiveVideo = null;
+        _stallNode = null;
+        _grokDetectStartedAt = 0;
+    }
+    window.resetSlideTrackingState = resetSlideTrackingState;
 
     function startPhotoCountdown(initSec, why) {
         sessionStorage.removeItem('mossad_expected_type');
@@ -681,8 +705,16 @@
             startPhotoCountdown(initSec, 'кнопка «Удалить изображение»');
             return true;
         }
-        if (d.staleVideo) {
-            // На экране ещё ролик прошлого слайда: ждём смены (как в v1.3.38), затем — по признакам
+        // v1.3.43: «Make video» есть только у фото. Если сбор сказал «видео» — не верим кнопке
+        // (ждём <video>, как ниже); иначе — фото сразу, без окна ожидания.
+        if (d.makeVideoBtn && (!d.staleVideo || curImg) && expected !== 'video' && d.settled) {
+            startPhotoCountdown(initSec, 'кнопка «Make video»');
+            return true;
+        }
+        const curImg = !!(d.mainImg && curUuid && (d.mainImg.currentSrc || d.mainImg.src || '').toLowerCase().includes(curUuid));
+        if (d.staleVideo && !curImg) {
+            // На экране ещё ролик прошлого слайда: ждём смены (как в v1.3.38), затем — по признакам.
+            // v1.3.43: если уже видна картинка именно этого поста — старый ролик не ждём.
             if (sinceStart < GROK_STALE_WAIT_MS) return again();
             if (expected === 'image' && d.mainImg) { startPhotoCountdown(initSec, 'старое видео не сменилось, сбор: фото'); return true; }
             return d.staleVideo; // как раньше: принимаем ролик как видео этого слайда
@@ -732,6 +764,40 @@
             return;
         }
         _videoDetachedSince = 0;
+
+        // v1.3.43: «замёрзшее» видео на Grok (время не идёт > GROK_STALL_MS — на паузе не по воле
+        // пользователя или без данных). После повтора круга Grok держал в DOM старый элемент того же
+        // поста; счётчик кругов смотрел на него, таймер стоял на 1 с. Порядок восстановления:
+        // перепривязка к лучшему <video>; если другого нет и ролик НЕ на паузе (застрял) — play(),
+        // через GROK_STALL_SKIP_MS — следующий слайд. На паузе без другого ролика — ждём (пауза пользователя).
+        if (rootDomain === 'grok.com') {
+            const nowS = timeNow || performance.now();
+            const ctS = currentVideoNode.currentTime;
+            if (_stallNode !== currentVideoNode || Math.abs(ctS - _stallCt) > 0.01) {
+                _stallNode = currentVideoNode; _stallCt = ctS; _stallSince = nowS; _stallLastFix = 0;
+            } else if (!currentVideoNode._mossadUserPaused && nowS - _stallSince > GROK_STALL_MS && nowS - _stallLastFix > 700) {
+                _stallLastFix = nowS;
+                const act = getActiveVideo();
+                if (act && act !== currentVideoNode) {
+                    mossadDebug('loop', 'видео стоит — перепривязка к другому <video>', { ms: Math.round(nowS - _stallSince), paused: currentVideoNode.paused });
+                    rebindVideoNode(act, 'stall');
+                    if (!rafId) rafId = requestAnimationFrame(checkVideoLoops);
+                    return;
+                }
+                // На паузе и другого видео нет — это, скорее всего, пауза пользователя (клик по ролику): ждём, как раньше
+                if (currentVideoNode.paused) { /* ждём */ }
+                else if (nowS - _stallSince > GROK_STALL_SKIP_MS) {
+                    mossadDebug('loop', 'видео стоит слишком долго — следующий слайд', { ms: Math.round(nowS - _stallSince) });
+                    _stallNode = null;
+                    triggerNextSlide('video-stall');
+                    return;
+                }
+                else {
+                    mossadDebug('loop', 'видео стоит (не на паузе) — play()', { ms: Math.round(nowS - _stallSince) });
+                    try { currentVideoNode.play().catch(() => {}); } catch (e) {}
+                }
+            }
+        }
 
         // Если видео на паузе: либо пользователь поставил паузу (ждём), либо мы следим не за тем элементом
         if (currentVideoNode.paused) {

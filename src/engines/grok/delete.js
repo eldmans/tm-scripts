@@ -23,11 +23,13 @@
             const idx = unique.indexOf(currentId);
 
             let targetId = null;
+            let wrapped = false; // v1.3.43: повтор (R) — переход через край списка
             if (isFwd) {
                 if (idx >= 0 && idx < unique.length - 1) {
                     targetId = unique[idx + 1];
                 } else if (loop && unique.length > 0) {
                     targetId = unique[0];
+                    wrapped = true;
                 } else if (isDelete && !loop && idx > 0) {
                     targetId = unique[idx - 1];
                 }
@@ -36,10 +38,12 @@
                     targetId = unique[idx - 1];
                 } else if (loop && unique.length > 0) {
                     targetId = unique[unique.length - 1];
+                    wrapped = true;
                 } else if (isDelete && !loop && idx < unique.length - 1) {
                     targetId = unique[idx + 1];
                 }
             }
+            if (wrapped && targetId && typeof window.resetSlideTrackingState === 'function') window.resetSlideTrackingState('wrap-neighbor');
             if (targetId && seen.get(targetId)) return seen.get(targetId);
         }
 

@@ -159,23 +159,68 @@
         parts.push(hk.key === '+' ? '«+»' : hk.key);
         return parts.join('+');
     }
+    // ── v1.3.43: физическая клавиша (KeyboardEvent.code) для символа — раскладко-независимые хоткеи ──
+    // Строки: code, символ US без Shift, с Shift, символ русской раскладки (ЙЦУКЕН) без Shift / с Shift.
+    // Раньше (v1.3.37) по e.code сверялись только латинские буквы и цифры, а (v1.3.39) — хоткеи,
+    // записанные с полем code. Знаки («/», «.», «;», «[» …) и хоткеи, записанные в русской
+    // раскладке до v1.3.39 (key: 'и' без code), в другой раскладке не срабатывали. ANTI_PATTERNS §22.
+    const MOSSAD_KEY_LAYOUT = (() => {
+        const rows = [
+            ['Backquote', '`', '~', 'ё', 'Ё'], ['Minus', '-', '_'], ['Equal', '=', '+'],
+            ['BracketLeft', '[', '{', 'х', 'Х'], ['BracketRight', ']', '}', 'ъ', 'Ъ'], ['Backslash', '\\', '|'],
+            ['Semicolon', ';', ':', 'ж', 'Ж'], ['Quote', "'", '"', 'э', 'Э'],
+            ['Comma', ',', '<', 'б', 'Б'], ['Period', '.', '>', 'ю', 'Ю'], ['Slash', '/', '?'],
+            ['Digit1', '1', '!'], ['Digit2', '2', '@'], ['Digit3', '3', '#'], ['Digit4', '4', '$'], ['Digit5', '5', '%'],
+            ['Digit6', '6', '^'], ['Digit7', '7', '&'], ['Digit8', '8', '*'], ['Digit9', '9', '('], ['Digit0', '0', ')'],
+            ['Space', ' ', ' ']
+        ];
+        const ru = 'йцукенгшщзфывапролдячсмитьбю';
+        const us = 'qwertyuiopasdfghjklzxcvbnm';
+        for (let i = 0; i < us.length; i++) rows.push(['Key' + us[i].toUpperCase(), us[i], us[i].toUpperCase(), ru[i], ru[i].toUpperCase()]);
+        const charToCode = new Map();
+        const codeToUs = new Map();
+        const codeToUsShift = new Map();
+        // Сначала US (без Shift / с Shift), затем русские буквы — «.» и «,» остаются за US-клавишами
+        rows.forEach(([code, u, us2]) => {
+            codeToUs.set(code, u);
+            if (us2) codeToUsShift.set(code, us2);
+            if (!charToCode.has(u)) charToCode.set(u, code);
+            if (us2 && !charToCode.has(us2)) charToCode.set(us2, code);
+        });
+        rows.forEach(([code, , , r, r2]) => {
+            if (r && !charToCode.has(r)) charToCode.set(r, code);
+            if (r2 && !charToCode.has(r2)) charToCode.set(r2, code);
+        });
+        // ю/б заняты клавишами Period/Comma; в ряду букв у них свои code — исправляем
+        charToCode.set('ю', 'Period'); charToCode.set('Ю', 'Period'); charToCode.set('б', 'Comma'); charToCode.set('Б', 'Comma');
+        return { charToCode, codeToUs, codeToUsShift };
+    })();
+
+    /** e.code для символа хоткея (или ''): 'b' / 'и' → 'KeyB', '/' → 'Slash', '.' → 'Period'. */
+    function mossadCodeForKey(key) {
+        if (typeof key !== 'string' || key.length !== 1) return '';
+        return MOSSAD_KEY_LAYOUT.charToCode.get(key) || MOSSAD_KEY_LAYOUT.charToCode.get(key.toLowerCase()) || '';
+    }
+
+    /** Символ US-раскладки для e.code (shift — с Shift) или ''. */
+    function mossadUsKeyForCode(code, shift = false) {
+        return (shift && MOSSAD_KEY_LAYOUT.codeToUsShift.get(code)) || MOSSAD_KEY_LAYOUT.codeToUs.get(code) || '';
+    }
+
     function hotkeyMatches(e, hk) {
         if (!hk) return false;
         if (Array.isArray(hk)) return hk.some(k => hotkeyMatches(e, k));
         if (!hk.key) return false;
         let keyMatch = e.key === hk.key || (typeof e.key === 'string' && typeof hk.key === 'string' && e.key.toLowerCase() === hk.key.toLowerCase());
-        // v1.3.37: латинские буквы/цифры сверяем и по физической клавише (e.code), чтобы
-        // хоткеи вида Alt+R работали в русской раскладке (там e.key === 'к').
-        if (!keyMatch && typeof hk.key === 'string' && /^[a-z0-9]$/i.test(hk.key) && typeof e.code === 'string') {
-            keyMatch = e.code === (/[0-9]/.test(hk.key) ? 'Digit' + hk.key : 'Key' + hk.key.toUpperCase());
-        }
-        // v1.3.39: хоткей, записанный с физической клавишей (hk.code), совпадает по e.code в любой раскладке.
-        // «+» на основном ряду (Equal) и на цифровом блоке (NumpadAdd) считаются одной клавишей.
+        // «+» на основном ряду (Equal) и на цифровом блоке (NumpadAdd) считаются одной клавишей (v1.3.39).
         const PLUS_CODES = ['Equal', 'NumpadAdd'];
         if (!keyMatch && typeof e.code === 'string' && (hk.key === '+' || PLUS_CODES.includes(hk.code))) {
             keyMatch = PLUS_CODES.includes(e.code);
-        } else if (!keyMatch && hk.code && typeof e.code === 'string') {
-            keyMatch = e.code === hk.code;
+        } else if (!keyMatch && typeof e.code === 'string' && e.code) {
+            // v1.3.39: записанная физическая клавиша (hk.code); v1.3.43: иначе — code, выведенный из символа
+            // (буквы US/RU, цифры, знаки). Так Ctrl+B / Ctrl+/ / Alt+R работают в любой раскладке.
+            const code = hk.code || mossadCodeForKey(hk.key);
+            if (code) keyMatch = e.code === code;
         }
         return keyMatch &&
             !!e.ctrlKey  === !!hk.ctrl &&

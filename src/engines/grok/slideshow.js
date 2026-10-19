@@ -332,6 +332,7 @@
         grokHighlightActivePlaylistItem(startItem.url);
 
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
+        else sessionStorage.removeItem('mossad_expected_type'); // v1.3.43: тип неизвестен — не оставлять подсказку прошлого слайда
 
         grokBeginNav(startItem.url, 'manual-pick', true);
         const navSeq = _galleryNav.seq;
@@ -433,6 +434,7 @@
 
         if (nextRes.circleCompleted) {
             playCircleDoneSound();
+            resetSlideTrackingState('circle'); // v1.3.43: новый круг — забыть «прошлое видео» прошлого круга
             let ss = {};
             try { ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}'); } catch(e) {}
             ss.circle = (ss.circle || 1) + 1;
@@ -449,6 +451,7 @@
         mossadDebug('step', 'автошаг', { source, circle: !!nextRes.circleCompleted, target: ss.targetUuid });
 
         if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
+        else sessionStorage.removeItem('mossad_expected_type'); // v1.3.43: тип неизвестен — не оставлять подсказку прошлого слайда
         grokSpaNavigate(nextRes.item.url);
         return true;
     }

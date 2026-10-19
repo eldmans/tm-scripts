@@ -3,6 +3,39 @@
     // ============================================
     window.capturingFor = null;
 
+    // ── v1.3.43: «мост раскладки» для СОБСТВЕННЫХ сочетаний Grok (Ctrl+B — свернуть боковую панель, Ctrl+/) ──
+    // Это не хоткеи MOSSAD: их обрабатывает сам сайт и сравнивает e.key ('b', '/'). В русской раскладке
+    // e.key === 'и' (KeyB) и '.' (Slash) — сайт их не узнаёт. Ловим такое нажатие раньше всех (window, capture),
+    // гасим оригинал и отправляем копию с латинским e.key и тем же e.code/модификаторами. Если сайт отменил
+    // копию (preventDefault) — отменяем и оригинал (чтобы, например, Firefox не открыл панель закладок).
+    // Только белый список клавиш: Ctrl+C/V/X/A/Z и т.п. в полях ввода не трогаем (у копии нет действия по умолчанию).
+    const GROK_LAYOUT_BRIDGE_CODES = ['KeyB', 'Slash'];
+    window.addEventListener('keydown', function grokLayoutBridge(e) {
+        if (rootDomain !== 'grok.com' || window.capturingFor !== null) return;
+        if (e.__mossadLayoutBridge || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+        if (!GROK_LAYOUT_BRIDGE_CODES.includes(e.code)) return;
+        const us = mossadUsKeyForCode(e.code);
+        if (!us || e.key === us || e.key === mossadUsKeyForCode(e.code, true)) return; // латинская раскладка — сайт справится сам
+        const key = mossadUsKeyForCode(e.code, e.shiftKey);
+        let copy;
+        try {
+            copy = new KeyboardEvent('keydown', {
+                key, code: e.code, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, altKey: false,
+                repeat: e.repeat, bubbles: true, cancelable: true, composed: true
+            });
+            Object.defineProperty(copy, '__mossadLayoutBridge', { value: true });
+            // Старые обработчики смотрят keyCode/which (у копии они 0)
+            const kc = /^Key[A-Z]$/.test(e.code) ? e.code.charCodeAt(3) : (e.keyCode || 0);
+            Object.defineProperty(copy, 'keyCode', { get: () => kc });
+            Object.defineProperty(copy, 'which', { get: () => kc });
+        } catch (err) { return; }
+        e.stopImmediatePropagation();
+        const target = (e.target && e.target.dispatchEvent) ? e.target : document;
+        mossadDebug('hotkey', 'мост раскладки: сочетание сайта', { code: e.code, key: e.key, as: key });
+        const notCancelled = target.dispatchEvent(copy);
+        if (!notCancelled) e.preventDefault();
+    }, true);
+
     function isSlideshowActiveOrPaused() {
         if (typeof slideshowActive !== 'undefined' && slideshowActive) return true;
         if (typeof slideshowPaused !== 'undefined' && slideshowPaused) return true;
@@ -60,6 +93,7 @@
                 grokBeginNav(targetItem.url, 'manual:' + dir, true);
                 grokSyncSlidePosition(targetItem, { source: 'manual:' + dir });
                 if (targetItem.type) sessionStorage.setItem('mossad_expected_type', targetItem.type);
+                else sessionStorage.removeItem('mossad_expected_type'); // v1.3.43: тип неизвестен — не оставлять подсказку прошлого слайда
                 const struct = grokGetPlaylistStructure();
                 const curPos = (struct) ? grokFindCurrentPosition(struct, targetItem.url) : null;
                 const posStr = (curPos && curPos.flatIndex !== -1) ? ` ${curPos.flatIndex + 1}/${struct.items.length}` : '';
@@ -158,6 +192,7 @@
                 grokBeginNav(nextRes.item.url, isNextGrp ? 'manual:next_grp' : 'manual:prev_grp', true);
                 grokSyncSlidePosition(nextRes.item, { source: 'manual:grp' });
                 if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
+                else sessionStorage.removeItem('mossad_expected_type'); // v1.3.43: тип неизвестен — не оставлять подсказку прошлого слайда
                 showToast(`📁 Группа: ${isNextGrp ? '↓' : '↑'}`);
                 grokSpaNavigate(nextRes.item.url);
                 setTimeout(() => {
@@ -310,8 +345,9 @@
             e.preventDefault();
             const video = getActiveVideo();
             if (video) {
-                if (video.paused) video.play();
-                else video.pause();
+                // v1.3.43: пауза пользователя — сторож «замёрзшего» видео её не снимает
+                if (video.paused) { video._mossadUserPaused = false; video.play(); }
+                else { video._mossadUserPaused = true; video.pause(); }
                 showToast(video.paused ? '▶ Проигрывание' : '⏸ Пауза');
             }
         }
@@ -325,7 +361,7 @@
         }
 
         // Обновить скрипт (Win+Alt+R) / Мотать в начало (Alt+R по умолчанию)
-        if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R'))) {
+        if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR'))) {
             e.preventDefault();
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         } else if (hotkeyMatches(e, config.hk.rewind) && !e.metaKey) {

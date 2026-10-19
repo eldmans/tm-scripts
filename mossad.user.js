@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.42
+// @version      1.3.43
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -22,7 +22,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.42';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.43';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -693,23 +693,68 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         parts.push(hk.key === '+' ? '«+»' : hk.key);
         return parts.join('+');
     }
+    // ── v1.3.43: физическая клавиша (KeyboardEvent.code) для символа — раскладко-независимые хоткеи ──
+    // Строки: code, символ US без Shift, с Shift, символ русской раскладки (ЙЦУКЕН) без Shift / с Shift.
+    // Раньше (v1.3.37) по e.code сверялись только латинские буквы и цифры, а (v1.3.39) — хоткеи,
+    // записанные с полем code. Знаки («/», «.», «;», «[» …) и хоткеи, записанные в русской
+    // раскладке до v1.3.39 (key: 'и' без code), в другой раскладке не срабатывали. ANTI_PATTERNS §22.
+    const MOSSAD_KEY_LAYOUT = (() => {
+        const rows = [
+            ['Backquote', '`', '~', 'ё', 'Ё'], ['Minus', '-', '_'], ['Equal', '=', '+'],
+            ['BracketLeft', '[', '{', 'х', 'Х'], ['BracketRight', ']', '}', 'ъ', 'Ъ'], ['Backslash', '\\', '|'],
+            ['Semicolon', ';', ':', 'ж', 'Ж'], ['Quote', "'", '"', 'э', 'Э'],
+            ['Comma', ',', '<', 'б', 'Б'], ['Period', '.', '>', 'ю', 'Ю'], ['Slash', '/', '?'],
+            ['Digit1', '1', '!'], ['Digit2', '2', '@'], ['Digit3', '3', '#'], ['Digit4', '4', '$'], ['Digit5', '5', '%'],
+            ['Digit6', '6', '^'], ['Digit7', '7', '&'], ['Digit8', '8', '*'], ['Digit9', '9', '('], ['Digit0', '0', ')'],
+            ['Space', ' ', ' ']
+        ];
+        const ru = 'йцукенгшщзфывапролдячсмитьбю';
+        const us = 'qwertyuiopasdfghjklzxcvbnm';
+        for (let i = 0; i < us.length; i++) rows.push(['Key' + us[i].toUpperCase(), us[i], us[i].toUpperCase(), ru[i], ru[i].toUpperCase()]);
+        const charToCode = new Map();
+        const codeToUs = new Map();
+        const codeToUsShift = new Map();
+        // Сначала US (без Shift / с Shift), затем русские буквы — «.» и «,» остаются за US-клавишами
+        rows.forEach(([code, u, us2]) => {
+            codeToUs.set(code, u);
+            if (us2) codeToUsShift.set(code, us2);
+            if (!charToCode.has(u)) charToCode.set(u, code);
+            if (us2 && !charToCode.has(us2)) charToCode.set(us2, code);
+        });
+        rows.forEach(([code, , , r, r2]) => {
+            if (r && !charToCode.has(r)) charToCode.set(r, code);
+            if (r2 && !charToCode.has(r2)) charToCode.set(r2, code);
+        });
+        // ю/б заняты клавишами Period/Comma; в ряду букв у них свои code — исправляем
+        charToCode.set('ю', 'Period'); charToCode.set('Ю', 'Period'); charToCode.set('б', 'Comma'); charToCode.set('Б', 'Comma');
+        return { charToCode, codeToUs, codeToUsShift };
+    })();
+
+    /** e.code для символа хоткея (или ''): 'b' / 'и' → 'KeyB', '/' → 'Slash', '.' → 'Period'. */
+    function mossadCodeForKey(key) {
+        if (typeof key !== 'string' || key.length !== 1) return '';
+        return MOSSAD_KEY_LAYOUT.charToCode.get(key) || MOSSAD_KEY_LAYOUT.charToCode.get(key.toLowerCase()) || '';
+    }
+
+    /** Символ US-раскладки для e.code (shift — с Shift) или ''. */
+    function mossadUsKeyForCode(code, shift = false) {
+        return (shift && MOSSAD_KEY_LAYOUT.codeToUsShift.get(code)) || MOSSAD_KEY_LAYOUT.codeToUs.get(code) || '';
+    }
+
     function hotkeyMatches(e, hk) {
         if (!hk) return false;
         if (Array.isArray(hk)) return hk.some(k => hotkeyMatches(e, k));
         if (!hk.key) return false;
         let keyMatch = e.key === hk.key || (typeof e.key === 'string' && typeof hk.key === 'string' && e.key.toLowerCase() === hk.key.toLowerCase());
-        // v1.3.37: латинские буквы/цифры сверяем и по физической клавише (e.code), чтобы
-        // хоткеи вида Alt+R работали в русской раскладке (там e.key === 'к').
-        if (!keyMatch && typeof hk.key === 'string' && /^[a-z0-9]$/i.test(hk.key) && typeof e.code === 'string') {
-            keyMatch = e.code === (/[0-9]/.test(hk.key) ? 'Digit' + hk.key : 'Key' + hk.key.toUpperCase());
-        }
-        // v1.3.39: хоткей, записанный с физической клавишей (hk.code), совпадает по e.code в любой раскладке.
-        // «+» на основном ряду (Equal) и на цифровом блоке (NumpadAdd) считаются одной клавишей.
+        // «+» на основном ряду (Equal) и на цифровом блоке (NumpadAdd) считаются одной клавишей (v1.3.39).
         const PLUS_CODES = ['Equal', 'NumpadAdd'];
         if (!keyMatch && typeof e.code === 'string' && (hk.key === '+' || PLUS_CODES.includes(hk.code))) {
             keyMatch = PLUS_CODES.includes(e.code);
-        } else if (!keyMatch && hk.code && typeof e.code === 'string') {
-            keyMatch = e.code === hk.code;
+        } else if (!keyMatch && typeof e.code === 'string' && e.code) {
+            // v1.3.39: записанная физическая клавиша (hk.code); v1.3.43: иначе — code, выведенный из символа
+            // (буквы US/RU, цифры, знаки). Так Ctrl+B / Ctrl+/ / Alt+R работают в любой раскладке.
+            const code = hk.code || mossadCodeForKey(hk.key);
+            if (code) keyMatch = e.code === code;
         }
         return keyMatch &&
             !!e.ctrlKey  === !!hk.ctrl &&
@@ -1131,6 +1176,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         if (_isRewinding) return;
         _isRewinding = true;
         window._isRewinding = true;
+        // v1.3.43: на время перемотки — никаких таймеров/подсчёта кругов (раньше RAF перепривязывался
+        // и запускал play() у роликов, пролетающих при перемотке); после — сброс памяти прошлого круга.
+        if (typeof window.cancelSlideTimers === 'function') window.cancelSlideTimers();
 
         let oppDir = 'down';
         const d0 = (config.slideshowDirections || ['up'])[0];
@@ -1154,6 +1202,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                         clearInterval(interval);
                         _isRewinding = false;
                         window._isRewinding = false;
+                        if (typeof window.resetSlideTrackingState === 'function') window.resetSlideTrackingState('rewind');
                         showToast('🏁 Достигнуто начало ленты');
                         if (typeof onComplete === 'function') {
                             setTimeout(onComplete, 400);
@@ -2435,6 +2484,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             if (el.closest('#mossad-widget, [id^="mossad-"]')) continue; // свои кнопки MOSSAD не трогаем
             if (el.closest(GROK_FILMSTRIP_SEL)) continue; // кадры киноплёнки — не плеер
             if (isGrokMusicNoteButton(el)) continue;
+            // v1.3.43: «Make video» (белый треугольник в круге) — генерация видео из фото, не плеер
+            if (/make\s*video/i.test([el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].map(x => x || '').join(' '))) continue;
             if (el.hasAttribute('aria-haspopup')) continue; // mute не открывает меню
             const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).toLowerCase().trim();
             const txt = (el.textContent || '').trim().toLowerCase();
@@ -2757,6 +2808,48 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             v.isConnected && !v.closest(GROK_FILMSTRIP_SEL) && !v.closest('#mossad-widget, [id^="mossad-"]'));
     }
 
+    /**
+     * v1.3.43: лучший <video> поста из списка. Раньше брали «самое видимое», при равенстве — первое в DOM.
+     * После круга (повтор) Grok может держать в DOM старый элемент того же поста (на паузе, «замёрзший»
+     * на ~1 с) раньше свежего — слайдшоу считало круги по нему и висело. Теперь важнее: src с UUID
+     * текущего поста, видео играет, есть данные (readyState), затем видимая площадь.
+     */
+    /** v1.3.43: src ролика указывает на ДРУГУЮ генерацию (…/generated/<uuid>/…), не на текущий пост. */
+    function grokIsForeignVideo(v) {
+        const uuid = grokExtractUuid(location.pathname);
+        if (!uuid || !v) return false;
+        const src = (v.currentSrc || v.src || '').toLowerCase();
+        const m = src.match(/(?:generated|post)\/([a-f0-9-]{36})/);
+        return !!(m && m[1] !== uuid);
+    }
+
+    function grokPickBestVideo(videos) {
+        if (!videos || !videos.length) return null;
+        if (videos.length === 1) return videos[0];
+        const uuid = grokExtractUuid(location.pathname);
+        let best = null, bestScore = -1;
+        for (const v of videos) {
+            const src = (v.currentSrc || v.src || '').toLowerCase();
+            let area = 0;
+            try {
+                const r = v.getBoundingClientRect();
+                const vh = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+                const vw = Math.max(0, Math.min(r.right, window.innerWidth) - Math.max(r.left, 0));
+                area = vh * vw;
+            } catch (e) {}
+            let score = 0;
+            if (uuid && src.includes(uuid)) score += 8;
+            else if (grokIsForeignVideo(v)) score -= 8; // ролик другой генерации
+            if (!v.paused && !v.ended) score += 4;
+            if (v.readyState >= 2) score += 1;
+            if (area > 0) score += 2;
+            // площадь — только для различения равных (0..1)
+            score += Math.min(1, area / Math.max(1, window.innerWidth * window.innerHeight));
+            if (score > bestScore) { best = v; bestScore = score; }
+        }
+        return best;
+    }
+
     /** Главная картинка поста (сгенерированное изображение, не миниатюра и не аватар) или null. */
     function grokFindMainImage() {
         const uuid = grokExtractUuid(location.pathname);
@@ -2782,21 +2875,24 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
      * Признаки медиа текущего поста. Ничего не ждёт — только читает DOM; ожиданием управляет
      * scheduleNextSlideCycle (src/slideshow/engine.js).
      *   staleSrc — src <video> предыдущего слайда: такой ролик ещё не сменился, он «старый».
-     * Возвращает { video, staleVideo, soundBtn, mainImg, imageBtn, settled }.
+     * Возвращает { video, staleVideo, soundBtn, mainImg, imageBtn, makeVideoBtn, settled }.
      */
     function grokDetectSlideMedia(staleSrc = '') {
         const vids = grokGetViewerVideos();
         let video = null, staleVideo = null;
-        for (const v of vids) {
+        // v1.3.43: «чужой» ролик — src с UUID другой генерации (остался от прошлого слайда/круга) — как старый
+        const isOld = (v) => {
             const src = v.currentSrc || v.src || '';
-            if (staleSrc && src && src === staleSrc) { staleVideo = staleVideo || v; continue; }
-            if (!video) video = v;
+            if (staleSrc && src && src === staleSrc) return true;
+            return grokIsForeignVideo(v);
+        };
+        const fresh = [];
+        for (const v of vids) {
+            if (isOld(v)) { staleVideo = staleVideo || v; continue; }
+            fresh.push(v);
         }
-        // Если видео несколько — то, что выбрал бы движок (самое видимое), если оно «свежее»
-        if (video && vids.length > 1 && typeof getActiveVideo === 'function') {
-            const act = getActiveVideo();
-            if (act && act !== staleVideo && vids.includes(act)) video = act;
-        }
+        // Если «свежих» видео несколько — лучшее (v1.3.43: UUID поста в src, играет, видимо)
+        video = fresh.length > 1 ? grokPickBestVideo(fresh) : (fresh[0] || null);
         let soundBtn = null;
         try { soundBtn = findGrokSoundToggleButton({ includeHidden: true }); } catch (e) {}
         // «Удалить изображение» (видно, если меню поста раскрыто) — железное подтверждение фото
@@ -2815,7 +2911,14 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 if (ss.active && ss.targetUuid && cur && cur !== String(ss.targetUuid).toLowerCase()) settled = false;
             } catch (e) {}
         }
-        return { video, staleVideo, soundBtn, mainImg: grokFindMainImage(), imageBtn, settled };
+        // v1.3.43: «Make video» (сделать видео из картинки) бывает только у фото — сильный признак фото
+        let makeVideoBtn = null;
+        try {
+            makeVideoBtn = Array.from(document.querySelectorAll('button, [role="button"], a')).find(el =>
+                !el.closest(GROK_FILMSTRIP_SEL) && !el.closest('#mossad-widget, [id^="mossad-"]') &&
+                GROK_MAKE_VIDEO_RE.test([el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].map(x => x || '').join(' '))) || null;
+        } catch (e) {}
+        return { video, staleVideo, soundBtn, mainImg: grokFindMainImage(), imageBtn, makeVideoBtn, settled };
     }
 
 // ============================================================
@@ -3127,6 +3230,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
 
         if (nextIdx >= 0 && nextIdx < items.length) {
+            // v1.3.43: повтор киноплёнки — забыть «прошлое видео» прошлого круга до клика
+            if (reachedEnd && loop && typeof window.resetSlideTrackingState === 'function') window.resetSlideTrackingState('wrap-filmstrip');
             items[nextIdx].click();
             if (reachedEnd && loop) {
                 showToast('🔄 Конец киноплёнки: повтор (R)...');
@@ -3208,11 +3313,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             const idx = unique.indexOf(currentId);
 
             let targetId = null;
+            let wrapped = false; // v1.3.43: повтор (R) — переход через край списка
             if (isFwd) {
                 if (idx >= 0 && idx < unique.length - 1) {
                     targetId = unique[idx + 1];
                 } else if (loop && unique.length > 0) {
                     targetId = unique[0];
+                    wrapped = true;
                 } else if (isDelete && !loop && idx > 0) {
                     targetId = unique[idx - 1];
                 }
@@ -3221,10 +3328,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     targetId = unique[idx - 1];
                 } else if (loop && unique.length > 0) {
                     targetId = unique[unique.length - 1];
+                    wrapped = true;
                 } else if (isDelete && !loop && idx < unique.length - 1) {
                     targetId = unique[idx + 1];
                 }
             }
+            if (wrapped && targetId && typeof window.resetSlideTrackingState === 'function') window.resetSlideTrackingState('wrap-neighbor');
             if (targetId && seen.get(targetId)) return seen.get(targetId);
         }
 
@@ -3696,10 +3805,60 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         return 'unknown';
     }
 
+    // ── v1.3.43: тип плитки Saved («фото» / «видео») в обоих видах ленты ──
+    // Компактный вид: у видео есть бейдж длительности (span.tabular-nums, «0:06»).
+    // Полный вид: бейджей нет. У ФОТО есть кнопка «Make video» (белый треугольник в круге);
+    // у видео её нет, а после загрузки в плитке появляется <video> (автоплей).
+    // Плитка, которую ещё нельзя классифицировать (ленивая отрисовка), получает type: null и
+    // перепроверяется через ~500 мс (grokScheduleRetype). ANTI_PATTERNS §22.
+    const GROK_MAKE_VIDEO_RE = /make\s*video/i;
+    const GROK_RETYPE_DELAY_MS = 500;
+    const GROK_RETYPE_MAX = 4;
+
+    /** Кнопка «Make video» внутри root (aria-label / title / текст, без учёта регистра). */
+    function grokFindMakeVideoButton(root) {
+        if (!root || !root.querySelectorAll) return null;
+        const els = root.querySelectorAll('button, [role="button"], a');
+        for (const el of els) {
+            if (el.closest('#mossad-widget, [id^="mossad-"]')) continue;
+            const sig = [el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].map(x => x || '').join(' ');
+            if (GROK_MAKE_VIDEO_RE.test(sig)) return el;
+        }
+        return null;
+    }
+
+    /** Вид ленты Saved: 'compact' (есть бейджи), 'full' (есть «Make video» или <video> в плитках), иначе 'unknown'. */
+    function grokSavedViewMode() {
+        const anchors = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
+        let full = false;
+        for (const a of anchors) {
+            const card = a.closest('[role="listitem"], [data-masonry-key]') || a.parentElement;
+            if (!card) continue;
+            if (card.querySelector('span.tabular-nums')) return 'compact';
+            if (!full && (grokFindMakeVideoButton(card) || card.querySelector('video'))) full = true;
+        }
+        return full ? 'full' : 'unknown';
+    }
+
+    /** 'video' | 'photo' | null (плитка ещё не отрисована / вид ленты не ясен). */
+    function grokClassifySavedTile(card, view) {
+        if (!card) return null;
+        if (card.querySelector('span.tabular-nums')) return 'video';   // бейдж длительности (компактный вид)
+        if (grokFindMakeVideoButton(card)) return 'photo';               // «Make video» есть только у фото
+        if (card.querySelector('video')) return 'video';                 // автоплей (полный вид)
+        const img = card.querySelector('img');
+        const rendered = !!(img && (img.currentSrc || img.getAttribute('src')) && img.complete !== false);
+        if (!rendered) return null;
+        if (view === 'compact') return 'photo';  // бейджа нет → фото
+        if (view === 'full') return 'video';     // отрисована, но без «Make video» → видео (ролик ещё грузится)
+        return null;
+    }
+
     /** Собирает все уникальные ссылки /imagine/post/... из DOM в хронологическом порядке (снизу вверх страницы) */
     function grokCollectLinks() {
         const seen = new Set();
         const items = [];
+        const view = grokSavedViewMode();
         const anchors = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
         // Идём от конца к началу DOM: всё, что в самом низу, создавалось раньше (хронологический порядок)
         for (let i = anchors.length - 1; i >= 0; i--) {
@@ -3713,20 +3872,63 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             seen.add(baseUrl);
             // Карточка — ближайший listitem / masonry-item родитель
             const card = a.closest('[role="listitem"], [data-masonry-key]') || a.parentElement;
-            // Видео = есть span с классом tabular-nums (таймер 0:06)
-            const hasTimer = !!(card && card.querySelector('span.tabular-nums'));
+            const type = grokClassifySavedTile(card, view);
             // Conversation ID из ?conversation=UUID параметра
             let convId = null;
             try {
                 const urlObj = new URL(url, 'https://grok.com');
                 convId = urlObj.searchParams.get('conversation') || null;
             } catch(e) {}
-            items.push({ url, type: hasTimer ? 'video' : 'photo', convId });
+            items.push({ url, type, convId });
         }
+        const untyped = items.filter(it => !it.type).length;
+        mossadDebug('collect', 'типы плиток', { view, total: items.length, untyped });
         return items;
     }
 
+    /** Дописывает тип уже собранным элементам без типа (из свежего сбора). Возвращает число исправленных. */
+    function grokFillMissingTypes(existingItems, foundItems) {
+        const byBase = new Map();
+        foundItems.forEach(it => { if (it.type) byBase.set(normUrlKey(it.url), it.type); });
+        let fixed = 0;
+        existingItems.forEach(it => {
+            if (it.type) return;
+            const t = byBase.get(normUrlKey(it.url));
+            if (t) { it.type = t; fixed++; }
+        });
+        return fixed;
+    }
 
+    /** Перепроверка элементов коллекции без типа через ~500 мс (до GROK_RETYPE_MAX раз). */
+    let _retypeTimer = null;
+    function grokScheduleRetype(attempt = 1) {
+        if (_retypeTimer) return; // уже запланирована
+        if (attempt > GROK_RETYPE_MAX) return;
+        _retypeTimer = setTimeout(() => {
+            _retypeTimer = null;
+            if (!isGrokSavedPage()) return;
+            let data;
+            try { data = JSON.parse(_gSS.getItem(GALLERY_COLLECTION_KEY) || 'null'); } catch(e) { return; }
+            if (!data || !Array.isArray(data.items)) return;
+            const before = data.items.filter(it => !it.type).length;
+            if (!before) return;
+            const fixed = grokFillMissingTypes(data.items, grokCollectLinks());
+            const left = before - fixed;
+            if (fixed) {
+                _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(data));
+                const panel = document.getElementById('mossad-playlist-panel');
+                if (panel) { panel.remove(); grokTogglePlaylistPanel(true); }
+            }
+            mossadDebug('collect', 'перепроверка типов', { attempt, fixed, untyped: left });
+            if (left > 0) grokScheduleRetype(attempt + 1);
+        }, GROK_RETYPE_DELAY_MS);
+    }
+
+    function grokTypeCounts(items) {
+        const videos = items.filter(i => i.type === 'video').length;
+        const photos = items.filter(i => i.type === 'photo').length;
+        return { videos, photos, unknown: items.length - videos - photos };
+    }
 
     /** Кнопка 1: сохранить коллекцию в sessionStorage (накопительное добавление, список только увеличивается) */
     function grokSaveCollection(btnEl) {
@@ -3768,11 +3970,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
             }
         }
 
+        grokFillMissingTypes(mergedItems, foundItems);
         const grpMode  = existingData.grpMode  || 'seq';
         const itemMode = existingData.itemMode || 'fwd';
         const date     = new Date().toISOString().slice(0, 10);
-        const videos   = mergedItems.filter(i => i.type === 'video').length;
-        const photos   = mergedItems.length - videos;
+        const { videos, photos, unknown } = grokTypeCounts(mergedItems);
+        const unkTxt   = unknown ? `, ❔${unknown}` : '';
 
         _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({
             date,
@@ -3803,10 +4006,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         sessionStorage.setItem(GALLERY_COLLECT_ACTIVE_KEY, 'true');
 
         if (addedCount > 0) {
-            showToast(`✅ Добавлено +${addedCount}! Всего в списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
+            showToast(`✅ Добавлено +${addedCount}! Всего в списке: ${mergedItems.length} (📹${videos}, 🖼${photos}${unkTxt})`);
         } else {
-            showToast(`ℹ️ Новых ссылок нет. В списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
+            showToast(`ℹ️ Новых ссылок нет. В списке: ${mergedItems.length} (📹${videos}, 🖼${photos}${unkTxt})`);
         }
+        mossadDebug('collect', 'сбор: типы', { total: mergedItems.length, videos, photos, untyped: unknown });
+        if (unknown) grokScheduleRetype(1);
     }
 
     /**
@@ -3844,6 +4049,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 addedCount++;
             }
         }
+        // v1.3.43: тип, который появился после отрисовки плитки, дописываем уже собранным
+        const typedNow = grokFillMissingTypes(existingItems, foundItems);
+        if (typedNow && !addedCount && raw) {
+            existingData.items = existingItems;
+            _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(existingData));
+        }
+        if (existingItems.some(it => !it.type)) grokScheduleRetype(1);
 
         const btnCollect = document.getElementById('mossad-gallery-collect');
 
@@ -3981,7 +4193,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const email = grokExtractEmail();
         const date  = data.date || new Date().toISOString().slice(0, 10);
         const filename = `${email}_${date}_${items.length}_links.txt`;
-        const blob = new Blob([items.map(i => `${i.url}\t${i.type}`).join('\n')], { type: 'text/plain' });
+        const blob = new Blob([items.map(i => `${i.url}\t${i.type || 'unknown'}`).join('\n')], { type: 'text/plain' });
         const bUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = bUrl; a.download = filename;
@@ -4847,6 +5059,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         grokHighlightActivePlaylistItem(startItem.url);
 
         if (startItem.type) sessionStorage.setItem('mossad_expected_type', startItem.type);
+        else sessionStorage.removeItem('mossad_expected_type'); // v1.3.43: тип неизвестен — не оставлять подсказку прошлого слайда
 
         grokBeginNav(startItem.url, 'manual-pick', true);
         const navSeq = _galleryNav.seq;
@@ -4948,6 +5161,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
         if (nextRes.circleCompleted) {
             playCircleDoneSound();
+            resetSlideTrackingState('circle'); // v1.3.43: новый круг — забыть «прошлое видео» прошлого круга
             let ss = {};
             try { ss = JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}'); } catch(e) {}
             ss.circle = (ss.circle || 1) + 1;
@@ -4964,6 +5178,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         mossadDebug('step', 'автошаг', { source, circle: !!nextRes.circleCompleted, target: ss.targetUuid });
 
         if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
+        else sessionStorage.removeItem('mossad_expected_type'); // v1.3.43: тип неизвестен — не оставлять подсказку прошлого слайда
         grokSpaNavigate(nextRes.item.url);
         return true;
     }
@@ -5942,7 +6157,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                     const label = document.createElement('span');
                     label.className = 'mossad-playlist-label';
                     label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;transition:color 0.12s;`;
-                    const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 22)}`;
+                    const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : (item.type ? '🖼' : '❔')} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 22)}`;
                     label.textContent = baseText;
                     li.dataset.origText = baseText;
                     label.title = item.url;
@@ -5996,7 +6211,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                 const label = document.createElement('span');
                 label.className = 'mossad-playlist-label';
                 label.style.cssText = `flex:1;min-width:0;cursor:pointer;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;transition:color 0.12s;`;
-                const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : '🖼'} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 26)}`;
+                const baseText = `${idx + 1}. ${item.type === 'video' ? '📹' : (item.type ? '🖼' : '❔')} ${(item.url.split('/').pop() || '').split('?')[0].slice(0, 26)}`;
                 label.textContent = baseText;
                 li.dataset.origText = baseText;
                 label.title = item.url;
@@ -7153,7 +7368,11 @@ function findMediaForDownload() {
 
         let videos = Array.from(document.querySelectorAll('video'));
         // v1.3.42: на Grok <video> в кадрах киноплёнки — миниатюры других генераций, не плеер поста
-        if (rootDomain === 'grok.com') videos = videos.filter(v => !v.closest(GROK_FILMSTRIP_SEL));
+        if (rootDomain === 'grok.com') {
+            videos = videos.filter(v => !v.closest(GROK_FILMSTRIP_SEL));
+            if (videos.length === 0) return null;
+            return grokPickBestVideo(videos); // v1.3.43: UUID поста / играет / видимо (не «первое в DOM»)
+        }
         if (videos.length === 0) return null;
         
         // На Пинтересте ищем видео в главном контейнере сцены пина (closeup-stage / main)
@@ -7523,7 +7742,9 @@ function findMediaForDownload() {
 
         // Быстрое определение по кнопкам Grok (появляются раньше видео-плеера)
         if (rootDomain === 'grok.com') {
-            const allBtns = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]'));
+            // v1.3.43: кнопка «Make video» (у фото) — не признак видео
+            const allBtns = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"]'))
+                .filter(el => !/make\s*video/i.test([el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].map(x => x || '').join(' ')));
             const btnTexts = allBtns.map(el => (el.textContent || '').trim());
             const btnArias = allBtns.map(el => (el.getAttribute('aria-label') || '').toLowerCase());
             // "Удалить изображение" — железное подтверждение что это фото
@@ -7669,6 +7890,24 @@ function findMediaForDownload() {
     const GROK_VIDEO_WAIT_MS    = 6000; // сбор сказал «видео» или есть кнопка звука, а <video> ещё нет
     const GROK_DETECT_POLL_MS   = 100;
     let _grokDetectStartedAt = 0;
+    const GROK_STALL_MS      = 1500;  // v1.3.43: время видео не идёт столько — восстанавливаем
+    const GROK_STALL_SKIP_MS = 10000; // не помогло — следующий слайд
+    let _stallNode = null, _stallCt = -1, _stallSince = 0, _stallLastFix = 0;
+
+    /**
+     * v1.3.43: сброс «памяти» прошлых слайдов при повторе (круг слайдшоу / перемотка ленты в начало).
+     * Те же посты показываются снова: src «прошлого видео» и lastActiveVideo из прошлого круга не
+     * должны влиять на первый слайд нового круга.
+     */
+    function resetSlideTrackingState(reason) {
+        mossadDebug('cycle', 'сброс состояния слайдов (повтор)', { reason });
+        _lastCycleSlideKey = '';
+        _lastCycleVideoSrc = '';
+        lastActiveVideo = null;
+        _stallNode = null;
+        _grokDetectStartedAt = 0;
+    }
+    window.resetSlideTrackingState = resetSlideTrackingState;
 
     function startPhotoCountdown(initSec, why) {
         sessionStorage.removeItem('mossad_expected_type');
@@ -7707,8 +7946,16 @@ function findMediaForDownload() {
             startPhotoCountdown(initSec, 'кнопка «Удалить изображение»');
             return true;
         }
-        if (d.staleVideo) {
-            // На экране ещё ролик прошлого слайда: ждём смены (как в v1.3.38), затем — по признакам
+        // v1.3.43: «Make video» есть только у фото. Если сбор сказал «видео» — не верим кнопке
+        // (ждём <video>, как ниже); иначе — фото сразу, без окна ожидания.
+        if (d.makeVideoBtn && (!d.staleVideo || curImg) && expected !== 'video' && d.settled) {
+            startPhotoCountdown(initSec, 'кнопка «Make video»');
+            return true;
+        }
+        const curImg = !!(d.mainImg && curUuid && (d.mainImg.currentSrc || d.mainImg.src || '').toLowerCase().includes(curUuid));
+        if (d.staleVideo && !curImg) {
+            // На экране ещё ролик прошлого слайда: ждём смены (как в v1.3.38), затем — по признакам.
+            // v1.3.43: если уже видна картинка именно этого поста — старый ролик не ждём.
             if (sinceStart < GROK_STALE_WAIT_MS) return again();
             if (expected === 'image' && d.mainImg) { startPhotoCountdown(initSec, 'старое видео не сменилось, сбор: фото'); return true; }
             return d.staleVideo; // как раньше: принимаем ролик как видео этого слайда
@@ -7758,6 +8005,40 @@ function findMediaForDownload() {
             return;
         }
         _videoDetachedSince = 0;
+
+        // v1.3.43: «замёрзшее» видео на Grok (время не идёт > GROK_STALL_MS — на паузе не по воле
+        // пользователя или без данных). После повтора круга Grok держал в DOM старый элемент того же
+        // поста; счётчик кругов смотрел на него, таймер стоял на 1 с. Порядок восстановления:
+        // перепривязка к лучшему <video>; если другого нет и ролик НЕ на паузе (застрял) — play(),
+        // через GROK_STALL_SKIP_MS — следующий слайд. На паузе без другого ролика — ждём (пауза пользователя).
+        if (rootDomain === 'grok.com') {
+            const nowS = timeNow || performance.now();
+            const ctS = currentVideoNode.currentTime;
+            if (_stallNode !== currentVideoNode || Math.abs(ctS - _stallCt) > 0.01) {
+                _stallNode = currentVideoNode; _stallCt = ctS; _stallSince = nowS; _stallLastFix = 0;
+            } else if (!currentVideoNode._mossadUserPaused && nowS - _stallSince > GROK_STALL_MS && nowS - _stallLastFix > 700) {
+                _stallLastFix = nowS;
+                const act = getActiveVideo();
+                if (act && act !== currentVideoNode) {
+                    mossadDebug('loop', 'видео стоит — перепривязка к другому <video>', { ms: Math.round(nowS - _stallSince), paused: currentVideoNode.paused });
+                    rebindVideoNode(act, 'stall');
+                    if (!rafId) rafId = requestAnimationFrame(checkVideoLoops);
+                    return;
+                }
+                // На паузе и другого видео нет — это, скорее всего, пауза пользователя (клик по ролику): ждём, как раньше
+                if (currentVideoNode.paused) { /* ждём */ }
+                else if (nowS - _stallSince > GROK_STALL_SKIP_MS) {
+                    mossadDebug('loop', 'видео стоит слишком долго — следующий слайд', { ms: Math.round(nowS - _stallSince) });
+                    _stallNode = null;
+                    triggerNextSlide('video-stall');
+                    return;
+                }
+                else {
+                    mossadDebug('loop', 'видео стоит (не на паузе) — play()', { ms: Math.round(nowS - _stallSince) });
+                    try { currentVideoNode.play().catch(() => {}); } catch (e) {}
+                }
+            }
+        }
 
         // Если видео на паузе: либо пользователь поставил паузу (ждём), либо мы следим не за тем элементом
         if (currentVideoNode.paused) {
@@ -9182,7 +9463,11 @@ function findMediaForDownload() {
                             return;
                         }
                         
-                        const newHk = { key: e.key, code: e.code || '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }; // v1.3.39: + физическая клавиша
+                        // v1.3.43: буква, нажатая в русской раскладке, сохраняется латиницей (Ctrl+и → Ctrl+b);
+                        // сверка всё равно идёт и по физической клавише (code), в любой раскладке.
+                        const usKey = mossadUsKeyForCode(e.code || '');
+                        const recKey = (usKey && /^[a-z]$/.test(usKey) && typeof e.key === 'string' && /[^\x00-\x7f]/.test(e.key)) ? usKey : e.key;
+                        const newHk = { key: recKey, code: e.code || '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }; // v1.3.39: + физическая клавиша
                         hkArr[slotIndex] = newHk;
                         config.hk[k] = hkArr;
                         Settings.save();
@@ -9329,6 +9614,39 @@ function findMediaForDownload() {
     // ============================================
     window.capturingFor = null;
 
+    // ── v1.3.43: «мост раскладки» для СОБСТВЕННЫХ сочетаний Grok (Ctrl+B — свернуть боковую панель, Ctrl+/) ──
+    // Это не хоткеи MOSSAD: их обрабатывает сам сайт и сравнивает e.key ('b', '/'). В русской раскладке
+    // e.key === 'и' (KeyB) и '.' (Slash) — сайт их не узнаёт. Ловим такое нажатие раньше всех (window, capture),
+    // гасим оригинал и отправляем копию с латинским e.key и тем же e.code/модификаторами. Если сайт отменил
+    // копию (preventDefault) — отменяем и оригинал (чтобы, например, Firefox не открыл панель закладок).
+    // Только белый список клавиш: Ctrl+C/V/X/A/Z и т.п. в полях ввода не трогаем (у копии нет действия по умолчанию).
+    const GROK_LAYOUT_BRIDGE_CODES = ['KeyB', 'Slash'];
+    window.addEventListener('keydown', function grokLayoutBridge(e) {
+        if (rootDomain !== 'grok.com' || window.capturingFor !== null) return;
+        if (e.__mossadLayoutBridge || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+        if (!GROK_LAYOUT_BRIDGE_CODES.includes(e.code)) return;
+        const us = mossadUsKeyForCode(e.code);
+        if (!us || e.key === us || e.key === mossadUsKeyForCode(e.code, true)) return; // латинская раскладка — сайт справится сам
+        const key = mossadUsKeyForCode(e.code, e.shiftKey);
+        let copy;
+        try {
+            copy = new KeyboardEvent('keydown', {
+                key, code: e.code, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, altKey: false,
+                repeat: e.repeat, bubbles: true, cancelable: true, composed: true
+            });
+            Object.defineProperty(copy, '__mossadLayoutBridge', { value: true });
+            // Старые обработчики смотрят keyCode/which (у копии они 0)
+            const kc = /^Key[A-Z]$/.test(e.code) ? e.code.charCodeAt(3) : (e.keyCode || 0);
+            Object.defineProperty(copy, 'keyCode', { get: () => kc });
+            Object.defineProperty(copy, 'which', { get: () => kc });
+        } catch (err) { return; }
+        e.stopImmediatePropagation();
+        const target = (e.target && e.target.dispatchEvent) ? e.target : document;
+        mossadDebug('hotkey', 'мост раскладки: сочетание сайта', { code: e.code, key: e.key, as: key });
+        const notCancelled = target.dispatchEvent(copy);
+        if (!notCancelled) e.preventDefault();
+    }, true);
+
     function isSlideshowActiveOrPaused() {
         if (typeof slideshowActive !== 'undefined' && slideshowActive) return true;
         if (typeof slideshowPaused !== 'undefined' && slideshowPaused) return true;
@@ -9386,6 +9704,7 @@ function findMediaForDownload() {
                 grokBeginNav(targetItem.url, 'manual:' + dir, true);
                 grokSyncSlidePosition(targetItem, { source: 'manual:' + dir });
                 if (targetItem.type) sessionStorage.setItem('mossad_expected_type', targetItem.type);
+                else sessionStorage.removeItem('mossad_expected_type'); // v1.3.43: тип неизвестен — не оставлять подсказку прошлого слайда
                 const struct = grokGetPlaylistStructure();
                 const curPos = (struct) ? grokFindCurrentPosition(struct, targetItem.url) : null;
                 const posStr = (curPos && curPos.flatIndex !== -1) ? ` ${curPos.flatIndex + 1}/${struct.items.length}` : '';
@@ -9484,6 +9803,7 @@ function findMediaForDownload() {
                 grokBeginNav(nextRes.item.url, isNextGrp ? 'manual:next_grp' : 'manual:prev_grp', true);
                 grokSyncSlidePosition(nextRes.item, { source: 'manual:grp' });
                 if (nextRes.item.type) sessionStorage.setItem('mossad_expected_type', nextRes.item.type);
+                else sessionStorage.removeItem('mossad_expected_type'); // v1.3.43: тип неизвестен — не оставлять подсказку прошлого слайда
                 showToast(`📁 Группа: ${isNextGrp ? '↓' : '↑'}`);
                 grokSpaNavigate(nextRes.item.url);
                 setTimeout(() => {
@@ -9636,8 +9956,9 @@ function findMediaForDownload() {
             e.preventDefault();
             const video = getActiveVideo();
             if (video) {
-                if (video.paused) video.play();
-                else video.pause();
+                // v1.3.43: пауза пользователя — сторож «замёрзшего» видео её не снимает
+                if (video.paused) { video._mossadUserPaused = false; video.play(); }
+                else { video._mossadUserPaused = true; video.pause(); }
                 showToast(video.paused ? '▶ Проигрывание' : '⏸ Пауза');
             }
         }
@@ -9651,7 +9972,7 @@ function findMediaForDownload() {
         }
 
         // Обновить скрипт (Win+Alt+R) / Мотать в начало (Alt+R по умолчанию)
-        if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R'))) {
+        if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR'))) {
             e.preventDefault();
             window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
         } else if (hotkeyMatches(e, config.hk.rewind) && !e.metaKey) {

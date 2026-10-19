@@ -114,6 +114,8 @@
         }
 
         if (nextIdx >= 0 && nextIdx < items.length) {
+            // v1.3.43: повтор киноплёнки — забыть «прошлое видео» прошлого круга до клика
+            if (reachedEnd && loop && typeof window.resetSlideTrackingState === 'function') window.resetSlideTrackingState('wrap-filmstrip');
             items[nextIdx].click();
             if (reachedEnd && loop) {
                 showToast('🔄 Конец киноплёнки: повтор (R)...');

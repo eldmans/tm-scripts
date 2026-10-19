@@ -411,6 +411,9 @@
         if (_isRewinding) return;
         _isRewinding = true;
         window._isRewinding = true;
+        // v1.3.43: на время перемотки — никаких таймеров/подсчёта кругов (раньше RAF перепривязывался
+        // и запускал play() у роликов, пролетающих при перемотке); после — сброс памяти прошлого круга.
+        if (typeof window.cancelSlideTimers === 'function') window.cancelSlideTimers();
 
         let oppDir = 'down';
         const d0 = (config.slideshowDirections || ['up'])[0];
@@ -434,6 +437,7 @@
                         clearInterval(interval);
                         _isRewinding = false;
                         window._isRewinding = false;
+                        if (typeof window.resetSlideTrackingState === 'function') window.resetSlideTrackingState('rewind');
                         showToast('🏁 Достигнуто начало ленты');
                         if (typeof onComplete === 'function') {
                             setTimeout(onComplete, 400);

@@ -18,10 +18,60 @@
         return 'unknown';
     }
 
+    // ── v1.3.43: тип плитки Saved («фото» / «видео») в обоих видах ленты ──
+    // Компактный вид: у видео есть бейдж длительности (span.tabular-nums, «0:06»).
+    // Полный вид: бейджей нет. У ФОТО есть кнопка «Make video» (белый треугольник в круге);
+    // у видео её нет, а после загрузки в плитке появляется <video> (автоплей).
+    // Плитка, которую ещё нельзя классифицировать (ленивая отрисовка), получает type: null и
+    // перепроверяется через ~500 мс (grokScheduleRetype). ANTI_PATTERNS §22.
+    const GROK_MAKE_VIDEO_RE = /make\s*video/i;
+    const GROK_RETYPE_DELAY_MS = 500;
+    const GROK_RETYPE_MAX = 4;
+
+    /** Кнопка «Make video» внутри root (aria-label / title / текст, без учёта регистра). */
+    function grokFindMakeVideoButton(root) {
+        if (!root || !root.querySelectorAll) return null;
+        const els = root.querySelectorAll('button, [role="button"], a');
+        for (const el of els) {
+            if (el.closest('#mossad-widget, [id^="mossad-"]')) continue;
+            const sig = [el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].map(x => x || '').join(' ');
+            if (GROK_MAKE_VIDEO_RE.test(sig)) return el;
+        }
+        return null;
+    }
+
+    /** Вид ленты Saved: 'compact' (есть бейджи), 'full' (есть «Make video» или <video> в плитках), иначе 'unknown'. */
+    function grokSavedViewMode() {
+        const anchors = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
+        let full = false;
+        for (const a of anchors) {
+            const card = a.closest('[role="listitem"], [data-masonry-key]') || a.parentElement;
+            if (!card) continue;
+            if (card.querySelector('span.tabular-nums')) return 'compact';
+            if (!full && (grokFindMakeVideoButton(card) || card.querySelector('video'))) full = true;
+        }
+        return full ? 'full' : 'unknown';
+    }
+
+    /** 'video' | 'photo' | null (плитка ещё не отрисована / вид ленты не ясен). */
+    function grokClassifySavedTile(card, view) {
+        if (!card) return null;
+        if (card.querySelector('span.tabular-nums')) return 'video';   // бейдж длительности (компактный вид)
+        if (grokFindMakeVideoButton(card)) return 'photo';               // «Make video» есть только у фото
+        if (card.querySelector('video')) return 'video';                 // автоплей (полный вид)
+        const img = card.querySelector('img');
+        const rendered = !!(img && (img.currentSrc || img.getAttribute('src')) && img.complete !== false);
+        if (!rendered) return null;
+        if (view === 'compact') return 'photo';  // бейджа нет → фото
+        if (view === 'full') return 'video';     // отрисована, но без «Make video» → видео (ролик ещё грузится)
+        return null;
+    }
+
     /** Собирает все уникальные ссылки /imagine/post/... из DOM в хронологическом порядке (снизу вверх страницы) */
     function grokCollectLinks() {
         const seen = new Set();
         const items = [];
+        const view = grokSavedViewMode();
         const anchors = Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'));
         // Идём от конца к началу DOM: всё, что в самом низу, создавалось раньше (хронологический порядок)
         for (let i = anchors.length - 1; i >= 0; i--) {
@@ -35,20 +85,63 @@
             seen.add(baseUrl);
             // Карточка — ближайший listitem / masonry-item родитель
             const card = a.closest('[role="listitem"], [data-masonry-key]') || a.parentElement;
-            // Видео = есть span с классом tabular-nums (таймер 0:06)
-            const hasTimer = !!(card && card.querySelector('span.tabular-nums'));
+            const type = grokClassifySavedTile(card, view);
             // Conversation ID из ?conversation=UUID параметра
             let convId = null;
             try {
                 const urlObj = new URL(url, 'https://grok.com');
                 convId = urlObj.searchParams.get('conversation') || null;
             } catch(e) {}
-            items.push({ url, type: hasTimer ? 'video' : 'photo', convId });
+            items.push({ url, type, convId });
         }
+        const untyped = items.filter(it => !it.type).length;
+        mossadDebug('collect', 'типы плиток', { view, total: items.length, untyped });
         return items;
     }
 
+    /** Дописывает тип уже собранным элементам без типа (из свежего сбора). Возвращает число исправленных. */
+    function grokFillMissingTypes(existingItems, foundItems) {
+        const byBase = new Map();
+        foundItems.forEach(it => { if (it.type) byBase.set(normUrlKey(it.url), it.type); });
+        let fixed = 0;
+        existingItems.forEach(it => {
+            if (it.type) return;
+            const t = byBase.get(normUrlKey(it.url));
+            if (t) { it.type = t; fixed++; }
+        });
+        return fixed;
+    }
 
+    /** Перепроверка элементов коллекции без типа через ~500 мс (до GROK_RETYPE_MAX раз). */
+    let _retypeTimer = null;
+    function grokScheduleRetype(attempt = 1) {
+        if (_retypeTimer) return; // уже запланирована
+        if (attempt > GROK_RETYPE_MAX) return;
+        _retypeTimer = setTimeout(() => {
+            _retypeTimer = null;
+            if (!isGrokSavedPage()) return;
+            let data;
+            try { data = JSON.parse(_gSS.getItem(GALLERY_COLLECTION_KEY) || 'null'); } catch(e) { return; }
+            if (!data || !Array.isArray(data.items)) return;
+            const before = data.items.filter(it => !it.type).length;
+            if (!before) return;
+            const fixed = grokFillMissingTypes(data.items, grokCollectLinks());
+            const left = before - fixed;
+            if (fixed) {
+                _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(data));
+                const panel = document.getElementById('mossad-playlist-panel');
+                if (panel) { panel.remove(); grokTogglePlaylistPanel(true); }
+            }
+            mossadDebug('collect', 'перепроверка типов', { attempt, fixed, untyped: left });
+            if (left > 0) grokScheduleRetype(attempt + 1);
+        }, GROK_RETYPE_DELAY_MS);
+    }
+
+    function grokTypeCounts(items) {
+        const videos = items.filter(i => i.type === 'video').length;
+        const photos = items.filter(i => i.type === 'photo').length;
+        return { videos, photos, unknown: items.length - videos - photos };
+    }
 
     /** Кнопка 1: сохранить коллекцию в sessionStorage (накопительное добавление, список только увеличивается) */
     function grokSaveCollection(btnEl) {
@@ -90,11 +183,12 @@
             }
         }
 
+        grokFillMissingTypes(mergedItems, foundItems);
         const grpMode  = existingData.grpMode  || 'seq';
         const itemMode = existingData.itemMode || 'fwd';
         const date     = new Date().toISOString().slice(0, 10);
-        const videos   = mergedItems.filter(i => i.type === 'video').length;
-        const photos   = mergedItems.length - videos;
+        const { videos, photos, unknown } = grokTypeCounts(mergedItems);
+        const unkTxt   = unknown ? `, ❔${unknown}` : '';
 
         _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify({
             date,
@@ -125,10 +219,12 @@
         sessionStorage.setItem(GALLERY_COLLECT_ACTIVE_KEY, 'true');
 
         if (addedCount > 0) {
-            showToast(`✅ Добавлено +${addedCount}! Всего в списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
+            showToast(`✅ Добавлено +${addedCount}! Всего в списке: ${mergedItems.length} (📹${videos}, 🖼${photos}${unkTxt})`);
         } else {
-            showToast(`ℹ️ Новых ссылок нет. В списке: ${mergedItems.length} (📹${videos}, 🖼${photos})`);
+            showToast(`ℹ️ Новых ссылок нет. В списке: ${mergedItems.length} (📹${videos}, 🖼${photos}${unkTxt})`);
         }
+        mossadDebug('collect', 'сбор: типы', { total: mergedItems.length, videos, photos, untyped: unknown });
+        if (unknown) grokScheduleRetype(1);
     }
 
     /**
@@ -166,6 +262,13 @@
                 addedCount++;
             }
         }
+        // v1.3.43: тип, который появился после отрисовки плитки, дописываем уже собранным
+        const typedNow = grokFillMissingTypes(existingItems, foundItems);
+        if (typedNow && !addedCount && raw) {
+            existingData.items = existingItems;
+            _gSS.setItem(GALLERY_COLLECTION_KEY, JSON.stringify(existingData));
+        }
+        if (existingItems.some(it => !it.type)) grokScheduleRetype(1);
 
         const btnCollect = document.getElementById('mossad-gallery-collect');
 
@@ -303,7 +406,7 @@
         const email = grokExtractEmail();
         const date  = data.date || new Date().toISOString().slice(0, 10);
         const filename = `${email}_${date}_${items.length}_links.txt`;
-        const blob = new Blob([items.map(i => `${i.url}\t${i.type}`).join('\n')], { type: 'text/plain' });
+        const blob = new Blob([items.map(i => `${i.url}\t${i.type || 'unknown'}`).join('\n')], { type: 'text/plain' });
         const bUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = bUrl; a.download = filename;

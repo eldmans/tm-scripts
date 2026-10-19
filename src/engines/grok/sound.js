@@ -63,6 +63,8 @@
             if (el.closest('#mossad-widget, [id^="mossad-"]')) continue; // свои кнопки MOSSAD не трогаем
             if (el.closest(GROK_FILMSTRIP_SEL)) continue; // кадры киноплёнки — не плеер
             if (isGrokMusicNoteButton(el)) continue;
+            // v1.3.43: «Make video» (белый треугольник в круге) — генерация видео из фото, не плеер
+            if (/make\s*video/i.test([el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].map(x => x || '').join(' '))) continue;
             if (el.hasAttribute('aria-haspopup')) continue; // mute не открывает меню
             const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).toLowerCase().trim();
             const txt = (el.textContent || '').trim().toLowerCase();

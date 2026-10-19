@@ -316,7 +316,11 @@
                             return;
                         }
                         
-                        const newHk = { key: e.key, code: e.code || '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }; // v1.3.39: + физическая клавиша
+                        // v1.3.43: буква, нажатая в русской раскладке, сохраняется латиницей (Ctrl+и → Ctrl+b);
+                        // сверка всё равно идёт и по физической клавише (code), в любой раскладке.
+                        const usKey = mossadUsKeyForCode(e.code || '');
+                        const recKey = (usKey && /^[a-z]$/.test(usKey) && typeof e.key === 'string' && /[^\x00-\x7f]/.test(e.key)) ? usKey : e.key;
+                        const newHk = { key: recKey, code: e.code || '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }; // v1.3.39: + физическая клавиша
                         hkArr[slotIndex] = newHk;
                         config.hk[k] = hkArr;
                         Settings.save();
