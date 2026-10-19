@@ -486,7 +486,12 @@
                 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
                 localStorage.removeItem(STORAGE_KEY);
                 localStorage.removeItem('mossad_playlist_width');
+                // v1.3.48: закреплённые (🔒) хоткеи сброс не меняет; остальные — к общим умолчаниям клавиш, если сохранены
+                const pinnedHk = {};
+                try { getHotkeyPinned().forEach(k => { if (config.hk && config.hk[k]) pinnedHk[k] = JSON.parse(JSON.stringify(config.hk[k])); }); } catch (e) {}
                 Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+                try { Object.keys(config.hk).forEach(k => { config.hk[k] = hotkeyDefaultFor(k); }); } catch (e) {}
+                Object.assign(config.hk, pinnedHk);
                 // v1.3.41: сайт без своих настроек получает общие умолчания (вкладка «🌐 По умолчанию»), если они есть
                 const gd = GlobalDefaults.read();
                 if (gd) Object.assign(config, JSON.parse(JSON.stringify(gd)));

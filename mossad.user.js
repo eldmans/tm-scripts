@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.47
+// @version      1.3.48
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -22,7 +22,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.47';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.48';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -1507,8 +1507,10 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         ['tabDefaults',    '🌐 По умолчанию', 'вкладка общих умолчаний'],
         ['tabLabels',      '✏ Подписи',     'вкладка подписей (эта)'],
         ['close',          'Закрыть',       'кнопка закрытия окна'],
-        ['hkReset',        '↺ По умолчанию', 'кнопка «Заводские горячие клавиши»'],
-        ['hkOrderReset',   '↕ Порядок',     'кнопка «Исходный порядок клавиш»'],
+        ['hkDefaultsLabel', 'По умолчанию:', 'надпись перед кнопками сброса на вкладке клавиш'],
+        ['hkResetKeys',    'Клавиши',       'кнопка «Сбросить клавиши к умолчаниям» (🔒 не меняются)'],
+        ['hkResetOrder',   'Порядок',       'кнопка «Сбросить порядок строк» (🔒 остаются на месте)'],
+        ['hkSaveDefaults', 'Сохранить это', 'кнопка «Сохранить клавиши, порядок и 🔒 как общие умолчания»'],
         ['hkTop',          '⤒',             'кнопка строки клавиши: в самый верх'],
         ['hkBottom',       '⤓',             'кнопка строки клавиши: в самый низ'],
         ['hkPin',          '🔒',            'кнопка строки клавиши: закрепить'],
@@ -9303,7 +9305,12 @@ function findMediaForDownload() {
                 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
                 localStorage.removeItem(STORAGE_KEY);
                 localStorage.removeItem('mossad_playlist_width');
+                // v1.3.48: закреплённые (🔒) хоткеи сброс не меняет; остальные — к общим умолчаниям клавиш, если сохранены
+                const pinnedHk = {};
+                try { getHotkeyPinned().forEach(k => { if (config.hk && config.hk[k]) pinnedHk[k] = JSON.parse(JSON.stringify(config.hk[k])); }); } catch (e) {}
                 Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+                try { Object.keys(config.hk).forEach(k => { config.hk[k] = hotkeyDefaultFor(k); }); } catch (e) {}
+                Object.assign(config.hk, pinnedHk);
                 // v1.3.41: сайт без своих настроек получает общие умолчания (вкладка «🌐 По умолчанию»), если они есть
                 const gd = GlobalDefaults.read();
                 if (gd) Object.assign(config, JSON.parse(JSON.stringify(gd)));
@@ -9534,6 +9541,96 @@ function findMediaForDownload() {
         let j = 0;
         for (let i = 0; i < out.length; i++) if (out[i] === null) out[i] = flow[j++];
         return out.filter(k => k != null);
+    }
+    // ── v1.3.48: «По умолчанию: Клавиши · Порядок · Сохранить это» — общие умолчания хоткеев (GM) ──
+    // { id, ts, hk, order, pinned }. Запись = рассылка: открытые вкладки получают её через
+    // GM_addValueChangeListener, остальные контейнеры — при следующей загрузке (id применённого — в localStorage).
+    // Закреплённые (🔒) строки НЕ меняются ни сбросом, ни рассылкой: ни клавиша, ни место.
+    const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
+    const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
+    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget'];
+    function readHotkeyDefaults() {
+        let raw = null;
+        try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
+        try {
+            const o = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (!o || typeof o !== 'object' || !o.hk || typeof o.hk !== 'object') return null;
+            return { id: String(o.id || ''), ts: Number(o.ts) || 0, hk: o.hk, order: Array.isArray(o.order) ? o.order.filter(x => typeof x === 'string') : [], pinned: Array.isArray(o.pinned) ? o.pinned.filter(x => typeof x === 'string') : [] };
+        } catch (e) { return null; }
+    }
+    /** Клавиши по умолчанию: сохранённые общие («Сохранить это») или заводские. */
+    function hotkeyDefaultFor(k) {
+        const d = readHotkeyDefaults();
+        if (d && d.hk && Object.prototype.hasOwnProperty.call(d.hk, k)) return normalizeHotkeyBinding(d.hk[k]);
+        return normalizeHotkeyBinding(DEFAULT_CONFIG.hk[k]);
+    }
+    function hotkeyDefaultOrder() {
+        const d = readHotkeyDefaults();
+        return (d && d.order.length) ? d.order : HK_FACTORY_ORDER;
+    }
+    /** Сбросить клавиши к умолчаниям, кроме закреплённых. Возвращает число изменённых. */
+    function resetHotkeysKeepPinned() {
+        const pin = new Set(getHotkeyPinned());
+        const keys = new Set(Object.keys(DEFAULT_CONFIG.hk).concat(Object.keys(config.hk || {})));
+        const d = readHotkeyDefaults();
+        if (d) Object.keys(d.hk).forEach(k => keys.add(k));
+        let n = 0;
+        keys.forEach(k => {
+            if (pin.has(k)) return;
+            if (!Object.prototype.hasOwnProperty.call(DEFAULT_CONFIG.hk, k) && !(d && d.hk[k])) return;
+            const v = hotkeyDefaultFor(k);
+            if (JSON.stringify(v) !== JSON.stringify(config.hk[k])) { config.hk[k] = v; n++; }
+        });
+        return n;
+    }
+    /** Сбросить порядок к умолчанию; закреплённые строки остаются на своих местах. */
+    function resetHotkeyOrderKeepPinned(allKeys) {
+        const cur = orderedHotkeyKeys(allKeys, getHotkeyOrder());
+        const want = orderedHotkeyKeys(allKeys, hotkeyDefaultOrder());
+        const out = hkOrderKeepPinned(want, cur, getHotkeyPinned());
+        saveHotkeyOrder(out);
+        return out;
+    }
+    /** «Сохранить это»: текущие клавиши + порядок + закрепления → общие умолчания (и рассылка). */
+    function saveHotkeyDefaults(allKeys) {
+        const rec = {
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+            ts: Date.now(),
+            hk: JSON.parse(JSON.stringify(config.hk || {})),
+            order: orderedHotkeyKeys(allKeys || HK_FACTORY_ORDER, getHotkeyOrder()),
+            pinned: getHotkeyPinned(),
+        };
+        if (typeof GM_setValue !== 'function') return null;
+        try { GM_setValue(HK_DEFAULTS_GM_KEY, JSON.stringify(rec)); } catch (e) { return null; }
+        try { localStorage.setItem(HK_DEFAULTS_APPLIED_LS, rec.id); } catch (e) {} // этот контейнер уже в этом состоянии
+        return rec;
+    }
+    /**
+     * Применить общие умолчания в этом контейнере (рассылка или загрузка). Закреплённые здесь строки
+     * не трогаются: ни клавиша, ни место. Закрепления из рассылки добавляются к своим.
+     */
+    function applyHotkeyDefaults(rec, reason) {
+        if (!rec || !rec.hk) return false;
+        const localPinned = getHotkeyPinned();
+        const pin = new Set(localPinned);
+        for (const k of Object.keys(rec.hk)) {
+            if (pin.has(k)) continue;
+            if (!Object.prototype.hasOwnProperty.call(DEFAULT_CONFIG.hk, k)) continue;
+            config.hk[k] = normalizeHotkeyBinding(rec.hk[k]);
+        }
+        const all = HK_FACTORY_ORDER.concat(Object.keys(DEFAULT_CONFIG.hk).filter(k => !HK_FACTORY_ORDER.includes(k)));
+        const cur = orderedHotkeyKeys(all, getHotkeyOrder());
+        if (rec.order && rec.order.length) saveHotkeyOrder(hkOrderKeepPinned(orderedHotkeyKeys(all, rec.order), cur, localPinned));
+        const mergedPins = Array.from(new Set(localPinned.concat(rec.pinned || [])));
+        if (mergedPins.length !== localPinned.length) saveHotkeyPinned(mergedPins);
+        try { localStorage.setItem(HK_DEFAULTS_APPLIED_LS, rec.id); } catch (e) {}
+        try { persistLocalConfig(); } catch (e) {}
+        try { if (typeof GM_setValue === 'function') GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch (e) {}
+        if (window.updateWidgetUI) window.updateWidgetUI();
+        const modal = document.getElementById('mossad-hk-modal');
+        if (modal && typeof modal._mossadRenderHotkeys === 'function') modal._mossadRenderHotkeys();
+        mossadDebug('hotkey', 'общие умолчания клавиш применены', { reason, id: rec.id, keptPinned: localPinned.length });
+        return true;
     }
     function clearHotkeyOrder() {
         try { if (typeof GM_deleteValue === 'function') GM_deleteValue(HK_ORDER_KEY); else if (typeof GM_setValue === 'function') GM_setValue(HK_ORDER_KEY, '[]'); } catch (e) {}
@@ -9835,8 +9932,10 @@ function findMediaForDownload() {
             </div>
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:calc(85vh - 230px); overflow-y:auto; padding-right:4px;"></div>
               <div style="display:flex; gap:6px; align-items:center;">
-                <button id="mossad-hk-reset" title="Вернуть заводские горячие клавиши (для всех сайтов)" style="background:#374151; border:1px solid #4b5563; padding:6px 12px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkReset">${LH('hkReset')}</button>
-                <button id="mossad-hk-order-reset" title="Вернуть исходный порядок строк" style="background:transparent; border:1px solid #374151; padding:4px 8px; border-radius:6px; color:#9ca3af; cursor:pointer; font-size:11px;" data-mossad-label="hkOrderReset">${LH('hkOrderReset')}</button>
+                <span style="font-size:12px;color:#9ca3af;" data-mossad-label="hkDefaultsLabel">${LH('hkDefaultsLabel')}</span>
+                <button id="mossad-hk-reset" title="Сбросить клавиши к умолчаниям (сохранённым «Сохранить это» или заводским). Закреплённые 🔒 не меняются" style="background:#374151; border:1px solid #4b5563; padding:5px 10px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkResetKeys">${LH('hkResetKeys')}</button>
+                <button id="mossad-hk-order-reset" title="Сбросить порядок строк к умолчанию. Закреплённые 🔒 остаются на месте" style="background:#374151; border:1px solid #4b5563; padding:5px 10px; border-radius:6px; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkResetOrder">${LH('hkResetOrder')}</button>
+                <button id="mossad-hk-save-defaults" title="Сохранить текущие клавиши, порядок и закрепления как общие умолчания — применяются во всех открытых вкладках сразу, в остальных контейнерах при загрузке" style="background:#065f46; border:1px solid #10b981; padding:5px 10px; border-radius:6px; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkSaveDefaults">${LH('hkSaveDefaults')}</button>
               </div>
             </div>
             <div data-pane="defaults" style="display:none; flex-direction:column; gap:6px;">
@@ -9949,7 +10048,8 @@ function findMediaForDownload() {
             };
 
             resetBtn.onclick = () => {
-                setHk(DEFAULT_CONFIG.hk[k]);
+                if (row.dataset.pinned) return; // v1.3.48: закреплённую строку сброс не меняет
+                setHk(hotkeyDefaultFor(k));
                 btn.textContent = formatHotkey(cur());
             };
 
@@ -9990,7 +10090,7 @@ function findMediaForDownload() {
                 pinBtn.title = pinned ? 'Открепить строку' : 'Закрепить строку на месте';
                 pinBtn.style.color = pinned ? '#fbbf24' : '#9ca3af';
             }
-            row.querySelectorAll('.mossad-hk-top, .mossad-hk-bottom').forEach(b => {
+            row.querySelectorAll('.mossad-hk-top, .mossad-hk-bottom, .mossad-hk-key-reset').forEach(b => {
                 b.disabled = !!pinned;
                 b.style.opacity = pinned ? '0.3' : '1';
                 b.style.cursor = pinned ? 'default' : 'pointer';
@@ -10255,25 +10355,48 @@ function findMediaForDownload() {
             if (typeof modal._mossadEndDrag === 'function') modal._mossadEndDrag();
         };
 
+        modal._mossadRenderHotkeys = renderHotkeyList;
         modal.querySelector('#mossad-hk-reset').onclick = () => {
-            if (!confirm('Сбросить все горячие клавиши по умолчанию?')) return;
-            config.hk = JSON.parse(JSON.stringify(DEFAULT_CONFIG.hk));
-            normalizeAllHotkeys();
-            if (typeof window.saveGlobalHotkeys === 'function') {
-                window.saveGlobalHotkeys(false);
-            } else {
-                Settings.save();
-            }
-            closeSettingsWindow(false);
-            openSettingsWindow('hotkeys'); // переоткрыть с обновлёнными клавишами
-            showToast('✅ Клавиши сброшены по умолчанию для всех сайтов');
+            const src = readHotkeyDefaults() ? 'сохранённым умолчаниям' : 'заводским';
+            if (!confirm(`Сбросить горячие клавиши к ${src}? Закреплённые 🔒 не изменятся.`)) return;
+            const n = resetHotkeysKeepPinned();
+            if (typeof window.saveGlobalHotkeys === 'function') window.saveGlobalHotkeys(false);
+            else Settings.save();
+            renderHotkeyList();
+            showToast(`✅ Клавиши сброшены (${n})`);
         };
         modal.querySelector('#mossad-hk-order-reset').onclick = () => {
-            clearHotkeyOrder();
+            resetHotkeyOrderKeepPinned(Object.keys(keysMap));
             renderHotkeyList();
-            showToast('↕ Исходный порядок клавиш');
+            showToast('↕ Порядок по умолчанию');
+        };
+        modal.querySelector('#mossad-hk-save-defaults').onclick = () => {
+            if (saveHotkeyDefaults(Object.keys(keysMap))) showToast('🌐 Клавиши сохранены как общие умолчания — применяются во всех вкладках');
+            else showToast('❌ GM-хранилище недоступно', true);
         };
         return modal;
+    }
+
+    // v1.3.48: общие умолчания клавиш — при загрузке (если ещё не применены здесь) и живьём из других вкладок
+    try {
+        const rec = readHotkeyDefaults();
+        let applied = null;
+        try { applied = localStorage.getItem(HK_DEFAULTS_APPLIED_LS); } catch (e) {}
+        if (rec && rec.id && rec.id !== applied) applyHotkeyDefaults(rec, 'load');
+    } catch (e) {}
+    if (typeof GM_addValueChangeListener === 'function') {
+        try {
+            GM_addValueChangeListener(HK_DEFAULTS_GM_KEY, (name, oldVal, newVal, remote) => {
+                if (!remote) return;
+                const rec = readHotkeyDefaults();
+                let applied = null;
+                try { applied = localStorage.getItem(HK_DEFAULTS_APPLIED_LS); } catch (e) {}
+                if (rec && rec.id && rec.id !== applied) {
+                    applyHotkeyDefaults(rec, 'broadcast');
+                    if (typeof showToast === 'function') showToast('🌐 Общие умолчания клавиш применены');
+                }
+            });
+        } catch (e) {}
     }
 
 // ============================================
