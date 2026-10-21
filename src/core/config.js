@@ -59,6 +59,7 @@
             focusWidget:      { key: 'F7',         ctrl: false, alt: false, shift: false },
             snapWidget:       { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
             openTodos:        { key: '',           ctrl: false, alt: false, shift: false }, // v1.3.49: «📝 Тудушки» — пусто по умолчанию
+            pinFullScale:     { key: '',           ctrl: false, alt: false, shift: false }, // v1.3.63: Pinterest — ⛶ «Показать в полном масштабе» (не назначено)
             grokCycle:        { key: '\\',         ctrl: false, alt: false, shift: false }, // v1.3.61: Grok — промт → фото/видео → длина/соотношение (e.code Backslash)
             nextSlide:        { key: 'ArrowRight', ctrl: false, alt: false, shift: false }, // v1.3.45: одна привязка (резервный Пробел убран)
             prevSlide:        { key: 'ArrowLeft',  ctrl: false, alt: false, shift: false },
@@ -387,6 +388,113 @@
         if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch (e) {} }
     }
 
+    // ── v1.3.63: хоткеи «Только для этого сайта» ──
+    // GM `mossad_hk_site` = { <rootDomain>: { hk: { действие: привязка }, order: [действия] } }.
+    // Действие в hk сайта — «своё» для сайта: его привязка берётся отсюда, иначе — общая (`mossad_hk_global`).
+    // В памяти config.hk — ДЕЙСТВУЮЩАЯ таблица (сайт поверх общей), поэтому весь код хоткеев и проверка
+    // занятых сочетаний работают без изменений. Общие значения «своих» действий лежат в _hkGlobalShadow
+    // и пишутся в mossad_hk_global вместо действующих (mossadHkGlobalTable). ANTI_PATTERNS §42.
+    const HK_SITE_GM_KEY = 'mossad_hk_site';
+    // Сразу «свои» при первом заходе на сайт (действие есть только на этом сайте)
+    const HK_SITE_SEED = { 'grok.com': ['grokCycle'], 'pinterest.com': ['pinFullScale'], 'pinterest.ru': ['pinFullScale'] };
+    let _hkGlobalShadow = {};
+    function _hkSiteReadAll() {
+        let raw = null;
+        try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_SITE_GM_KEY, null); } catch (e) {}
+        if (raw == null) { try { raw = localStorage.getItem(HK_SITE_GM_KEY); } catch (e) {} }
+        try { const o = typeof raw === 'string' ? JSON.parse(raw) : raw; return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {}; } catch (e) { return {}; }
+    }
+    function _hkSiteWriteAll(all) {
+        const json = JSON.stringify(all);
+        try { if (typeof GM_setValue === 'function') GM_setValue(HK_SITE_GM_KEY, json); } catch (e) {}
+        try { localStorage.setItem(HK_SITE_GM_KEY, json); } catch (e) {}
+    }
+    /** Запись этого сайта { hk, order } (копия). */
+    function mossadHkSiteEntry() {
+        const e = _hkSiteReadAll()[rootDomain];
+        return { hk: (e && e.hk && typeof e.hk === 'object') ? e.hk : {}, order: (e && Array.isArray(e.order)) ? e.order.filter(x => typeof x === 'string') : [] };
+    }
+    function _hkSiteSaveEntry(entry) {
+        const all = _hkSiteReadAll();
+        all[rootDomain] = { hk: entry.hk, order: entry.order };
+        _hkSiteWriteAll(all);
+    }
+    /** Действия «только для этого сайта». */
+    function mossadHkSiteKeys() { return Object.keys(mossadHkSiteEntry().hk); }
+    function mossadHkIsSite(k) { return Object.prototype.hasOwnProperty.call(mossadHkSiteEntry().hk, k); }
+    /**
+     * Наложить привязки сайта на config.hk. Вызывать сразу после слияния с общими (тогда config.hk[k] — общее значение).
+     * Первый заход на сайт: запись создаётся из HK_SITE_SEED (привязка = текущая общая).
+     */
+    function mossadApplySiteHotkeys() {
+        if (!config.hk) return;
+        const all = _hkSiteReadAll();
+        if (!all[rootDomain]) {
+            const seed = (HK_SITE_SEED[rootDomain] || []).filter(k => DEFAULT_CONFIG.hk[k]);
+            const hk = {};
+            seed.forEach(k => { hk[k] = normalizeHotkeyBinding(config.hk[k] || DEFAULT_CONFIG.hk[k]); });
+            all[rootDomain] = { hk, order: seed.slice() };
+            _hkSiteWriteAll(all);
+        }
+        const e = all[rootDomain];
+        _hkGlobalShadow = {};
+        for (const k of Object.keys(e.hk || {})) {
+            _hkGlobalShadow[k] = normalizeHotkeyBinding(config.hk[k] || DEFAULT_CONFIG.hk[k]);
+            config.hk[k] = normalizeHotkeyBinding(e.hk[k]);
+        }
+    }
+    /** Общая таблица (для mossad_hk_global): у «своих» действий — общее значение, а не сайта. */
+    function mossadHkGlobalTable() {
+        const out = JSON.parse(JSON.stringify(config.hk || {}));
+        for (const k of Object.keys(_hkGlobalShadow)) out[k] = _hkGlobalShadow[k];
+        return out;
+    }
+    /** Записать общие хоткеи и привязки сайта (из действующей config.hk). */
+    function mossadHkPersist() {
+        if (typeof GM_setValue === 'function' && config.hk) {
+            try { GM_setValue('mossad_hk_global', JSON.stringify(mossadHkGlobalTable())); } catch (e) {}
+        }
+        const keys = Object.keys(_hkGlobalShadow);
+        if (!keys.length) return; // «своих» нет — запись сайта не трогаем
+        const entry = mossadHkSiteEntry();
+        const hk = {};
+        keys.forEach(k => { hk[k] = normalizeHotkeyBinding(config.hk[k]); });
+        entry.hk = hk;
+        entry.order = entry.order.filter(k => hk[k]).concat(keys.filter(k => !entry.order.includes(k)));
+        _hkSiteSaveEntry(entry);
+    }
+    /** Сделать действие «своим» для сайта (on) или общим (off). Привязка: своё ← текущая общая; общее ← общее значение. */
+    function mossadHkSetSite(k, on, orderHint) {
+        const entry = mossadHkSiteEntry();
+        const was = Object.prototype.hasOwnProperty.call(entry.hk, k);
+        if (on && !was) {
+            _hkGlobalShadow[k] = normalizeHotkeyBinding(config.hk[k]);
+            entry.hk[k] = normalizeHotkeyBinding(config.hk[k]);
+        } else if (!on && was) {
+            config.hk[k] = normalizeHotkeyBinding(Object.prototype.hasOwnProperty.call(_hkGlobalShadow, k) ? _hkGlobalShadow[k] : DEFAULT_CONFIG.hk[k]);
+            delete _hkGlobalShadow[k];
+            delete entry.hk[k];
+        }
+        entry.order = Array.isArray(orderHint) ? orderHint.filter(x => entry.hk[x]) : entry.order.filter(x => entry.hk[x]);
+        Object.keys(entry.hk).forEach(x => { if (!entry.order.includes(x)) entry.order.push(x); });
+        _hkSiteSaveEntry(entry);
+        try { persistLocalConfig(); } catch (e) {}
+        if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(mossadHkGlobalTable())); } catch (e) {} }
+        mossadDebug('hotkey', on ? 'клавиша только для сайта' : 'клавиша снова общая', { k, site: rootDomain, hk: config.hk[k] });
+    }
+    function mossadHkSaveSiteOrder(order) {
+        const entry = mossadHkSiteEntry();
+        entry.order = order.filter(x => entry.hk[x]);
+        Object.keys(entry.hk).forEach(x => { if (!entry.order.includes(x)) entry.order.push(x); });
+        _hkSiteSaveEntry(entry);
+    }
+    /** Значение «по умолчанию» из общих умолчаний для «своего» действия — в общую тень, действующее не трогаем. */
+    function mossadHkSetGlobalValue(k, v) {
+        if (Object.prototype.hasOwnProperty.call(_hkGlobalShadow, k)) { _hkGlobalShadow[k] = normalizeHotkeyBinding(v); return true; }
+        return false;
+    }
+    try { mossadApplySiteHotkeys(); } catch (e) {}
+
     // v1.3.41: «Применить во всех контейнерах» — штамп из GM, если этот контейнер его ещё не применял
     try { GlobalDefaults.applyStampIfNew(); } catch (e) {}
     // …и живьём для уже открытых вкладок (Tampermonkey: GM_addValueChangeListener)
@@ -485,22 +593,14 @@
         get: () => config,
         save: () => {
             persistLocalConfig();
-            if (typeof GM_setValue === 'function' && config.hk) {
-                try {
-                    GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
-                } catch(e) {}
-            }
+            mossadHkPersist(); // v1.3.63: общие + «только для этого сайта»
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleSyncPush(); // Запускаем батч-синхронизацию
         },
         // Сохранить без ре-рендера UI (для текстовых полей — не сбивает фокус)
         saveQuiet: () => {
             persistLocalConfig();
-            if (typeof GM_setValue === 'function' && config.hk) {
-                try {
-                    GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
-                } catch(e) {}
-            }
+            mossadHkPersist(); // v1.3.63: общие + «только для этого сайта»
             scheduleSyncPush();
         },
         setQuiet: (key, val) => {
@@ -517,9 +617,7 @@
     window.saveGlobalHotkeys = function(showToastNotice = true) {
         try {
             persistLocalConfig();
-            if (typeof GM_setValue === 'function' && config.hk) {
-                GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
-            }
+            mossadHkPersist();
             if (window.updateWidgetUI) window.updateWidgetUI();
             scheduleSyncPush();
             if (showToastNotice) {
@@ -540,6 +638,7 @@
                     if (parsed && typeof parsed === 'object') {
                         config.hk = mergeDeep(config.hk, parsed);
                         normalizeAllHotkeys();
+                        mossadApplySiteHotkeys(); // v1.3.63: «свои» клавиши сайта поверх общих
                         persistLocalConfig();
                     }
                 }

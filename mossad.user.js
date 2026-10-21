@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.62
+// @version      1.3.63
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -27,7 +27,7 @@
     'use strict';
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.62';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.63';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -199,6 +199,7 @@ galleryStop: { key: '', ctrl: false, alt: false, shift: false },
 focusWidget: { key: 'F7', ctrl: false, alt: false, shift: false },
 snapWidget: { key: 'F8', ctrl: false, alt: false, shift: false },
 openTodos: { key: '', ctrl: false, alt: false, shift: false },
+pinFullScale: { key: '', ctrl: false, alt: false, shift: false },
 grokCycle: { key: '\\', ctrl: false, alt: false, shift: false },
 nextSlide: { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
 prevSlide: { key: 'ArrowLeft', ctrl: false, alt: false, shift: false },
@@ -462,6 +463,95 @@ if (normalizeAllHotkeys()) {
 try { persistLocalConfig(); } catch (e) {}
 if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch (e) {} }
 }
+const HK_SITE_GM_KEY = 'mossad_hk_site';
+const HK_SITE_SEED = { 'grok.com': ['grokCycle'], 'pinterest.com': ['pinFullScale'], 'pinterest.ru': ['pinFullScale'] };
+let _hkGlobalShadow = {};
+function _hkSiteReadAll() {
+let raw = null;
+try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_SITE_GM_KEY, null); } catch (e) {}
+if (raw == null) { try { raw = localStorage.getItem(HK_SITE_GM_KEY); } catch (e) {} }
+try { const o = typeof raw === 'string' ? JSON.parse(raw) : raw; return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {}; } catch (e) { return {}; }
+}
+function _hkSiteWriteAll(all) {
+const json = JSON.stringify(all);
+try { if (typeof GM_setValue === 'function') GM_setValue(HK_SITE_GM_KEY, json); } catch (e) {}
+try { localStorage.setItem(HK_SITE_GM_KEY, json); } catch (e) {}
+}
+function mossadHkSiteEntry() {
+const e = _hkSiteReadAll()[rootDomain];
+return { hk: (e && e.hk && typeof e.hk === 'object') ? e.hk : {}, order: (e && Array.isArray(e.order)) ? e.order.filter(x => typeof x === 'string') : [] };
+}
+function _hkSiteSaveEntry(entry) {
+const all = _hkSiteReadAll();
+all[rootDomain] = { hk: entry.hk, order: entry.order };
+_hkSiteWriteAll(all);
+}
+function mossadHkSiteKeys() { return Object.keys(mossadHkSiteEntry().hk); }
+function mossadHkIsSite(k) { return Object.prototype.hasOwnProperty.call(mossadHkSiteEntry().hk, k); }
+function mossadApplySiteHotkeys() {
+if (!config.hk) return;
+const all = _hkSiteReadAll();
+if (!all[rootDomain]) {
+const seed = (HK_SITE_SEED[rootDomain] || []).filter(k => DEFAULT_CONFIG.hk[k]);
+const hk = {};
+seed.forEach(k => { hk[k] = normalizeHotkeyBinding(config.hk[k] || DEFAULT_CONFIG.hk[k]); });
+all[rootDomain] = { hk, order: seed.slice() };
+_hkSiteWriteAll(all);
+}
+const e = all[rootDomain];
+_hkGlobalShadow = {};
+for (const k of Object.keys(e.hk || {})) {
+_hkGlobalShadow[k] = normalizeHotkeyBinding(config.hk[k] || DEFAULT_CONFIG.hk[k]);
+config.hk[k] = normalizeHotkeyBinding(e.hk[k]);
+}
+}
+function mossadHkGlobalTable() {
+const out = JSON.parse(JSON.stringify(config.hk || {}));
+for (const k of Object.keys(_hkGlobalShadow)) out[k] = _hkGlobalShadow[k];
+return out;
+}
+function mossadHkPersist() {
+if (typeof GM_setValue === 'function' && config.hk) {
+try { GM_setValue('mossad_hk_global', JSON.stringify(mossadHkGlobalTable())); } catch (e) {}
+}
+const keys = Object.keys(_hkGlobalShadow);
+if (!keys.length) return;
+const entry = mossadHkSiteEntry();
+const hk = {};
+keys.forEach(k => { hk[k] = normalizeHotkeyBinding(config.hk[k]); });
+entry.hk = hk;
+entry.order = entry.order.filter(k => hk[k]).concat(keys.filter(k => !entry.order.includes(k)));
+_hkSiteSaveEntry(entry);
+}
+function mossadHkSetSite(k, on, orderHint) {
+const entry = mossadHkSiteEntry();
+const was = Object.prototype.hasOwnProperty.call(entry.hk, k);
+if (on && !was) {
+_hkGlobalShadow[k] = normalizeHotkeyBinding(config.hk[k]);
+entry.hk[k] = normalizeHotkeyBinding(config.hk[k]);
+} else if (!on && was) {
+config.hk[k] = normalizeHotkeyBinding(Object.prototype.hasOwnProperty.call(_hkGlobalShadow, k) ? _hkGlobalShadow[k] : DEFAULT_CONFIG.hk[k]);
+delete _hkGlobalShadow[k];
+delete entry.hk[k];
+}
+entry.order = Array.isArray(orderHint) ? orderHint.filter(x => entry.hk[x]) : entry.order.filter(x => entry.hk[x]);
+Object.keys(entry.hk).forEach(x => { if (!entry.order.includes(x)) entry.order.push(x); });
+_hkSiteSaveEntry(entry);
+try { persistLocalConfig(); } catch (e) {}
+if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(mossadHkGlobalTable())); } catch (e) {} }
+mossadDebug('hotkey', on ? 'клавиша только для сайта' : 'клавиша снова общая', { k, site: rootDomain, hk: config.hk[k] });
+}
+function mossadHkSaveSiteOrder(order) {
+const entry = mossadHkSiteEntry();
+entry.order = order.filter(x => entry.hk[x]);
+Object.keys(entry.hk).forEach(x => { if (!entry.order.includes(x)) entry.order.push(x); });
+_hkSiteSaveEntry(entry);
+}
+function mossadHkSetGlobalValue(k, v) {
+if (Object.prototype.hasOwnProperty.call(_hkGlobalShadow, k)) { _hkGlobalShadow[k] = normalizeHotkeyBinding(v); return true; }
+return false;
+}
+try { mossadApplySiteHotkeys(); } catch (e) {}
 try { GlobalDefaults.applyStampIfNew(); } catch (e) {}
 if (typeof GM_addValueChangeListener === 'function') {
 try {
@@ -544,21 +634,13 @@ const Settings = {
 get: () => config,
 save: () => {
 persistLocalConfig();
-if (typeof GM_setValue === 'function' && config.hk) {
-try {
-GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
-} catch(e) {}
-}
+mossadHkPersist();
 if (window.updateWidgetUI) window.updateWidgetUI();
 scheduleSyncPush();
 },
 saveQuiet: () => {
 persistLocalConfig();
-if (typeof GM_setValue === 'function' && config.hk) {
-try {
-GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
-} catch(e) {}
-}
+mossadHkPersist();
 scheduleSyncPush();
 },
 setQuiet: (key, val) => {
@@ -573,9 +655,7 @@ Settings.save();
 window.saveGlobalHotkeys = function(showToastNotice = true) {
 try {
 persistLocalConfig();
-if (typeof GM_setValue === 'function' && config.hk) {
-GM_setValue('mossad_hk_global', JSON.stringify(config.hk));
-}
+mossadHkPersist();
 if (window.updateWidgetUI) window.updateWidgetUI();
 scheduleSyncPush();
 if (showToastNotice) {
@@ -594,6 +674,7 @@ const parsed = JSON.parse(gmHk);
 if (parsed && typeof parsed === 'object') {
 config.hk = mergeDeep(config.hk, parsed);
 normalizeAllHotkeys();
+mossadApplySiteHotkeys();
 persistLocalConfig();
 }
 }
@@ -1451,6 +1532,9 @@ const LABEL_DEFS = [
 ['hkCleared', 'очищено:', 'тост после переназначения'],
 ['hkDupHint', 'Дубликат — та же клавиша у:', 'подсказка на красной (дублирующейся) клавише'],
 ['hkResetCleared', 'Сброс: клавиша уже занята — очищено:', 'тост, если сброс очистил клавишу из-за дубликата'],
+['hkSecSite', 'Только для этого сайта', 'вкладка клавиш: заголовок секции клавиш этого сайта (v1.3.63)'],
+['hkSecSiteEmpty', 'Перетащите сюда строку (или ⤒ с верха общих) — клавиша будет своя для этого сайта', 'вкладка клавиш: подсказка в пустой секции сайта'],
+['hkSecGlobal', 'Общие для всех сайтов', 'вкладка клавиш: заголовок общей секции (разделитель)'],
 ['hkPinJumpNote', 'На Pinterest эта клавиша будет пропущена в «Клавиши» похожих пинов', 'заметка: клавиша совпадает с клавишами похожих пинов'],
 ['#', 'После скачивания (v1.3.56)'],
 ['pdLabel', 'После скачивания:', 'надпись у выбора действия после скачивания'],
@@ -9535,7 +9619,7 @@ return out.filter(k => k != null);
 }
 const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
 const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle'];
+const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'pinFullScale'];
 function readHotkeyDefaults() {
 let raw = null;
 try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -9611,7 +9695,7 @@ function saveHotkeyDefaults(allKeys) {
 const rec = {
 id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
 ts: Date.now(),
-hk: JSON.parse(JSON.stringify(config.hk || {})),
+hk: mossadHkGlobalTable(),
 order: orderedHotkeyKeys(allKeys || HK_FACTORY_ORDER, getHotkeyOrder()),
 pinned: getHotkeyPinned(),
 };
@@ -9627,6 +9711,7 @@ const pin = new Set(localPinned);
 for (const k of Object.keys(rec.hk)) {
 if (pin.has(k)) continue;
 if (!Object.prototype.hasOwnProperty.call(DEFAULT_CONFIG.hk, k)) continue;
+if (mossadHkSetGlobalValue(k, rec.hk[k])) continue;
 config.hk[k] = normalizeHotkeyBinding(rec.hk[k]);
 }
 const all = HK_FACTORY_ORDER.concat(Object.keys(DEFAULT_CONFIG.hk).filter(k => !HK_FACTORY_ORDER.includes(k)));
@@ -9636,7 +9721,7 @@ const mergedPins = Array.from(new Set(localPinned.concat(rec.pinned || [])));
 if (mergedPins.length !== localPinned.length) saveHotkeyPinned(mergedPins);
 try { localStorage.setItem(HK_DEFAULTS_APPLIED_LS, rec.id); } catch (e) {}
 try { persistLocalConfig(); } catch (e) {}
-try { if (typeof GM_setValue === 'function') GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch (e) {}
+try { mossadHkPersist(); } catch (e) {}
 if (window.updateWidgetUI) window.updateWidgetUI();
 const modal = document.getElementById('mossad-hk-modal');
 if (modal && typeof modal._mossadRenderHotkeys === 'function') modal._mossadRenderHotkeys();
@@ -9981,7 +10066,8 @@ duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробе
 rewind: 'Мотать в начало (Alt+R)',
 snapWidget: 'Привязать к левому верхнему краю (F8)',
 openTodos: 'Открыть «📝 Тудушки» (по умолчанию не назначено)',
-grokCycle: 'Grok — цикл: промт → фото/видео → длина/соотношение (\\)'
+grokCycle: 'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
+pinFullScale: 'Pinterest — ⛶ «Показать в полном масштабе» (не назначено)'
 };
 const renderHotkeyRow = (k) => {
 const row = document.createElement('div');
@@ -10091,8 +10177,8 @@ return b;
 const sep = document.createElement('span');
 sep.style.cssText = 'width:1px; height:14px; background:#374151; margin:0 3px;';
 slotDiv.append(btn, resetBtn, disableBtn, sep,
-mkMini('mossad-hk-top', 'hkTop', 'Переместить строку в самый верх'),
-mkMini('mossad-hk-bottom', 'hkBottom', 'Переместить строку в самый низ'),
+mkMini('mossad-hk-top', 'hkTop', 'Вверх до края секции; с верха общих — в «Только для этого сайта»'),
+mkMini('mossad-hk-bottom', 'hkBottom', 'Вниз до края секции; с низа секции сайта — в «Общие»'),
 mkMini('mossad-hk-pin', 'hkPin', 'Закрепить строку на месте'));
 row.append(label, slotDiv);
 return row;
@@ -10132,21 +10218,65 @@ r.dataset.dup = d ? '1' : '';
 });
 };
 modal._mossadPaintDupes = paintDupes;
+const mkSecHead = (cls, text, hint) => {
+const h = document.createElement('div');
+h.className = cls;
+h.style.cssText = 'font-size:11px; font-weight:bold; color:#9ca3af; text-transform:uppercase; letter-spacing:0.04em; padding:2px 2px 0;' +
+(cls === 'mossad-hk-sep' ? ' border-top:2px solid #4b5563; margin-top:4px; padding-top:8px;' : '');
+h.textContent = text;
+if (hint) {
+const sp = document.createElement('span');
+sp.className = 'mossad-hk-sec-hint';
+sp.style.cssText = 'display:block; font-weight:normal; text-transform:none; letter-spacing:0; color:#6b7280; font-size:11px;';
+sp.textContent = hint;
+h.appendChild(sp);
+}
+return h;
+};
+const hkSep = () => list.querySelector('.mossad-hk-sep');
 const renderHotkeyList = () => {
 list.innerHTML = '';
 const pinned = new Set(getHotkeyPinned());
-orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()).forEach(k => {
-const row = renderHotkeyRow(k);
-paintPinned(row, pinned.has(k));
-list.append(row);
-});
+const all = Object.keys(keysMap);
+const siteSet = new Set(mossadHkSiteKeys().filter(k => keysMap[k]));
+const siteKeys = orderedHotkeyKeys(all.filter(k => siteSet.has(k)), mossadHkSiteEntry().order);
+const globalKeys = orderedHotkeyKeys(all, getHotkeyOrder()).filter(k => !siteSet.has(k));
+list.append(mkSecHead('mossad-hk-sec-site', `${L('hkSecSite')} (${rootDomain})`, siteKeys.length ? '' : L('hkSecSiteEmpty')));
+const addRow = (k, site) => { const row = renderHotkeyRow(k); row.dataset.site = site ? '1' : ''; paintPinned(row, pinned.has(k)); list.append(row); };
+siteKeys.forEach(k => addRow(k, true));
+list.append(mkSecHead('mossad-hk-sep', L('hkSecGlobal')));
+globalKeys.forEach(k => addRow(k, false));
 paintDupes();
 };
-const commitOrder = (order) => {
+const hkSections = () => {
+const out = { site: [], global: [] };
+let past = false;
+Array.from(list.children).forEach(el => {
+if (el.classList && el.classList.contains('mossad-hk-sep')) { past = true; return; }
+if (el.dataset && el.dataset.hk) out[past ? 'global' : 'site'].push(el.dataset.hk);
+});
+return out;
+};
+const mergeGlobalOrder = (visible) => {
+const all = Object.keys(keysMap);
+const full = orderedHotkeyKeys(all, getHotkeyOrder());
+const vis = new Set(visible), q = visible.slice(), out = [];
+full.forEach(k => { if (vis.has(k)) { if (q.length) out.push(q.shift()); } else out.push(k); });
+return out.concat(q);
+};
+const commitSections = (siteOrder, globalOrder) => {
+const wasSite = new Set(mossadHkSiteKeys());
+siteOrder.forEach(k => { if (!wasSite.has(k)) mossadHkSetSite(k, true, siteOrder); });
+globalOrder.forEach(k => { if (wasSite.has(k)) mossadHkSetSite(k, false); });
+mossadHkSaveSiteOrder(siteOrder);
+saveHotkeyOrder(mergeGlobalOrder(globalOrder));
+const moved = siteOrder.some(k => !wasSite.has(k)) || globalOrder.some(k => wasSite.has(k));
+if (moved) { renderHotkeyList(); if (window.updateWidgetUI) window.updateWidgetUI(); return; }
 const byKey = {};
 Array.from(list.children).forEach(r => { if (r.dataset && r.dataset.hk) byKey[r.dataset.hk] = r; });
-order.forEach(k => { if (byKey[k]) list.appendChild(byKey[k]); });
-saveHotkeyOrder(order);
+const sep = hkSep();
+siteOrder.forEach(k => { if (byKey[k]) list.insertBefore(byKey[k], sep); });
+globalOrder.forEach(k => { if (byKey[k]) list.appendChild(byKey[k]); });
 };
 list.addEventListener('click', (e) => {
 const b = e.target && e.target.closest ? e.target.closest('.mossad-hk-top, .mossad-hk-bottom, .mossad-hk-pin') : null;
@@ -10167,9 +10297,18 @@ paintPinned(row, !isPinned);
 return;
 }
 if (pinned.includes(k)) return;
-const rest = cur.filter(x => x !== k);
-const want = b.classList.contains('mossad-hk-top') ? [k].concat(rest) : rest.concat(k);
-commitOrder(hkOrderKeepPinned(want, cur, pinned));
+const sec = hkSections();
+const inSite = sec.site.includes(k);
+const up = b.classList.contains('mossad-hk-top');
+const curSec = inSite ? sec.site : sec.global;
+const rest = curSec.filter(x => x !== k);
+const moved = hkOrderKeepPinned(up ? [k].concat(rest) : rest.concat(k), curSec, pinned);
+if (moved.join('|') !== curSec.join('|')) {
+if (inSite) commitSections(moved, sec.global); else commitSections(sec.site, moved);
+return;
+}
+if (up && !inSite) commitSections(sec.site.concat(k), sec.global.filter(x => x !== k));
+else if (!up && inSite) commitSections(sec.site.filter(x => x !== k), [k].concat(sec.global));
 });
 renderHotkeyList();
 list.style.position = 'relative';
@@ -10202,7 +10341,7 @@ modal.dataset.dragging = '1';
 }
 e.preventDefault();
 d.row.style.top = `${d.startTop + dy + (list.scrollTop - d.startScroll)}px`;
-const others = hkRows().filter(r => r !== d.row);
+const others = Array.from(list.children).filter(r => r !== d.row && r !== d.ph && ((r.dataset && r.dataset.hk) || r.classList.contains('mossad-hk-sep')));
 let before = null;
 for (const r of others) {
 const rc = r.getBoundingClientRect();
@@ -10231,9 +10370,12 @@ if (d.ph && d.ph.parentNode === list) { list.insertBefore(d.row, d.ph); d.ph.rem
 document.body.style.cursor = d.prevBodyCursor || '';
 delete modal.dataset.dragging;
 modal._mossadSuppressClickUntil = Date.now() + 300;
-const dropped = hkRows().map(r => r.dataset.hk);
-const order = hkOrderKeepPinned(dropped, d.orderBefore.split('|'), getHotkeyPinned());
-if (order.join('|') !== d.orderBefore) commitOrder(order);
+const sec = hkSections();
+const pin = getHotkeyPinned();
+const before = d.sectionsBefore;
+const siteO = hkOrderKeepPinned(sec.site, before.site.filter(x => sec.site.includes(x)), pin).concat(sec.site.filter(x => !before.site.includes(x)));
+const globO = hkOrderKeepPinned(sec.global, before.global.filter(x => sec.global.includes(x)), pin).concat(sec.global.filter(x => !before.global.includes(x)));
+if (siteO.join('|') !== before.site.join('|') || globO.join('|') !== before.global.join('|')) commitSections(siteO, globO);
 };
 list.addEventListener('pointerdown', (e) => {
 const label = e.target && e.target.closest ? e.target.closest('.mossad-hk-handle') : null;
@@ -10243,7 +10385,7 @@ if (window.capturingFor !== null && window.capturingFor !== undefined) return;
 e.preventDefault();
 const row = label.closest('[data-hk]');
 if (row && row.dataset.pinned) return;
-hkDrag = { row, label, pointerId: e.pointerId, startY: e.clientY, startScroll: list.scrollTop, active: false, ph: null, orderBefore: hkRows().map(r => r.dataset.hk).join('|') };
+hkDrag = { row, label, pointerId: e.pointerId, startY: e.clientY, startScroll: list.scrollTop, active: false, ph: null, orderBefore: hkRows().map(r => r.dataset.hk).join('|'), sectionsBefore: hkSections() };
 try { if (label.setPointerCapture && e.pointerId != null) label.setPointerCapture(e.pointerId); } catch (err) {}
 document.addEventListener('pointermove', onDragMove, true);
 document.addEventListener('pointerup', endDrag, true);
@@ -10728,6 +10870,12 @@ if (btn) btn.click();
 }
 showToast(video && video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
 }
+}
+if (rootDomain.includes('pinterest.') && config.hk.pinFullScale && config.hk.pinFullScale.key && hotkeyMatches(e, config.hk.pinFullScale)) {
+e.preventDefault();
+const fsBtn = pinterestFindFullScaleButton();
+if (fsBtn) clickElementFull(fsBtn); else showToast('⚠️ Кнопка «Показать в полном масштабе» не найдена', true);
+return;
 }
 if (hotkeyMatches(e, config.hk.playPause)) {
 e.preventDefault();

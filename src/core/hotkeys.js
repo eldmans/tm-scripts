@@ -391,6 +391,14 @@
             }
         }
 
+        // v1.3.63: Pinterest — ⛶ «Показать в полном масштабе» главного пина (по умолчанию не назначено)
+        if (rootDomain.includes('pinterest.') && config.hk.pinFullScale && config.hk.pinFullScale.key && hotkeyMatches(e, config.hk.pinFullScale)) {
+            e.preventDefault();
+            const fsBtn = pinterestFindFullScaleButton();
+            if (fsBtn) clickElementFull(fsBtn); else showToast('⚠️ Кнопка «Показать в полном масштабе» не найдена', true);
+            return;
+        }
+
         if (hotkeyMatches(e, config.hk.playPause)) {
             e.preventDefault();
             const video = getActiveVideo();

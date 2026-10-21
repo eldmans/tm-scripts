@@ -75,7 +75,7 @@
     // Закреплённые (🔒) строки НЕ меняются ни сбросом, ни рассылкой: ни клавиша, ни место.
     const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
     const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle'];
+    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'pinFullScale'];
     function readHotkeyDefaults() {
         let raw = null;
         try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -163,7 +163,7 @@
         const rec = {
             id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
             ts: Date.now(),
-            hk: JSON.parse(JSON.stringify(config.hk || {})),
+            hk: mossadHkGlobalTable(), // v1.3.63: общие значения, без «своих» клавиш сайта
             order: orderedHotkeyKeys(allKeys || HK_FACTORY_ORDER, getHotkeyOrder()),
             pinned: getHotkeyPinned(),
         };
@@ -183,6 +183,7 @@
         for (const k of Object.keys(rec.hk)) {
             if (pin.has(k)) continue;
             if (!Object.prototype.hasOwnProperty.call(DEFAULT_CONFIG.hk, k)) continue;
+            if (mossadHkSetGlobalValue(k, rec.hk[k])) continue; // v1.3.63: «своё» для сайта — меняется только общее значение
             config.hk[k] = normalizeHotkeyBinding(rec.hk[k]);
         }
         const all = HK_FACTORY_ORDER.concat(Object.keys(DEFAULT_CONFIG.hk).filter(k => !HK_FACTORY_ORDER.includes(k)));
@@ -192,7 +193,7 @@
         if (mergedPins.length !== localPinned.length) saveHotkeyPinned(mergedPins);
         try { localStorage.setItem(HK_DEFAULTS_APPLIED_LS, rec.id); } catch (e) {}
         try { persistLocalConfig(); } catch (e) {}
-        try { if (typeof GM_setValue === 'function') GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch (e) {}
+        try { mossadHkPersist(); } catch (e) {}
         if (window.updateWidgetUI) window.updateWidgetUI();
         const modal = document.getElementById('mossad-hk-modal');
         if (modal && typeof modal._mossadRenderHotkeys === 'function') modal._mossadRenderHotkeys();
@@ -562,7 +563,8 @@
             rewind:           'Мотать в начало (Alt+R)',
             snapWidget:       'Привязать к левому верхнему краю (F8)',
             openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)',
-            grokCycle:        'Grok — цикл: промт → фото/видео → длина/соотношение (\\)'
+            grokCycle:        'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
+            pinFullScale:     'Pinterest — ⛶ «Показать в полном масштабе» (не назначено)'
         };
         
         const renderHotkeyRow = (k) => {
@@ -694,8 +696,8 @@
             const sep = document.createElement('span');
             sep.style.cssText = 'width:1px; height:14px; background:#374151; margin:0 3px;';
             slotDiv.append(btn, resetBtn, disableBtn, sep,
-                mkMini('mossad-hk-top', 'hkTop', 'Переместить строку в самый верх'),
-                mkMini('mossad-hk-bottom', 'hkBottom', 'Переместить строку в самый низ'),
+                mkMini('mossad-hk-top', 'hkTop', 'Вверх до края секции; с верха общих — в «Только для этого сайта»'),
+                mkMini('mossad-hk-bottom', 'hkBottom', 'Вниз до края секции; с низа секции сайта — в «Общие»'),
                 mkMini('mossad-hk-pin', 'hkPin', 'Закрепить строку на месте'));
             row.append(label, slotDiv);
             return row;
@@ -738,22 +740,70 @@
             });
         };
         modal._mossadPaintDupes = paintDupes;
+        // ── v1.3.63: две секции — «Только для этого сайта» (сверху), разделитель, «Общие для всех сайтов» ──
+        // Строку перетащили выше разделителя (или ⤒ с верха общих) — клавиша своя для сайта; ниже — снова общая.
+        const mkSecHead = (cls, text, hint) => {
+            const h = document.createElement('div');
+            h.className = cls;
+            h.style.cssText = 'font-size:11px; font-weight:bold; color:#9ca3af; text-transform:uppercase; letter-spacing:0.04em; padding:2px 2px 0;' +
+                (cls === 'mossad-hk-sep' ? ' border-top:2px solid #4b5563; margin-top:4px; padding-top:8px;' : '');
+            h.textContent = text;
+            if (hint) {
+                const sp = document.createElement('span');
+                sp.className = 'mossad-hk-sec-hint';
+                sp.style.cssText = 'display:block; font-weight:normal; text-transform:none; letter-spacing:0; color:#6b7280; font-size:11px;';
+                sp.textContent = hint;
+                h.appendChild(sp);
+            }
+            return h;
+        };
+        const hkSep = () => list.querySelector('.mossad-hk-sep');
         const renderHotkeyList = () => {
             list.innerHTML = '';
             const pinned = new Set(getHotkeyPinned());
-            orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()).forEach(k => {
-                const row = renderHotkeyRow(k);
-                paintPinned(row, pinned.has(k));
-                list.append(row);
-            });
+            const all = Object.keys(keysMap);
+            const siteSet = new Set(mossadHkSiteKeys().filter(k => keysMap[k]));
+            const siteKeys = orderedHotkeyKeys(all.filter(k => siteSet.has(k)), mossadHkSiteEntry().order);
+            const globalKeys = orderedHotkeyKeys(all, getHotkeyOrder()).filter(k => !siteSet.has(k));
+            list.append(mkSecHead('mossad-hk-sec-site', `${L('hkSecSite')} (${rootDomain})`, siteKeys.length ? '' : L('hkSecSiteEmpty')));
+            const addRow = (k, site) => { const row = renderHotkeyRow(k); row.dataset.site = site ? '1' : ''; paintPinned(row, pinned.has(k)); list.append(row); };
+            siteKeys.forEach(k => addRow(k, true));
+            list.append(mkSecHead('mossad-hk-sep', L('hkSecGlobal')));
+            globalKeys.forEach(k => addRow(k, false));
             paintDupes();
         };
-        /** Расставить строки в DOM по порядку ключей и сохранить порядок. */
-        const commitOrder = (order) => {
+        /** Строки секций в DOM: { site: [...], global: [...] } */
+        const hkSections = () => {
+            const out = { site: [], global: [] };
+            let past = false;
+            Array.from(list.children).forEach(el => {
+                if (el.classList && el.classList.contains('mossad-hk-sep')) { past = true; return; }
+                if (el.dataset && el.dataset.hk) out[past ? 'global' : 'site'].push(el.dataset.hk);
+            });
+            return out;
+        };
+        /** Общий порядок хранится для всех сайтов: «свои» строки этого сайта сохраняют там прежние места. */
+        const mergeGlobalOrder = (visible) => {
+            const all = Object.keys(keysMap);
+            const full = orderedHotkeyKeys(all, getHotkeyOrder());
+            const vis = new Set(visible), q = visible.slice(), out = [];
+            full.forEach(k => { if (vis.has(k)) { if (q.length) out.push(q.shift()); } else out.push(k); });
+            return out.concat(q);
+        };
+        /** Расставить секции и сохранить: порядок сайта, общий порядок, переходы между секциями. */
+        const commitSections = (siteOrder, globalOrder) => {
+            const wasSite = new Set(mossadHkSiteKeys());
+            siteOrder.forEach(k => { if (!wasSite.has(k)) mossadHkSetSite(k, true, siteOrder); });
+            globalOrder.forEach(k => { if (wasSite.has(k)) mossadHkSetSite(k, false); });
+            mossadHkSaveSiteOrder(siteOrder);
+            saveHotkeyOrder(mergeGlobalOrder(globalOrder));
+            const moved = siteOrder.some(k => !wasSite.has(k)) || globalOrder.some(k => wasSite.has(k));
+            if (moved) { renderHotkeyList(); if (window.updateWidgetUI) window.updateWidgetUI(); return; }
             const byKey = {};
             Array.from(list.children).forEach(r => { if (r.dataset && r.dataset.hk) byKey[r.dataset.hk] = r; });
-            order.forEach(k => { if (byKey[k]) list.appendChild(byKey[k]); });
-            saveHotkeyOrder(order);
+            const sep = hkSep();
+            siteOrder.forEach(k => { if (byKey[k]) list.insertBefore(byKey[k], sep); });
+            globalOrder.forEach(k => { if (byKey[k]) list.appendChild(byKey[k]); });
         };
         // Делегированные клики: ⤒ / ⤓ / 🔒
         list.addEventListener('click', (e) => {
@@ -775,9 +825,20 @@
                 return;
             }
             if (pinned.includes(k)) return; // закреплённую строку ⤒/⤓ не двигают
-            const rest = cur.filter(x => x !== k);
-            const want = b.classList.contains('mossad-hk-top') ? [k].concat(rest) : rest.concat(k);
-            commitOrder(hkOrderKeepPinned(want, cur, pinned));
+            // v1.3.63: ⤒ / ⤓ — «до следующего потолка»: край своей секции, а с края — через разделитель
+            const sec = hkSections();
+            const inSite = sec.site.includes(k);
+            const up = b.classList.contains('mossad-hk-top');
+            const curSec = inSite ? sec.site : sec.global;
+            const rest = curSec.filter(x => x !== k);
+            const moved = hkOrderKeepPinned(up ? [k].concat(rest) : rest.concat(k), curSec, pinned);
+            if (moved.join('|') !== curSec.join('|')) {
+                if (inSite) commitSections(moved, sec.global); else commitSections(sec.site, moved);
+                return;
+            }
+            // уже у края секции
+            if (up && !inSite) commitSections(sec.site.concat(k), sec.global.filter(x => x !== k));       // ⤒ с верха общих → в конец «своих»
+            else if (!up && inSite) commitSections(sec.site.filter(x => x !== k), [k].concat(sec.global)); // ⤓ с низа «своих» → в начало общих
         });
         renderHotkeyList();
         list.style.position = 'relative';
@@ -816,7 +877,7 @@
             e.preventDefault();
             d.row.style.top = `${d.startTop + dy + (list.scrollTop - d.startScroll)}px`;
             // Куда встать: перед первой строкой, чья середина ниже указателя
-            const others = hkRows().filter(r => r !== d.row);
+            const others = Array.from(list.children).filter(r => r !== d.row && r !== d.ph && ((r.dataset && r.dataset.hk) || r.classList.contains('mossad-hk-sep')));
             let before = null;
             for (const r of others) {
                 const rc = r.getBoundingClientRect();
@@ -848,9 +909,13 @@
             // Клик после перетаскивания не должен считаться «кликом вне окна»
             modal._mossadSuppressClickUntil = Date.now() + 300;
             // v1.3.47: закреплённые строки возвращаются на свои места, остальные — в новом порядке
-            const dropped = hkRows().map(r => r.dataset.hk);
-            const order = hkOrderKeepPinned(dropped, d.orderBefore.split('|'), getHotkeyPinned());
-            if (order.join('|') !== d.orderBefore) commitOrder(order);
+            // v1.3.63: выше разделителя — «свои» для сайта, ниже — общие; закреплённые — на своих местах в секции
+            const sec = hkSections();
+            const pin = getHotkeyPinned();
+            const before = d.sectionsBefore;
+            const siteO = hkOrderKeepPinned(sec.site, before.site.filter(x => sec.site.includes(x)), pin).concat(sec.site.filter(x => !before.site.includes(x)));
+            const globO = hkOrderKeepPinned(sec.global, before.global.filter(x => sec.global.includes(x)), pin).concat(sec.global.filter(x => !before.global.includes(x)));
+            if (siteO.join('|') !== before.site.join('|') || globO.join('|') !== before.global.join('|')) commitSections(siteO, globO);
         };
         list.addEventListener('pointerdown', (e) => {
             const label = e.target && e.target.closest ? e.target.closest('.mossad-hk-handle') : null;
@@ -860,7 +925,7 @@
             e.preventDefault(); // не выделять текст
             const row = label.closest('[data-hk]');
             if (row && row.dataset.pinned) return; // v1.3.47: закреплённую строку не тянут
-            hkDrag = { row, label, pointerId: e.pointerId, startY: e.clientY, startScroll: list.scrollTop, active: false, ph: null, orderBefore: hkRows().map(r => r.dataset.hk).join('|') };
+            hkDrag = { row, label, pointerId: e.pointerId, startY: e.clientY, startScroll: list.scrollTop, active: false, ph: null, orderBefore: hkRows().map(r => r.dataset.hk).join('|'), sectionsBefore: hkSections() };
             try { if (label.setPointerCapture && e.pointerId != null) label.setPointerCapture(e.pointerId); } catch (err) {}
             document.addEventListener('pointermove', onDragMove, true);
             document.addEventListener('pointerup', endDrag, true);
