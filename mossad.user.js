@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.50
+// @version      1.3.51
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -25,7 +25,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.50';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.51';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -192,7 +192,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         debugSlideshow: false,          // v1.3.38: debug-лог источников шагов слайдшоу и шагов удаления (консоль)
         
         // PINTEREST ENGINE CONFIGS
-        pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
+        pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'30' (№ N — N-й похожий пин)
+        pinterestDir: 'fwd',               // v1.3.51: малое слайдшоу на Pinterest: 'fwd' — новые пины, 'back' — назад по истории
         pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
         pinterestPhotoPercent: 50,         // 0..100 % (видео = 100 - photo)
         pinterestMaxVideoDuration: 0,      // макс длительность видео в сек (0 = без лимита)
@@ -348,6 +349,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         }
         config = mergeDeep(base, config);
     }
+
+    // v1.3.51: Pinterest — мусорный режим/направление → по умолчанию (режим из старой панели мог быть любым текстом)
+    if (!(config.pinterestMode === 'rand' || config.pinterestMode === '+1' || /^\d+$/.test(String(config.pinterestMode)))) config.pinterestMode = 'rand';
+    if (/^\d+$/.test(String(config.pinterestMode))) config.pinterestMode = String(Math.min(30, Math.max(1, parseInt(config.pinterestMode, 10))));
+    if (config.pinterestDir !== 'back') config.pinterestDir = 'fwd';
 
     // ── GitHub-токен: хранится в общем хранилище Tampermonkey (GM_setValue), а НЕ в localStorage сайта ──
     // v1.3.34: раньше токен лежал в localStorage каждого сайта (`mossad_{domain}_config`) и был
@@ -724,6 +730,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const exportCfg = JSON.parse(JSON.stringify(config));
         delete exportCfg.githubToken;
         delete exportCfg.allowedDomains; // v1.3.50: список сайтов живёт в GM `mossad_sites`
+        delete exportCfg.pinterestHistory;    // v1.3.51: история пинов — локальная, не синхронизируется
+        delete exportCfg.pinterestHistoryIdx;
         const content = btoa(unescape(encodeURIComponent(JSON.stringify(exportCfg, null, 2))));
         
         const body = JSON.stringify({
@@ -766,6 +774,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
                             const decoded = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\n/g, '')))));
                             // Применяем конфиг, сохраняя локальный токен
                             const token = config.githubToken;
+                            // v1.3.51: локальную историю пинов не затираем (файл общий для всех сайтов)
+                            if (decoded && typeof decoded === 'object') { delete decoded.pinterestHistory; delete decoded.pinterestHistoryIdx; }
                             Object.assign(config, decoded);
                             config.githubToken = token;
                             try { normalizeAllHotkeys(); } catch (e) {} // v1.3.45: одна привязка на действие
@@ -1254,8 +1264,11 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         const isFwd = (dir === 'down' || dir === 'right');
 
         // 1. Pinterest
+        // v1.3.51: направление D-pad на Pinterest не используется (D-pad там не показан, а ▲ по умолчанию
+        // означало «назад по истории»). Слайдшоу — своё направление ◀/▶ (pinterestSlideDir), «После DL: +1» — вперёд.
         if (rootDomain.includes('pinterest.')) {
-            selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: !isSlideshow });
+            if (isSlideshow) selectNextPinterestPin(pinterestSlideDir(), { isManual: false, fromSlideshow: true });
+            else selectNextPinterestPin('next', { isManual: true });
             return true;
         }
 
@@ -1634,6 +1647,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         ['sitesRemove',    '✕',             'кнопка «Убрать сайт» у строки'],
         ['sitesBuiltin',   'Встроенные',    'заголовок списка встроенных сайтов'],
         ['sitesUser',      'Свои',          'заголовок списка своих сайтов'],
+        ['#', 'Pinterest (v1.3.51)'],
+        ['pinModeLabel',   'Пин:',          'надпись у выбора следующего пина'],
+        ['pinRand',        'rand',          'режим «случайный похожий пин»'],
+        ['pinPlus1',       '+1',            'режим «по очереди: 1-й, 2-й, 3-й…»'],
+        ['pinNum',         '№',             'режим «всегда N-й похожий пин» (рядом поле с числом)'],
+        ['pinDirBack',     '◀',             'направление слайдшоу: назад по истории'],
+        ['pinDirFwd',      '▶',             'направление слайдшоу: вперёд по новым пинам'],
         ['#', 'Уведомления'],
         ['toastClose',     '×',             'крестик на тосте звука'],
     ];
@@ -7812,20 +7832,9 @@ function findMediaForDownload() {
         }
         if (videos.length === 0) return null;
         
-        // На Пинтересте ищем видео в главном контейнере сцены пина (closeup-stage / main)
-        if (rootDomain.includes('pinterest.')) {
-            const mainStage = document.querySelector('div[data-test-id="closeup-stage"], div[data-test-id="pin-closeup"], div[role="main"], div[data-test-id="story-pin-closeup-container"]');
-            if (mainStage) {
-                const stageVideo = mainStage.querySelector('video');
-                if (stageVideo) return stageVideo;
-            }
-
-            videos = videos.filter(v => {
-                const isRec = v.closest('div[data-grid-item], div[data-test-id="pin-card"], div[data-test-id="related-pins"], div[data-test-id="search-feed"]');
-                return !isRec;
-            });
-            if (videos.length === 0) return null;
-        }
+        // v1.3.51: на Пинтересте — только видео главного пина (closeup), превью «Похожих пинов» не берём.
+        // Раньше в список «сцен» входил div[role="main"], а он содержит и сетку похожих.
+        if (rootDomain.includes('pinterest.')) return pinterestMainVideo();
 
         if (videos.length === 1) return videos[0];
         
@@ -7963,6 +7972,7 @@ function findMediaForDownload() {
 
     function stopSlideshow() {
         cancelSlideTimers();
+        if (typeof pinterestCancelWait === 'function') pinterestCancelWait();
         slideshowActive = false;
         setSlideshowPaused(false);
         isCountingDown = false;
@@ -8031,7 +8041,8 @@ function findMediaForDownload() {
         })();
 
         const dirs = config.slideshowDirections;
-        if (!isBigGrokSs && (!dirs || dirs.length === 0)) {
+        const isPinterest = rootDomain.includes('pinterest.');
+        if (!isBigGrokSs && !isPinterest && (!dirs || dirs.length === 0)) {
             stopSlideshow();
             return;
         }
@@ -8043,6 +8054,15 @@ function findMediaForDownload() {
                     window._mossadGalleryNextFn(source);
                     return;
                 } else grokGalleryStepNext(source);
+                return;
+            }
+
+            // v1.3.51: Pinterest — своё направление (▶ вперёд по умолчанию, ◀ назад по истории), не D-pad.
+            // Похожих пинов ждёт сам движок (до 15 с), тупик — шаг назад; «конец ленты» и остановки здесь нет.
+            // Раньше: D-pad ▲ по умолчанию = «назад по истории» → «начало истории» → через 5 с «конец ленты». ANTI_PATTERNS §30.
+            if (isPinterest) {
+                selectNextPinterestPin(pinterestSlideDir(), { isManual: false, fromSlideshow: true });
+                triggerUniversalFullScreen();
                 return;
             }
 
@@ -8163,20 +8183,21 @@ function findMediaForDownload() {
     function getPinMediaType() {
         if (rootDomain.includes('redgifs.com')) return 'video';
 
+        // v1.3.51: Pinterest — сначала факты о ГЛАВНОМ пине (closeup), тип с карточки сетки — только подсказка
+        // «ждать плеер». Раньше тип с карточки ('image') сразу запускал фото-таймер даже у видео-пина.
+        if (rootDomain.includes('pinterest.')) {
+            const pinData = getPinterestMainPinData();
+            if (pinData.isFound && (pinData.type === 'video' || pinData.type === 'image')) return pinData.type;
+            if (sessionStorage.getItem('mossad_expected_type') === 'video') return 'video';
+            if (config.pinterestFilterType === 'video') return 'video';
+            return 'unknown';
+        }
+
         const expected = sessionStorage.getItem('mossad_expected_type');
         if (expected === 'video' || expected === 'image') return expected;
         // v1.3.42: сбор Grok пишет тип 'photo' (collect.js) — раньше он не распознавался и тип
         // угадывался по DOM, что на фото давало ложное «видео» и ожидание 6 с.
         if (expected === 'photo') return 'image';
-
-        if (rootDomain.includes('pinterest.')) {
-            const pinData = getPinterestMainPinData();
-            if (pinData.isFound && (pinData.type === 'video' || pinData.type === 'image')) {
-                return pinData.type;
-            }
-            if (config.pinterestFilterType === 'video') return 'video';
-            if (config.pinterestFilterType === 'image') return 'image';
-        }
 
         // Быстрое определение по кнопкам Grok (появляются раньше видео-плеера)
         if (rootDomain === 'grok.com') {
@@ -8282,6 +8303,21 @@ function findMediaForDownload() {
             }
             mossadDebug('cycle', 'старт подсчёта кругов видео', { need: config.videoLoops, dur: Math.round(video.duration * 10) / 10 });
             rafId = requestAnimationFrame(checkVideoLoops);
+        } else if (rootDomain.includes('pinterest.')) {
+            // v1.3.51: Pinterest — картинка и признаки видео только у главного пина (не в сетке похожих).
+            // Есть плеер/кнопка звука — ждём <video> до 6 с; карточка сказала «видео» — до 3 с; иначе 0.5 с.
+            const mainImg = pinterestMainImage();
+            const signs = pinterestHasVideoSigns();
+            const cap = signs ? 60 : (detectedType === 'video' ? 30 : 5);
+            if (retryCount < cap || (!mainImg && retryCount < 60)) {
+                if ((signs || detectedType === 'video') && retryCount > 0 && retryCount % 10 === 0) {
+                    showToast(`⏳ Загрузка видео-плеера... (${Math.floor(retryCount / 10)}/${Math.round(cap / 10)}с)`);
+                }
+                slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 100);
+                return;
+            }
+            pinterestRememberType('image');
+            startPhotoCountdown(initSec, 'pinterest: нет видео у главного пина');
         } else {
             // Если в DOM уже есть главная картинка пина и нет контейнеров видео
             const stage = document.querySelector('div[data-test-id="closeup-stage"], div[data-test-id="pin-closeup"], div[role="main"]');
@@ -8694,12 +8730,147 @@ function findMediaForDownload() {
         }, 200);
     }
 
+    // ── v1.3.51: главный пин отделяем от «Похожих пинов» ──
+    // Раньше тип и видео искались по всему документу (первый <video>, regex по innerHTML всей страницы):
+    // превью похожего пина делало фото-пин «видео», а сериализация всего DOM повторялась до 60 раз за слайд.
+    // ⚠️ Живые данные (ru.pinterest.com, 10.2026): ГЛАВНЫЙ <video> тоже лежит внутри [data-grid-item]!
+    // Различаем по elementtiming: главный — 'closeup-video-main-MainPinImage' (^closeup / MainPinImage),
+    // похожие — 'gestalt-video'. Сетка — только запасной признак. Без innerHTML. ANTI_PATTERNS §30.
+    const PIN_GRID_SEL = '[data-grid-item], [data-test-id="pin-card"], [data-test-id="related-pins"], [data-test-id="relatedPins"], [data-test-id="search-feed"]';
+    const PIN_CLOSEUP_SEL = '[data-test-id="closeup-body"], [data-test-id="pin-closeup"], [data-test-id="closeup-stage"], [data-test-id="story-pin-closeup-container"], [data-test-id="visual-content-container"], [data-test-id="closeup-image"]';
+    const PIN_VIDEO_SIGNS_SEL = 'video, [data-test-id*="video"], [data-test-id*="duplo-hls"], [data-test-id*="story-pin"], [data-test-id*="idea-pin"], button[aria-label*="звук"], button[aria-label*="Sound"], button[aria-label*="sound"], button[aria-label*="Unmute"], button[aria-label*="Mute"], .SoundButton';
+    const PIN_MAIN_MARK_SEL = '[elementtiming^="closeup"], [elementtiming*="MainPinImage"]';
+    const PIN_MAIN_SEL = PIN_MAIN_MARK_SEL + ', ' + PIN_CLOSEUP_SEL;
+    const PIN_RELATED_SEL = '[data-test-id="relatedPins"], [data-test-id="related-pins"], [data-test-id="closeup-related-pins"]';
+    const PIN_SEQ_SS_KEY = 'mossad_pin_seq';    // счётчик режима «+1» (переживает переход на следующий пин)
+    const PIN_DEAD_SS_KEY = 'mossad_pin_dead';  // пины без похожих (тупики) — не выбирать снова
+    const PIN_WAIT_MS = 15000;                  // ждать появления похожих пинов не дольше
+    const PIN_POLL_MS = 250;
+    const PIN_MAX_CANDIDATES = 30;
+
+    function pinterestCurrentPinId(path) {
+        const m = String(path || location.pathname).match(/\/pin\/(\d+)/);
+        return m ? m[1] : '';
+    }
+    function pinIsOwnUi(el) {
+        return !!(el && el.closest && el.closest('[id^="mossad"]'));
+    }
+    /**
+     * Элемент относится к похожему пину (не к главному)?
+     * 1) elementtiming ^closeup / MainPinImage — главный; ^gestalt — похожий.
+     * 2) Без сетки вокруг — главный.
+     * 3) Ближайший контейнер главного (closeup) СОДЕРЖИТ ячейку сетки — ячейка вложена в closeup → похожий;
+     *    наоборот (closeup внутри ячейки, как на живом Pinterest) — главный.
+     */
+    function pinIsRelated(el) {
+        if (!el || !el.closest) return false;
+        if (pinIsOwnUi(el)) return true;
+        const et = (el.getAttribute && el.getAttribute('elementtiming')) || '';
+        if (/^closeup|MainPinImage/i.test(et)) return false;
+        if (/^gestalt/i.test(et)) return true;
+        const g = el.closest(PIN_GRID_SEL);
+        if (!g) return false;
+        const c = el.closest(PIN_MAIN_SEL);
+        if (!c) return true;
+        return c !== g && c.contains(g);
+    }
+    function pinterestCloseupRoots() {
+        return Array.from(document.querySelectorAll(PIN_CLOSEUP_SEL)).filter(el => !pinIsRelated(el));
+    }
+    /** <video> главного пина: внутри closeup, иначе любой не из сетки (самый крупный). */
+    function pinterestMainVideo() {
+        const marked = document.querySelector('video[elementtiming^="closeup"], video[elementtiming*="MainPinImage"]');
+        if (marked && !pinIsOwnUi(marked)) return marked;
+        const vids = Array.from(document.querySelectorAll('video')).filter(v => !pinIsRelated(v));
+        if (!vids.length) return null;
+        const roots = pinterestCloseupRoots();
+        const inRoot = vids.find(v => roots.some(r => r.contains(v)));
+        if (inRoot) return inRoot;
+        if (vids.length === 1) return vids[0];
+        let best = vids[0], max = -1;
+        for (const v of vids) {
+            const r = v.getBoundingClientRect();
+            const a = Math.max(0, r.width) * Math.max(0, r.height);
+            if (a > max) { max = a; best = v; }
+        }
+        return best;
+    }
+    const _pinSmallImgRe = /\/(?:\d{2,3}x\d{2,3}_RS|30x30|60x60|75x75|140x140)\//i;
+    /** Картинка главного пина: в closeup, иначе самая крупная pinimg-картинка не из сетки (аватарки пропускаем). */
+    function pinterestMainImage() {
+        const ok = (i) => {
+            const src = i.currentSrc || i.src || '';
+            return /pinimg\.com/.test(src) && !_pinSmallImgRe.test(src) && !pinIsRelated(i);
+        };
+        const marked = Array.from(document.querySelectorAll('img[elementtiming^="closeup"], img[elementtiming*="MainPinImage"]')).find(i => !pinIsOwnUi(i));
+        if (marked) return marked;
+        for (const r of pinterestCloseupRoots()) {
+            const img = Array.from(r.querySelectorAll('img')).find(ok);
+            if (img) return img;
+        }
+        let best = null, max = 0;
+        for (const i of document.querySelectorAll('img')) {
+            if (!ok(i)) continue;
+            const r = i.getBoundingClientRect();
+            const a = (r.width * r.height) || ((parseInt(i.getAttribute('width'), 10) || 0) * (parseInt(i.getAttribute('height'), 10) || 0)) || 1;
+            if (a > max) { max = a; best = i; }
+        }
+        return best;
+    }
+    /** Признаки видео у ГЛАВНОГО пина (плеер, кнопка звука) — без сетки и без виджета MOSSAD. */
+    function pinterestHasVideoSigns() {
+        const roots = pinterestCloseupRoots();
+        const pool = roots.length
+            ? roots.flatMap(r => Array.from(r.querySelectorAll(PIN_VIDEO_SIGNS_SEL)))
+            : Array.from(document.querySelectorAll(PIN_VIDEO_SIGNS_SEL));
+        return pool.some(el => !pinIsRelated(el));
+    }
+
+    // Кэш типа текущего пина (по id): решение «фото» принимает движок слайдшоу, «видео» — найденный <video>
+    let _pinMediaCache = { pinId: '', type: '', bestMp4Url: null };
+    function pinterestRememberType(type, bestMp4Url) {
+        const id = pinterestCurrentPinId();
+        if (!id) return;
+        _pinMediaCache = { pinId: id, type, bestMp4Url: bestMp4Url || (_pinMediaCache.pinId === id ? _pinMediaCache.bestMp4Url : null) };
+    }
+    function pinterestMp4FromSrc(src) {
+        if (!src) return null;
+        const sigMatch = src.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i) ||
+                         src.match(/expMp4\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})/i);
+        if (sigMatch) {
+            const sig = sigMatch[4];
+            return `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
+        }
+        return /\.mp4(\?|$)/i.test(src) && !src.startsWith('blob:') ? src : null;
+    }
+
+    function getPinterestMainPinData() {
+        try {
+            const id = pinterestCurrentPinId();
+            const v = pinterestMainVideo();
+            if (v) {
+                const srcEl = v.querySelector('source');
+                const url = pinterestMp4FromSrc(v.currentSrc || v.src || (srcEl && srcEl.src) || '');
+                pinterestRememberType('video', url);
+                return { isFound: true, type: 'video', bestMp4Url: _pinMediaCache.bestMp4Url };
+            }
+            if (pinterestHasVideoSigns()) return { isFound: true, type: 'video', bestMp4Url: null };
+            if (id && _pinMediaCache.pinId === id && (_pinMediaCache.type === 'video' || _pinMediaCache.type === 'image')) {
+                return { isFound: true, type: _pinMediaCache.type, bestMp4Url: _pinMediaCache.bestMp4Url };
+            }
+        } catch (e) {
+            console.error('[MOSSAD] Pinterest main pin detect error:', e);
+        }
+        return { isFound: false, type: 'unknown', bestMp4Url: null };
+    }
+
     function getPinterestCandidatePins() {
-        const currentPinId = (location.pathname.match(/\/pin\/(\d+)/) || [])[1];
+        const currentPinId = pinterestCurrentPinId();
         const allLinks = Array.from(document.querySelectorAll('a[href*="/pin/"]'));
         const candidates = [];
 
         for (const a of allLinks) {
+            if (pinIsOwnUi(a)) continue;
             const href = a.getAttribute('href') || '';
             const match = href.match(/\/pin\/(\d+)/);
             if (match) {
@@ -8731,207 +8902,188 @@ function findMediaForDownload() {
         window.location.href = url;
     }
 
+    /** v1.3.51: история пинов — только в localStorage сайта: без перерисовки меню и без синхронизации с GitHub. */
+    function pinterestSaveHistory() {
+        try { persistLocalConfig(); } catch (e) {}
+    }
+    function _pinReadDead() {
+        try { const a = JSON.parse(sessionStorage.getItem(PIN_DEAD_SS_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+    }
+    function _pinMarkDead(pinId) {
+        if (!pinId) return;
+        const a = _pinReadDead().filter(x => x !== pinId);
+        a.push(pinId);
+        try { sessionStorage.setItem(PIN_DEAD_SS_KEY, JSON.stringify(a.slice(-50))); } catch (e) {}
+    }
+    /** Направление малого слайдшоу на Pinterest: ▶ вперёд (новые пины, по умолчанию) или ◀ назад по истории. */
+    function pinterestSlideDir() {
+        return config.pinterestDir === 'back' ? 'prev' : 'next';
+    }
+    function pinterestModeIsNumber(mode) {
+        return /^\d+$/.test(String(mode == null ? '' : mode));
+    }
+
+    /**
+     * Выбор следующего пина из похожих. Пропускаются тупики (_pinMarkDead) и, если есть из чего выбрать,
+     * недавно посещённые (иначе «№ 3» мог ходить по кругу A → B → A).
+     */
+    function pinterestChooseCandidate(candidates) {
+        const dead = new Set(_pinReadDead());
+        const hist = Array.isArray(config.pinterestHistory) ? config.pinterestHistory : [];
+        const visited = new Set(hist.slice(-30).map(u => pinterestCurrentPinId(u)).filter(Boolean));
+        let pool = candidates.filter(c => !dead.has(c.pinId));
+        const fresh = pool.filter(c => !visited.has(c.pinId));
+        if (fresh.length) pool = fresh;
+        if (!pool.length) pool = candidates;
+
+        let filtered = [];
+        const filterType = config.pinterestFilterType || 'ratio';
+        if (filterType === 'image') {
+            filtered = pool.filter(c => c.type === 'image');
+        } else if (filterType === 'video') {
+            filtered = pool.filter(c => c.type === 'video');
+        } else if (filterType === 'ratio') {
+            const photoPercent = config.pinterestPhotoPercent ?? 50;
+            const targetType = (Math.random() * 100) < photoPercent ? 'image' : 'video';
+            filtered = pool.filter(c => c.type === targetType);
+            if (filtered.length === 0) filtered = pool.filter(c => c.type !== targetType);
+        } else {
+            filtered = pool; // 'all'
+        }
+        if (filtered.length === 0) filtered = pool;
+
+        const maxCandidates = filtered.slice(0, PIN_MAX_CANDIDATES);
+        if (!maxCandidates.length) return null;
+        let targetIndex = 0;
+        const mode = config.pinterestMode || 'rand';
+        if (mode === '+1') {
+            // v1.3.51: счётчик в sessionStorage (раньше window._pinSeqIndex обнулялся на каждой странице → всегда 2-й пин)
+            const prev = parseInt(sessionStorage.getItem(PIN_SEQ_SS_KEY), 10);
+            const next = isNaN(prev) ? 0 : prev + 1;
+            targetIndex = next % maxCandidates.length;
+            try { sessionStorage.setItem(PIN_SEQ_SS_KEY, String(next % PIN_MAX_CANDIDATES)); } catch (e) {}
+        } else if (pinterestModeIsNumber(mode)) {
+            const num = parseInt(mode, 10) || 1;
+            targetIndex = Math.min(Math.max(0, num - 1), maxCandidates.length - 1);
+        } else {
+            targetIndex = Math.floor(Math.random() * maxCandidates.length);
+        }
+        return { target: maxCandidates[targetIndex], index: targetIndex };
+    }
+
+    function pinterestScrollToRelated() {
+        const rel = document.querySelector(PIN_RELATED_SEL) || document.querySelector('[data-grid-item]');
+        try {
+            if (rel && typeof rel.scrollIntoView === 'function') rel.scrollIntoView({ block: 'start', behavior: 'instant' });
+            else window.scrollBy({ top: Math.max(300, window.innerHeight || 600), behavior: 'instant' });
+        } catch (e) {}
+    }
+
+    let _pinWaitTimer = null;
+    function pinterestCancelWait() {
+        if (_pinWaitTimer) { clearTimeout(_pinWaitTimer); _pinWaitTimer = null; }
+    }
+    window.pinterestCancelWait = pinterestCancelWait;
+
+    function _pinGoToHistory(idx, toastMsg) {
+        config.pinterestHistoryIdx = idx;
+        pinterestSaveHistory();
+        if (toastMsg) showToast(toastMsg);
+        navigatePinterestUrl(config.pinterestHistory[idx]);
+    }
+
+    /**
+     * v1.3.51: ждём похожие пины (они подгружаются лениво) — опрос каждые 250 мс до 15 с, с прокруткой к ним.
+     * Не нашлись: этот пин — тупик, шаг назад по истории (там выберется другая ветка). Слайдшоу само НЕ останавливается.
+     */
+    function _pinterestPickAndGo(fromSlideshow) {
+        pinterestCancelWait();
+        const startHref = location.href;
+        const t0 = Date.now();
+        let scrolled = false, waitToast = false;
+        const tick = () => {
+            _pinWaitTimer = null;
+            if (location.href !== startHref) return;
+            if (fromSlideshow && (!slideshowActive || slideshowPaused)) return;
+            const picked = pinterestChooseCandidate(getPinterestCandidatePins());
+            if (picked && picked.target) {
+                const target = picked.target;
+                sessionStorage.setItem('mossad_expected_type', target.type);
+                const hi = config.pinterestHistoryIdx ?? (config.pinterestHistory.length - 1);
+                config.pinterestHistory = config.pinterestHistory.slice(0, hi + 1); // свернули на новый путь — хвост впереди отрезаем
+                config.pinterestHistory.push(target.url);
+                if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
+                config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
+                pinterestSaveHistory();
+                showToast(`📌 Новый пин #${picked.index + 1} (${target.type === 'video' ? '🎬 Видео' : '🖼 Фото'})`);
+                navigatePinterestUrl(target.url);
+                return;
+            }
+            const waited = Date.now() - t0;
+            if (waited >= PIN_WAIT_MS) {
+                _pinMarkDead(pinterestCurrentPinId());
+                const idx = typeof config.pinterestHistoryIdx === 'number' ? config.pinterestHistoryIdx : config.pinterestHistory.length - 1;
+                if (idx > 0) {
+                    _pinGoToHistory(idx - 1, '↩ Похожих пинов нет — шаг назад, другая ветка');
+                    return;
+                }
+                showToast('⚠️ Похожих пинов нет, истории нет — жду дальше', true);
+                if (!fromSlideshow) return; // ручной шаг: просто сообщаем
+                _pinterestPickAndGo(true); // слайдшоу не останавливаем
+                return;
+            }
+            if (!scrolled) { scrolled = true; pinterestScrollToRelated(); }
+            if (!waitToast && waited >= 1000) { waitToast = true; showToast('⏳ Жду похожие пины…'); }
+            _pinWaitTimer = setTimeout(tick, PIN_POLL_MS);
+        };
+        tick();
+    }
+
+    /**
+     * Следующий / предыдущий пин.
+     * options.isManual — ручной шаг (стрелки): вперёд сначала идём по истории, если мы не на её вершине.
+     * options.fromSlideshow — шаг слайдшоу: в начале истории («назад») не стоим, а идём вперёд по новым пинам.
+     */
     function selectNextPinterestPin(direction, options = {}) {
         const isManual = options.isManual || false;
+        const fromSlideshow = options.fromSlideshow || false;
         if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
         let idx = typeof config.pinterestHistoryIdx === 'number' ? config.pinterestHistoryIdx : config.pinterestHistory.length - 1;
 
         if (direction === 'prev') {
             if (idx > 0) {
                 idx--;
-                config.pinterestHistoryIdx = idx;
-                Settings.save();
-                showToast(`◀ Назад по истории (${idx + 1}/${config.pinterestHistory.length})`);
-                navigatePinterestUrl(config.pinterestHistory[idx]);
-                return;
-            } else {
+                _pinGoToHistory(idx, `◀ Назад по истории (${idx + 1}/${config.pinterestHistory.length})`);
+                return true;
+            }
+            if (!fromSlideshow) {
                 showToast('⚠️ Вы в самом начале истории просмотров', true);
-                return;
+                return false;
             }
+            // v1.3.51: слайдшоу в начале истории не останавливается — дальше вперёд по новым пинам
+            showToast('⏮ Начало истории — дальше вперёд по новым пинам');
         }
 
-        // direction === 'next'
-        // Если выбор сделан ВРУЧНУЮ и мы находимся НЕ на самой вершине стека: идем вперед по истории (как в Проводнике)
-        if (isManual && idx >= 0 && idx < config.pinterestHistory.length - 1) {
+        // Ручной шаг вперёд НЕ на вершине истории: идём вперёд по истории (как в Проводнике)
+        if (direction !== 'prev' && isManual && idx >= 0 && idx < config.pinterestHistory.length - 1) {
             idx++;
-            config.pinterestHistoryIdx = idx;
-            Settings.save();
-            showToast(`▶ Вперед по истории (${idx + 1}/${config.pinterestHistory.length})`);
-            navigatePinterestUrl(config.pinterestHistory[idx]);
-            return;
+            _pinGoToHistory(idx, `▶ Вперед по истории (${idx + 1}/${config.pinterestHistory.length})`);
+            return true;
         }
 
-        // Авто-слайдшоу ИЛИ ручной клик на вершине стека: генерируем НОВЫЙ слайд!
-        if (config.pinterestHistory.length === 0 || config.pinterestHistory[config.pinterestHistory.length - 1] !== location.href) {
-            config.pinterestHistory.push(location.href);
-            if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
-            config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
-            Settings.save();
+        // Новый пин: текущий — в историю (если его там нет на вершине)
+        const hist = config.pinterestHistory;
+        const curIdxOk = idx >= 0 && idx < hist.length && hist[idx] === location.href;
+        if (!curIdxOk) {
+            if (hist.length === 0 || hist[hist.length - 1] !== location.href) {
+                hist.push(location.href);
+                if (hist.length > 100) hist.shift();
+            }
+            config.pinterestHistoryIdx = hist.length - 1;
+            pinterestSaveHistory();
         }
-
-        // Фоновый виртуальный скролл для гидратации React
-        window.scrollBy({ top: 300, behavior: 'instant' });
-        setTimeout(() => window.scrollBy({ top: -300, behavior: 'instant' }), 40);
-
-        setTimeout(() => {
-            let candidates = getPinterestCandidatePins();
-            let filtered = [];
-            const filterType = config.pinterestFilterType || 'ratio';
-
-            if (filterType === 'image') {
-                filtered = candidates.filter(c => c.type === 'image');
-            } else if (filterType === 'video') {
-                filtered = candidates.filter(c => c.type === 'video');
-            } else if (filterType === 'ratio') {
-                const photoPercent = config.pinterestPhotoPercent ?? 50;
-                const roll = Math.random() * 100;
-                const targetType = roll < photoPercent ? 'image' : 'video';
-                filtered = candidates.filter(c => c.type === targetType);
-                if (filtered.length === 0) {
-                    filtered = candidates.filter(c => c.type === (targetType === 'image' ? 'video' : 'image'));
-                }
-            } else {
-                filtered = candidates; // 'all'
-            }
-
-            // Случай когда у пина 0 ссылок: возврат назад по истории и вызов другого пина
-            if (filtered.length === 0 && candidates.length === 0) {
-                showToast('⚠️ На странице нет ссылок, переход назад...', true);
-                if (config.pinterestHistory.length > 1 && idx > 0) {
-                    idx--;
-                    config.pinterestHistoryIdx = idx;
-                    Settings.save();
-                    navigatePinterestUrl(config.pinterestHistory[idx]);
-                    return;
-                }
-                filtered = candidates;
-            } else if (filtered.length === 0) {
-                filtered = candidates;
-            }
-
-            const maxCandidates = filtered.slice(0, 30);
-            let targetIndex = 0;
-            const mode = config.pinterestMode || 'rand';
-
-            if (mode === 'rand') {
-                targetIndex = Math.floor(Math.random() * maxCandidates.length);
-            } else if (mode === '+1') {
-                window._pinSeqIndex = ((window._pinSeqIndex || 0) + 1) % maxCandidates.length;
-                targetIndex = window._pinSeqIndex;
-            } else {
-                const num = parseInt(mode, 10) || 1;
-                targetIndex = Math.min(Math.max(0, num - 1), maxCandidates.length - 1);
-            }
-
-            const target = maxCandidates[targetIndex];
-            if (target) {
-                // Запоминаем тип следующего контента в sessionStorage перед переходом
-                sessionStorage.setItem('mossad_expected_type', target.type);
-
-                // Если свернули на новый путь — усекаем историю впереди
-                config.pinterestHistory = config.pinterestHistory.slice(0, (config.pinterestHistoryIdx ?? (config.pinterestHistory.length - 1)) + 1);
-                config.pinterestHistory.push(target.url);
-                if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
-                config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
-                Settings.save();
-
-                showToast(`📌 Новый пин #${targetIndex + 1} (${target.type === 'video' ? '🎬 Видео' : '🖼 Фото'})`);
-                navigatePinterestUrl(target.url);
-            } else {
-                showToast('❌ Подходящий пин не найден', true);
-            }
-        }, 100);
-    }
-
-    function getPinterestMainPinData() {
-        try {
-            // 1. Прямой осмотр DOM тегов видео главного пина (closeup-video-main, duplo-hls-video)
-            const mainVideo = document.querySelector('video[elementtiming*="video"], video[data-test-id="duplo-hls-video"], video[src*="v1.pinimg.com"], video.jI_JN7');
-            if (mainVideo) {
-                const src = mainVideo.src || (mainVideo.querySelector('source') && mainVideo.querySelector('source').src) || '';
-                const sigMatch = src.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i) ||
-                                 src.match(/expMp4\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})/i);
-                let bestMp4Url = null;
-                if (sigMatch) {
-                    const sig = sigMatch[4];
-                    bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
-                } else if (src.endsWith('.mp4')) {
-                    bestMp4Url = src;
-                }
-                return { isFound: true, type: 'video', bestMp4Url };
-            }
-
-            // 2. Сканирование разметки DOM на предмет v1.pinimg.com/videos/iht/hls/ или elementtiming="closeup-video-main"
-            const fullHtml = document.documentElement.innerHTML || '';
-            const hlsMatch = fullHtml.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/iht\\?\/hls\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{2})\\?\/([a-f0-9]{32})\.m3u8/i) ||
-                             fullHtml.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i);
-
-            if (hlsMatch || fullHtml.includes('elementtiming="closeup-video-main') || fullHtml.includes('data-test-id="duplo-hls-video"')) {
-                let bestMp4Url = null;
-                if (hlsMatch) {
-                    const sig = hlsMatch[4];
-                    bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
-                }
-                return { isFound: true, type: 'video', bestMp4Url };
-            }
-
-            const scanText = (txt) => {
-                if (!txt || !txt.includes('auth_web_main_pin')) return null;
-                const idx = txt.indexOf('resource_response');
-                if (idx === -1) return null;
-                
-                // Берем с запасом 40000 символов, т.к. story_pin_data с видео-блоком лежит глубоко внизу JSON
-                const slice = txt.slice(Math.max(0, idx - 500), idx + 40000);
-
-                // 1. ПЕРВЫМ ДЕЛОМ ИЩЕМ СИГНАТУРЫ И БЛОКИ ВИДЕО
-                const sigMatch = slice.match(/"video_signature"\s*:\s*"([a-f0-9]{32})"/i) ||
-                                 slice.match(/hls\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.m3u8/i) ||
-                                 slice.match(/thumbnails\/originals\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\./i);
-
-                const hasVideoKeywords = /story_pin_video_block/i.test(slice) || 
-                                         /"video_list"\s*:\s*\{/i.test(slice) || 
-                                         /"videos"\s*:\s*\{/i.test(slice) || 
-                                         /duplo-hls/i.test(slice);
-
-                if (sigMatch || hasVideoKeywords) {
-                    let bestMp4Url = null;
-                    const mp4Matches = slice.match(/https:\\?\/\\?\/v1\.pinimg\.com\\?\/videos\\?\/[^\s"',]+?\.mp4/g) ||
-                                       slice.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"',]+?\.mp4/g);
-                    if (mp4Matches && mp4Matches.length > 0) {
-                        bestMp4Url = mp4Matches[0].replace(/\\/g, '');
-                    }
-                    
-                    if (!bestMp4Url && sigMatch) {
-                        const sig = sigMatch[4] || sigMatch[1];
-                        if (sig && sig.length === 32) {
-                            bestMp4Url = `https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`;
-                        }
-                    }
-                    return { isFound: true, type: 'video', bestMp4Url };
-                }
-
-                // 2. И ТОЛЬКО ЕСЛИ НИ ОДНОГО ПРИЗНАКА ВИДЕО НЕТ — ЭТО ФОТО
-                if (/"images"\s*:\s*\{/i.test(slice) || /"image_signature"/i.test(slice)) {
-                    return { isFound: true, type: 'image', bestMp4Url: null };
-                }
-
-                return null;
-            };
-
-            if (window.__PJS_OUTPUT__) {
-                const res = scanText(JSON.stringify(window.__PJS_OUTPUT__));
-                if (res) return res;
-            }
-
-            const scripts = document.querySelectorAll('script');
-            for (const s of scripts) {
-                const res = scanText(s.textContent || '');
-                if (res) return res;
-            }
-        } catch (e) {
-            console.error('[MOSSAD] PinResource JSON parse error:', e);
-        }
-        return { isFound: false, type: 'unknown', bestMp4Url: null };
+        _pinterestPickAndGo(fromSlideshow);
+        return true;
     }
 
 // ============================================
@@ -9114,6 +9266,16 @@ function findMediaForDownload() {
             width: 100%; box-sizing: border-box;
         `;
 
+        /** v1.3.51: подсветка сегмента переключателя (активный — синий, жирный, с рамкой). */
+        const mossadPaintSeg = (el, on) => {
+            el.classList.toggle('mossad-seg-on', !!on);
+            el.setAttribute('aria-pressed', on ? 'true' : 'false');
+            el.style.background = on ? '#2563eb' : '#1f2937';
+            el.style.color = on ? '#fff' : '#9ca3af';
+            el.style.fontWeight = on ? '700' : '400';
+            el.style.boxShadow = on ? 'inset 0 0 0 1px #93c5fd' : 'none';
+        };
+
         const renderPanel = () => {
             const dirs = config.slideshowDirections || [];
             const isPinterest = rootDomain.includes('pinterest.');
@@ -9129,11 +9291,17 @@ function findMediaForDownload() {
                                 <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> FS
                             </label>
                         </div>
-                        <div style="display: flex; gap: 4px; align-items: center;">
-                            <span style="color:#9ca3af;">Пин:</span>
-                            <button class="mossad-pmode" data-mode="rand" style="background:${config.pinterestMode === 'rand' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">rand</button>
-                            <button class="mossad-pmode" data-mode="+1" style="background:${config.pinterestMode === '+1' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">+1</button>
-                            <input id="mossad-in-pmode-n" type="number" min="1" max="9" value="${!isNaN(parseInt(config.pinterestMode, 10)) ? config.pinterestMode : '1'}" style="width:30px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="Номер пина 1-9">
+                        <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+                            <span style="color:#9ca3af;" title="Какой из похожих пинов открыть следующим" data-mossad-label="pinModeLabel">${LH('pinModeLabel')}</span>
+                            <div role="group" style="display:inline-flex; border:1px solid #4b5563; border-radius:5px; overflow:hidden;">
+                                <button class="mossad-pmode" data-mode="rand" title="rand — случайный из первых 30 похожих пинов" style="border:none; border-right:1px solid #4b5563; padding:2px 7px; cursor:pointer; font-size:11px;" data-mossad-label="pinRand">${LH('pinRand')}</button>
+                                <button class="mossad-pmode" data-mode="+1" title="+1 — по очереди: 1-й, 2-й, 3-й… похожий пин (счёт продолжается от пина к пину, по кругу до 30)" style="border:none; border-right:1px solid #4b5563; padding:2px 7px; cursor:pointer; font-size:11px;" data-mossad-label="pinPlus1">${LH('pinPlus1')}</button>
+                                <span class="mossad-pmode" data-mode="n" title="№ N — всегда N-й похожий пин (1–30). Клик по полю включает этот режим" style="display:inline-flex; align-items:center; gap:2px; padding:0 4px; cursor:pointer; font-size:11px;"><span data-mossad-label="pinNum">${LH('pinNum')}</span><input id="mossad-in-pmode-n" type="number" min="1" max="30" value="${pinterestModeIsNumber(config.pinterestMode) ? config.pinterestMode : '3'}" style="width:32px; background:#111827; border:1px solid #4b5563; color:#fff; border-radius:3px; text-align:center; font-size:11px;"></span>
+                            </div>
+                            <div role="group" title="Направление слайдшоу: ▶ вперёд — новые пины; ◀ назад — по истории (в начале истории — дальше вперёд)" style="display:inline-flex; border:1px solid #4b5563; border-radius:5px; overflow:hidden; margin-left:auto;">
+                                <button class="mossad-pdir" data-dir="back" title="◀ Слайдшоу назад по истории" style="border:none; border-right:1px solid #4b5563; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="pinDirBack">${LH('pinDirBack')}</button>
+                                <button class="mossad-pdir" data-dir="fwd" title="▶ Слайдшоу вперёд по новым пинам" style="border:none; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="pinDirFwd">${LH('pinDirFwd')}</button>
+                            </div>
                         </div>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style="color:#9ca3af;">Тип:</span>
@@ -9255,16 +9423,38 @@ function findMediaForDownload() {
             const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
             if (isPinterest) {
-                panel.querySelectorAll('.mossad-pmode').forEach(btn => {
-                    btn.onclick = () => Settings.set('pinterestMode', btn.dataset.mode);
-                });
+                // v1.3.51: сегменты [rand][+1][№ N] и [◀][▶] — активный подсвечен; сохраняем тихо (без перерисовки,
+                // фокус в поле не теряется). Раньше выбранный «№» ничем не выделялся. ANTI_PATTERNS §30.
+                const paintPinterestSegs = () => {
+                    panel.querySelectorAll('.mossad-pmode').forEach(el => {
+                        const m = el.dataset.mode;
+                        const on = m === 'n' ? pinterestModeIsNumber(config.pinterestMode) : config.pinterestMode === m;
+                        mossadPaintSeg(el, on);
+                    });
+                    panel.querySelectorAll('.mossad-pdir').forEach(el => mossadPaintSeg(el, (config.pinterestDir === 'back' ? 'back' : 'fwd') === el.dataset.dir));
+                };
                 const inN = panel.querySelector('#mossad-in-pmode-n');
+                const numVal = () => String(Math.min(30, Math.max(1, parseInt(inN && inN.value, 10) || 1)));
+                panel.querySelectorAll('.mossad-pmode').forEach(el => {
+                    el.onclick = () => {
+                        const m = el.dataset.mode === 'n' ? numVal() : el.dataset.mode;
+                        if (config.pinterestMode !== m) Settings.setQuiet('pinterestMode', m);
+                        paintPinterestSegs();
+                    };
+                });
                 if (inN) {
-                    inN.oninput = debounce((e) => {
-                        const val = Math.min(9, Math.max(1, parseInt(e.target.value, 10) || 1));
-                        Settings.set('pinterestMode', String(val));
+                    inN.oninput = debounce(() => {
+                        Settings.setQuiet('pinterestMode', numVal());
+                        paintPinterestSegs();
                     }, 300);
                 }
+                panel.querySelectorAll('.mossad-pdir').forEach(el => {
+                    el.onclick = () => {
+                        Settings.setQuiet('pinterestDir', el.dataset.dir === 'back' ? 'back' : 'fwd');
+                        paintPinterestSegs();
+                    };
+                });
+                paintPinterestSegs();
                 const selPType = panel.querySelector('#mossad-sel-ptype');
                 if (selPType) {
                     selPType.onchange = (e) => Settings.set('pinterestFilterType', e.target.value);
@@ -10487,7 +10677,7 @@ function findMediaForDownload() {
         { k: 'playlistRows',      t: 'num', label: 'Список: видимых строк', step: 1, min: 5 },
         { k: 'playlistWidth',     t: 'num', label: 'Список: ширина, px (0 = авто)', step: 10, min: 0 },
         { k: 'collectWatchSec',   t: 'num', label: 'Досбор после «Собрать», сек', step: 5, min: 5 },
-        { k: 'pinterestMode',     t: 'text', label: 'Pinterest: режим (rand / +1 / 1–9)' },
+        { k: 'pinterestMode',     t: 'text', label: 'Pinterest: режим (rand / +1 / 1–30)' },
         { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
         { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото', step: 5, min: 0 },
         { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },

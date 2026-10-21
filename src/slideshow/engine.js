@@ -134,20 +134,9 @@
         }
         if (videos.length === 0) return null;
         
-        // На Пинтересте ищем видео в главном контейнере сцены пина (closeup-stage / main)
-        if (rootDomain.includes('pinterest.')) {
-            const mainStage = document.querySelector('div[data-test-id="closeup-stage"], div[data-test-id="pin-closeup"], div[role="main"], div[data-test-id="story-pin-closeup-container"]');
-            if (mainStage) {
-                const stageVideo = mainStage.querySelector('video');
-                if (stageVideo) return stageVideo;
-            }
-
-            videos = videos.filter(v => {
-                const isRec = v.closest('div[data-grid-item], div[data-test-id="pin-card"], div[data-test-id="related-pins"], div[data-test-id="search-feed"]');
-                return !isRec;
-            });
-            if (videos.length === 0) return null;
-        }
+        // v1.3.51: на Пинтересте — только видео главного пина (closeup), превью «Похожих пинов» не берём.
+        // Раньше в список «сцен» входил div[role="main"], а он содержит и сетку похожих.
+        if (rootDomain.includes('pinterest.')) return pinterestMainVideo();
 
         if (videos.length === 1) return videos[0];
         
@@ -285,6 +274,7 @@
 
     function stopSlideshow() {
         cancelSlideTimers();
+        if (typeof pinterestCancelWait === 'function') pinterestCancelWait();
         slideshowActive = false;
         setSlideshowPaused(false);
         isCountingDown = false;
@@ -353,7 +343,8 @@
         })();
 
         const dirs = config.slideshowDirections;
-        if (!isBigGrokSs && (!dirs || dirs.length === 0)) {
+        const isPinterest = rootDomain.includes('pinterest.');
+        if (!isBigGrokSs && !isPinterest && (!dirs || dirs.length === 0)) {
             stopSlideshow();
             return;
         }
@@ -365,6 +356,15 @@
                     window._mossadGalleryNextFn(source);
                     return;
                 } else grokGalleryStepNext(source);
+                return;
+            }
+
+            // v1.3.51: Pinterest — своё направление (▶ вперёд по умолчанию, ◀ назад по истории), не D-pad.
+            // Похожих пинов ждёт сам движок (до 15 с), тупик — шаг назад; «конец ленты» и остановки здесь нет.
+            // Раньше: D-pad ▲ по умолчанию = «назад по истории» → «начало истории» → через 5 с «конец ленты». ANTI_PATTERNS §30.
+            if (isPinterest) {
+                selectNextPinterestPin(pinterestSlideDir(), { isManual: false, fromSlideshow: true });
+                triggerUniversalFullScreen();
                 return;
             }
 
@@ -485,20 +485,21 @@
     function getPinMediaType() {
         if (rootDomain.includes('redgifs.com')) return 'video';
 
+        // v1.3.51: Pinterest — сначала факты о ГЛАВНОМ пине (closeup), тип с карточки сетки — только подсказка
+        // «ждать плеер». Раньше тип с карточки ('image') сразу запускал фото-таймер даже у видео-пина.
+        if (rootDomain.includes('pinterest.')) {
+            const pinData = getPinterestMainPinData();
+            if (pinData.isFound && (pinData.type === 'video' || pinData.type === 'image')) return pinData.type;
+            if (sessionStorage.getItem('mossad_expected_type') === 'video') return 'video';
+            if (config.pinterestFilterType === 'video') return 'video';
+            return 'unknown';
+        }
+
         const expected = sessionStorage.getItem('mossad_expected_type');
         if (expected === 'video' || expected === 'image') return expected;
         // v1.3.42: сбор Grok пишет тип 'photo' (collect.js) — раньше он не распознавался и тип
         // угадывался по DOM, что на фото давало ложное «видео» и ожидание 6 с.
         if (expected === 'photo') return 'image';
-
-        if (rootDomain.includes('pinterest.')) {
-            const pinData = getPinterestMainPinData();
-            if (pinData.isFound && (pinData.type === 'video' || pinData.type === 'image')) {
-                return pinData.type;
-            }
-            if (config.pinterestFilterType === 'video') return 'video';
-            if (config.pinterestFilterType === 'image') return 'image';
-        }
 
         // Быстрое определение по кнопкам Grok (появляются раньше видео-плеера)
         if (rootDomain === 'grok.com') {
@@ -604,6 +605,21 @@
             }
             mossadDebug('cycle', 'старт подсчёта кругов видео', { need: config.videoLoops, dur: Math.round(video.duration * 10) / 10 });
             rafId = requestAnimationFrame(checkVideoLoops);
+        } else if (rootDomain.includes('pinterest.')) {
+            // v1.3.51: Pinterest — картинка и признаки видео только у главного пина (не в сетке похожих).
+            // Есть плеер/кнопка звука — ждём <video> до 6 с; карточка сказала «видео» — до 3 с; иначе 0.5 с.
+            const mainImg = pinterestMainImage();
+            const signs = pinterestHasVideoSigns();
+            const cap = signs ? 60 : (detectedType === 'video' ? 30 : 5);
+            if (retryCount < cap || (!mainImg && retryCount < 60)) {
+                if ((signs || detectedType === 'video') && retryCount > 0 && retryCount % 10 === 0) {
+                    showToast(`⏳ Загрузка видео-плеера... (${Math.floor(retryCount / 10)}/${Math.round(cap / 10)}с)`);
+                }
+                slideshowTimeoutId = setTimeout(() => scheduleNextSlideCycle(initSec, retryCount + 1), 100);
+                return;
+            }
+            pinterestRememberType('image');
+            startPhotoCountdown(initSec, 'pinterest: нет видео у главного пина');
         } else {
             // Если в DOM уже есть главная картинка пина и нет контейнеров видео
             const stage = document.querySelector('div[data-test-id="closeup-stage"], div[data-test-id="pin-closeup"], div[role="main"]');

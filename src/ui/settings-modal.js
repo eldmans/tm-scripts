@@ -218,7 +218,7 @@
         { k: 'playlistRows',      t: 'num', label: 'Список: видимых строк', step: 1, min: 5 },
         { k: 'playlistWidth',     t: 'num', label: 'Список: ширина, px (0 = авто)', step: 10, min: 0 },
         { k: 'collectWatchSec',   t: 'num', label: 'Досбор после «Собрать», сек', step: 5, min: 5 },
-        { k: 'pinterestMode',     t: 'text', label: 'Pinterest: режим (rand / +1 / 1–9)' },
+        { k: 'pinterestMode',     t: 'text', label: 'Pinterest: режим (rand / +1 / 1–30)' },
         { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
         { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото', step: 5, min: 0 },
         { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },

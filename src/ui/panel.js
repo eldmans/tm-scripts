@@ -178,6 +178,16 @@
             width: 100%; box-sizing: border-box;
         `;
 
+        /** v1.3.51: подсветка сегмента переключателя (активный — синий, жирный, с рамкой). */
+        const mossadPaintSeg = (el, on) => {
+            el.classList.toggle('mossad-seg-on', !!on);
+            el.setAttribute('aria-pressed', on ? 'true' : 'false');
+            el.style.background = on ? '#2563eb' : '#1f2937';
+            el.style.color = on ? '#fff' : '#9ca3af';
+            el.style.fontWeight = on ? '700' : '400';
+            el.style.boxShadow = on ? 'inset 0 0 0 1px #93c5fd' : 'none';
+        };
+
         const renderPanel = () => {
             const dirs = config.slideshowDirections || [];
             const isPinterest = rootDomain.includes('pinterest.');
@@ -193,11 +203,17 @@
                                 <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> FS
                             </label>
                         </div>
-                        <div style="display: flex; gap: 4px; align-items: center;">
-                            <span style="color:#9ca3af;">Пин:</span>
-                            <button class="mossad-pmode" data-mode="rand" style="background:${config.pinterestMode === 'rand' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">rand</button>
-                            <button class="mossad-pmode" data-mode="+1" style="background:${config.pinterestMode === '+1' ? '#3b82f6' : '#1f2937'}; border:1px solid #374151; color:#fff; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">+1</button>
-                            <input id="mossad-in-pmode-n" type="number" min="1" max="9" value="${!isNaN(parseInt(config.pinterestMode, 10)) ? config.pinterestMode : '1'}" style="width:30px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="Номер пина 1-9">
+                        <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+                            <span style="color:#9ca3af;" title="Какой из похожих пинов открыть следующим" data-mossad-label="pinModeLabel">${LH('pinModeLabel')}</span>
+                            <div role="group" style="display:inline-flex; border:1px solid #4b5563; border-radius:5px; overflow:hidden;">
+                                <button class="mossad-pmode" data-mode="rand" title="rand — случайный из первых 30 похожих пинов" style="border:none; border-right:1px solid #4b5563; padding:2px 7px; cursor:pointer; font-size:11px;" data-mossad-label="pinRand">${LH('pinRand')}</button>
+                                <button class="mossad-pmode" data-mode="+1" title="+1 — по очереди: 1-й, 2-й, 3-й… похожий пин (счёт продолжается от пина к пину, по кругу до 30)" style="border:none; border-right:1px solid #4b5563; padding:2px 7px; cursor:pointer; font-size:11px;" data-mossad-label="pinPlus1">${LH('pinPlus1')}</button>
+                                <span class="mossad-pmode" data-mode="n" title="№ N — всегда N-й похожий пин (1–30). Клик по полю включает этот режим" style="display:inline-flex; align-items:center; gap:2px; padding:0 4px; cursor:pointer; font-size:11px;"><span data-mossad-label="pinNum">${LH('pinNum')}</span><input id="mossad-in-pmode-n" type="number" min="1" max="30" value="${pinterestModeIsNumber(config.pinterestMode) ? config.pinterestMode : '3'}" style="width:32px; background:#111827; border:1px solid #4b5563; color:#fff; border-radius:3px; text-align:center; font-size:11px;"></span>
+                            </div>
+                            <div role="group" title="Направление слайдшоу: ▶ вперёд — новые пины; ◀ назад — по истории (в начале истории — дальше вперёд)" style="display:inline-flex; border:1px solid #4b5563; border-radius:5px; overflow:hidden; margin-left:auto;">
+                                <button class="mossad-pdir" data-dir="back" title="◀ Слайдшоу назад по истории" style="border:none; border-right:1px solid #4b5563; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="pinDirBack">${LH('pinDirBack')}</button>
+                                <button class="mossad-pdir" data-dir="fwd" title="▶ Слайдшоу вперёд по новым пинам" style="border:none; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="pinDirFwd">${LH('pinDirFwd')}</button>
+                            </div>
                         </div>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style="color:#9ca3af;">Тип:</span>
@@ -319,16 +335,38 @@
             const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
             if (isPinterest) {
-                panel.querySelectorAll('.mossad-pmode').forEach(btn => {
-                    btn.onclick = () => Settings.set('pinterestMode', btn.dataset.mode);
-                });
+                // v1.3.51: сегменты [rand][+1][№ N] и [◀][▶] — активный подсвечен; сохраняем тихо (без перерисовки,
+                // фокус в поле не теряется). Раньше выбранный «№» ничем не выделялся. ANTI_PATTERNS §30.
+                const paintPinterestSegs = () => {
+                    panel.querySelectorAll('.mossad-pmode').forEach(el => {
+                        const m = el.dataset.mode;
+                        const on = m === 'n' ? pinterestModeIsNumber(config.pinterestMode) : config.pinterestMode === m;
+                        mossadPaintSeg(el, on);
+                    });
+                    panel.querySelectorAll('.mossad-pdir').forEach(el => mossadPaintSeg(el, (config.pinterestDir === 'back' ? 'back' : 'fwd') === el.dataset.dir));
+                };
                 const inN = panel.querySelector('#mossad-in-pmode-n');
+                const numVal = () => String(Math.min(30, Math.max(1, parseInt(inN && inN.value, 10) || 1)));
+                panel.querySelectorAll('.mossad-pmode').forEach(el => {
+                    el.onclick = () => {
+                        const m = el.dataset.mode === 'n' ? numVal() : el.dataset.mode;
+                        if (config.pinterestMode !== m) Settings.setQuiet('pinterestMode', m);
+                        paintPinterestSegs();
+                    };
+                });
                 if (inN) {
-                    inN.oninput = debounce((e) => {
-                        const val = Math.min(9, Math.max(1, parseInt(e.target.value, 10) || 1));
-                        Settings.set('pinterestMode', String(val));
+                    inN.oninput = debounce(() => {
+                        Settings.setQuiet('pinterestMode', numVal());
+                        paintPinterestSegs();
                     }, 300);
                 }
+                panel.querySelectorAll('.mossad-pdir').forEach(el => {
+                    el.onclick = () => {
+                        Settings.setQuiet('pinterestDir', el.dataset.dir === 'back' ? 'back' : 'fwd');
+                        paintPinterestSegs();
+                    };
+                });
+                paintPinterestSegs();
                 const selPType = panel.querySelector('#mossad-sel-ptype');
                 if (selPType) {
                     selPType.onchange = (e) => Settings.set('pinterestFilterType', e.target.value);

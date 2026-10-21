@@ -32,7 +32,8 @@
         debugSlideshow: false,          // v1.3.38: debug-лог источников шагов слайдшоу и шагов удаления (консоль)
         
         // PINTEREST ENGINE CONFIGS
-        pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'9'
+        pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'30' (№ N — N-й похожий пин)
+        pinterestDir: 'fwd',               // v1.3.51: малое слайдшоу на Pinterest: 'fwd' — новые пины, 'back' — назад по истории
         pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
         pinterestPhotoPercent: 50,         // 0..100 % (видео = 100 - photo)
         pinterestMaxVideoDuration: 0,      // макс длительность видео в сек (0 = без лимита)
@@ -188,6 +189,11 @@
         }
         config = mergeDeep(base, config);
     }
+
+    // v1.3.51: Pinterest — мусорный режим/направление → по умолчанию (режим из старой панели мог быть любым текстом)
+    if (!(config.pinterestMode === 'rand' || config.pinterestMode === '+1' || /^\d+$/.test(String(config.pinterestMode)))) config.pinterestMode = 'rand';
+    if (/^\d+$/.test(String(config.pinterestMode))) config.pinterestMode = String(Math.min(30, Math.max(1, parseInt(config.pinterestMode, 10))));
+    if (config.pinterestDir !== 'back') config.pinterestDir = 'fwd';
 
     // ── GitHub-токен: хранится в общем хранилище Tampermonkey (GM_setValue), а НЕ в localStorage сайта ──
     // v1.3.34: раньше токен лежал в localStorage каждого сайта (`mossad_{domain}_config`) и был

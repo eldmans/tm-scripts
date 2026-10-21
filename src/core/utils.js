@@ -352,8 +352,11 @@
         const isFwd = (dir === 'down' || dir === 'right');
 
         // 1. Pinterest
+        // v1.3.51: направление D-pad на Pinterest не используется (D-pad там не показан, а ▲ по умолчанию
+        // означало «назад по истории»). Слайдшоу — своё направление ◀/▶ (pinterestSlideDir), «После DL: +1» — вперёд.
         if (rootDomain.includes('pinterest.')) {
-            selectNextPinterestPin(isFwd ? 'next' : 'prev', { isManual: !isSlideshow });
+            if (isSlideshow) selectNextPinterestPin(pinterestSlideDir(), { isManual: false, fromSlideshow: true });
+            else selectNextPinterestPin('next', { isManual: true });
             return true;
         }
 
