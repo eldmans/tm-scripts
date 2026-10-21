@@ -1,0 +1,6 @@
+{
+  "name": "mossad-tests",
+  "private": true,
+  "description": "jsdom-тесты MOSSAD (не входят в бандл). npm install && node run_all.js",
+  "dependencies": { "jsdom": "^24.1.3" }
+}
