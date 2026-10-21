@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.61
+// @version      1.3.62
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -27,7 +27,7 @@
     'use strict';
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.61';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.62';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -955,6 +955,18 @@ activeEl.getAttribute('role') === 'textbox' ||
 )) {
 try { activeEl.blur(); } catch (e) {}
 }
+}
+function mossadPressEl(el) {
+if (!el) return;
+const P = window.PointerEvent || window.MouseEvent;
+const r = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+const base = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+const fire = (C, type, extra) => { try { el.dispatchEvent(new C(type, Object.assign({}, base, extra))); } catch (e) {} };
+fire(P, 'pointerdown', { buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true });
+fire(window.MouseEvent, 'mousedown', { buttons: 1 });
+fire(P, 'pointerup', { buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true });
+fire(window.MouseEvent, 'mouseup', { buttons: 0 });
+try { el.click(); } catch (e) {}
 }
 function triggerClick(el, label = '') {
 if (!el) return;
@@ -5582,18 +5594,6 @@ return pool.find(_gcIsOn) || pool[0];
 }
 function grokFindDurationControl() { return _gcParamControl('duration'); }
 function grokFindAspectControl() { return _gcParamControl('aspect'); }
-function mossadPressEl(el) {
-if (!el) return;
-const P = window.PointerEvent || window.MouseEvent;
-const r = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
-const base = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
-const fire = (C, type, extra) => { try { el.dispatchEvent(new C(type, Object.assign({}, base, extra))); } catch (e) {} };
-fire(P, 'pointerdown', { buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true });
-fire(window.MouseEvent, 'mousedown', { buttons: 1 });
-fire(P, 'pointerup', { buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true });
-fire(window.MouseEvent, 'mouseup', { buttons: 0 });
-try { el.click(); } catch (e) {}
-}
 function _gcFocus(el) {
 if (!el) return false;
 try { el.focus({ preventScroll: true, focusVisible: true }); } catch (e) { try { el.focus(); } catch (e2) {} }
@@ -7282,6 +7282,64 @@ const a = Math.max(0, r.width) * Math.max(0, r.height);
 if (a > max) { max = a; best = v; }
 }
 return best;
+}
+const PIN_SOUND_RE = /(^|\b)(un)?mute|sound|volume|звук|громк/i;
+function _pinVisArea(v) {
+if (!v || !v.isConnected || !v.getBoundingClientRect) return 0;
+const r = v.getBoundingClientRect();
+const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+return Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+}
+function _pinLargest(list) {
+let best = null, max = 0;
+for (const v of list) { const a = _pinVisArea(v); if (a > max) { max = a; best = v; } }
+return best;
+}
+function pinterestSoundVideo() {
+const fs = document.fullscreenElement;
+if (fs) {
+if (fs.tagName === 'VIDEO') return fs;
+const v = _pinLargest(Array.from(fs.querySelectorAll('video')).filter(x => !pinIsOwnUi(x)));
+if (v) return v;
+}
+const dlg = _pinLargest(Array.from(document.querySelectorAll('[role="dialog"] video, [aria-modal="true"] video')).filter(x => !pinIsOwnUi(x)));
+if (dlg) return dlg;
+const main = pinterestMainVideo();
+if (main && _pinVisArea(main) > 0) return main;
+return _pinLargest(Array.from(document.querySelectorAll('video')).filter(x => !pinIsRelated(x))) || main;
+}
+function pinterestSoundButton(video) {
+let up = video && video.parentElement;
+for (let i = 0; up && i < 10; i++, up = up.parentElement) {
+if (up.querySelectorAll('video').length > 1) break;
+const btn = Array.from(up.querySelectorAll('button, [role="button"]')).find(b => !pinIsOwnUi(b) &&
+PIN_SOUND_RE.test([b.getAttribute('aria-label'), b.getAttribute('title'), b.getAttribute('data-test-id')].filter(Boolean).join(' ')));
+if (btn) return btn;
+if (up === document.body) break;
+}
+return null;
+}
+let _pinSoundGuard = null;
+function pinterestToggleSound() {
+const v = pinterestSoundVideo();
+if (!v) { showSoundToast('🔇 Видео не найдено'); mossadDebug('sound', 'Pinterest: <video> не найден'); return false; }
+if (_pinSoundGuard) { _pinSoundGuard.v.removeEventListener('volumechange', _pinSoundGuard.fn); clearTimeout(_pinSoundGuard.t); _pinSoundGuard = null; }
+const want = !v.muted;
+const prevFocus = document.activeElement;
+const btn = pinterestSoundButton(v);
+if (btn) mossadPressEl(btn);
+if (v.muted !== want) v.muted = want;
+if (!want && v.volume === 0) { try { v.volume = 1; } catch (e) {} }
+if (btn && document.activeElement === btn && prevFocus !== btn) {
+try { btn.blur(); } catch (e) {}
+if (prevFocus && prevFocus !== document.body && prevFocus.focus) { try { prevFocus.focus({ preventScroll: true }); } catch (e) {} }
+}
+const fn = () => { if (v.muted !== want) { mossadDebug('sound', 'Pinterest вернул muted — повторяем', { want }); v.muted = want; } };
+v.addEventListener('volumechange', fn);
+_pinSoundGuard = { v, fn, t: setTimeout(() => { v.removeEventListener('volumechange', fn); _pinSoundGuard = null; }, 1500) };
+mossadDebug('sound', 'Pinterest: звук', { muted: want, button: btn ? (btn.getAttribute('aria-label') || btn.getAttribute('data-test-id') || btn.tagName) : null, main: v === pinterestMainVideo() });
+showSoundToast(want ? '🔇 Звук выкл' : '🔊 Звук вкл');
+return true;
 }
 const _pinSmallImgRe = /\/(?:\d{2,3}x\d{2,3}_RS|30x30|60x60|75x75|140x140)\//i;
 function pinterestMainImage() {
@@ -10659,6 +10717,8 @@ if (hotkeyMatches(e, config.hk.sound)) {
 e.preventDefault();
 if (rootDomain === 'grok.com') {
 toggleGrokSound();
+} else if (rootDomain.includes('pinterest.')) {
+pinterestToggleSound();
 } else {
 const video = getActiveVideo();
 if (video) video.muted = !video.muted;

@@ -67,6 +67,76 @@
         }
         return best;
     }
+    // ── v1.3.62: звук (хоткей sound, ScrollLock) ──
+    // Раньше: getActiveVideo() → video.muted = !video.muted и обычный тост. В полном экране тост (в body) не виден;
+    // в оверлее «Показать в полном масштабе» играет ДРУГОЙ <video>, а брался closeup-видео под ним; кнопку звука
+    // Pinterest мы не трогали, и плеер мог вернуть muted из своего состояния. Фокус мы не ставим нигде:
+    // синяя рамка — это :focus-visible Pinterest на кнопке, по которой раньше щёлкнули мышью. ANTI_PATTERNS §41.
+    const PIN_SOUND_RE = /(^|\b)(un)?mute|sound|volume|звук|громк/i;
+    function _pinVisArea(v) {
+        if (!v || !v.isConnected || !v.getBoundingClientRect) return 0;
+        const r = v.getBoundingClientRect();
+        const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+        return Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+    }
+    function _pinLargest(list) {
+        let best = null, max = 0;
+        for (const v of list) { const a = _pinVisArea(v); if (a > max) { max = a; best = v; } }
+        return best;
+    }
+    /** <video> для звука: в полном экране → в диалоге/оверлее → главный пин (если виден) → самый крупный видимый не из похожих. */
+    function pinterestSoundVideo() {
+        const fs = document.fullscreenElement;
+        if (fs) {
+            if (fs.tagName === 'VIDEO') return fs;
+            const v = _pinLargest(Array.from(fs.querySelectorAll('video')).filter(x => !pinIsOwnUi(x)));
+            if (v) return v;
+        }
+        const dlg = _pinLargest(Array.from(document.querySelectorAll('[role="dialog"] video, [aria-modal="true"] video')).filter(x => !pinIsOwnUi(x)));
+        if (dlg) return dlg;
+        const main = pinterestMainVideo();
+        if (main && _pinVisArea(main) > 0) return main;
+        return _pinLargest(Array.from(document.querySelectorAll('video')).filter(x => !pinIsRelated(x))) || main;
+    }
+    /** Кнопка звука плеера именно этого <video>: поднимаемся от видео, пока в контейнере одно видео. */
+    function pinterestSoundButton(video) {
+        let up = video && video.parentElement;
+        for (let i = 0; up && i < 10; i++, up = up.parentElement) {
+            if (up.querySelectorAll('video').length > 1) break;
+            const btn = Array.from(up.querySelectorAll('button, [role="button"]')).find(b => !pinIsOwnUi(b) &&
+                PIN_SOUND_RE.test([b.getAttribute('aria-label'), b.getAttribute('title'), b.getAttribute('data-test-id')].filter(Boolean).join(' ')));
+            if (btn) return btn;
+            if (up === document.body) break;
+        }
+        return null;
+    }
+    let _pinSoundGuard = null;
+    /** Переключить звук видео пина. Фокус не трогаем; тост — через showSoundToast (виден и в полном экране). */
+    function pinterestToggleSound() {
+        const v = pinterestSoundVideo();
+        if (!v) { showSoundToast('🔇 Видео не найдено'); mossadDebug('sound', 'Pinterest: <video> не найден'); return false; }
+        // прошлый сторож снять ДО клика, иначе он «вернёт» новое переключение
+        if (_pinSoundGuard) { _pinSoundGuard.v.removeEventListener('volumechange', _pinSoundGuard.fn); clearTimeout(_pinSoundGuard.t); _pinSoundGuard = null; }
+        const want = !v.muted;
+        const prevFocus = document.activeElement;
+        const btn = pinterestSoundButton(v);
+        if (btn) mossadPressEl(btn); // кнопка Pinterest — чтобы его плеер знал о смене (и иконка обновилась)
+        if (v.muted !== want) v.muted = want; // кнопки нет (скрыта до наведения) или клик не дошёл
+        if (!want && v.volume === 0) { try { v.volume = 1; } catch (e) {} }
+        // не уводим фокус: если клик сфокусировал кнопку — вернуть как было
+        if (btn && document.activeElement === btn && prevFocus !== btn) {
+            try { btn.blur(); } catch (e) {}
+            if (prevFocus && prevFocus !== document.body && prevFocus.focus) { try { prevFocus.focus({ preventScroll: true }); } catch (e) {} }
+        }
+        // Плеер Pinterest может вернуть muted из своего состояния — 1,5 с держим выбранное
+        const fn = () => { if (v.muted !== want) { mossadDebug('sound', 'Pinterest вернул muted — повторяем', { want }); v.muted = want; } };
+        v.addEventListener('volumechange', fn);
+        _pinSoundGuard = { v, fn, t: setTimeout(() => { v.removeEventListener('volumechange', fn); _pinSoundGuard = null; }, 1500) };
+        mossadDebug('sound', 'Pinterest: звук', { muted: want, button: btn ? (btn.getAttribute('aria-label') || btn.getAttribute('data-test-id') || btn.tagName) : null, main: v === pinterestMainVideo() });
+        showSoundToast(want ? '🔇 Звук выкл' : '🔊 Звук вкл');
+        return true;
+    }
+
     const _pinSmallImgRe = /\/(?:\d{2,3}x\d{2,3}_RS|30x30|60x60|75x75|140x140)\//i;
     /** Картинка главного пина: в closeup, иначе самая крупная pinimg-картинка не из сетки (аватарки пропускаем). */
     function pinterestMainImage() {

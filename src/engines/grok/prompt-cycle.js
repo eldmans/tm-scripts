@@ -72,19 +72,6 @@
     function grokFindDurationControl() { return _gcParamControl('duration'); }
     function grokFindAspectControl() { return _gcParamControl('aspect'); }
 
-    /** Клик «как мышью»: pointer/mouse-последовательность + один click (Radix реагирует и на pointerdown). */
-    function mossadPressEl(el) {
-        if (!el) return;
-        const P = window.PointerEvent || window.MouseEvent;
-        const r = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
-        const base = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
-        const fire = (C, type, extra) => { try { el.dispatchEvent(new C(type, Object.assign({}, base, extra))); } catch (e) {} };
-        fire(P, 'pointerdown', { buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true });
-        fire(window.MouseEvent, 'mousedown', { buttons: 1 });
-        fire(P, 'pointerup', { buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true });
-        fire(window.MouseEvent, 'mouseup', { buttons: 0 });
-        try { el.click(); } catch (e) {}
-    }
     function _gcFocus(el) {
         if (!el) return false;
         try { el.focus({ preventScroll: true, focusVisible: true }); } catch (e) { try { el.focus(); } catch (e2) {} }

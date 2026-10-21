@@ -377,6 +377,8 @@
             e.preventDefault();
             if (rootDomain === 'grok.com') {
                 toggleGrokSound();
+            } else if (rootDomain.includes('pinterest.')) {
+                pinterestToggleSound(); // v1.3.62: видео оверлея/полного экрана, кнопка плеера, тост и в полном экране
             } else {
                 const video = getActiveVideo();
                 if (video) video.muted = !video.muted;
