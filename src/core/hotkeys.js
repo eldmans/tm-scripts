@@ -192,9 +192,16 @@
         }
     }, true);
 
+    /** v1.3.69: стрелка ↑/↓ в контроле длительности/соотношения композера Grok — хоткеи MOSSAD её не трогают. */
+    function _mossadGrokCtlArrow(e) {
+        if (e.__mossadGrokCtlArrow) return true;
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return false;
+        try { return typeof grokComposerArrowCtl === 'function' && !!grokComposerArrowCtl(e); } catch (err) { return false; }
+    }
     // Ранний перехват клавиш слайдера (PageUp / PageDown, ArrowDown / ArrowUp) ДО сайта на window в фазе capture
     window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
         if (window.capturingFor !== null) return;
+        if (_mossadGrokCtlArrow(e)) return; // v1.3.69: ↑/↓ в длительности/соотношении композера Grok
         if (isEditableElement(document.activeElement)) return;
 
         // v1.3.47: раньше стрелки и Alt+PageDown/Up перехватывались и без слайдшоу — достаточно было
@@ -241,6 +248,7 @@
 
     window.addEventListener('keydown', function (e) {
         if (window.capturingFor !== null) return;
+        if (_mossadGrokCtlArrow(e)) return; // v1.3.69
 
         const activeEl = document.activeElement;
         const isEditing = isEditableElement(activeEl);
