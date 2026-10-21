@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.65
+// @version      1.3.66
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -26,8 +26,232 @@
 (function () {
     'use strict';
 
+// ── src/light/dnd.js ──
+const MOSSAD_DND_GM_KEY = 'mossad_dnd';
+function mossadDndCfg() {
+let o = null;
+try { if (typeof GM_getValue === 'function') o = GM_getValue(MOSSAD_DND_GM_KEY, null); } catch (e) {}
+try { if (typeof o === 'string') o = JSON.parse(o); } catch (e) { o = null; }
+o = (o && typeof o === 'object') ? o : {};
+return { enabled: o.enabled !== false, folder: typeof o.folder === 'string' ? o.folder : 'DND/' };
+}
+function mossadDndSave(patch) {
+const c = Object.assign(mossadDndCfg(), patch || {});
+try { if (typeof GM_setValue === 'function') GM_setValue(MOSSAD_DND_GM_KEY, JSON.stringify(c)); } catch (e) {}
+return c;
+}
+function mossadDndNormFolder(f) {
+const parts = String(f || '').replace(/\\/g, '/').split('/').map(p => p.trim().replace(/[<>:"|?*\x00-\x1f]/g, '_')).filter(p => p && p !== '.' && p !== '..');
+return parts.length ? parts.join('/') + '/' : '';
+}
+function mossadLightToast(msg, isError) {
+try {
+const host = document.fullscreenElement || document.body || document.documentElement;
+let t = document.getElementById('mossad-light-toast');
+if (!t) {
+t = document.createElement('div');
+t.id = 'mossad-light-toast';
+t.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483647;padding:8px 14px;border-radius:8px;' +
+'background:rgba(17,17,17,0.92);color:#fff;font:600 13px system-ui,sans-serif;pointer-events:none;max-width:90vw;';
+}
+if (t.parentNode !== host) host.appendChild(t);
+t.textContent = msg;
+t.style.border = '1px solid ' + (isError ? '#ef4444' : '#10b981');
+clearTimeout(t._mossadT);
+t._mossadT = setTimeout(() => t.remove(), 2600);
+} catch (e) {}
+}
+function mossadMediaAt(x, y, target) {
+const pick = (el) => {
+if (!el || !el.tagName) return null;
+const tag = el.tagName;
+if (tag === 'IMG' || tag === 'VIDEO') return el;
+if (tag === 'PICTURE' || tag === 'SOURCE') return el.closest('picture') && el.closest('picture').querySelector('img');
+return null;
+};
+let m = pick(target);
+if (m) return m;
+if (document.elementsFromPoint) {
+for (const el of document.elementsFromPoint(x, y)) {
+if (el.id && String(el.id).indexOf('mossad') === 0) continue;
+m = pick(el);
+if (m) return m;
+}
+}
+return null;
+}
+function mossadMediaUrl(el) {
+if (!el) return '';
+if (el.tagName === 'VIDEO') {
+const s = el.currentSrc || el.src || (el.querySelector('source[src]') && el.querySelector('source[src]').src) || '';
+return s;
+}
+return el.currentSrc || el.src || '';
+}
+function mossadDndFileName(url, el) {
+let name = '';
+try { name = decodeURIComponent(new URL(url, location.href).pathname.split('/').pop() || ''); } catch (e) {}
+name = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(-120);
+const isVid = el && el.tagName === 'VIDEO';
+if (!name || name.indexOf('.') < 0) {
+const host = (location.hostname || 'page').replace(/^www\./, '');
+name = (name || host + '-' + Date.now().toString(36)) + (isVid ? '.mp4' : '.jpg');
+}
+return name;
+}
+function _dndSaveBlob(blob, name) {
+const a = document.createElement('a');
+const u = URL.createObjectURL(blob);
+a.href = u; a.download = name; a.style.display = 'none';
+(document.body || document.documentElement).appendChild(a);
+a.click();
+setTimeout(() => { a.remove(); URL.revokeObjectURL(u); }, 4000);
+}
+function mossadDndDownload(el) {
+const url = mossadMediaUrl(el);
+if (!url) { mossadLightToast('⚠️ У элемента нет адреса файла', true); return false; }
+const name = mossadDndFileName(url, el);
+const folder = mossadDndNormFolder(mossadDndCfg().folder);
+if (/^blob:/.test(url)) {
+fetch(url).then(r => r.blob()).then(b => { _dndSaveBlob(b, name); mossadLightToast('⬇ ' + name + ' (blob — в корень «Загрузок»)'); })
+.catch(() => mossadLightToast('⚠️ Потоковое видео (blob/MSE) так не скачать — попробуйте «Копировать кадр» или MOSSAD на сайте', true));
+return true;
+}
+if (/^data:/.test(url)) { fetch(url).then(r => r.blob()).then(b => _dndSaveBlob(b, name)); mossadLightToast('⬇ ' + name); return true; }
+if (typeof GM_download !== 'function') { window.open(url, '_blank'); return true; }
+try {
+GM_download({
+url, name: folder + name, saveAs: false,
+onload: () => mossadLightToast('✅ ' + folder + name),
+onerror: (err) => {
+const why = (err && (err.error || err.details && err.details.current)) || '';
+mossadLightToast('⚠️ Не скачалось' + (why ? ' (' + why + ')' : '') + '. Tampermonkey → Настройки → Загрузки: «Browser API» и разрешить расширения файлов', true);
+},
+});
+mossadLightToast('⬇ ' + folder + name);
+} catch (e) { mossadLightToast('⚠️ GM_download: ' + e.message, true); }
+return true;
+}
+function mossadCopyFrame(el) {
+const w = el.tagName === 'VIDEO' ? el.videoWidth : (el.naturalWidth || el.width);
+const h = el.tagName === 'VIDEO' ? el.videoHeight : (el.naturalHeight || el.height);
+if (!w || !h) { mossadLightToast('⚠️ Кадр ещё не загружен', true); return; }
+const c = document.createElement('canvas');
+c.width = w; c.height = h;
+try { c.getContext('2d').drawImage(el, 0, 0, w, h); } catch (e) { mossadLightToast('⚠️ Кадр не нарисовать: ' + e.message, true); return; }
+const base = mossadDndFileName(mossadMediaUrl(el) || 'frame', el).replace(/\.[a-z0-9]+$/i, '') + (el.tagName === 'VIDEO' ? '-' + Math.floor(el.currentTime || 0) + 's' : '') + '.png';
+let p;
+try {
+p = new Promise((res, rej) => { try { c.toBlob(b => b ? res(b) : rej(new Error('пустой кадр')), 'image/png'); } catch (e) { rej(e); } });
+} catch (e) { p = Promise.reject(e); }
+p.then(blob => {
+if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem === 'function') {
+return navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+.then(() => mossadLightToast('📋 Кадр скопирован (' + w + '×' + h + ')'))
+.catch(() => { _dndSaveBlob(blob, base); mossadLightToast('📋 Буфер недоступен — кадр сохранён: ' + base); });
+}
+_dndSaveBlob(blob, base);
+mossadLightToast('📋 Копирование картинок не поддерживается — кадр сохранён: ' + base);
+}).catch(err => {
+if (err && (err.name === 'SecurityError' || /taint|insecure|security/i.test(String(err.message))))
+mossadLightToast('⚠️ Сайт защищает кадр (CORS) — скопировать нельзя. «Скачать» сохранит оригинал', true);
+else mossadLightToast('⚠️ Кадр: ' + (err && err.message || err), true);
+});
+}
+function mossadDndCloseMenu() {
+const m = document.getElementById('mossad-dnd-menu');
+if (m) { if (m._mossadOff) m._mossadOff(); m.remove(); }
+}
+function mossadDndMenu(el, x, y) {
+mossadDndCloseMenu();
+const m = document.createElement('div');
+m.id = 'mossad-dnd-menu';
+m.style.cssText = 'position:fixed;z-index:2147483647;background:#111827;border:1px solid #4b5563;border-radius:8px;padding:4px;' +
+'box-shadow:0 8px 24px rgba(0,0,0,0.6);font:13px system-ui,sans-serif;color:#e5e7eb;min-width:170px;';
+const folder = mossadDndNormFolder(mossadDndCfg().folder) || '(корень)';
+const items = [['dl', '⬇ Скачать'], ['folder', '📁 Папка… (' + folder + ')'], ['frame', '📋 Копировать кадр']];
+m.innerHTML = items.map(([k, t]) => `<div data-dnd="${k}" style="padding:6px 10px;border-radius:5px;cursor:pointer;white-space:nowrap;">${t.replace(/</g, '&lt;')}</div>`).join('');
+(document.fullscreenElement || document.body || document.documentElement).appendChild(m);
+const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+m.style.left = Math.max(2, Math.min(x, vw - 200)) + 'px';
+m.style.top = Math.max(2, Math.min(y, vh - 110)) + 'px';
+m.addEventListener('mouseover', (e) => { const it = e.target.closest('[data-dnd]'); m.querySelectorAll('[data-dnd]').forEach(d => { d.style.background = d === it ? '#1f2937' : ''; }); });
+m.addEventListener('click', (e) => {
+const it = e.target.closest('[data-dnd]');
+if (!it) return;
+e.preventDefault(); e.stopPropagation();
+const k = it.getAttribute('data-dnd');
+mossadDndCloseMenu();
+if (k === 'dl') mossadDndDownload(el);
+else if (k === 'frame') mossadCopyFrame(el);
+else if (k === 'folder') {
+const v = prompt('MOSSAD DND: подпапка в «Загрузках» (пусто — корень):', mossadDndCfg().folder);
+if (v !== null) { const f = mossadDndNormFolder(v); mossadDndSave({ folder: f }); mossadLightToast('📁 Папка: ' + (f || '(корень «Загрузок»)')); }
+}
+});
+const off = (e) => { if (e.type === 'keydown' && e.key !== 'Escape') return; if (e.type !== 'keydown' && m.contains(e.target)) return; mossadDndCloseMenu(); };
+setTimeout(() => {
+window.addEventListener('pointerdown', off, true);
+window.addEventListener('keydown', off, true);
+window.addEventListener('blur', off);
+}, 0);
+m._mossadOff = () => { window.removeEventListener('pointerdown', off, true); window.removeEventListener('keydown', off, true); window.removeEventListener('blur', off); };
+}
+function _dndOnClick(e) {
+if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.button !== 0) return;
+const el = mossadMediaAt(e.clientX, e.clientY, e.target);
+if (!el || !mossadDndCfg().enabled) return;
+e.preventDefault(); e.stopPropagation();
+mossadDndDownload(el);
+}
+function _dndOnContext(e) {
+if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+const el = mossadMediaAt(e.clientX, e.clientY, e.target);
+if (!el || !mossadDndCfg().enabled) return;
+e.preventDefault(); e.stopPropagation();
+mossadDndMenu(el, e.clientX, e.clientY);
+}
+window.addEventListener('click', _dndOnClick, true);
+window.addEventListener('contextmenu', _dndOnContext, true);
+
+// ── src/light/ui.js ──
+const mossadLightSections = [];
+mossadLightSections.push({ id: 'dnd', render(box) {
+const c = mossadDndCfg();
+const sec = document.createElement('div');
+sec.setAttribute('data-light', 'dnd');
+sec.style.cssText = 'background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:#d1d5db;';
+sec.innerHTML = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">⬇ DND: скачивание по Ctrl+клик (все сайты)</div>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;"><input data-dnd-cfg="enabled" type="checkbox" ${c.enabled ? 'checked' : ''} style="accent-color:#3b82f6;"> Включено</label>
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">Подпапка в «Загрузках»:
+              <input data-dnd-cfg="folder" type="text" value="${String(c.folder).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="пусто — корень" style="width:120px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;"></label>
+            <div style="color:#9ca3af;line-height:1.35;">Ctrl + левый клик по картинке/видео — скачать. Ctrl + правый клик — меню: Скачать, Папка…, Копировать кадр.
+            Для подпапок в Tampermonkey: Настройки → «Режим загрузки: Browser API».</div>`;
+sec.querySelector('[data-dnd-cfg="enabled"]').onchange = (e) => mossadDndSave({ enabled: e.target.checked });
+const f = sec.querySelector('[data-dnd-cfg="folder"]');
+f.onchange = () => { const v = mossadDndNormFolder(f.value); f.value = v; mossadDndSave({ folder: v }); };
+box.appendChild(sec);
+} });
+function mossadLightRenderSettings(container) {
+container.innerHTML = '';
+for (const s of mossadLightSections) { try { s.render(container); } catch (e) { console.warn('[MOSSAD] light settings', s.id, e); } }
+}
+function mossadLightOpenPanel() {
+let p = document.getElementById('mossad-light-panel');
+if (p) { p.remove(); return; }
+p = document.createElement('div');
+p.id = 'mossad-light-panel';
+p.style.cssText = 'position:fixed;top:40px;right:20px;z-index:2147483646;width:440px;max-width:94vw;max-height:85vh;overflow:auto;background:rgba(17,24,39,0.97);' +
+'border:1px solid #4b5563;border-radius:10px;padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,0.6);font:12px system-ui,sans-serif;color:#e5e7eb;';
+p.innerHTML = '<div style="display:flex;align-items:center;margin-bottom:6px;"><b style="flex:1;">🎬 MOSSAD: видео и DND</b><button data-x style="background:none;border:none;color:#9ca3af;font-size:16px;cursor:pointer;">×</button></div><div data-body></div>';
+(document.body || document.documentElement).appendChild(p);
+p.querySelector('[data-x]').onclick = () => p.remove();
+mossadLightRenderSettings(p.querySelector('[data-body]'));
+}
+try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
+
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.65';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.66';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1548,6 +1772,7 @@ const LABEL_DEFS = [
 ['keyHelpTitle', 'Клавиши — клик дописывает в поле', 'окно «?» у поля клавиш'],
 ['keyHelpNote', 'Буква/цифра/знак — сама клавиша в любой раскладке (К = R). Пробел = Space. Остальные — {Имя}: {Enter}, {F5}, {ArrowUp}. Ctrl/Alt не учитываются (с ними Grok фокус не забирает).', 'окно «?» у поля клавиш: пояснение формата'],
 ['tplSepLabel', 'Разделитель при вставке:', 'окно тегов шаблона: поле разделителя (v1.3.65)'],
+['tabVideo', '🎬 Видео', 'вкладка окна настроек: DND-скачивание и скорость видео (лёгкий слой, v1.3.66)'],
 ['tplHelpBtn', '?', 'кнопка у поля шаблона: окно тегов'],
 ['tplHelpTitle', '🏷 Теги шаблона имени файла', 'заголовок окна «?»'],
 ['tplHelpNow', 'Сейчас скачается как:', 'строка с итоговым именем в окне «?»'],
@@ -9710,7 +9935,7 @@ function openHotkeySettings(tab = 'hotkeys') {
 return openSettingsWindow(tab);
 }
 const SETTINGS_TAB_LS_KEY = 'mossad_settings_tab';
-const SETTINGS_TABS = ['general', 'hotkeys', 'defaults', 'labels', 'todos', 'sites'];
+const SETTINGS_TABS = ['general', 'hotkeys', 'video', 'defaults', 'labels', 'todos', 'sites'];
 function getLastSettingsTab(fallback = 'hotkeys') {
 try {
 const t = localStorage.getItem(SETTINGS_TAB_LS_KEY);
@@ -10099,6 +10324,7 @@ modal.innerHTML = `
             <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px;">
               <button data-tab="general" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" data-mossad-label="tabGeneral">${LH('tabGeneral')}</button>
               <button data-tab="hotkeys" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" data-mossad-label="tabHotkeys">${LH('tabHotkeys')}</button>
+              <button data-tab="video" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Лёгкий слой на всех сайтах: DND-скачивание, скорость видео" data-mossad-label="tabVideo">${LH('tabVideo')}</button>
               <button data-tab="defaults" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Общие умолчания для всех сайтов без своих сохранённых настроек" data-mossad-label="tabDefaults">${LH('tabDefaults')}</button>
               <button data-tab="labels" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Свои подписи кнопок MOSSAD (для всех сайтов)" data-mossad-label="tabLabels">${LH('tabLabels')}</button>
               <button data-tab="todos" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Задачи для ассистента (текст + фото)" data-mossad-label="tabTodos">${LH('tabTodos')}</button>
@@ -10185,6 +10411,7 @@ modal.innerHTML = `
                 <button id="mossad-def-apply" style="background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;color:#60a5fa;" title="Записать значения формы в настройки ЭТОГО сайта">➜ Применить к этому сайту</button>
               </div>
             </div>
+            <div data-pane="video" style="display:none; flex-direction:column; gap:6px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;"></div>
             <div data-pane="labels" style="display:none; flex-direction:column; gap:6px;"></div>
             <div data-pane="todos" style="display:none; flex-direction:column; gap:6px;"></div>
             <div data-pane="sites" style="display:none; flex-direction:column; gap:6px;"></div>
@@ -10550,6 +10777,7 @@ rememberSettingsTab(want);
 if (want === 'labels') initLabelsTab(modal);
 if (want === 'todos') initTodosTab(modal);
 if (want === 'sites') initSitesTab(modal);
+if (want === 'video') mossadLightRenderSettings(modal.querySelector('[data-pane="video"]'));
 modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
 modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
 const on = b.dataset.tab === want;
