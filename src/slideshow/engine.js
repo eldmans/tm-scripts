@@ -490,6 +490,13 @@
         if (rootDomain.includes('pinterest.')) {
             const pinData = getPinterestMainPinData();
             if (pinData.isFound && (pinData.type === 'video' || pinData.type === 'image')) return pinData.type;
+            // v1.3.52: сводка пина из PinResource API (один запрос на пин, кэш): видео/фото известно ещё до плеера
+            const pid = pinterestCurrentPinId();
+            if (pid) {
+                const ci = pinterestCachedPinInfo(pid);
+                if (ci === undefined) pinterestFetchPinInfo(pid);
+                else if (ci) return ci.isVideo ? 'video' : 'image';
+            }
             if (sessionStorage.getItem('mossad_expected_type') === 'video') return 'video';
             if (config.pinterestFilterType === 'video') return 'video';
             return 'unknown';

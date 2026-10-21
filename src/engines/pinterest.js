@@ -395,3 +395,157 @@
         _pinterestPickAndGo(fromSlideshow);
         return true;
     }
+
+    // ── v1.3.52: СКАЧИВАНИЕ на Pinterest — данные пина из PinResource API (same-origin) ──
+    // История поломки: v1.2.19 (6b460fd) — ранний возврат «видео без ссылки» по blob-src плеера (JSON уже не
+    // смотрели); v1.2.22 (1b8a255) — фолбэк на первое `div[role=main] img` (это картинка ПОХОЖЕГО пина).
+    // Правка v1.3.21 была сделана только в бандле и потерялась при сборке из src/. ANTI_PATTERNS §31.
+    // Порядок: (1) API пина (кэш по id) → хеш HLS → expMp4 _720w, запасной _360w; (2) хеш из poster/
+    // data-video-signature главного <video>; (3) видео-пин без ссылки — «видео не найдено», НИКОГДА не фото;
+    // фото — images.orig из API, иначе только картинка главного пина (closeup / MainPinImage).
+    const PIN_API_TIMEOUT_MS = 7000;
+    const PIN_API_CACHE_MAX = 30;
+    const _pinApiCache = new Map(); // id → Promise<info|null>
+    const _pinApiDone = new Map();  // id → info|null (уже полученные — для синхронных проверок слайдшоу)
+
+    /** Хеш ролика (32 hex + путь aa/bb/cc) из ссылки HLS / expMp4 / превью videos/thumbnails. */
+    function pinterestVideoHashFromUrl(url) {
+        const m = String(url || '').match(/\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})(?:[._]|$)/i);
+        if (!m) return null;
+        if (!/videos\//i.test(url) && !/\.m3u8|expMp4|thumbnails/i.test(url)) return null;
+        return m[4].toLowerCase();
+    }
+    /** Рабочие ссылки на mp4 по хешу (проверено 10.2026: _720w / _360w = 200 video/mp4 со звуком; mc/720p, _t1.._t4, _1080w, _480w = 403). */
+    function pinterestMp4UrlsFromHash(hash) {
+        if (!hash || hash.length !== 32) return [];
+        const p = `${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4, 6)}/${hash}`;
+        return [`https://v1.pinimg.com/videos/iht/expMp4/${p}_720w.mp4`, `https://v1.pinimg.com/videos/iht/expMp4/${p}_360w.mp4`];
+    }
+    function _pinCollectVideoLists(d) {
+        const lists = [];
+        const add = (v) => { if (v && v.video_list && typeof v.video_list === 'object') lists.push(v.video_list); };
+        add(d && d.videos);
+        add(d && d.video);
+        const pages = (d && d.story_pin_data && Array.isArray(d.story_pin_data.pages)) ? d.story_pin_data.pages : [];
+        for (const pg of pages) {
+            add(pg && pg.video);
+            const blocks = (pg && Array.isArray(pg.blocks)) ? pg.blocks : [];
+            for (const b of blocks) add(b && b.video);
+        }
+        return lists;
+    }
+    /** Компактная сводка пина из ответа API (весь JSON не храним). */
+    function pinterestParsePinData(d) {
+        if (!d || typeof d !== 'object') return null;
+        const info = { isVideo: false, mp4Urls: [], hash: null, durationMs: 0, imageUrl: '', desc: '' };
+        const direct = [];
+        for (const list of _pinCollectVideoLists(d)) {
+            for (const k of Object.keys(list)) {
+                const e = list[k];
+                if (!e || !e.url) continue;
+                info.isVideo = true;
+                if (!info.durationMs && e.duration) info.durationMs = Number(e.duration) || 0;
+                if (/\.mp4(\?|$)/i.test(e.url)) direct.push({ url: e.url, w: e.width || 0 });
+                if (!info.hash) info.hash = pinterestVideoHashFromUrl(e.url);
+            }
+        }
+        const byHash = pinterestMp4UrlsFromHash(info.hash);
+        direct.sort((a, b) => b.w - a.w);
+        info.mp4Urls = Array.from(new Set([...byHash, ...direct.map(x => x.url)]));
+        const im = d.images || {};
+        info.imageUrl = (im.orig && im.orig.url) || (im.originals && im.originals.url) || (im['736x'] && im['736x'].url) || '';
+        const txt = [d.title, d.grid_title, d.description, d.closeup_unified_description].find(x => typeof x === 'string' && x.trim());
+        info.desc = txt ? txt.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+        return info;
+    }
+    /** Один запрос на пин (кэш промисов, до 30 пинов), таймаут 7 с; ошибка → null. */
+    function pinterestFetchPinInfo(pinId) {
+        if (!pinId) return Promise.resolve(null);
+        if (_pinApiCache.has(pinId)) return _pinApiCache.get(pinId);
+        const p = (async () => {
+            if (typeof fetch !== 'function') return null;
+            const ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+            const t = ctrl ? setTimeout(() => ctrl.abort(), PIN_API_TIMEOUT_MS) : null;
+            try {
+                const q = new URLSearchParams({
+                    source_url: `/pin/${pinId}/`,
+                    data: JSON.stringify({ options: { id: String(pinId), field_set_key: 'detailed' }, context: {} })
+                });
+                const res = await fetch(`/resource/PinResource/get/?${q}`, {
+                    credentials: 'same-origin',
+                    headers: { 'X-Pinterest-PWS-Handler': 'www/pin/[id].js', 'Accept': 'application/json' },
+                    signal: ctrl ? ctrl.signal : undefined
+                });
+                if (!res.ok) return null;
+                const json = await res.json();
+                return pinterestParsePinData(json && json.resource_response && json.resource_response.data);
+            } catch (e) {
+                console.warn('[MOSSAD] PinResource API недоступен:', e && e.message);
+                return null;
+            } finally {
+                if (t) clearTimeout(t);
+            }
+        })().then(info => { _pinApiDone.set(pinId, info); return info; });
+        _pinApiCache.set(pinId, p);
+        while (_pinApiCache.size > PIN_API_CACHE_MAX) {
+            const k = _pinApiCache.keys().next().value;
+            _pinApiCache.delete(k);
+            _pinApiDone.delete(k);
+        }
+        return p;
+    }
+    /** Уже полученная сводка текущего пина (синхронно; undefined — ещё не запрашивали/не пришла). */
+    function pinterestCachedPinInfo(pinId) {
+        const id = pinId || pinterestCurrentPinId();
+        return _pinApiDone.has(id) ? _pinApiDone.get(id) : undefined;
+    }
+    window.pinterestFetchPinInfo = pinterestFetchPinInfo;
+
+    /** Хеш ролика главного пина из DOM: poster главного <video> или ближайший [data-video-signature]. */
+    function pinterestVideoHashFromDom() {
+        const v = pinterestMainVideo();
+        if (!v) return null;
+        const sigEl = v.closest('[data-video-signature]') || v.querySelector('[data-video-signature]');
+        const sig = sigEl ? (sigEl.getAttribute('data-video-signature') || '') : '';
+        if (/^[a-f0-9]{32}$/i.test(sig)) return sig.toLowerCase();
+        const srcEl = v.querySelector('source');
+        for (const u of [v.getAttribute('poster'), v.currentSrc, v.src, srcEl && srcEl.src]) {
+            const h = pinterestVideoHashFromUrl(u || '');
+            if (h) return h;
+        }
+        return null;
+    }
+    function _pinOriginalsUrl(src) {
+        return String(src || '').replace(/\/(?:\d{2,4}x(?:\d{2,4})?(?:_RS)?)\//, '/originals/');
+    }
+
+    /**
+     * Что качать на текущем пине. → { urls, type: 'video'|'photo', desc } | { error: 'video-not-found' } | null.
+     * API ответил — доверяем ему (видео/фото); API недоступен — только DOM главного пина.
+     */
+    async function pinterestResolveMedia() {
+        const id = pinterestCurrentPinId();
+        const info = id ? await pinterestFetchPinInfo(id) : null;
+        const domHash = pinterestVideoHashFromDom();
+        if (info) {
+            if (info.isVideo) {
+                const urls = Array.from(new Set([...info.mp4Urls, ...pinterestMp4UrlsFromHash(domHash)]));
+                if (urls.length) return { urls, type: 'video', desc: info.desc };
+                return { error: 'video-not-found' };
+            }
+            if (info.imageUrl) return { urls: [info.imageUrl], type: 'photo', desc: info.desc };
+        }
+        if (domHash) return { urls: pinterestMp4UrlsFromHash(domHash), type: 'video', desc: info ? info.desc : '' };
+        const v = pinterestMainVideo();
+        if (v) {
+            const direct = pinterestMp4FromSrc(v.currentSrc || v.src || '');
+            if (direct) return { urls: [direct], type: 'video' };
+        }
+        if (v || pinterestHasVideoSigns()) return { error: 'video-not-found' };
+        const img = pinterestMainImage();
+        if (img) {
+            const src = img.currentSrc || img.src;
+            return { urls: Array.from(new Set([_pinOriginalsUrl(src), src])), type: 'photo', desc: info ? info.desc : '' };
+        }
+        return null;
+    }

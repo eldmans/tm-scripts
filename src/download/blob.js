@@ -1,7 +1,8 @@
     // ============================================
     // PINTEREST / DOWNLOAD ENGINE
     // ============================================
-    function triggerDirectBlobDownload(url, filename, onErrorCallback, postUrl = null) {
+    function triggerDirectBlobDownload(url, filename, onErrorCallback, postUrl = null, onSuccess = null) {
+        // v1.3.52: onSuccess — файл сохранён (для слайдшоу «скачать и листать»: не ждать страховочные 8 с)
         // 1. Предпочитаем GM_download (без CORS-проблем, скачивает напрямую в Загрузки)
         if (typeof GM_download === 'function') {
             try {
@@ -12,6 +13,7 @@
                     saveAs: false,
                     onload: () => {
                         showToast('✅ Сохранено!');
+                        if (onSuccess) { try { onSuccess(); } catch (e) {} }
                         saveFileToHistory({
                             hash: '',
                             filename,
@@ -23,7 +25,7 @@
                     },
                     onerror: (err) => {
                         console.warn('[MOSSAD] GM_download failed, trying fallback:', err);
-                        _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl);
+                        _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl, onSuccess);
                     }
                 });
                 return;
@@ -31,10 +33,10 @@
                 console.warn('[MOSSAD] GM_download call exception:', e);
             }
         }
-        _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl);
+        _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl, onSuccess);
     }
 
-    function _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl = null) {
+    function _downloadViaXhrOrFetch(url, filename, onErrorCallback, postUrl = null, onSuccess = null) {
         if (typeof GM_xmlhttpRequest === 'function') {
             GM_xmlhttpRequest({
                 method: 'GET',
@@ -49,6 +51,7 @@
                 onload: (res) => {
                     if (res.status === 200 && res.response) {
                         saveBlobToDisk(res.response, filename, url, postUrl);
+                        if (onSuccess) { try { onSuccess(); } catch (e) {} }
                     } else {
                         if (onErrorCallback) onErrorCallback();
                         else fetchBlobFallback(url, filename, postUrl);

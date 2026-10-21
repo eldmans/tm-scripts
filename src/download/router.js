@@ -4,31 +4,11 @@
             return window.MOSSAD_ENGINES.instagram.findMedia();
         }
 
+        // v1.3.52: Pinterest — асинхронно через pinterestResolveMedia() в triggerDownload (API пина).
+        // Синхронный путь сюда больше не заходит; запасной ответ — только главный пин, без «первой картинки страницы».
         if (rootDomain.includes('pinterest.')) {
-            const pinType = getPinMediaType();
-            const mainPin = getPinterestMainPinData();
-            
-            // 1. Если главный пин - ВИДЕО
-            if (pinType === 'video' || mainPin.bestMp4Url) {
-                if (mainPin.bestMp4Url) {
-                    return { urls: [mainPin.bestMp4Url], type: 'video' };
-                }
-                const stageSig = document.querySelector('div[data-test-id="closeup-stage"] [data-video-signature], div[data-test-id="pin-closeup"] [data-video-signature]');
-                if (stageSig) {
-                    const sig = stageSig.getAttribute('data-video-signature');
-                    if (sig && sig.length === 32) {
-                        return { urls: [`https://v1.pinimg.com/videos/iht/expMp4/${sig.slice(0,2)}/${sig.slice(2,4)}/${sig.slice(4,6)}/${sig}_720w.mp4`], type: 'video' };
-                    }
-                }
-            }
-
-            // 2. Если главный пин - ФОТО (или не содержит видео)
-            const stageImg = document.querySelector('div[data-test-id="closeup-stage"] img, div[data-test-id="pin-closeup"] img, div[role="main"] img');
-            if (stageImg && stageImg.src) {
-                let imgUrl = stageImg.src;
-                imgUrl = imgUrl.replace(/\/(236x|474x|564x|736x|1200x)\//, '/originals/');
-                return { urls: [imgUrl], type: 'photo' };
-            }
+            const img = pinterestMainImage();
+            return img ? { urls: [img.currentSrc || img.src], type: 'photo' } : null;
         }
 
         if (rootDomain.includes('redgifs.com')) {
@@ -97,7 +77,21 @@
 
     let _activeDuplicateRecord = null;
 
-    function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
+    function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null, presetMedia = null) {
+        // v1.3.52: Pinterest — медиа главного пина из PinResource API (асинхронно, кэш по id пина)
+        if (rootDomain.includes('pinterest.') && !presetMedia) {
+            const pinUrlAtStart = location.href;
+            pinterestResolveMedia().then(m => {
+                if (location.href !== pinUrlAtStart) return; // ушли на другой пин, пока ждали
+                if (!m || m.error || !m.urls || !m.urls.length) {
+                    showToast(m && m.error === 'video-not-found' ? '❌ Видео не найдено (фото вместо видео не качаю)' : '❌ Медиа не найдено', true);
+                    if (onDoneCallback) onDoneCallback(); // слайдшоу не ждёт 8 с
+                    return;
+                }
+                triggerDownload(bypassDuplicateCheck, duplicateRecord, onDoneCallback, m);
+            }).catch(e => { console.error('[MOSSAD] Pinterest download resolve error:', e); showToast('❌ Медиа не найдено', true); if (onDoneCallback) onDoneCallback(); });
+            return;
+        }
         if (duplicateRecord) {
             _activeDuplicateRecord = duplicateRecord;
         } else if (!bypassDuplicateCheck) {
@@ -108,7 +102,7 @@
             if (triggerGrokDownload(bypassDuplicateCheck, duplicateRecord || _activeDuplicateRecord, onDoneCallback)) return;
         }
 
-        const media = findMediaForDownload();
+        const media = presetMedia || findMediaForDownload();
         if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
 
         const primaryUrl = media.urls[0];
@@ -119,10 +113,10 @@
             checkFileInHistory(null, primaryUrl, canonicalPostUrl, media.type).then(record => {
                 if (record) {
                     _activeDuplicateRecord = record;
-                    showDuplicateDownloadNotice(record, () => triggerDownload(true, record), canonicalPostUrl, primaryUrl);
+                    showDuplicateDownloadNotice(record, () => triggerDownload(true, record, null, presetMedia), canonicalPostUrl, primaryUrl);
                 } else {
                     _activeDuplicateRecord = null;
-                    triggerDownload(true, null);
+                    triggerDownload(true, null, onDoneCallback, presetMedia);
                 }
             });
             return;
@@ -268,16 +262,19 @@
         const urls = media.urls;
         let attemptedIndex = 0;
 
+        let postActionDone = false; // v1.3.52: «После DL» — один раз, а не на каждую запасную ссылку (_720w → _360w)
         function tryNext() {
             if (attemptedIndex >= urls.length) {
                 console.warn('Все ссылки не сработали, fallback на Blob...');
+                if (onDoneCallback) onDoneCallback();
                 downloadBlobMedia(urls[0], filename, canonicalPostUrl);
                 return;
             }
             const targetUrl = urls[attemptedIndex++];
             showToast('⏳ Запуск скачивания...');
-            triggerDirectBlobDownload(targetUrl, filename, tryNext, canonicalPostUrl);
-            performPostDownloadAction();
+            // v1.3.52: слайдшоу листает, как только файл сохранён (раньше колбэк не вызывался — всегда ждали 8 с страховки)
+            triggerDirectBlobDownload(targetUrl, filename, tryNext, canonicalPostUrl, onDoneCallback);
+            if (!postActionDone) { postActionDone = true; performPostDownloadAction(); }
         }
         
         tryNext();
