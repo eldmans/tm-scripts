@@ -20,7 +20,7 @@ tm-scripts/grok/
 ├── src/                      # ИСХОДНЫЙ КОД (править только здесь!)
 │   ├── banner.js             # Метаданные Tampermonkey (// ==UserScript== ...)
 │   ├── core/
-│   │   ├── domain.js         # Определение хоста, allowedDomains, базовая инициализация
+│   │   ├── domain.js         # Определение хоста, список сайтов (встроенные + GM `mossad_sites`, суффикс), команда меню TM
 │   │   ├── config.js         # DEFAULT_CONFIG и система настроек
 │   │   ├── sync.js           # Синхронизация настроек с GitHub (push/pull)
 │   │   ├── utils.js          # Утилиты (debounce, showToast)
@@ -53,6 +53,9 @@ tm-scripts/grok/
 │   │   └── engine.js         # Движок авто-слайдшоу, таймеры фото/видео, D-pad
 │   └── ui/
 │       ├── panel.js          # Glassmorphism виджет (initWidget) и запуск UI
+│       ├── labels.js         # Подписи L('key') (вкладка «✏ Подписи»)
+│       ├── todos.js          # Вкладка «📝 Тудушки»
+│       ├── sites.js          # Вкладка «🌍 Сайты» (v1.3.50)
 │       └── settings-modal.js # Модалка настроек F1: хоткеи, GitHub-синхронизация, история
 ├── archive/                  # Устаревшие standalone-скрипты (grok-hotkeys*, universal_media_enhancer) — в git, только история
 └── _archive/                 # Локальные бэкапы (в .gitignore, не коммитятся)
