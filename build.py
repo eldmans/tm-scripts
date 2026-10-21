@@ -34,6 +34,7 @@ MODULES = [
     "src/download/router.js",
     "src/slideshow/engine.js",
     "src/engines/pinterest.js",
+    "src/ui/tpl-help.js",
     "src/ui/panel.js",
     "src/ui/todos.js",
     "src/ui/sites.js",

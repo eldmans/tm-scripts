@@ -536,81 +536,150 @@
     }
     window.doRewind = doRewind;
 
+    // ============================================
+    // ШАБЛОН ИМЕНИ ФАЙЛА (v1.3.53: общие теги, buildFilenameVars, правило расширения)
+    // ============================================
+    // Старый общий шаблон по умолчанию: {RadugaStud} задумывался как «аккаунт», но такого тега не было —
+    // он молча пропадал (имя «12345678-pint~.jpg»). Сохранённый ровно таким шаблон мигрирует в config.js.
+    const MOSSAD_OLD_DEFAULT_TPL = '{id8}-{domain[4]}~{RadugaStud}';
+    const MOSSAD_DEFAULT_TPL = '{id8}-{domain}';
+    const MOSSAD_DEFAULT_TPL_GROK = '{id8}-{domain}~{account}';
+    // Расширение добавляется, если имя НЕ оканчивается на одно из этих (точки внутри имени не мешают)
+    const MOSSAD_MEDIA_EXTS = ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'heic', 'mp3', 'm4a', 'txt'];
+    const MOSSAD_NAME_MAX = 200; // длина имени без расширения (Windows: 255 на имя целиком)
+
     /**
-     * Возвращает дефолтный шаблон имени файла для текущего сайта (отображается серым плейсхолдером)
+     * Теги шаблона: k — имя, aliases — синонимы, what — что подставляется (для окна «?»).
+     * Любой тег принимает длину: {tagN} или {tag[N]} — первые N символов (N ≥ 1; без N — целиком).
+     * Имена — только буквы, регистр не важен. Неизвестный тег в имени файла пропадает (в окне «?» — красным).
      */
+    const MOSSAD_TPL_TAGS = [
+        { k: 'id',         aliases: ['uuid', 'hash', 'postid'], what: 'ID поста: Pinterest — номер пина, Grok — UUID поста, RedGifs — id ролика, Instagram — код поста; иначе — время (мс)' },
+        { k: 'conv',       aliases: ['conversation'],           what: 'Grok: UUID беседы (на других сайтах пусто)' },
+        { k: 'domain',     aliases: ['site'],                   what: 'Сайт одним словом: pinterest, grok, redgifs…' },
+        { k: 'domainfull', aliases: [],                         what: 'Домен целиком: pinterest.com, grok.com…' },
+        { k: 'account',    aliases: ['email'],                  what: 'Grok: e-mail вошедшего аккаунта (если удалось узнать); на других сайтах пусто' },
+        { k: 'username',   aliases: ['user', 'author'],         what: 'Автор (RedGifs, Instagram); иначе — первые 8 символов ID; Grok — grok' },
+        { k: 'desc',       aliases: ['description'],            what: 'Описание: Pinterest — заголовок/описание пина, Grok — промпт; иначе пусто' },
+        { k: 'title',      aliases: [],                         what: 'Заголовок вкладки (Grok — «Imagine - Grok»)' },
+        { k: 'date',       aliases: [],                         what: 'Дата скачивания: дд.мм.гг' },
+        { k: 'time',       aliases: [],                         what: 'Время скачивания: чч-мм-сс' },
+        { k: 'ext',        aliases: [],                         what: 'Расширение: mp4 / jpg (добавляется само, если имя не оканчивается на него)' },
+        { k: 'n',          aliases: [],                         what: 'Последние 6 цифр текущего времени в мс (не счётчик)' },
+        { k: 'dbl',        aliases: [],                         what: 'Пометка дубликата « (исходное имя) DBL»; без тега добавляется в конец сама' },
+        { k: 'oldname',    aliases: ['copy', 'root'],           what: 'Имя ранее скачанного файла (только для дубликата, до 50 символов)' },
+    ];
+    const MOSSAD_TPL_ALIAS = {};
+    for (const t of MOSSAD_TPL_TAGS) { MOSSAD_TPL_ALIAS[t.k] = t.k; for (const a of t.aliases) MOSSAD_TPL_ALIAS[a] = t.k; }
+    const MOSSAD_TPL_TAG_RE = /\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g;
+
+    /** Шаблон по умолчанию для текущего сайта (серый плейсхолдер; пустое поле = он). */
     function getDefaultFilenameTemplate() {
-        // v1.3.36: единый шаблон по умолчанию для всех сайтов (эталон владельца, см. DEFAULT_CONFIG).
-        // Раньше: RedGifs — {userName}-{domain[4]}, Grok — {conv4}-{id4}-{domain}.{ext}, прочие — {id8}-{domain}.{ext}.
-        return DEFAULT_CONFIG.filenameTemplate;
+        return rootDomain === 'grok.com' ? MOSSAD_DEFAULT_TPL_GROK : MOSSAD_DEFAULT_TPL;
     }
     window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
 
+    /** Сайт одним словом (метка второго уровня): pinterest.com → pinterest, ru.pinterest.com → pinterest, vk.video → vk. */
+    function mossadDomainWord(root) {
+        const parts = String(root || '').toLowerCase().split('.').filter(Boolean);
+        return parts.length >= 2 ? parts[parts.length - 2] : (parts[0] || '');
+    }
+    /** Текст для имени файла под Windows: без \ / : * ? " < > | и управляющих, пробелы схлопнуты, без точек/пробелов в конце. */
+    function mossadSafeNamePart(s) {
+        return String(s == null ? '' : s)
+            .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/[.\s]+$/, '');
+    }
+
     /**
-     * Форматирует имя файла по шаблону и словарю переменных.
-     * Поддерживает:
-     * - {varN} (например {conv4}, {id4}, {id8}, {conv8})
-     * - {var[N]} (например {domain[4]}, {id[8]})
-     * - {var} (полное значение без обрезки)
-     * - авто-очистку висячих разделителей при пустых переменных
-     * - подстановку суффикса дубликата {dbl}
+     * v1.3.53: ОДИН словарь тегов для настоящего скачивания и для окна «?» (раньше — две копии: router.js и
+     * grok/download.js, и они расходились). ctx: { postId, convId, type ('video'|'photo'), ext, authorName,
+     * title, desc, account, dblSuffix, rootBase, now }.
+     */
+    function buildFilenameVars(ctx = {}) {
+        const now = ctx.now instanceof Date ? ctx.now : new Date();
+        const p2 = (n) => String(n).padStart(2, '0');
+        const postId = String(ctx.postId || '');
+        const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
+        const ext = ctx.ext || (ctx.type === 'video' ? 'mp4' : 'jpg');
+        const titleRaw = ctx.title != null ? ctx.title : (document.title || '');
+        return {
+            id:         postId,
+            conv:       String(ctx.convId || ''),
+            domain:     mossadDomainWord(rootDomain),
+            domainfull: rootDomain.replace(/[^a-z0-9._-]/gi, '_'),
+            account:    String(ctx.account || '').trim(),
+            username:   String(ctx.authorName || '') || shortId,
+            desc:       mossadSafeNamePart(ctx.desc || ''),
+            title:      mossadSafeNamePart(titleRaw) || `media_${now.getTime()}`,
+            date:       `${p2(now.getDate())}.${p2(now.getMonth() + 1)}.${String(now.getFullYear()).slice(-2)}`,
+            time:       `${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`,
+            ext,
+            n:          String(now.getTime()).slice(-6),
+            dbl:        ctx.dblSuffix || '',
+            oldname:    ctx.rootBase || '',
+        };
+    }
+    window.buildFilenameVars = buildFilenameVars;
+
+    /** Значение тега по имени из шаблона (с синонимами) или undefined, если тег неизвестен. */
+    function mossadTplValue(vars, name) {
+        const key = MOSSAD_TPL_ALIAS[String(name).toLowerCase()];
+        if (key && key in vars) return vars[key] != null ? String(vars[key]) : '';
+        const raw = String(name).toLowerCase();
+        if (raw in vars) return vars[raw] != null ? String(vars[raw]) : '';
+        return undefined;
+    }
+    /** Неизвестные теги шаблона (как написаны: '{RadugaStud}'). */
+    function mossadTemplateUnknownTags(tpl, vars) {
+        const out = [];
+        String(tpl || '').replace(MOSSAD_TPL_TAG_RE, (m, name) => { if (mossadTplValue(vars || buildFilenameVars({}), name) === undefined && !out.includes(m)) out.push(m); return m; });
+        return out;
+    }
+
+    /**
+     * Имя файла по шаблону. {tag}, {tagN}, {tag[N]} — первые N символов. Неизвестный тег → пусто
+     * (решение v1.3.53: в имени — пропадает, в окне «?» — показывается красным с предупреждением).
+     * Расширение: добавляется, если имя не оканчивается на известное медиа-расширение (v1.3.53; раньше
+     * любая точка в имени — например pinterest.com — отменяла расширение).
      */
     function renderFilenameTemplate(rawTpl, vars, isDup = false, dblSuffix = '', defaultExt = 'mp4') {
-        const tplStr = (rawTpl && rawTpl.trim())
-            ? rawTpl.trim()
-            : (getDefaultFilenameTemplate());
-
+        const tplStr = (rawTpl && rawTpl.trim()) ? rawTpl.trim() : getDefaultFilenameTemplate();
         const hasDblVar = /\{dbl\}/i.test(tplStr);
 
-        const aliasMap = {
-            conversation: 'conv',
-            uuid: 'id',
-            hash: 'id',
-            postid: 'id',
-            user: 'username',
-            author: 'username',
-            copy: 'oldname',
-            root: 'oldname'
-        };
+        let filename = tplStr.replace(MOSSAD_TPL_TAG_RE, (_, name, inlineLen, bracketLen) => {
+            const val = mossadTplValue(vars, name);
+            if (val === undefined) return '';
+            const len = parseInt(bracketLen || inlineLen || '0', 10);
+            return len > 0 ? val.slice(0, len) : val;
+        }).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');
 
-        let filename = tplStr.replace(
-            /\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g,
-            (_, name, inlineLen, bracketLen) => {
-                const rawName = name.toLowerCase();
-                const key = aliasMap[rawName] || rawName;
-                const len = parseInt(bracketLen || inlineLen || '0', 10);
-                if (key in vars) {
-                    const val = vars[key] != null ? String(vars[key]) : '';
-                    return len > 0 ? val.slice(0, len) : val;
-                }
-                if (rawName in vars) {
-                    const val = vars[rawName] != null ? String(vars[rawName]) : '';
-                    return len > 0 ? val.slice(0, len) : val;
-                }
-                return '';
-            }
-        ).replace(/[\\/:*?"<>|]/g, '_');
-
-        // Очистка возможных двойных или висячих дефисов/подчеркиваний (например, если conv пустой)
+        // Висячие разделители при пустых тегах (например, нет conv / account)
         filename = filename
             .replace(/-{2,}/g, '-')
             .replace(/_{2,}/g, '_')
-            .replace(/^[-_\s]+/, '')
-            .replace(/[-_\s]+(?=\.[a-zA-Z0-9]+$)/, '');
+            .replace(/~{2,}/g, '~')
+            .replace(/^[-_~\s]+/, '')
+            .replace(/[-_~\s]+(?=\.[a-zA-Z0-9]+$)/, '')
+            .replace(/[-_~.\s]+$/, '');
 
         const ext = vars.ext || defaultExt;
-        if (!filename.includes('.')) {
-            filename += `.${ext}`;
+        const extRe = new RegExp('\\.(' + MOSSAD_MEDIA_EXTS.join('|') + ')$', 'i');
+        let base = filename, extPart = '';
+        if (extRe.test(filename)) {
+            const i = filename.lastIndexOf('.');
+            base = filename.slice(0, i);
+            extPart = filename.slice(i);
+        } else {
+            extPart = `.${ext}`;
         }
+        if (!base) base = String(vars.id || '').slice(0, 8) || 'media';
+        if (base.length > MOSSAD_NAME_MAX) base = base.slice(0, MOSSAD_NAME_MAX).replace(/[-_~.\s]+$/, '');
 
-        if (isDup && !hasDblVar && dblSuffix) {
-            const lastDot = filename.lastIndexOf('.');
-            const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
-            const extPart = lastDot !== -1 ? filename.slice(lastDot) : `.${ext}`;
-            filename = `${base}${dblSuffix}${extPart}`;
-        }
-
-        return filename;
+        if (isDup && !hasDblVar && dblSuffix) base = `${base}${dblSuffix}`;
+        return `${base}${extPart}`;
     }
     window.renderFilenameTemplate = renderFilenameTemplate;
 

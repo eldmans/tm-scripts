@@ -75,6 +75,54 @@
         return null;
     }
 
+    /**
+     * v1.3.53: данные поста для шаблона имени (не Grok-пост: у него grokFilenameContext). Общие для скачивания и окна «?».
+     * → { postId, convId, type, ext, authorName, desc, account }
+     */
+    function mossadFilenameContext(media) {
+        media = media || {};
+        let postId = '';
+        if (rootDomain.includes('pinterest.')) {
+            postId = pinterestCurrentPinId();
+        } else if (rootDomain.includes('redgifs.com')) {
+            postId = media.itemId || '';
+        } else if (rootDomain.includes('instagram.com')) {
+            const m = location.pathname.match(/\/(?:p|reel)\/([^/?#]+)/);
+            if (m) postId = m[1];
+        } else if (rootDomain === 'grok.com') {
+            postId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+        }
+        if (!postId && media.itemId) postId = media.itemId;
+        if (!postId) postId = String(Date.now());
+
+        let authorName = '';
+        if (media.userName) {
+            authorName = media.userName;
+        } else if (rootDomain.includes('redgifs.com')) {
+            authorName = getRedGifsUserName();
+        } else if (rootDomain.includes('instagram.com')) {
+            const m = location.pathname.match(/^\/([A-Za-z0-9_.]+)\//);
+            if (m && !['p', 'reel', 'stories', 'explore'].includes(m[1])) authorName = m[1];
+        }
+
+        // {desc}: Pinterest — из API пина (media.desc); иначе описание страницы (og:description), если есть
+        let desc = media.desc || '';
+        if (!desc && !rootDomain.includes('pinterest.')) {
+            const meta = document.querySelector('meta[property="og:description"], meta[name="description"]');
+            desc = meta ? (meta.getAttribute('content') || '') : '';
+        }
+        const type = media.type === 'video' ? 'video' : 'photo';
+        return {
+            postId,
+            convId: rootDomain === 'grok.com' && typeof grokCurrentConvId === 'function' ? grokCurrentConvId(postId) : '',
+            type,
+            ext: type === 'video' ? 'mp4' : 'jpg',
+            authorName,
+            desc: String(desc).slice(0, 300),
+            account: rootDomain === 'grok.com' && typeof grokAccountEmail === 'function' ? grokAccountEmail() : '',
+        };
+    }
+
     let _activeDuplicateRecord = null;
 
     function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null, presetMedia = null) {
@@ -136,65 +184,12 @@
         const rootBase = isDup ? (currentDup.rootFilename || (extractRootFilename(currentDup.filename))) : '';
         const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL` : '';
         
-        // Извлечение UUID / ID поста для короткого именования (первые 8 символов)
-        let postId = '';
-        let convId = '';
-        if (rootDomain === 'grok.com') {
-            const m = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
-            if (m) postId = m[1];
-            try {
-                const u = new URL(location.href);
-                convId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
-            } catch(e) {}
-            if (!convId && postId) {
-                try {
-                    const raw = sessionStorage.getItem('grok_gallery_collection');
-                    if (raw) {
-                        const data = JSON.parse(raw);
-                        const found = (data.items || []).find(it => it.url && it.url.includes(postId));
-                        if (found && found.convId) convId = found.convId;
-                    }
-                } catch(e) {}
-            }
-            if (!convId && postId) {
-                const a = document.querySelector(`a[href*="${postId}"][href*="conversation="]`);
-                if (a) {
-                    try {
-                        const u = new URL(a.href, location.origin);
-                        convId = u.searchParams.get('conversation') || '';
-                    } catch(e) {}
-                }
-            }
-        } else if (rootDomain.includes('pinterest.')) {
-            const m = location.pathname.match(/\/pin\/(\d+)/);
-            if (m) postId = m[1];
-        } else if (rootDomain.includes('redgifs.com')) {
-            postId = media.itemId || '';
-        } else if (rootDomain.includes('instagram.com')) {
-            const m = location.pathname.match(/\/(?:p|reel)\/([^/?#]+)/);
-            if (m) postId = m[1];
-        }
-        if (!postId && media.itemId) postId = media.itemId;
-        if (!postId) postId = String(Date.now());
-
+        // v1.3.53: данные для имени — общий mossadFilenameContext (его же использует окно «?»)
+        const fctx = mossadFilenameContext(media);
+        const postId = fctx.postId;
+        const convId = fctx.convId;
         const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
         const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
-
-        // Извлечение имени автора/пользователя (для RedGifs, Instagram и др.)
-        let authorName = '';
-        if (media && media.userName) {
-            authorName = media.userName;
-        } else if (rootDomain.includes('redgifs.com')) {
-            authorName = getRedGifsUserName();
-        } else if (rootDomain.includes('instagram.com')) {
-            const m = location.pathname.match(/^\/([A-Za-z0-9_.]+)\//);
-            if (m && !['p', 'reel', 'stories', 'explore'].includes(m[1])) authorName = m[1];
-        }
-
-        // --- Вспомогательная функция: применить {var[N]} синтаксис ---
-        function applyTplVar(value, len) {
-            return len > 0 ? value.slice(0, len) : value;
-        }
 
         // --- Базовое имя файла (по умолчанию: 8 символов ID + домен) ---
         let filename;
@@ -216,40 +211,8 @@
 
         // --- Применяем шаблон имени файла, если включён ---
         if (config.filenameTemplateEnabled) {
-            const now2 = new Date();
-            const pad2 = (n) => String(n).padStart(2, '0');
-            const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
-            const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
             const ext2 = media.type === 'video' ? 'mp4' : 'jpg';
-            const titleClean2 = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
-            const nStr = String(Date.now()).slice(-6);
-
-            // Словарь переменных (значение без обрезки)
-            const vars = {
-                id:           postId,
-                conv:         convId,
-                conversation: convId,
-                uuid:         postId,
-                hash:         postId,
-                postid:       postId,
-                id8:          shortId,
-                hash8:        shortId,
-                uuid8:        shortId,
-                title:        titleClean2,
-                date:         dateStr,
-                time:         timeStr,
-                ext:          ext2,
-                domain:       domainClean,
-                username:     authorName || shortId,
-                user:         authorName || shortId,
-                author:       authorName || shortId,
-                n:            nStr,
-                dbl:          dblSuffix,
-                oldname:      rootBase,
-                copy:         rootBase,
-                root:         rootBase,
-            };
-
+            const vars = buildFilenameVars(Object.assign({}, fctx, { dblSuffix, rootBase }));
             filename = renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2);
         } else if (isDup) {
             // Без шаблона: добавляем разметку дубликата перед расширением

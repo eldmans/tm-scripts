@@ -21,7 +21,7 @@
         // v1.3.50: allowedDomains убран — список сайтов в GM `mossad_sites` (domain.js, вкладка «🌍 Сайты»)
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
-        filenameTemplate: '{id8}-{domain[4]}~{RadugaStud}',  // шаблон имени файла по умолчанию (для всех сайтов)
+        filenameTemplate: '',            // v1.3.53: пусто = шаблон сайта по умолчанию (getDefaultFilenameTemplate: Grok '{id8}-{domain}~{account}', прочие '{id8}-{domain}')
         filenameTemplateEnabled: true,   // использовать шаблон?
         playlistRows: 30,                // v1.3.40: видимых строк списка при открытии / по ⤢
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
@@ -410,11 +410,30 @@
     }
 
     // Глобальная синхронизация шаблона имени файла через GM_getValue
+    // v1.3.53: старый общий шаблон '{id8}-{domain[4]}~{RadugaStud}' ({RadugaStud} — несуществующий тег, задумывался
+    // как аккаунт) → пусто = шаблон сайта по умолчанию. Мигрируем: конфиг сайта, GM-шаблон сайта, общие умолчания.
+    const OLD_DEFAULT_TPL_V1336 = '{id8}-{domain[4]}~{RadugaStud}';
     if (typeof GM_getValue === 'function') {
-        const gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
+        let gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
+        if (gmTpl === OLD_DEFAULT_TPL_V1336) {
+            gmTpl = '';
+            try { GM_setValue('mossad_tpl_' + rootDomain, ''); } catch (e) {}
+        }
         if (gmTpl && typeof gmTpl === 'string') {
             config.filenameTemplate = gmTpl;
         }
+        try {
+            const rawGd = GM_getValue(GLOBAL_DEFAULTS_GM_KEY, '');
+            const gd = rawGd ? (typeof rawGd === 'string' ? JSON.parse(rawGd) : rawGd) : null;
+            if (gd && gd.filenameTemplate === OLD_DEFAULT_TPL_V1336) {
+                gd.filenameTemplate = '';
+                GM_setValue(GLOBAL_DEFAULTS_GM_KEY, JSON.stringify(gd));
+            }
+        } catch (e) {}
+    }
+    if (config.filenameTemplate === OLD_DEFAULT_TPL_V1336) {
+        config.filenameTemplate = '';
+        try { if (GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
     }
 
     /**

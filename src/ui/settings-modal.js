@@ -235,6 +235,7 @@
             const id = `mossad-def-${f.k}`;
             let ctl = '';
             if (f.t === 'num') ctl = `<input id="${id}" type="number" step="${f.step || 1}" min="${f.min != null ? f.min : ''}" style="width:70px;${inputCss}">`;
+            else if (f.t === 'text' && f.k === 'filenameTemplate') ctl = `<span style="display:flex;align-items:center;gap:4px;"><input id="${id}" type="text" placeholder="пусто = шаблон сайта" style="width:170px;${inputCss}"><button class="mossad-tpl-help-btn" data-for="${id}" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button></span>`;
             else if (f.t === 'text') ctl = `<input id="${id}" type="text" style="width:190px;${inputCss}">`;
             else if (f.t === 'sel') ctl = `<select id="${id}" style="${inputCss}">${f.opts.map(o => `<option value="${esc(o[0])}">${esc(o[1])}</option>`).join('')}</select>`;
             else if (f.t === 'dirs') ctl = `<span id="${id}" style="display:flex;gap:6px;">${[['up', '↑'], ['down', '↓'], ['left', '←'], ['right', '→']].map(d => `<label style="cursor:pointer;"><input type="checkbox" data-dir="${d[0]}"> ${d[1]}</label>`).join('')}</span>`;
@@ -242,6 +243,7 @@
             return `<input type="checkbox" class="mossad-def-force" data-k="${f.k}" checked title="Включать в «Применить во всех контейнерах»" style="cursor:pointer;margin:0;">` +
                    `<label for="${id}" style="cursor:default;">${esc(f.label)}</label>${ctl}`;
         }).join('');
+        mossadWireTplHelp(form);
         // Заголовок колонки галочек
         form.insertAdjacentHTML('afterbegin', `<span title="Какие настройки перезаписать во всех контейнерах" style="font-size:10px;color:#9ca3af;">⇄</span><span style="font-size:10px;color:#9ca3af;">настройка (⇄ — применять во всех контейнерах)</span><span></span>`);
 
@@ -426,6 +428,12 @@
                 <button id="mossad-gh-save" style="background:#3b82f6;border:none;border-radius:4px;color:#fff;padding:4px 10px;cursor:pointer;font-size:12px;">💾</button>
                 <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">⬇</button>
               </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
+              <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
+              <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+              <button class="mossad-tpl-help-btn" data-for="mossad-gen-tpl" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Клик мышью вне окон MOSSAD сворачивает панель настроек виджета до краткого меню">
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
@@ -788,6 +796,12 @@
             Settings.setQuiet('playlistRows', v);
         };
 
+        // v1.3.53: шаблон имени для этого сайта (то же, что поле в меню)
+        const genTpl = modal.querySelector('#mossad-gen-tpl');
+        if (genTpl) {
+            genTpl.onchange = genTpl.onblur = (e) => mossadSaveSiteTemplate(e.target.value);
+            mossadWireTplHelp(genTpl.parentElement);
+        }
         modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
             Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
         };

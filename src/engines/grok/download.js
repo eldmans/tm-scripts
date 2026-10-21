@@ -1,36 +1,116 @@
     // ============================================================
     // GROK: Download with Metadata Injection & Fallback
     // ============================================================
+    // ============================================================
+    // v1.3.53: GROK — данные для шаблона имени (общие для скачивания и окна «?»)
+    // ============================================================
+    /** UUID беседы текущего поста: ?conversation= / собранная коллекция / ссылка на странице. */
+    function grokCurrentConvId(postId) {
+        let convId = '';
+        try {
+            const u = new URL(location.href);
+            convId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
+        } catch(e) {}
+        if (!convId && postId) {
+            try {
+                const raw = sessionStorage.getItem('grok_gallery_collection');
+                if (raw) {
+                    const data = JSON.parse(raw);
+                    const found = (data.items || []).find(it => it.url && it.url.includes(postId));
+                    if (found && found.convId) convId = found.convId;
+                }
+            } catch(e) {}
+        }
+        if (!convId && postId) {
+            const a = document.querySelector(`a[href*="${postId}"][href*="conversation="]`);
+            if (a) {
+                try { convId = new URL(a.href, location.origin).searchParams.get('conversation') || ''; } catch(e) {}
+            }
+        }
+        return convId;
+    }
+
+    // {account}: e-mail вошедшего аккаунта Grok. Источник — GET /rest/user (тот же сайт, куки сессии), один раз за
+    // сессию вкладки и только если шаблон использует {account}/{email}; результат — в localStorage grok.com (у
+    // каждого контейнера свой аккаунт, поэтому НЕ в общем GM). Запасной путь — e-mail в aria-label/title/alt страницы.
+    const GROK_ACCOUNT_LS_KEY = 'mossad_grok_account';
+    const GROK_ACCOUNT_SS_FLAG = 'mossad_grok_account_checked';
+    const _emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+    function _grokFindEmailDeep(obj, depth = 0) {
+        if (!obj || depth > 4) return '';
+        if (typeof obj === 'string') return '';
+        if (typeof obj.email === 'string' && _emailRe.test(obj.email)) return obj.email.trim();
+        for (const k of Object.keys(obj)) {
+            const v = obj[k];
+            if (v && typeof v === 'object') { const r = _grokFindEmailDeep(v, depth + 1); if (r) return r; }
+        }
+        return '';
+    }
+    function grokAccountFromDom() {
+        const el = document.querySelector('[aria-label*="@"], [title*="@"], img[alt*="@"]');
+        if (!el) return '';
+        const m = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('alt')].join(' ').match(_emailRe);
+        return m ? m[0] : '';
+    }
+    /** Синхронно: известный e-mail аккаунта Grok или ''. */
+    function grokAccountEmail() {
+        if (rootDomain !== 'grok.com') return '';
+        let v = '';
+        try { v = localStorage.getItem(GROK_ACCOUNT_LS_KEY) || ''; } catch (e) {}
+        if (!v) {
+            v = grokAccountFromDom();
+            if (v) { try { localStorage.setItem(GROK_ACCOUNT_LS_KEY, v); } catch (e) {} }
+        }
+        return v;
+    }
+    /** Один запрос /rest/user за сессию вкладки; обновляет кэш. force — для окна «?». */
+    function grokRefreshAccount(force = false) {
+        if (rootDomain !== 'grok.com' || typeof fetch !== 'function') return Promise.resolve(grokAccountEmail());
+        if (!force && sessionStorage.getItem(GROK_ACCOUNT_SS_FLAG)) return Promise.resolve(grokAccountEmail());
+        try { sessionStorage.setItem(GROK_ACCOUNT_SS_FLAG, '1'); } catch (e) {}
+        return fetch('/rest/user', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(r => r.ok ? r.json() : null)
+            .then(j => {
+                const email = _grokFindEmailDeep(j);
+                if (email) { try { localStorage.setItem(GROK_ACCOUNT_LS_KEY, email); } catch (e) {} }
+                return email || grokAccountEmail();
+            })
+            .catch(() => grokAccountEmail());
+    }
+    window.grokRefreshAccount = grokRefreshAccount;
+    // Лёгкий префетч: только если действующий шаблон использует {account}/{email}, через 4 с после загрузки
+    if (rootDomain === 'grok.com') {
+        setTimeout(() => {
+            const tpl = (config.filenameTemplate && config.filenameTemplate.trim()) || getDefaultFilenameTemplate();
+            if (config.filenameTemplateEnabled && /\{(account|email)/i.test(tpl)) grokRefreshAccount(false);
+        }, 4000);
+    }
+
+    /** Контекст для buildFilenameVars на посте Grok (без пометки дубликата). */
+    function grokFilenameContext(media) {
+        const postId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+        const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
+        let prompt = '';
+        try { prompt = getGrokCurrentPrompt() || ''; } catch (e) {}
+        return {
+            postId,
+            convId: grokCurrentConvId(postId),
+            type: hasVid ? 'video' : 'photo',
+            ext: media ? media.ext : (hasVid ? 'mp4' : 'jpg'),
+            authorName: 'grok',
+            title: 'Imagine - Grok',
+            desc: prompt,
+            account: grokAccountEmail(),
+        };
+    }
+
     function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
         if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
         blurActiveInput();
 
         const currentPostUrl = location.href;
         const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
-        let currentConvId = '';
-        try {
-            const u = new URL(currentPostUrl);
-            currentConvId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
-        } catch(e) {}
-        if (!currentConvId && currentPostId) {
-            try {
-                const raw = sessionStorage.getItem('grok_gallery_collection');
-                if (raw) {
-                    const data = JSON.parse(raw);
-                    const found = (data.items || []).find(it => it.url && it.url.includes(currentPostId));
-                    if (found && found.convId) currentConvId = found.convId;
-                }
-            } catch(e) {}
-        }
-        if (!currentConvId && currentPostId) {
-            const a = document.querySelector(`a[href*="${currentPostId}"][href*="conversation="]`);
-            if (a) {
-                try {
-                    const u = new URL(a.href, location.origin);
-                    currentConvId = u.searchParams.get('conversation') || '';
-                } catch(e) {}
-            }
-        }
+        const currentConvId = grokCurrentConvId(currentPostId);
 
         const media = getGrokMedia();
         const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
@@ -67,34 +147,8 @@
         let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
 
         if (config.filenameTemplateEnabled) {
-            const now2 = new Date();
-            const pad2 = (n) => String(n).padStart(2, '0');
-            const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
-            const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
-            const vars = {
-                id:           currentPostId || '',
-                conv:         currentConvId || '',
-                conversation: currentConvId || '',
-                uuid:         currentPostId || '',
-                hash:         currentPostId || '',
-                postid:       currentPostId || '',
-                id8:          shortId,
-                hash8:        shortId,
-                uuid8:        shortId,
-                domain:       'grok',
-                title:        'Imagine - Grok',
-                username:     'grok',
-                user:         'grok',
-                author:       'grok',
-                date:         dateStr,
-                time:         timeStr,
-                ext:          ext2,
-                n:            String(Date.now()).slice(-6),
-                dbl:          dblSuffix,
-                oldname:      rootBase,
-                copy:         rootBase,
-                root:         rootBase
-            };
+            // v1.3.53: общий словарь тегов (buildFilenameVars) — тот же, что в окне «?»
+            const vars = buildFilenameVars(Object.assign(grokFilenameContext(media), { dblSuffix, rootBase }));
             grokFilename = renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2);
         }
 

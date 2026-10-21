@@ -276,8 +276,9 @@
                         <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> <span data-mossad-label=\"tplLabel\">${LH('tplLabel')}</span>
                     </label>
                     <input id="mossad-in-fn-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
-                        title="Шаблон: {conv4} {id4} {id8} {id} {domain} {userName} {title} {date} {time} {ext} {n} {dbl} {oldname}"
+                        title="Шаблон: {id8} {conv4} {domain} {domainfull} {account} {username} {desc} {title} {date} {time} {ext} {n} {dbl} {oldname} — «?» справа: все теги и итоговое имя"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
+                    <button class="mossad-tpl-help-btn" data-for="mossad-in-fn-tpl" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
                     <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="saveTplGlobal">${LH('saveTplGlobal')}</button>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
@@ -408,7 +409,8 @@
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
             panel.querySelector('#mossad-cb-fn-tpl').onchange = (e) => Settings.set('filenameTemplateEnabled', e.target.checked);
             const fnTplInput = panel.querySelector('#mossad-in-fn-tpl');
-            const _saveFnTpl = (e) => Settings.setQuiet('filenameTemplate', e.target.value);
+            const _saveFnTpl = (e) => mossadSaveSiteTemplate(e.target.value); // v1.3.53: обновляет и 💾 GM-шаблон сайта
+            mossadWireTplHelp(panel);
             fnTplInput.onblur   = _saveFnTpl;  // сохранить при потере фокуса (Tab / клик)
             fnTplInput.onchange = _saveFnTpl;  // сохранить при Enter
 

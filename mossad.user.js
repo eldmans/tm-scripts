@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.52
+// @version      1.3.53
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -25,7 +25,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.52';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.53';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -181,7 +181,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         // v1.3.50: allowedDomains убран — список сайтов в GM `mossad_sites` (domain.js, вкладка «🌍 Сайты»)
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
-        filenameTemplate: '{id8}-{domain[4]}~{RadugaStud}',  // шаблон имени файла по умолчанию (для всех сайтов)
+        filenameTemplate: '',            // v1.3.53: пусто = шаблон сайта по умолчанию (getDefaultFilenameTemplate: Grok '{id8}-{domain}~{account}', прочие '{id8}-{domain}')
         filenameTemplateEnabled: true,   // использовать шаблон?
         playlistRows: 30,                // v1.3.40: видимых строк списка при открытии / по ⤢
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
@@ -570,11 +570,30 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
 
     // Глобальная синхронизация шаблона имени файла через GM_getValue
+    // v1.3.53: старый общий шаблон '{id8}-{domain[4]}~{RadugaStud}' ({RadugaStud} — несуществующий тег, задумывался
+    // как аккаунт) → пусто = шаблон сайта по умолчанию. Мигрируем: конфиг сайта, GM-шаблон сайта, общие умолчания.
+    const OLD_DEFAULT_TPL_V1336 = '{id8}-{domain[4]}~{RadugaStud}';
     if (typeof GM_getValue === 'function') {
-        const gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
+        let gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
+        if (gmTpl === OLD_DEFAULT_TPL_V1336) {
+            gmTpl = '';
+            try { GM_setValue('mossad_tpl_' + rootDomain, ''); } catch (e) {}
+        }
         if (gmTpl && typeof gmTpl === 'string') {
             config.filenameTemplate = gmTpl;
         }
+        try {
+            const rawGd = GM_getValue(GLOBAL_DEFAULTS_GM_KEY, '');
+            const gd = rawGd ? (typeof rawGd === 'string' ? JSON.parse(rawGd) : rawGd) : null;
+            if (gd && gd.filenameTemplate === OLD_DEFAULT_TPL_V1336) {
+                gd.filenameTemplate = '';
+                GM_setValue(GLOBAL_DEFAULTS_GM_KEY, JSON.stringify(gd));
+            }
+        } catch (e) {}
+    }
+    if (config.filenameTemplate === OLD_DEFAULT_TPL_V1336) {
+        config.filenameTemplate = '';
+        try { if (GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
     }
 
     /**
@@ -1448,81 +1467,150 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     }
     window.doRewind = doRewind;
 
+    // ============================================
+    // ШАБЛОН ИМЕНИ ФАЙЛА (v1.3.53: общие теги, buildFilenameVars, правило расширения)
+    // ============================================
+    // Старый общий шаблон по умолчанию: {RadugaStud} задумывался как «аккаунт», но такого тега не было —
+    // он молча пропадал (имя «12345678-pint~.jpg»). Сохранённый ровно таким шаблон мигрирует в config.js.
+    const MOSSAD_OLD_DEFAULT_TPL = '{id8}-{domain[4]}~{RadugaStud}';
+    const MOSSAD_DEFAULT_TPL = '{id8}-{domain}';
+    const MOSSAD_DEFAULT_TPL_GROK = '{id8}-{domain}~{account}';
+    // Расширение добавляется, если имя НЕ оканчивается на одно из этих (точки внутри имени не мешают)
+    const MOSSAD_MEDIA_EXTS = ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'heic', 'mp3', 'm4a', 'txt'];
+    const MOSSAD_NAME_MAX = 200; // длина имени без расширения (Windows: 255 на имя целиком)
+
     /**
-     * Возвращает дефолтный шаблон имени файла для текущего сайта (отображается серым плейсхолдером)
+     * Теги шаблона: k — имя, aliases — синонимы, what — что подставляется (для окна «?»).
+     * Любой тег принимает длину: {tagN} или {tag[N]} — первые N символов (N ≥ 1; без N — целиком).
+     * Имена — только буквы, регистр не важен. Неизвестный тег в имени файла пропадает (в окне «?» — красным).
      */
+    const MOSSAD_TPL_TAGS = [
+        { k: 'id',         aliases: ['uuid', 'hash', 'postid'], what: 'ID поста: Pinterest — номер пина, Grok — UUID поста, RedGifs — id ролика, Instagram — код поста; иначе — время (мс)' },
+        { k: 'conv',       aliases: ['conversation'],           what: 'Grok: UUID беседы (на других сайтах пусто)' },
+        { k: 'domain',     aliases: ['site'],                   what: 'Сайт одним словом: pinterest, grok, redgifs…' },
+        { k: 'domainfull', aliases: [],                         what: 'Домен целиком: pinterest.com, grok.com…' },
+        { k: 'account',    aliases: ['email'],                  what: 'Grok: e-mail вошедшего аккаунта (если удалось узнать); на других сайтах пусто' },
+        { k: 'username',   aliases: ['user', 'author'],         what: 'Автор (RedGifs, Instagram); иначе — первые 8 символов ID; Grok — grok' },
+        { k: 'desc',       aliases: ['description'],            what: 'Описание: Pinterest — заголовок/описание пина, Grok — промпт; иначе пусто' },
+        { k: 'title',      aliases: [],                         what: 'Заголовок вкладки (Grok — «Imagine - Grok»)' },
+        { k: 'date',       aliases: [],                         what: 'Дата скачивания: дд.мм.гг' },
+        { k: 'time',       aliases: [],                         what: 'Время скачивания: чч-мм-сс' },
+        { k: 'ext',        aliases: [],                         what: 'Расширение: mp4 / jpg (добавляется само, если имя не оканчивается на него)' },
+        { k: 'n',          aliases: [],                         what: 'Последние 6 цифр текущего времени в мс (не счётчик)' },
+        { k: 'dbl',        aliases: [],                         what: 'Пометка дубликата « (исходное имя) DBL»; без тега добавляется в конец сама' },
+        { k: 'oldname',    aliases: ['copy', 'root'],           what: 'Имя ранее скачанного файла (только для дубликата, до 50 символов)' },
+    ];
+    const MOSSAD_TPL_ALIAS = {};
+    for (const t of MOSSAD_TPL_TAGS) { MOSSAD_TPL_ALIAS[t.k] = t.k; for (const a of t.aliases) MOSSAD_TPL_ALIAS[a] = t.k; }
+    const MOSSAD_TPL_TAG_RE = /\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g;
+
+    /** Шаблон по умолчанию для текущего сайта (серый плейсхолдер; пустое поле = он). */
     function getDefaultFilenameTemplate() {
-        // v1.3.36: единый шаблон по умолчанию для всех сайтов (эталон владельца, см. DEFAULT_CONFIG).
-        // Раньше: RedGifs — {userName}-{domain[4]}, Grok — {conv4}-{id4}-{domain}.{ext}, прочие — {id8}-{domain}.{ext}.
-        return DEFAULT_CONFIG.filenameTemplate;
+        return rootDomain === 'grok.com' ? MOSSAD_DEFAULT_TPL_GROK : MOSSAD_DEFAULT_TPL;
     }
     window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
 
+    /** Сайт одним словом (метка второго уровня): pinterest.com → pinterest, ru.pinterest.com → pinterest, vk.video → vk. */
+    function mossadDomainWord(root) {
+        const parts = String(root || '').toLowerCase().split('.').filter(Boolean);
+        return parts.length >= 2 ? parts[parts.length - 2] : (parts[0] || '');
+    }
+    /** Текст для имени файла под Windows: без \ / : * ? " < > | и управляющих, пробелы схлопнуты, без точек/пробелов в конце. */
+    function mossadSafeNamePart(s) {
+        return String(s == null ? '' : s)
+            .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/[.\s]+$/, '');
+    }
+
     /**
-     * Форматирует имя файла по шаблону и словарю переменных.
-     * Поддерживает:
-     * - {varN} (например {conv4}, {id4}, {id8}, {conv8})
-     * - {var[N]} (например {domain[4]}, {id[8]})
-     * - {var} (полное значение без обрезки)
-     * - авто-очистку висячих разделителей при пустых переменных
-     * - подстановку суффикса дубликата {dbl}
+     * v1.3.53: ОДИН словарь тегов для настоящего скачивания и для окна «?» (раньше — две копии: router.js и
+     * grok/download.js, и они расходились). ctx: { postId, convId, type ('video'|'photo'), ext, authorName,
+     * title, desc, account, dblSuffix, rootBase, now }.
+     */
+    function buildFilenameVars(ctx = {}) {
+        const now = ctx.now instanceof Date ? ctx.now : new Date();
+        const p2 = (n) => String(n).padStart(2, '0');
+        const postId = String(ctx.postId || '');
+        const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
+        const ext = ctx.ext || (ctx.type === 'video' ? 'mp4' : 'jpg');
+        const titleRaw = ctx.title != null ? ctx.title : (document.title || '');
+        return {
+            id:         postId,
+            conv:       String(ctx.convId || ''),
+            domain:     mossadDomainWord(rootDomain),
+            domainfull: rootDomain.replace(/[^a-z0-9._-]/gi, '_'),
+            account:    String(ctx.account || '').trim(),
+            username:   String(ctx.authorName || '') || shortId,
+            desc:       mossadSafeNamePart(ctx.desc || ''),
+            title:      mossadSafeNamePart(titleRaw) || `media_${now.getTime()}`,
+            date:       `${p2(now.getDate())}.${p2(now.getMonth() + 1)}.${String(now.getFullYear()).slice(-2)}`,
+            time:       `${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`,
+            ext,
+            n:          String(now.getTime()).slice(-6),
+            dbl:        ctx.dblSuffix || '',
+            oldname:    ctx.rootBase || '',
+        };
+    }
+    window.buildFilenameVars = buildFilenameVars;
+
+    /** Значение тега по имени из шаблона (с синонимами) или undefined, если тег неизвестен. */
+    function mossadTplValue(vars, name) {
+        const key = MOSSAD_TPL_ALIAS[String(name).toLowerCase()];
+        if (key && key in vars) return vars[key] != null ? String(vars[key]) : '';
+        const raw = String(name).toLowerCase();
+        if (raw in vars) return vars[raw] != null ? String(vars[raw]) : '';
+        return undefined;
+    }
+    /** Неизвестные теги шаблона (как написаны: '{RadugaStud}'). */
+    function mossadTemplateUnknownTags(tpl, vars) {
+        const out = [];
+        String(tpl || '').replace(MOSSAD_TPL_TAG_RE, (m, name) => { if (mossadTplValue(vars || buildFilenameVars({}), name) === undefined && !out.includes(m)) out.push(m); return m; });
+        return out;
+    }
+
+    /**
+     * Имя файла по шаблону. {tag}, {tagN}, {tag[N]} — первые N символов. Неизвестный тег → пусто
+     * (решение v1.3.53: в имени — пропадает, в окне «?» — показывается красным с предупреждением).
+     * Расширение: добавляется, если имя не оканчивается на известное медиа-расширение (v1.3.53; раньше
+     * любая точка в имени — например pinterest.com — отменяла расширение).
      */
     function renderFilenameTemplate(rawTpl, vars, isDup = false, dblSuffix = '', defaultExt = 'mp4') {
-        const tplStr = (rawTpl && rawTpl.trim())
-            ? rawTpl.trim()
-            : (getDefaultFilenameTemplate());
-
+        const tplStr = (rawTpl && rawTpl.trim()) ? rawTpl.trim() : getDefaultFilenameTemplate();
         const hasDblVar = /\{dbl\}/i.test(tplStr);
 
-        const aliasMap = {
-            conversation: 'conv',
-            uuid: 'id',
-            hash: 'id',
-            postid: 'id',
-            user: 'username',
-            author: 'username',
-            copy: 'oldname',
-            root: 'oldname'
-        };
+        let filename = tplStr.replace(MOSSAD_TPL_TAG_RE, (_, name, inlineLen, bracketLen) => {
+            const val = mossadTplValue(vars, name);
+            if (val === undefined) return '';
+            const len = parseInt(bracketLen || inlineLen || '0', 10);
+            return len > 0 ? val.slice(0, len) : val;
+        }).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');
 
-        let filename = tplStr.replace(
-            /\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g,
-            (_, name, inlineLen, bracketLen) => {
-                const rawName = name.toLowerCase();
-                const key = aliasMap[rawName] || rawName;
-                const len = parseInt(bracketLen || inlineLen || '0', 10);
-                if (key in vars) {
-                    const val = vars[key] != null ? String(vars[key]) : '';
-                    return len > 0 ? val.slice(0, len) : val;
-                }
-                if (rawName in vars) {
-                    const val = vars[rawName] != null ? String(vars[rawName]) : '';
-                    return len > 0 ? val.slice(0, len) : val;
-                }
-                return '';
-            }
-        ).replace(/[\\/:*?"<>|]/g, '_');
-
-        // Очистка возможных двойных или висячих дефисов/подчеркиваний (например, если conv пустой)
+        // Висячие разделители при пустых тегах (например, нет conv / account)
         filename = filename
             .replace(/-{2,}/g, '-')
             .replace(/_{2,}/g, '_')
-            .replace(/^[-_\s]+/, '')
-            .replace(/[-_\s]+(?=\.[a-zA-Z0-9]+$)/, '');
+            .replace(/~{2,}/g, '~')
+            .replace(/^[-_~\s]+/, '')
+            .replace(/[-_~\s]+(?=\.[a-zA-Z0-9]+$)/, '')
+            .replace(/[-_~.\s]+$/, '');
 
         const ext = vars.ext || defaultExt;
-        if (!filename.includes('.')) {
-            filename += `.${ext}`;
+        const extRe = new RegExp('\\.(' + MOSSAD_MEDIA_EXTS.join('|') + ')$', 'i');
+        let base = filename, extPart = '';
+        if (extRe.test(filename)) {
+            const i = filename.lastIndexOf('.');
+            base = filename.slice(0, i);
+            extPart = filename.slice(i);
+        } else {
+            extPart = `.${ext}`;
         }
+        if (!base) base = String(vars.id || '').slice(0, 8) || 'media';
+        if (base.length > MOSSAD_NAME_MAX) base = base.slice(0, MOSSAD_NAME_MAX).replace(/[-_~.\s]+$/, '');
 
-        if (isDup && !hasDblVar && dblSuffix) {
-            const lastDot = filename.lastIndexOf('.');
-            const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
-            const extPart = lastDot !== -1 ? filename.slice(lastDot) : `.${ext}`;
-            filename = `${base}${dblSuffix}${extPart}`;
-        }
-
-        return filename;
+        if (isDup && !hasDblVar && dblSuffix) base = `${base}${dblSuffix}`;
+        return `${base}${extPart}`;
     }
     window.renderFilenameTemplate = renderFilenameTemplate;
 
@@ -1654,6 +1742,12 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         ['pinNum',         '№',             'режим «всегда N-й похожий пин» (рядом поле с числом)'],
         ['pinDirBack',     '◀',             'направление слайдшоу: назад по истории'],
         ['pinDirFwd',      '▶',             'направление слайдшоу: вперёд по новым пинам'],
+        ['#', 'Шаблон имени файла (v1.3.53)'],
+        ['tplHelpBtn',     '?',             'кнопка у поля шаблона: окно тегов'],
+        ['tplHelpTitle',   '🏷 Теги шаблона имени файла', 'заголовок окна «?»'],
+        ['tplHelpNow',     'Сейчас скачается как:', 'строка с итоговым именем в окне «?»'],
+        ['tplHelpUnknown', '⚠ Неизвестные теги — в имени файла пропадут:', 'предупреждение в окне «?»'],
+        ['tplSiteLabel',   'Шаблон имени:', 'поле шаблона сайта во вкладке «Общие»'],
         ['#', 'Уведомления'],
         ['toastClose',     '×',             'крестик на тосте звука'],
     ];
@@ -3378,36 +3472,116 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 // ============================================================
     // GROK: Download with Metadata Injection & Fallback
     // ============================================================
+    // ============================================================
+    // v1.3.53: GROK — данные для шаблона имени (общие для скачивания и окна «?»)
+    // ============================================================
+    /** UUID беседы текущего поста: ?conversation= / собранная коллекция / ссылка на странице. */
+    function grokCurrentConvId(postId) {
+        let convId = '';
+        try {
+            const u = new URL(location.href);
+            convId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
+        } catch(e) {}
+        if (!convId && postId) {
+            try {
+                const raw = sessionStorage.getItem('grok_gallery_collection');
+                if (raw) {
+                    const data = JSON.parse(raw);
+                    const found = (data.items || []).find(it => it.url && it.url.includes(postId));
+                    if (found && found.convId) convId = found.convId;
+                }
+            } catch(e) {}
+        }
+        if (!convId && postId) {
+            const a = document.querySelector(`a[href*="${postId}"][href*="conversation="]`);
+            if (a) {
+                try { convId = new URL(a.href, location.origin).searchParams.get('conversation') || ''; } catch(e) {}
+            }
+        }
+        return convId;
+    }
+
+    // {account}: e-mail вошедшего аккаунта Grok. Источник — GET /rest/user (тот же сайт, куки сессии), один раз за
+    // сессию вкладки и только если шаблон использует {account}/{email}; результат — в localStorage grok.com (у
+    // каждого контейнера свой аккаунт, поэтому НЕ в общем GM). Запасной путь — e-mail в aria-label/title/alt страницы.
+    const GROK_ACCOUNT_LS_KEY = 'mossad_grok_account';
+    const GROK_ACCOUNT_SS_FLAG = 'mossad_grok_account_checked';
+    const _emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+    function _grokFindEmailDeep(obj, depth = 0) {
+        if (!obj || depth > 4) return '';
+        if (typeof obj === 'string') return '';
+        if (typeof obj.email === 'string' && _emailRe.test(obj.email)) return obj.email.trim();
+        for (const k of Object.keys(obj)) {
+            const v = obj[k];
+            if (v && typeof v === 'object') { const r = _grokFindEmailDeep(v, depth + 1); if (r) return r; }
+        }
+        return '';
+    }
+    function grokAccountFromDom() {
+        const el = document.querySelector('[aria-label*="@"], [title*="@"], img[alt*="@"]');
+        if (!el) return '';
+        const m = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('alt')].join(' ').match(_emailRe);
+        return m ? m[0] : '';
+    }
+    /** Синхронно: известный e-mail аккаунта Grok или ''. */
+    function grokAccountEmail() {
+        if (rootDomain !== 'grok.com') return '';
+        let v = '';
+        try { v = localStorage.getItem(GROK_ACCOUNT_LS_KEY) || ''; } catch (e) {}
+        if (!v) {
+            v = grokAccountFromDom();
+            if (v) { try { localStorage.setItem(GROK_ACCOUNT_LS_KEY, v); } catch (e) {} }
+        }
+        return v;
+    }
+    /** Один запрос /rest/user за сессию вкладки; обновляет кэш. force — для окна «?». */
+    function grokRefreshAccount(force = false) {
+        if (rootDomain !== 'grok.com' || typeof fetch !== 'function') return Promise.resolve(grokAccountEmail());
+        if (!force && sessionStorage.getItem(GROK_ACCOUNT_SS_FLAG)) return Promise.resolve(grokAccountEmail());
+        try { sessionStorage.setItem(GROK_ACCOUNT_SS_FLAG, '1'); } catch (e) {}
+        return fetch('/rest/user', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(r => r.ok ? r.json() : null)
+            .then(j => {
+                const email = _grokFindEmailDeep(j);
+                if (email) { try { localStorage.setItem(GROK_ACCOUNT_LS_KEY, email); } catch (e) {} }
+                return email || grokAccountEmail();
+            })
+            .catch(() => grokAccountEmail());
+    }
+    window.grokRefreshAccount = grokRefreshAccount;
+    // Лёгкий префетч: только если действующий шаблон использует {account}/{email}, через 4 с после загрузки
+    if (rootDomain === 'grok.com') {
+        setTimeout(() => {
+            const tpl = (config.filenameTemplate && config.filenameTemplate.trim()) || getDefaultFilenameTemplate();
+            if (config.filenameTemplateEnabled && /\{(account|email)/i.test(tpl)) grokRefreshAccount(false);
+        }, 4000);
+    }
+
+    /** Контекст для buildFilenameVars на посте Grok (без пометки дубликата). */
+    function grokFilenameContext(media) {
+        const postId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+        const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
+        let prompt = '';
+        try { prompt = getGrokCurrentPrompt() || ''; } catch (e) {}
+        return {
+            postId,
+            convId: grokCurrentConvId(postId),
+            type: hasVid ? 'video' : 'photo',
+            ext: media ? media.ext : (hasVid ? 'mp4' : 'jpg'),
+            authorName: 'grok',
+            title: 'Imagine - Grok',
+            desc: prompt,
+            account: grokAccountEmail(),
+        };
+    }
+
     function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
         if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
         blurActiveInput();
 
         const currentPostUrl = location.href;
         const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
-        let currentConvId = '';
-        try {
-            const u = new URL(currentPostUrl);
-            currentConvId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
-        } catch(e) {}
-        if (!currentConvId && currentPostId) {
-            try {
-                const raw = sessionStorage.getItem('grok_gallery_collection');
-                if (raw) {
-                    const data = JSON.parse(raw);
-                    const found = (data.items || []).find(it => it.url && it.url.includes(currentPostId));
-                    if (found && found.convId) currentConvId = found.convId;
-                }
-            } catch(e) {}
-        }
-        if (!currentConvId && currentPostId) {
-            const a = document.querySelector(`a[href*="${currentPostId}"][href*="conversation="]`);
-            if (a) {
-                try {
-                    const u = new URL(a.href, location.origin);
-                    currentConvId = u.searchParams.get('conversation') || '';
-                } catch(e) {}
-            }
-        }
+        const currentConvId = grokCurrentConvId(currentPostId);
 
         const media = getGrokMedia();
         const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
@@ -3444,34 +3618,8 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
 
         if (config.filenameTemplateEnabled) {
-            const now2 = new Date();
-            const pad2 = (n) => String(n).padStart(2, '0');
-            const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
-            const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
-            const vars = {
-                id:           currentPostId || '',
-                conv:         currentConvId || '',
-                conversation: currentConvId || '',
-                uuid:         currentPostId || '',
-                hash:         currentPostId || '',
-                postid:       currentPostId || '',
-                id8:          shortId,
-                hash8:        shortId,
-                uuid8:        shortId,
-                domain:       'grok',
-                title:        'Imagine - Grok',
-                username:     'grok',
-                user:         'grok',
-                author:       'grok',
-                date:         dateStr,
-                time:         timeStr,
-                ext:          ext2,
-                n:            String(Date.now()).slice(-6),
-                dbl:          dblSuffix,
-                oldname:      rootBase,
-                copy:         rootBase,
-                root:         rootBase
-            };
+            // v1.3.53: общий словарь тегов (buildFilenameVars) — тот же, что в окне «?»
+            const vars = buildFilenameVars(Object.assign(grokFilenameContext(media), { dblSuffix, rootBase }));
             grokFilename = renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2);
         }
 
@@ -7491,6 +7639,54 @@ function findMediaForDownload() {
         return null;
     }
 
+    /**
+     * v1.3.53: данные поста для шаблона имени (не Grok-пост: у него grokFilenameContext). Общие для скачивания и окна «?».
+     * → { postId, convId, type, ext, authorName, desc, account }
+     */
+    function mossadFilenameContext(media) {
+        media = media || {};
+        let postId = '';
+        if (rootDomain.includes('pinterest.')) {
+            postId = pinterestCurrentPinId();
+        } else if (rootDomain.includes('redgifs.com')) {
+            postId = media.itemId || '';
+        } else if (rootDomain.includes('instagram.com')) {
+            const m = location.pathname.match(/\/(?:p|reel)\/([^/?#]+)/);
+            if (m) postId = m[1];
+        } else if (rootDomain === 'grok.com') {
+            postId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+        }
+        if (!postId && media.itemId) postId = media.itemId;
+        if (!postId) postId = String(Date.now());
+
+        let authorName = '';
+        if (media.userName) {
+            authorName = media.userName;
+        } else if (rootDomain.includes('redgifs.com')) {
+            authorName = getRedGifsUserName();
+        } else if (rootDomain.includes('instagram.com')) {
+            const m = location.pathname.match(/^\/([A-Za-z0-9_.]+)\//);
+            if (m && !['p', 'reel', 'stories', 'explore'].includes(m[1])) authorName = m[1];
+        }
+
+        // {desc}: Pinterest — из API пина (media.desc); иначе описание страницы (og:description), если есть
+        let desc = media.desc || '';
+        if (!desc && !rootDomain.includes('pinterest.')) {
+            const meta = document.querySelector('meta[property="og:description"], meta[name="description"]');
+            desc = meta ? (meta.getAttribute('content') || '') : '';
+        }
+        const type = media.type === 'video' ? 'video' : 'photo';
+        return {
+            postId,
+            convId: rootDomain === 'grok.com' && typeof grokCurrentConvId === 'function' ? grokCurrentConvId(postId) : '',
+            type,
+            ext: type === 'video' ? 'mp4' : 'jpg',
+            authorName,
+            desc: String(desc).slice(0, 300),
+            account: rootDomain === 'grok.com' && typeof grokAccountEmail === 'function' ? grokAccountEmail() : '',
+        };
+    }
+
     let _activeDuplicateRecord = null;
 
     function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null, presetMedia = null) {
@@ -7552,65 +7748,12 @@ function findMediaForDownload() {
         const rootBase = isDup ? (currentDup.rootFilename || (extractRootFilename(currentDup.filename))) : '';
         const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL` : '';
         
-        // Извлечение UUID / ID поста для короткого именования (первые 8 символов)
-        let postId = '';
-        let convId = '';
-        if (rootDomain === 'grok.com') {
-            const m = location.pathname.match(/\/imagine\/post\/([^/?#]+)/);
-            if (m) postId = m[1];
-            try {
-                const u = new URL(location.href);
-                convId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
-            } catch(e) {}
-            if (!convId && postId) {
-                try {
-                    const raw = sessionStorage.getItem('grok_gallery_collection');
-                    if (raw) {
-                        const data = JSON.parse(raw);
-                        const found = (data.items || []).find(it => it.url && it.url.includes(postId));
-                        if (found && found.convId) convId = found.convId;
-                    }
-                } catch(e) {}
-            }
-            if (!convId && postId) {
-                const a = document.querySelector(`a[href*="${postId}"][href*="conversation="]`);
-                if (a) {
-                    try {
-                        const u = new URL(a.href, location.origin);
-                        convId = u.searchParams.get('conversation') || '';
-                    } catch(e) {}
-                }
-            }
-        } else if (rootDomain.includes('pinterest.')) {
-            const m = location.pathname.match(/\/pin\/(\d+)/);
-            if (m) postId = m[1];
-        } else if (rootDomain.includes('redgifs.com')) {
-            postId = media.itemId || '';
-        } else if (rootDomain.includes('instagram.com')) {
-            const m = location.pathname.match(/\/(?:p|reel)\/([^/?#]+)/);
-            if (m) postId = m[1];
-        }
-        if (!postId && media.itemId) postId = media.itemId;
-        if (!postId) postId = String(Date.now());
-
+        // v1.3.53: данные для имени — общий mossadFilenameContext (его же использует окно «?»)
+        const fctx = mossadFilenameContext(media);
+        const postId = fctx.postId;
+        const convId = fctx.convId;
         const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
         const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
-
-        // Извлечение имени автора/пользователя (для RedGifs, Instagram и др.)
-        let authorName = '';
-        if (media && media.userName) {
-            authorName = media.userName;
-        } else if (rootDomain.includes('redgifs.com')) {
-            authorName = getRedGifsUserName();
-        } else if (rootDomain.includes('instagram.com')) {
-            const m = location.pathname.match(/^\/([A-Za-z0-9_.]+)\//);
-            if (m && !['p', 'reel', 'stories', 'explore'].includes(m[1])) authorName = m[1];
-        }
-
-        // --- Вспомогательная функция: применить {var[N]} синтаксис ---
-        function applyTplVar(value, len) {
-            return len > 0 ? value.slice(0, len) : value;
-        }
 
         // --- Базовое имя файла (по умолчанию: 8 символов ID + домен) ---
         let filename;
@@ -7632,40 +7775,8 @@ function findMediaForDownload() {
 
         // --- Применяем шаблон имени файла, если включён ---
         if (config.filenameTemplateEnabled) {
-            const now2 = new Date();
-            const pad2 = (n) => String(n).padStart(2, '0');
-            const dateStr = `${now2.getFullYear()}-${pad2(now2.getMonth()+1)}-${pad2(now2.getDate())}`;
-            const timeStr = `${pad2(now2.getHours())}-${pad2(now2.getMinutes())}-${pad2(now2.getSeconds())}`;
             const ext2 = media.type === 'video' ? 'mp4' : 'jpg';
-            const titleClean2 = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
-            const nStr = String(Date.now()).slice(-6);
-
-            // Словарь переменных (значение без обрезки)
-            const vars = {
-                id:           postId,
-                conv:         convId,
-                conversation: convId,
-                uuid:         postId,
-                hash:         postId,
-                postid:       postId,
-                id8:          shortId,
-                hash8:        shortId,
-                uuid8:        shortId,
-                title:        titleClean2,
-                date:         dateStr,
-                time:         timeStr,
-                ext:          ext2,
-                domain:       domainClean,
-                username:     authorName || shortId,
-                user:         authorName || shortId,
-                author:       authorName || shortId,
-                n:            nStr,
-                dbl:          dblSuffix,
-                oldname:      rootBase,
-                copy:         rootBase,
-                root:         rootBase,
-            };
-
+            const vars = buildFilenameVars(Object.assign({}, fctx, { dblSuffix, rootBase }));
             filename = renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2);
         } else if (isDup) {
             // Без шаблона: добавляем разметку дубликата перед расширением
@@ -9248,6 +9359,190 @@ function findMediaForDownload() {
     }
 
 // ============================================
+    // v1.3.53: «?» у шаблона имени файла — окно с итоговым именем и тегами
+    // Создаётся лениво при первом клике, одно на страницу; Esc / клик вне / × закрывают (слушатели снимаются).
+    // Имя считается тем же кодом, что и настоящее скачивание: mossadFilenameContext / grokFilenameContext →
+    // buildFilenameVars → renderFilenameTemplate. Данные поста берутся один раз при открытии, дальше —
+    // пересчёт при каждом вводе в поле шаблона. ANTI_PATTERNS §32.
+    // ============================================
+    let _tplHelp = null; // { box, input, btn, ctx, vars, cleanup }
+
+    function _tplEsc(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    /** Данные текущего поста для предпросмотра (асинхронно: Pinterest — API пина, Grok — e-mail аккаунта). */
+    async function mossadTplPreviewContext() {
+        try {
+            if (rootDomain === 'grok.com') {
+                if (!grokAccountEmail()) await grokRefreshAccount(true);
+                if (typeof isGrokPostPage === 'function' && isGrokPostPage()) return grokFilenameContext(getGrokMedia());
+                return mossadFilenameContext({});
+            }
+            if (rootDomain.includes('pinterest.')) {
+                const m = await pinterestResolveMedia();
+                if (m && m.error) return mossadFilenameContext({ type: 'video', desc: (pinterestCachedPinInfo() || {}).desc || '' });
+                return mossadFilenameContext(m || {});
+            }
+            return mossadFilenameContext(findMediaForDownload() || {});
+        } catch (e) {
+            console.warn('[MOSSAD] tpl preview context:', e);
+            return mossadFilenameContext({});
+        }
+    }
+
+    /** Сохранить шаблон ЭТОГО сайта (поле меню / окно настроек). Если есть GM-шаблон сайта (💾) — обновить и его,
+     *  иначе он при следующей загрузке вернул бы старое значение. */
+    function mossadSaveSiteTemplate(val) {
+        const v = String(val == null ? '' : val).trim();
+        Settings.setQuiet('filenameTemplate', v);
+        if (typeof GM_getValue === 'function' && typeof GM_setValue === 'function') {
+            try { if (GM_getValue('mossad_tpl_' + rootDomain, null)) GM_setValue('mossad_tpl_' + rootDomain, v); } catch (e) {}
+        }
+        document.querySelectorAll('#mossad-in-fn-tpl, #mossad-gen-tpl').forEach(el => { if (el.value !== v && el !== document.activeElement) el.value = v; });
+    }
+    window.mossadSaveSiteTemplate = mossadSaveSiteTemplate;
+
+    function _tplCurrent(input) {
+        const v = input ? String(input.value || '').trim() : '';
+        return v || (input && input.placeholder) || getDefaultFilenameTemplate();
+    }
+
+    function _tplRenderDynamic() {
+        const h = _tplHelp;
+        if (!h || !h.vars) return;
+        const tpl = _tplCurrent(h.input);
+        const name = renderFilenameTemplate(tpl, h.vars, false, '', h.vars.ext);
+        const unknown = mossadTemplateUnknownTags(tpl, h.vars);
+        h.box.querySelector('[data-th="name"]').textContent = name;
+        h.box.querySelector('[data-th="tpl"]').innerHTML = _tplEsc(tpl).replace(/\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g, (m) =>
+            unknown.includes(m) ? `<span style="color:#f87171;text-decoration:line-through;">${m}</span>` : `<span style="color:#93c5fd;">${m}</span>`);
+        const warn = h.box.querySelector('[data-th="warn"]');
+        warn.style.display = unknown.length ? 'block' : 'none';
+        warn.textContent = unknown.length ? `${L('tplHelpUnknown')} ${unknown.join(' ')}` : '';
+        h.box.querySelector('[data-th="off"]').style.display = config.filenameTemplateEnabled ? 'none' : 'block';
+    }
+
+    function _tplRenderTable() {
+        const h = _tplHelp;
+        const rows = MOSSAD_TPL_TAGS.map(t => {
+            const val = h.vars ? String(h.vars[t.k] == null ? '' : h.vars[t.k]) : '…';
+            const len = h.vars ? val.length : 0;
+            const nRange = len > 1 ? `{${t.k}[1..${len}]}` : (len === 1 ? `{${t.k}[1]}` : '—');
+            const shown = val.length > 60 ? val.slice(0, 60) + '…' : val;
+            return `<tr>
+                <td style="padding:2px 6px;white-space:nowrap;"><code data-th-ins="{${t.k}}" title="Вставить в шаблон" style="cursor:pointer;color:#93c5fd;">{${t.k}}</code></td>
+                <td style="padding:2px 6px;color:#9ca3af;white-space:nowrap;">${t.aliases.map(a => `{${a}}`).join(' ')}</td>
+                <td style="padding:2px 6px;color:#9ca3af;white-space:nowrap;">${nRange}</td>
+                <td style="padding:2px 6px;color:#fbbf24;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_tplEsc(val)}">${val ? _tplEsc(shown) : '<span style="color:#6b7280;">пусто</span>'}</td>
+                <td style="padding:2px 6px;color:#d1d5db;">${_tplEsc(t.what)}</td></tr>`;
+        }).join('');
+        h.box.querySelector('[data-th="tbody"]').innerHTML = rows;
+    }
+
+    function mossadCloseTplHelp() {
+        const h = _tplHelp;
+        if (!h) return;
+        _tplHelp = null;
+        if (h.cleanup) h.cleanup();
+        h.box.remove();
+    }
+    window.mossadCloseTplHelp = mossadCloseTplHelp;
+
+    /** Открыть/закрыть окно «?» для поля шаблона input (btn — кнопка «?», к ней прикладывается окно). */
+    function mossadToggleTplHelp(btn, input) {
+        if (_tplHelp && _tplHelp.input === input) { mossadCloseTplHelp(); return; }
+        mossadCloseTplHelp();
+        if (!input) return;
+        const box = document.createElement('div');
+        box.id = 'mossad-tpl-help';
+        box.style.cssText = 'position:fixed;z-index:2147483646;background:rgba(17,24,39,0.97);border:1px solid #4b5563;border-radius:10px;' +
+            'padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,0.6);color:#e5e7eb;font:12px system-ui,-apple-system,sans-serif;' +
+            'max-width:min(640px,96vw);max-height:72vh;overflow:auto;';
+        box.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <b style="flex:1;" data-mossad-label="tplHelpTitle">${LH('tplHelpTitle')}</b>
+              <button data-th="close" title="Закрыть (Esc)" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px;">✕</button>
+            </div>
+            <div style="margin-bottom:4px;"><span style="color:#9ca3af;" data-mossad-label="tplHelpNow">${LH('tplHelpNow')}</span>
+              <code data-th="name" style="color:#34d399;font-weight:700;word-break:break-all;">…</code></div>
+            <div style="margin-bottom:4px;color:#9ca3af;">Шаблон: <code data-th="tpl" style="word-break:break-all;"></code></div>
+            <div data-th="warn" style="display:none;color:#f87171;margin-bottom:4px;"></div>
+            <div data-th="off" style="display:none;color:#fbbf24;margin-bottom:4px;">Галочка «Шаблон» выключена — сейчас файл сохранится с именем по умолчанию (без шаблона).</div>
+            <table style="border-collapse:collapse;width:100%;margin-top:4px;">
+              <thead><tr style="color:#6b7280;text-align:left;"><th style="padding:2px 6px;">Тег</th><th style="padding:2px 6px;">Синонимы</th><th style="padding:2px 6px;">Длина N</th><th style="padding:2px 6px;">Сейчас</th><th style="padding:2px 6px;">Что это</th></tr></thead>
+              <tbody data-th="tbody"></tbody>
+            </table>
+            <div style="margin-top:6px;color:#9ca3af;line-height:1.4;">
+              {тег} — целиком; {тегN} или {тег[N]} — первые N символов (например {id8}, {desc[40]}).
+              Регистр не важен. Неизвестный тег в имени файла пропадает. Расширение (.mp4 / .jpg) добавляется само,
+              если имя на него не оканчивается. Пустые теги убирают лишние «-», «_», «~». Клик по тегу — вставить в шаблон.
+            </div>`;
+        document.body.appendChild(box);
+        // Позиция: под кнопкой, в пределах экрана
+        try {
+            const r = (btn || input).getBoundingClientRect();
+            const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+            box.style.left = Math.max(4, Math.min(r.left, vw - Math.min(640, vw * 0.96) - 4)) + 'px';
+            if (r.bottom + 300 > vh && r.top > 300) box.style.bottom = Math.max(4, vh - r.top + 4) + 'px';
+            else box.style.top = Math.max(4, r.bottom + 4) + 'px';
+        } catch (e) {}
+
+        const onInput = () => _tplRenderDynamic();
+        const onKey = (e) => {
+            if (e.key !== 'Escape') return;
+            e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
+            mossadCloseTplHelp();
+        };
+        const onDown = (e) => {
+            const t = e.target;
+            if (box.contains(t) || t === btn || t === input) return;
+            mossadCloseTplHelp();
+        };
+        input.addEventListener('input', onInput);
+        window.addEventListener('keydown', onKey, true);
+        document.addEventListener('pointerdown', onDown, true);
+        _tplHelp = { box, input, btn, ctx: null, vars: null, cleanup: () => {
+            input.removeEventListener('input', onInput);
+            window.removeEventListener('keydown', onKey, true);
+            document.removeEventListener('pointerdown', onDown, true);
+        } };
+        box.querySelector('[data-th="close"]').onclick = () => mossadCloseTplHelp();
+        box.addEventListener('click', (e) => {
+            const ins = e.target.closest && e.target.closest('[data-th-ins]');
+            if (!ins) return;
+            const text = ins.getAttribute('data-th-ins');
+            const s0 = input.selectionStart ?? input.value.length, s1 = input.selectionEnd ?? input.value.length;
+            input.value = input.value.slice(0, s0) + text + input.value.slice(s1);
+            try { input.setSelectionRange(s0 + text.length, s0 + text.length); } catch (err) {}
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        _tplRenderTable();
+        const mine = _tplHelp;
+        mossadTplPreviewContext().then(ctx => {
+            if (_tplHelp !== mine) return; // окно уже закрыто/переоткрыто
+            mine.ctx = ctx;
+            mine.vars = buildFilenameVars(ctx);
+            _tplRenderTable();
+            _tplRenderDynamic();
+        });
+    }
+    window.mossadToggleTplHelp = mossadToggleTplHelp;
+
+    /** Подключить кнопки «?» (class mossad-tpl-help-btn, data-for = id поля шаблона) внутри root. */
+    function mossadWireTplHelp(root) {
+        (root || document).querySelectorAll('.mossad-tpl-help-btn').forEach(b => {
+            b.onclick = (e) => {
+                e.preventDefault(); e.stopPropagation();
+                mossadToggleTplHelp(b, document.getElementById(b.dataset.for));
+            };
+        });
+    }
+    window.mossadWireTplHelp = mossadWireTplHelp;
+    const MOSSAD_TPL_HELP_BTN_CSS = 'background:#1f2937;border:1px solid #4b5563;color:#fbbf24;border-radius:50%;width:18px;height:18px;padding:0;cursor:pointer;font-size:11px;font-weight:700;line-height:16px;flex:none;';
+
+// ============================================
     // WIDGET UI
     // ============================================
     window.widgetState = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true'
@@ -9525,8 +9820,9 @@ function findMediaForDownload() {
                         <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> <span data-mossad-label=\"tplLabel\">${LH('tplLabel')}</span>
                     </label>
                     <input id="mossad-in-fn-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
-                        title="Шаблон: {conv4} {id4} {id8} {id} {domain} {userName} {title} {date} {time} {ext} {n} {dbl} {oldname}"
+                        title="Шаблон: {id8} {conv4} {domain} {domainfull} {account} {username} {desc} {title} {date} {time} {ext} {n} {dbl} {oldname} — «?» справа: все теги и итоговое имя"
                         style="flex:1; min-width:0; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px;">
+                    <button class="mossad-tpl-help-btn" data-for="mossad-in-fn-tpl" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
                     <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="saveTplGlobal">${LH('saveTplGlobal')}</button>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
@@ -9657,7 +9953,8 @@ function findMediaForDownload() {
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
             panel.querySelector('#mossad-cb-fn-tpl').onchange = (e) => Settings.set('filenameTemplateEnabled', e.target.checked);
             const fnTplInput = panel.querySelector('#mossad-in-fn-tpl');
-            const _saveFnTpl = (e) => Settings.setQuiet('filenameTemplate', e.target.value);
+            const _saveFnTpl = (e) => mossadSaveSiteTemplate(e.target.value); // v1.3.53: обновляет и 💾 GM-шаблон сайта
+            mossadWireTplHelp(panel);
             fnTplInput.onblur   = _saveFnTpl;  // сохранить при потере фокуса (Tab / клик)
             fnTplInput.onchange = _saveFnTpl;  // сохранить при Enter
 
@@ -10855,6 +11152,7 @@ function findMediaForDownload() {
             const id = `mossad-def-${f.k}`;
             let ctl = '';
             if (f.t === 'num') ctl = `<input id="${id}" type="number" step="${f.step || 1}" min="${f.min != null ? f.min : ''}" style="width:70px;${inputCss}">`;
+            else if (f.t === 'text' && f.k === 'filenameTemplate') ctl = `<span style="display:flex;align-items:center;gap:4px;"><input id="${id}" type="text" placeholder="пусто = шаблон сайта" style="width:170px;${inputCss}"><button class="mossad-tpl-help-btn" data-for="${id}" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button></span>`;
             else if (f.t === 'text') ctl = `<input id="${id}" type="text" style="width:190px;${inputCss}">`;
             else if (f.t === 'sel') ctl = `<select id="${id}" style="${inputCss}">${f.opts.map(o => `<option value="${esc(o[0])}">${esc(o[1])}</option>`).join('')}</select>`;
             else if (f.t === 'dirs') ctl = `<span id="${id}" style="display:flex;gap:6px;">${[['up', '↑'], ['down', '↓'], ['left', '←'], ['right', '→']].map(d => `<label style="cursor:pointer;"><input type="checkbox" data-dir="${d[0]}"> ${d[1]}</label>`).join('')}</span>`;
@@ -10862,6 +11160,7 @@ function findMediaForDownload() {
             return `<input type="checkbox" class="mossad-def-force" data-k="${f.k}" checked title="Включать в «Применить во всех контейнерах»" style="cursor:pointer;margin:0;">` +
                    `<label for="${id}" style="cursor:default;">${esc(f.label)}</label>${ctl}`;
         }).join('');
+        mossadWireTplHelp(form);
         // Заголовок колонки галочек
         form.insertAdjacentHTML('afterbegin', `<span title="Какие настройки перезаписать во всех контейнерах" style="font-size:10px;color:#9ca3af;">⇄</span><span style="font-size:10px;color:#9ca3af;">настройка (⇄ — применять во всех контейнерах)</span><span></span>`);
 
@@ -11046,6 +11345,12 @@ function findMediaForDownload() {
                 <button id="mossad-gh-save" style="background:#3b82f6;border:none;border-radius:4px;color:#fff;padding:4px 10px;cursor:pointer;font-size:12px;">💾</button>
                 <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">⬇</button>
               </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
+              <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
+              <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+              <button class="mossad-tpl-help-btn" data-for="mossad-gen-tpl" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Клик мышью вне окон MOSSAD сворачивает панель настроек виджета до краткого меню">
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
@@ -11408,6 +11713,12 @@ function findMediaForDownload() {
             Settings.setQuiet('playlistRows', v);
         };
 
+        // v1.3.53: шаблон имени для этого сайта (то же, что поле в меню)
+        const genTpl = modal.querySelector('#mossad-gen-tpl');
+        if (genTpl) {
+            genTpl.onchange = genTpl.onblur = (e) => mossadSaveSiteTemplate(e.target.value);
+            mossadWireTplHelp(genTpl.parentElement);
+        }
         modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
             Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
         };
