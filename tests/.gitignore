@@ -1,3 +1,4 @@
 node_modules/
 .bundle_*.js
 package-lock.json
+bundle_patched.js
