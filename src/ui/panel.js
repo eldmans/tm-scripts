@@ -289,11 +289,16 @@
                         <option value="photo" ${config.downloadType === 'photo' ? 'selected' : ''}>Качать Фото</option>
                         <option value="video" ${config.downloadType === 'video' ? 'selected' : ''}>Качать Видео</option>
                     </select>
+                    <span style="display:flex; align-items:center; gap:4px;" title="Что делать после скачивания. «Не СШ +1» — перейти к следующему, только если слайдшоу не запущено (на паузе — считается запущенным). «+1 всегда» — всегда (кроме скачивания самим слайдшоу: оно шагает само). Delete — только Grok">
+                    <span data-mossad-label="pdLabel" style="white-space:nowrap;">${LH('pdLabel')}</span>
                     <select id="mossad-sel-pd" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
-                        <option value="none" ${config.pdAction === 'none' ? 'selected' : ''}>После DL: —</option>
-                        <option value="up" ${config.pdAction === 'up' ? 'selected' : ''}>После DL: +1</option>
-                        ${rootDomain === 'grok.com' ? `<option value="del" ${config.pdAction === 'del' ? 'selected' : ''}>После DL: del</option>` : ''}
+                        <option value="none" ${mossadPdAction() === 'none' ? 'selected' : ''} data-mossad-label="pdNone">${LH('pdNone')}</option>
+                        <option value="upns" ${mossadPdAction() === 'upns' ? 'selected' : ''} data-mossad-label="pdUpNoSs">${LH('pdUpNoSs')}</option>
+                        <option value="always" ${mossadPdAction() === 'always' ? 'selected' : ''} data-mossad-label="pdUpAlways">${LH('pdUpAlways')}</option>
+                        ${rootDomain === 'grok.com' ? `<option value="del" ${mossadPdAction() === 'del' ? 'selected' : ''} data-mossad-label="pdDel">${LH('pdDel')}</option>`
+                          : (mossadPdAction() === 'del' ? `<option value="del" selected disabled>${LH('pdDel')} (только Grok)</option>` : '')}
                     </select>
+                    </span>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">

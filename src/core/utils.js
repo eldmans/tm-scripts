@@ -416,19 +416,41 @@
     }
     window.performDpadStep = performDpadStep;
 
+    // v1.3.56: «После скачивания»: none (—) | upns («Не СШ +1»: +1, только если слайдшоу НЕ запущено —
+    // ни малое, ни большое Grok, ни Pinterest; на паузе = запущено) | always («+1 всегда») | del (Delete, только Grok).
+    // Скачивание, которое запустило само слайдшоу перед шагом, +1 не делает никогда: слайдшоу шагает само (иначе двойной шаг).
+    let mossadSlideshowDlActive = false;
+    function mossadPdAction() {
+        const v = config && config.pdAction;
+        if (v === 'up') return 'upns';
+        return ['none', 'upns', 'always', 'del'].includes(v) ? v : 'upns';
+    }
+    /** Запущено ли какое-либо слайдшоу (идёт или на паузе). Остановлено полностью — false. */
+    function mossadAnySlideshowActive() {
+        try {
+            if (typeof slideshowActive !== 'undefined' && slideshowActive) return true;
+            if (window._mossadGalleryActive) return true;
+            if (sessionStorage.getItem(`mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`) === 'true') return true;
+        } catch (e) {}
+        return false;
+    }
+
     /**
      * Выполняет пост-действие после фактического скачивания (+1 или del).
      * Срабатывает ТОЛЬКО когда скачивание реально началось, а не при блокировке дубликата.
      */
     function performPostDownloadAction() {
-        if (!config || config.pdAction === 'none') return;
-        if (config.pdAction === 'up') {
+        const act = mossadPdAction();
+        if (!config || act === 'none') return;
+        if (act === 'upns' || act === 'always') {
+            if (mossadSlideshowDlActive) { mossadDebug('step', 'После скачивания +1 пропущен: скачивание запустило слайдшоу'); return; }
+            if (act === 'upns' && mossadAnySlideshowActive()) { mossadDebug('step', 'После скачивания «Не СШ +1»: слайдшоу запущено — без +1'); return; }
             setTimeout(() => {
                 const dirs = config.slideshowDirections;
                 const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
                 performDpadStep(dPadDir, false);
             }, 600);
-        } else if (config.pdAction === 'del' && rootDomain === 'grok.com') {
+        } else if (act === 'del' && rootDomain === 'grok.com') {
             setTimeout(() => {
                 runSmartDelete();
             }, 1000);

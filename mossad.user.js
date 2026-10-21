@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.55
+// @version      1.3.56
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -26,7 +26,7 @@
     'use strict';
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.55';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.56';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -156,7 +156,7 @@ videoLoops: 1,
 slideshowDelay: 1,
 delayAfterVideo: 1,
 downloadType: 'none',
-pdAction: 'none',
+pdAction: 'upns',
 stopOnTabSwitch: false,
 stopOnBrsrSwitch: false,
 deleteAutoconfirm: true,
@@ -480,6 +480,18 @@ if (typeof showToast === 'function') showToast(`🌐 Общие умолчани
 } catch (e) {}
 }
 const OLD_DEFAULT_TPL_V1336 = '{id8}-{domain[4]}~{RadugaStud}';
+if (config.pdAction === 'up' || !['none', 'upns', 'always', 'del'].includes(config.pdAction)) {
+const wasSaved = config.pdAction === 'up';
+config.pdAction = 'upns';
+try { if (wasSaved && GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
+}
+if (typeof GM_getValue === 'function') {
+try {
+const rawGd0 = GM_getValue(GLOBAL_DEFAULTS_GM_KEY, '');
+const gd0 = rawGd0 ? (typeof rawGd0 === 'string' ? JSON.parse(rawGd0) : rawGd0) : null;
+if (gd0 && gd0.pdAction === 'up') { gd0.pdAction = 'upns'; GM_setValue(GLOBAL_DEFAULTS_GM_KEY, JSON.stringify(gd0)); }
+} catch (e) {}
+}
 if (typeof GM_getValue === 'function') {
 let gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
 if (gmTpl === OLD_DEFAULT_TPL_V1336) {
@@ -1078,15 +1090,32 @@ sendDpadKeyEvent(key);
 return true;
 }
 window.performDpadStep = performDpadStep;
+let mossadSlideshowDlActive = false;
+function mossadPdAction() {
+const v = config && config.pdAction;
+if (v === 'up') return 'upns';
+return ['none', 'upns', 'always', 'del'].includes(v) ? v : 'upns';
+}
+function mossadAnySlideshowActive() {
+try {
+if (typeof slideshowActive !== 'undefined' && slideshowActive) return true;
+if (window._mossadGalleryActive) return true;
+if (sessionStorage.getItem(`mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`) === 'true') return true;
+} catch (e) {}
+return false;
+}
 function performPostDownloadAction() {
-if (!config || config.pdAction === 'none') return;
-if (config.pdAction === 'up') {
+const act = mossadPdAction();
+if (!config || act === 'none') return;
+if (act === 'upns' || act === 'always') {
+if (mossadSlideshowDlActive) { mossadDebug('step', 'После скачивания +1 пропущен: скачивание запустило слайдшоу'); return; }
+if (act === 'upns' && mossadAnySlideshowActive()) { mossadDebug('step', 'После скачивания «Не СШ +1»: слайдшоу запущено — без +1'); return; }
 setTimeout(() => {
 const dirs = config.slideshowDirections;
 const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
 performDpadStep(dPadDir, false);
 }, 600);
-} else if (config.pdAction === 'del' && rootDomain === 'grok.com') {
+} else if (act === 'del' && rootDomain === 'grok.com') {
 setTimeout(() => {
 runSmartDelete();
 }, 1000);
@@ -1389,6 +1418,12 @@ const LABEL_DEFS = [
 ['pinNum', '№', 'режим «всегда N-й похожий пин» (рядом поле с числом)'],
 ['pinDirBack', '◀', 'направление слайдшоу: назад по истории'],
 ['pinDirFwd', '▶', 'направление слайдшоу: вперёд по новым пинам'],
+['#', 'После скачивания (v1.3.56)'],
+['pdLabel', 'После скачивания:', 'надпись у выбора действия после скачивания'],
+['pdNone', '—', 'ничего не делать'],
+['pdUpNoSs', 'Не СШ +1', 'следующий, только когда слайдшоу не запущено'],
+['pdUpAlways', '+1 всегда', 'следующий всегда (кроме скачивания самим слайдшоу)'],
+['pdDel', 'Delete', 'удалить пост (только Grok)'],
 ['#', 'Шаблон имени файла (v1.3.53)'],
 ['tplHelpBtn', '?', 'кнопка у поля шаблона: окно тегов'],
 ['tplHelpTitle', '🏷 Теги шаблона имени файла', 'заголовок окна «?»'],
@@ -6562,7 +6597,8 @@ let advanced = false;
 const onDownloadComplete = () => {
 if (advanced) return;
 advanced = true;
-if (config.pdAction === 'del' && rootDomain === 'grok.com') {
+mossadSlideshowDlActive = false;
+if (mossadPdAction() === 'del' && rootDomain === 'grok.com') {
 setTimeout(() => window.close(), 1000);
 return;
 }
@@ -6572,6 +6608,7 @@ const safetyTimer = setTimeout(() => {
 console.warn('[MOSSAD] Auto-download wait timeout (8s), advancing slide');
 onDownloadComplete();
 }, 8000);
+mossadSlideshowDlActive = true;
 triggerDownload(false, null, () => {
 clearTimeout(safetyTimer);
 onDownloadComplete();
@@ -7929,11 +7966,16 @@ panel.innerHTML = `
                         <option value="photo" ${config.downloadType === 'photo' ? 'selected' : ''}>Качать Фото</option>
                         <option value="video" ${config.downloadType === 'video' ? 'selected' : ''}>Качать Видео</option>
                     </select>
+                    <span style="display:flex; align-items:center; gap:4px;" title="Что делать после скачивания. «Не СШ +1» — перейти к следующему, только если слайдшоу не запущено (на паузе — считается запущенным). «+1 всегда» — всегда (кроме скачивания самим слайдшоу: оно шагает само). Delete — только Grok">
+                    <span data-mossad-label="pdLabel" style="white-space:nowrap;">${LH('pdLabel')}</span>
                     <select id="mossad-sel-pd" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
-                        <option value="none" ${config.pdAction === 'none' ? 'selected' : ''}>После DL: —</option>
-                        <option value="up" ${config.pdAction === 'up' ? 'selected' : ''}>После DL: +1</option>
-                        ${rootDomain === 'grok.com' ? `<option value="del" ${config.pdAction === 'del' ? 'selected' : ''}>После DL: del</option>` : ''}
+                        <option value="none" ${mossadPdAction() === 'none' ? 'selected' : ''} data-mossad-label="pdNone">${LH('pdNone')}</option>
+                        <option value="upns" ${mossadPdAction() === 'upns' ? 'selected' : ''} data-mossad-label="pdUpNoSs">${LH('pdUpNoSs')}</option>
+                        <option value="always" ${mossadPdAction() === 'always' ? 'selected' : ''} data-mossad-label="pdUpAlways">${LH('pdUpAlways')}</option>
+                        ${rootDomain === 'grok.com' ? `<option value="del" ${mossadPdAction() === 'del' ? 'selected' : ''} data-mossad-label="pdDel">${LH('pdDel')}</option>`
+: (mossadPdAction() === 'del' ? `<option value="del" selected disabled>${LH('pdDel')} (только Grok)</option>` : '')}
                     </select>
+                    </span>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
@@ -9074,7 +9116,7 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'slideshowDirections', t: 'dirs', label: 'Направления D-pad' },
 { k: 'loopFeed', t: 'bool', label: 'R: повторять ленту' },
 { k: 'downloadType', t: 'sel', label: 'Скачивание', opts: [['none', 'Не скачивать'], ['all', 'Качать всё'], ['photo', 'Качать фото'], ['video', 'Качать видео']] },
-{ k: 'pdAction', t: 'sel', label: 'После DL', opts: [['none', '—'], ['up', '+1'], ['del', 'del (Grok)']] },
+{ k: 'pdAction', t: 'sel', label: 'После скачивания', opts: [['none', '—'], ['upns', 'Не СШ +1'], ['always', '+1 всегда'], ['del', 'Delete (Grok)']] },
 { k: 'filenameTemplate', t: 'text', label: 'Шаблон имени файла' },
 { k: 'filenameTemplateEnabled', t: 'bool', label: 'Использовать шаблон' },
 { k: 'allowDuplicates', t: 'bool', label: 'Дубли: качать без вопроса' },

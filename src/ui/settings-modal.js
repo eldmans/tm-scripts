@@ -200,7 +200,7 @@
         { k: 'slideshowDirections', t: 'dirs', label: 'Направления D-pad' },
         { k: 'loopFeed',          t: 'bool', label: 'R: повторять ленту' },
         { k: 'downloadType',      t: 'sel', label: 'Скачивание', opts: [['none', 'Не скачивать'], ['all', 'Качать всё'], ['photo', 'Качать фото'], ['video', 'Качать видео']] },
-        { k: 'pdAction',          t: 'sel', label: 'После DL', opts: [['none', '—'], ['up', '+1'], ['del', 'del (Grok)']] },
+        { k: 'pdAction',          t: 'sel', label: 'После скачивания', opts: [['none', '—'], ['upns', 'Не СШ +1'], ['always', '+1 всегда'], ['del', 'Delete (Grok)']] },
         { k: 'filenameTemplate',  t: 'text', label: 'Шаблон имени файла' },
         { k: 'filenameTemplateEnabled', t: 'bool', label: 'Использовать шаблон' },
         { k: 'allowDuplicates',   t: 'bool', label: 'Дубли: качать без вопроса' },

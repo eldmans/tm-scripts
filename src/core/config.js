@@ -12,7 +12,7 @@
         slideshowDelay: 1,            // Фото: 1 сек
         delayAfterVideo: 1,           // Пауза: 1 сек
         downloadType: 'none',         // не скачивать
-        pdAction: 'none',             // После DL: —
+        pdAction: 'upns',             // v1.3.56: «После скачивания»: none | upns (+1, только когда слайдшоу нет) | always (+1 всегда) | del (Grok)
         stopOnTabSwitch: false,       // Tab — выключена
         stopOnBrsrSwitch: false,      // Brsr — выключена
         deleteAutoconfirm: true,      // hold post включён (один чекбокс управляет обоими флагами, ANTI_PATTERNS §2)
@@ -413,6 +413,20 @@
     // v1.3.53: старый общий шаблон '{id8}-{domain[4]}~{RadugaStud}' ({RadugaStud} — несуществующий тег, задумывался
     // как аккаунт) → пусто = шаблон сайта по умолчанию. Мигрируем: конфиг сайта, GM-шаблон сайта, общие умолчания.
     const OLD_DEFAULT_TPL_V1336 = '{id8}-{domain[4]}~{RadugaStud}';
+    // v1.3.56: «После DL: +1» ('up') → «Не СШ +1» ('upns'): во время слайдшоу +1 больше не делается (по умолчанию).
+    // Новое «+1 всегда» — отдельное значение 'always' (иначе миграция срабатывала бы снова на каждой загрузке).
+    if (config.pdAction === 'up' || !['none', 'upns', 'always', 'del'].includes(config.pdAction)) {
+        const wasSaved = config.pdAction === 'up';
+        config.pdAction = 'upns';
+        try { if (wasSaved && GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
+    }
+    if (typeof GM_getValue === 'function') {
+        try {
+            const rawGd0 = GM_getValue(GLOBAL_DEFAULTS_GM_KEY, '');
+            const gd0 = rawGd0 ? (typeof rawGd0 === 'string' ? JSON.parse(rawGd0) : rawGd0) : null;
+            if (gd0 && gd0.pdAction === 'up') { gd0.pdAction = 'upns'; GM_setValue(GLOBAL_DEFAULTS_GM_KEY, JSON.stringify(gd0)); }
+        } catch (e) {}
+    }
     if (typeof GM_getValue === 'function') {
         let gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
         if (gmTpl === OLD_DEFAULT_TPL_V1336) {

@@ -457,7 +457,8 @@
                     const onDownloadComplete = () => {
                         if (advanced) return;
                         advanced = true;
-                        if (config.pdAction === 'del' && rootDomain === 'grok.com') {
+                        mossadSlideshowDlActive = false;
+                        if (mossadPdAction() === 'del' && rootDomain === 'grok.com') {
                             setTimeout(() => window.close(), 1000);
                             return;
                         }
@@ -470,6 +471,7 @@
                         onDownloadComplete();
                     }, 8000);
 
+                    mossadSlideshowDlActive = true; // v1.3.56: «+1 всегда» не шагает за слайдшоу (двойной шаг)
                     triggerDownload(false, null, () => {
                         clearTimeout(safetyTimer);
                         onDownloadComplete();
