@@ -494,6 +494,48 @@
         if (Object.prototype.hasOwnProperty.call(_hkGlobalShadow, k)) { _hkGlobalShadow[k] = normalizeHotkeyBinding(v); return true; }
         return false;
     }
+    /**
+     * v1.3.68: «Применить на всех сайтах» — действующие клавиши ЭТОГО сайта (общие + «свои») становятся:
+     *  • общими (mossad_hk_global), включая общие значения «своих» действий этого сайта (они остаются «своими», значение то же);
+     *  • значениями «своих» действий ДРУГИХ сайтов (раздел «Только для этого сайта» там сохраняется, меняется только клавиша).
+     * Исключение — действие, работающее только на том сайте (HK_SITE_SEED: grokCycle на grok, pinFullScale на Pinterest),
+     * если на этом сайте оно не «родное»: его клавиша там сохраняется; если она совпала с разосланной — очищается
+     * (разосланное важнее), об этом сообщается. Умолчания для «Сброс клавиш» не меняются. ANTI_PATTERNS §46.
+     * Возврат: { sites, kept: ['домен: действие'], cleared: ['домен: действие'] }.
+     */
+    function mossadHkPushAllSites() {
+        const eff = JSON.parse(JSON.stringify(config.hk || {}));
+        Object.keys(_hkGlobalShadow).forEach(k => { _hkGlobalShadow[k] = normalizeHotkeyBinding(eff[k]); });
+        if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(eff)); } catch (e) {} }
+        const comboId = (b) => (typeof window.hotkeyComboId === 'function' ? window.hotkeyComboId(b) : (b && b.key ? JSON.stringify(b) : ''));
+        const mine = HK_SITE_SEED[rootDomain] || [];
+        const all = _hkSiteReadAll();
+        const rep = { sites: 0, kept: [], cleared: [] };
+        for (const dom of Object.keys(all)) {
+            const e = all[dom];
+            if (dom === rootDomain || !e || !e.hk || typeof e.hk !== 'object') continue;
+            const only = (HK_SITE_SEED[dom] || []).filter(k => !mine.includes(k));
+            const keep = [];
+            for (const k of Object.keys(e.hk)) {
+                if (only.includes(k)) { keep.push(k); continue; }
+                if (Object.prototype.hasOwnProperty.call(eff, k)) e.hk[k] = normalizeHotkeyBinding(eff[k]);
+            }
+            for (const k of keep) {
+                const id = comboId(e.hk[k]);
+                if (!id) continue;
+                const clash = Object.keys(eff).concat(Object.keys(e.hk)).some(a => a !== k && comboId(Object.prototype.hasOwnProperty.call(e.hk, a) ? e.hk[a] : eff[a]) === id);
+                if (clash) { e.hk[k] = normalizeHotkeyBinding(null); rep.cleared.push(dom + ': ' + k); }
+                else rep.kept.push(dom + ': ' + k);
+            }
+            rep.sites++;
+        }
+        all[rootDomain] = { hk: {}, order: mossadHkSiteEntry().order };
+        Object.keys(_hkGlobalShadow).forEach(k => { all[rootDomain].hk[k] = normalizeHotkeyBinding(eff[k]); });
+        _hkSiteWriteAll(all);
+        try { persistLocalConfig(); } catch (e) {}
+        mossadDebug('hotkey', 'клавиши сайта применены на всех сайтах', rep);
+        return rep;
+    }
     try { mossadApplySiteHotkeys(); } catch (e) {}
 
     // v1.3.41: «Применить во всех контейнерах» — штамп из GM, если этот контейнер его ещё не применял

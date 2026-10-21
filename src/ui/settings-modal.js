@@ -69,7 +69,7 @@
         for (let i = 0; i < out.length; i++) if (out[i] === null) out[i] = flow[j++];
         return out.filter(k => k != null);
     }
-    // ── v1.3.48: «По умолчанию: Клавиши · Порядок · Сохранить это» — общие умолчания хоткеев (GM) ──
+    // ── v1.3.48: «По умолчанию: Клавиши · Порядок · Применить на всех сайтах · Сохранить как умолчание» (v1.3.68) — общие умолчания хоткеев (GM) ──
     // { id, ts, hk, order, pinned }. Запись = рассылка: открытые вкладки получают её через
     // GM_addValueChangeListener, остальные контейнеры — при следующей загрузке (id применённого — в localStorage).
     // Закреплённые (🔒) строки НЕ меняются ни сбросом, ни рассылкой: ни клавиша, ни место.
@@ -85,7 +85,7 @@
             return { id: String(o.id || ''), ts: Number(o.ts) || 0, hk: o.hk, order: Array.isArray(o.order) ? o.order.filter(x => typeof x === 'string') : [], pinned: Array.isArray(o.pinned) ? o.pinned.filter(x => typeof x === 'string') : [] };
         } catch (e) { return null; }
     }
-    /** Клавиши по умолчанию: сохранённые общие («Сохранить это») или заводские. */
+    /** Клавиши по умолчанию: сохранённые общие («Сохранить как умолчание») или заводские. */
     function hotkeyDefaultFor(k) {
         const d = readHotkeyDefaults();
         if (d && d.hk && Object.prototype.hasOwnProperty.call(d.hk, k)) return normalizeHotkeyBinding(d.hk[k]);
@@ -158,12 +158,15 @@
         saveHotkeyOrder(out);
         return out;
     }
-    /** «Сохранить это»: текущие клавиши + порядок + закрепления → общие умолчания (и рассылка). */
-    function saveHotkeyDefaults(allKeys) {
+    /**
+     * «Сохранить как умолчание»: текущие клавиши + порядок + закрепления → общие умолчания (база «Сброс клавиш») и рассылка.
+     * v1.3.68: effective=true — действующие клавиши этого сайта (после «Применить на всех сайтах» они же общие).
+     */
+    function saveHotkeyDefaults(allKeys, effective) {
         const rec = {
             id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
             ts: Date.now(),
-            hk: mossadHkGlobalTable(), // v1.3.63: общие значения, без «своих» клавиш сайта
+            hk: effective ? JSON.parse(JSON.stringify(config.hk || {})) : mossadHkGlobalTable(), // v1.3.63: общие значения, без «своих» клавиш сайта
             order: orderedHotkeyKeys(allKeys || HK_FACTORY_ORDER, getHotkeyOrder()),
             pinned: getHotkeyPinned(),
         };
@@ -522,9 +525,10 @@
             <div id="mossad-hk-list" style="display:flex; flex-direction:column; gap:8px; max-height:calc(85vh - 230px); overflow-y:auto; padding-right:4px;"></div>
               <div style="display:flex; gap:6px; align-items:center;">
                 <span style="font-size:12px;color:#9ca3af;" data-mossad-label="hkDefaultsLabel">${LH('hkDefaultsLabel')}</span>
-                <button id="mossad-hk-reset" title="Сбросить клавиши к умолчаниям (сохранённым «Сохранить это» или заводским). Закреплённые 🔒 не меняются" style="background:#374151; border:1px solid #4b5563; padding:5px 10px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkResetKeys">${LH('hkResetKeys')}</button>
+                <button id="mossad-hk-reset" title="Сбросить клавиши к умолчаниям (сохранённым «Сохранить как умолчание» или заводским). Закреплённые 🔒 не меняются" style="background:#374151; border:1px solid #4b5563; padding:5px 10px; border-radius:6px; color:#f87171; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkResetKeys">${LH('hkResetKeys')}</button>
                 <button id="mossad-hk-order-reset" title="Сбросить порядок строк к умолчанию. Закреплённые 🔒 остаются на месте" style="background:#374151; border:1px solid #4b5563; padding:5px 10px; border-radius:6px; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkResetOrder">${LH('hkResetOrder')}</button>
-                <button id="mossad-hk-save-defaults" title="Сохранить текущие клавиши, порядок и закрепления как общие умолчания — применяются во всех открытых вкладках сразу, в остальных контейнерах при загрузке" style="background:#065f46; border:1px solid #10b981; padding:5px 10px; border-radius:6px; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkSaveDefaults">${LH('hkSaveDefaults')}</button>
+                <button id="mossad-hk-apply-all" title="Действующие клавиши этого сайта — на все сайты: общие клавиши и «свои» клавиши других сайтов (кроме действий, работающих только там). Умолчания для «Клавиши» (сброс) не меняются" style="background:#1e3a8a; border:1px solid #3b82f6; padding:5px 10px; border-radius:6px; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkApplyAll">${LH('hkApplyAll')}</button>
+                <button id="mossad-hk-save-defaults" title="То же, что «Применить на всех сайтах», и ещё запомнить клавиши, порядок и закрепления как умолчания — к ним возвращает «Клавиши» (сброс)" style="background:#065f46; border:1px solid #10b981; padding:5px 10px; border-radius:6px; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px;" data-mossad-label="hkSaveDefaults">${LH('hkSaveDefaults')}</button>
               </div>
             </div>
             <div data-pane="defaults" style="display:none; flex-direction:column; gap:6px;">
@@ -1119,8 +1123,23 @@
             renderHotkeyList();
             showToast('↕ Порядок по умолчанию');
         };
+        // v1.3.68: две кнопки — «Применить на всех сайтах» и «Сохранить как умолчание» (= то же + база сброса)
+        const pushAll = () => {
+            const rep = mossadHkPushAllSites();
+            renderHotkeyList();
+            if (rep.cleared.length) setTimeout(() => showToast(`⚠️ Совпали с разосланными и очищены: ${rep.cleared.map(x => x.replace(/: (\w+)$/, (m, k) => ': ' + (keysMap[k] || k))).join(', ')}`, true), 1200);
+            return rep;
+        };
+        const pushNote = 'Клавиши этого сайта (общие и «Только для этого сайта») станут такими же на всех сайтах: и общие, и «свои» клавиши других сайтов. Действия, работающие только на другом сайте (например, цикл Grok, полный экран Pinterest), сохранят там свою клавишу.';
+        modal.querySelector('#mossad-hk-apply-all').onclick = () => {
+            if (!confirm(`Применить на всех сайтах?\n\n${pushNote}\n\nУмолчания, к которым возвращает сброс «Клавиши», не изменятся.`)) return;
+            const rep = pushAll();
+            showToast(`🌐 Клавиши применены на всех сайтах (своих разделов других сайтов: ${rep.sites})`);
+        };
         modal.querySelector('#mossad-hk-save-defaults').onclick = () => {
-            if (saveHotkeyDefaults(Object.keys(keysMap))) showToast('🌐 Клавиши сохранены как общие умолчания — применяются во всех вкладках');
+            if (!confirm(`Сохранить как умолчание?\n\n${pushNote}\n\nКроме того, клавиши, порядок и закрепления 🔒 станут умолчаниями: к ним вернёт сброс «Клавиши», они применятся и в других контейнерах.`)) return;
+            pushAll();
+            if (saveHotkeyDefaults(Object.keys(keysMap), true)) showToast('🌐 Применено на всех сайтах и сохранено как умолчание');
             else showToast('❌ GM-хранилище недоступно', true);
         };
         return modal;
