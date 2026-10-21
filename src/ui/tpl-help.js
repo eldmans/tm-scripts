@@ -43,6 +43,29 @@
     }
     window.mossadSaveSiteTemplate = mossadSaveSiteTemplate;
 
+    // ── v1.3.65: разделитель между тегами при вставке кликом (общий для всех сайтов: GM, копия в localStorage) ──
+    const TPL_SEP_KEY = 'mossad_tpl_sep';
+    const TPL_SEP_CHARS = '-_~.+ ()[]';
+    function mossadTplSep() {
+        let v = null;
+        try { if (typeof GM_getValue === 'function') v = GM_getValue(TPL_SEP_KEY, null); } catch (e) {}
+        if (v == null) { try { v = localStorage.getItem(TPL_SEP_KEY); } catch (e) {} }
+        return v == null ? '~' : String(v);
+    }
+    function mossadSetTplSep(v) {
+        const x = String(v == null ? '' : v).slice(0, 8);
+        try { if (typeof GM_setValue === 'function') GM_setValue(TPL_SEP_KEY, x); } catch (e) {}
+        try { localStorage.setItem(TPL_SEP_KEY, x); } catch (e) {}
+    }
+    /** Текст для вставки после prefix: разделитель, если prefix не пуст и не кончается разделителем (в т.ч. кончается тегом «}»). */
+    function mossadTplInsertText(prefix, tag, sep) {
+        const p = String(prefix || '');
+        if (!p || !sep) return tag;
+        const last = p[p.length - 1];
+        if (p.endsWith(sep) || (last !== '}' && TPL_SEP_CHARS.includes(last))) return tag;
+        return sep + tag;
+    }
+
     function _tplCurrent(input) {
         const v = input ? String(input.value || '').trim() : '';
         return v || (input && input.placeholder) || getDefaultFilenameTemplate();
@@ -104,6 +127,10 @@
               <b style="flex:1;" data-mossad-label="tplHelpTitle">${LH('tplHelpTitle')}</b>
               <button data-th="close" title="Закрыть (Esc)" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px;">✕</button>
             </div>
+            <div style="margin-bottom:6px;display:flex;align-items:center;gap:6px;" title="Вставляется перед тегом, если шаблон не пуст и не кончается разделителем (общий для всех сайтов). Пусто — без разделителя">
+              <span style="color:#9ca3af;" data-mossad-label="tplSepLabel">${LH('tplSepLabel')}</span>
+              <input data-th="sep" type="text" maxlength="8" style="width:46px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:1px 4px;font-size:12px;">
+            </div>
             <div style="margin-bottom:4px;"><span style="color:#9ca3af;" data-mossad-label="tplHelpNow">${LH('tplHelpNow')}</span>
               <code data-th="name" style="color:#34d399;font-weight:700;word-break:break-all;">…</code></div>
             <div style="margin-bottom:4px;color:#9ca3af;">Шаблон: <code data-th="tpl" style="word-break:break-all;"></code></div>
@@ -148,11 +175,14 @@
             document.removeEventListener('pointerdown', onDown, true);
         } };
         box.querySelector('[data-th="close"]').onclick = () => mossadCloseTplHelp();
+        const sepIn = box.querySelector('[data-th="sep"]');
+        sepIn.value = mossadTplSep();
+        sepIn.oninput = () => mossadSetTplSep(sepIn.value);
         box.addEventListener('click', (e) => {
             const ins = e.target.closest && e.target.closest('[data-th-ins]');
             if (!ins) return;
-            const text = ins.getAttribute('data-th-ins');
             const s0 = input.selectionStart ?? input.value.length, s1 = input.selectionEnd ?? input.value.length;
+            const text = mossadTplInsertText(input.value.slice(0, s0), ins.getAttribute('data-th-ins'), mossadTplSep()); // v1.3.65
             input.value = input.value.slice(0, s0) + text + input.value.slice(s1);
             try { input.setSelectionRange(s0 + text.length, s0 + text.length); } catch (err) {}
             input.dispatchEvent(new Event('input', { bubbles: true }));

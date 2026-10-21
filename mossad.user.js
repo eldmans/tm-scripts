@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.64
+// @version      1.3.65
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -27,7 +27,7 @@
     'use strict';
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.64';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.65';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1547,6 +1547,7 @@ const LABEL_DEFS = [
 ['noPromptLabel', 'Клавиши, которые не кидают в промт:', 'Grok, «Общие»: поле клавиш, после которых Grok не переводит фокус в промт (v1.3.64)'],
 ['keyHelpTitle', 'Клавиши — клик дописывает в поле', 'окно «?» у поля клавиш'],
 ['keyHelpNote', 'Буква/цифра/знак — сама клавиша в любой раскладке (К = R). Пробел = Space. Остальные — {Имя}: {Enter}, {F5}, {ArrowUp}. Ctrl/Alt не учитываются (с ними Grok фокус не забирает).', 'окно «?» у поля клавиш: пояснение формата'],
+['tplSepLabel', 'Разделитель при вставке:', 'окно тегов шаблона: поле разделителя (v1.3.65)'],
 ['tplHelpBtn', '?', 'кнопка у поля шаблона: окно тегов'],
 ['tplHelpTitle', '🏷 Теги шаблона имени файла', 'заголовок окна «?»'],
 ['tplHelpNow', 'Сейчас скачается как:', 'строка с итоговым именем в окне «?»'],
@@ -8297,6 +8298,26 @@ try { if (GM_getValue('mossad_tpl_' + rootDomain, null)) GM_setValue('mossad_tpl
 document.querySelectorAll('#mossad-in-fn-tpl, #mossad-gen-tpl').forEach(el => { if (el.value !== v && el !== document.activeElement) el.value = v; });
 }
 window.mossadSaveSiteTemplate = mossadSaveSiteTemplate;
+const TPL_SEP_KEY = 'mossad_tpl_sep';
+const TPL_SEP_CHARS = '-_~.+ ()[]';
+function mossadTplSep() {
+let v = null;
+try { if (typeof GM_getValue === 'function') v = GM_getValue(TPL_SEP_KEY, null); } catch (e) {}
+if (v == null) { try { v = localStorage.getItem(TPL_SEP_KEY); } catch (e) {} }
+return v == null ? '~' : String(v);
+}
+function mossadSetTplSep(v) {
+const x = String(v == null ? '' : v).slice(0, 8);
+try { if (typeof GM_setValue === 'function') GM_setValue(TPL_SEP_KEY, x); } catch (e) {}
+try { localStorage.setItem(TPL_SEP_KEY, x); } catch (e) {}
+}
+function mossadTplInsertText(prefix, tag, sep) {
+const p = String(prefix || '');
+if (!p || !sep) return tag;
+const last = p[p.length - 1];
+if (p.endsWith(sep) || (last !== '}' && TPL_SEP_CHARS.includes(last))) return tag;
+return sep + tag;
+}
 function _tplCurrent(input) {
 const v = input ? String(input.value || '').trim() : '';
 return v || (input && input.placeholder) || getDefaultFilenameTemplate();
@@ -8353,6 +8374,10 @@ box.innerHTML = `
               <b style="flex:1;" data-mossad-label="tplHelpTitle">${LH('tplHelpTitle')}</b>
               <button data-th="close" title="Закрыть (Esc)" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px;">✕</button>
             </div>
+            <div style="margin-bottom:6px;display:flex;align-items:center;gap:6px;" title="Вставляется перед тегом, если шаблон не пуст и не кончается разделителем (общий для всех сайтов). Пусто — без разделителя">
+              <span style="color:#9ca3af;" data-mossad-label="tplSepLabel">${LH('tplSepLabel')}</span>
+              <input data-th="sep" type="text" maxlength="8" style="width:46px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:1px 4px;font-size:12px;">
+            </div>
             <div style="margin-bottom:4px;"><span style="color:#9ca3af;" data-mossad-label="tplHelpNow">${LH('tplHelpNow')}</span>
               <code data-th="name" style="color:#34d399;font-weight:700;word-break:break-all;">…</code></div>
             <div style="margin-bottom:4px;color:#9ca3af;">Шаблон: <code data-th="tpl" style="word-break:break-all;"></code></div>
@@ -8395,11 +8420,14 @@ window.removeEventListener('keydown', onKey, true);
 document.removeEventListener('pointerdown', onDown, true);
 } };
 box.querySelector('[data-th="close"]').onclick = () => mossadCloseTplHelp();
+const sepIn = box.querySelector('[data-th="sep"]');
+sepIn.value = mossadTplSep();
+sepIn.oninput = () => mossadSetTplSep(sepIn.value);
 box.addEventListener('click', (e) => {
 const ins = e.target.closest && e.target.closest('[data-th-ins]');
 if (!ins) return;
-const text = ins.getAttribute('data-th-ins');
 const s0 = input.selectionStart ?? input.value.length, s1 = input.selectionEnd ?? input.value.length;
+const text = mossadTplInsertText(input.value.slice(0, s0), ins.getAttribute('data-th-ins'), mossadTplSep());
 input.value = input.value.slice(0, s0) + text + input.value.slice(s1);
 try { input.setSelectionRange(s0 + text.length, s0 + text.length); } catch (err) {}
 input.dispatchEvent(new Event('input', { bubbles: true }));
