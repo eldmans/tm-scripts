@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.63
+// @version      1.3.64
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -27,7 +27,7 @@
     'use strict';
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.63';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.64';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -175,6 +175,7 @@ collectWatchSec: 30,
 showSoundToast: true,
 debugSlideshow: false,
 pinterestMode: 'rand',
+grokNoPromptKeys: 'R',
 pinterestJumpKeys: 'off',
 pinterestDir: 'fwd',
 pinterestFilterType: 'ratio',
@@ -1543,6 +1544,9 @@ const LABEL_DEFS = [
 ['pdUpAlways', '+1 всегда', 'следующий всегда (кроме скачивания самим слайдшоу)'],
 ['pdDel', 'Delete', 'удалить пост (только Grok)'],
 ['#', 'Шаблон имени файла (v1.3.53)'],
+['noPromptLabel', 'Клавиши, которые не кидают в промт:', 'Grok, «Общие»: поле клавиш, после которых Grok не переводит фокус в промт (v1.3.64)'],
+['keyHelpTitle', 'Клавиши — клик дописывает в поле', 'окно «?» у поля клавиш'],
+['keyHelpNote', 'Буква/цифра/знак — сама клавиша в любой раскладке (К = R). Пробел = Space. Остальные — {Имя}: {Enter}, {F5}, {ArrowUp}. Ctrl/Alt не учитываются (с ними Grok фокус не забирает).', 'окно «?» у поля клавиш: пояснение формата'],
 ['tplHelpBtn', '?', 'кнопка у поля шаблона: окно тегов'],
 ['tplHelpTitle', '🏷 Теги шаблона имени файла', 'заголовок окна «?»'],
 ['tplHelpNow', 'Сейчас скачается как:', 'строка с итоговым именем в окне «?»'],
@@ -5786,6 +5790,118 @@ if (e.repeat) return;
 grokCycleFocus();
 }, true);
 
+// ── src/engines/grok/key-guard.js ──
+const GROK_KEYGUARD_MS = 300;
+const _kg = { src: null, codes: new Set(), names: new Set(), until: 0, prev: null };
+function mossadParseKeyList(str) {
+const codes = new Set(), names = new Set();
+const s = String(str || '');
+for (let i = 0; i < s.length; i++) {
+const ch = s[i];
+if (ch === '{') {
+const j = s.indexOf('}', i + 1);
+const name = j > i + 1 ? s.slice(i + 1, j).trim() : '';
+if (name && /^[A-Za-z][A-Za-z0-9]*$/.test(name)) {
+const norm = name.toLowerCase() === 'space' ? 'Space' : name[0].toUpperCase() + name.slice(1);
+codes.add(norm); names.add(norm === 'Space' ? ' ' : norm);
+i = j; continue;
+}
+}
+if (ch === ' ') { codes.add('Space'); continue; }
+if (/\s/.test(ch)) continue;
+const code = mossadCodeForKey(ch);
+if (code) codes.add(code); else names.add(ch);
+}
+return { codes, names };
+}
+function _kgList() {
+const src = String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys);
+if (src !== _kg.src) { const p = mossadParseKeyList(src); _kg.src = src; _kg.codes = p.codes; _kg.names = p.names; }
+return _kg;
+}
+function grokNoPromptKeyMatch(e) {
+if (e.ctrlKey || e.altKey || e.metaKey) return false;
+const l = _kgList();
+return (!!e.code && l.codes.has(e.code)) || (typeof e.key === 'string' && l.names.has(e.key));
+}
+function _kgMossadHotkey(e, needHandled) {
+if ((needHandled && !e.defaultPrevented) || !config.hk) return false;
+for (const k of Object.keys(config.hk)) { if (hotkeyMatches(e, config.hk[k])) return true; }
+return false;
+}
+function _kgArm() { _kg.until = Date.now() + GROK_KEYGUARD_MS; _kg.prev = document.activeElement; }
+if (rootDomain === 'grok.com') {
+window.addEventListener('keydown', (e) => {
+if (isEditableElement(document.activeElement)) return;
+if (grokNoPromptKeyMatch(e) || _kgMossadHotkey(e, false)) _kgArm();
+}, true);
+const stopAtHtml = (e) => {
+if (isEditableElement(document.activeElement) && !(Date.now() < _kg.until)) return;
+if (grokNoPromptKeyMatch(e) || _kgMossadHotkey(e, true)) e.stopPropagation();
+};
+document.documentElement.addEventListener('keydown', stopAtHtml, false);
+document.documentElement.addEventListener('keypress', stopAtHtml, false);
+document.documentElement.addEventListener('keyup', stopAtHtml, false);
+window.addEventListener('focusin', (e) => {
+if (!(Date.now() < _kg.until)) return;
+const t = e.target;
+if (!isEditableElement(t) || isEditableElement(_kg.prev) || (t.closest && t.closest('[id^="mossad"]'))) return;
+const prev = _kg.prev;
+mossadDebug('hotkey', 'Grok увёл фокус в поле ввода — возвращаем', { code: t.tagName });
+try { t.blur(); } catch (err) {}
+if (prev && prev !== document.body && prev.isConnected && prev.focus) { try { prev.focus({ preventScroll: true }); } catch (err) {} }
+}, true);
+window.addEventListener('beforeinput', (e) => {
+if (Date.now() < _kg.until && !isEditableElement(_kg.prev) && !(e.target.closest && e.target.closest('[id^="mossad"]'))) e.preventDefault();
+}, true);
+}
+const MOSSAD_KEY_TOKENS = [
+['{Backspace}', '⌫ Backspace'], ['{Enter}', '↵ Enter'], ['{Space}', '␣ Пробел'], ['{Tab}', '⇥ Tab'], ['{Escape}', 'Esc'],
+['{ArrowUp}', '↑'], ['{ArrowDown}', '↓'], ['{ArrowLeft}', '←'], ['{ArrowRight}', '→'],
+['{Delete}', 'Delete'], ['{Insert}', 'Insert'], ['{Home}', 'Home'], ['{End}', 'End'], ['{PageUp}', 'PageUp'], ['{PageDown}', 'PageDown'],
+...Array.from({ length: 12 }, (_, i) => [`{F${i + 1}}`, `F${i + 1}`]),
+...Array.from({ length: 10 }, (_, i) => [String(i), String(i)]),
+['{Minus}', '- Minus'], ['{Equal}', '= Equal'], ['{BracketLeft}', '[ BracketLeft'], ['{BracketRight}', '] BracketRight'],
+['{Backslash}', '\\ Backslash'], ['{Semicolon}', '; Semicolon'], ['{Quote}', "' Quote"], ['{Comma}', ', Comma'],
+['{Period}', '. Period'], ['{Slash}', '/ Slash'], ['{Backquote}', '` Backquote'],
+];
+let _keyHelp = null;
+function mossadCloseKeyHelp() { if (_keyHelp) { _keyHelp.cleanup(); _keyHelp.box.remove(); _keyHelp = null; } }
+function mossadToggleKeyHelp(btn, input) {
+if (_keyHelp && _keyHelp.input === input) { mossadCloseKeyHelp(); return; }
+mossadCloseKeyHelp();
+if (!input) return;
+const box = document.createElement('div');
+box.id = 'mossad-key-help';
+box.style.cssText = 'position:fixed;z-index:2147483646;background:rgba(17,24,39,0.97);border:1px solid #4b5563;border-radius:10px;padding:10px 12px;' +
+'box-shadow:0 10px 30px rgba(0,0,0,0.6);color:#e5e7eb;font:12px system-ui,-apple-system,sans-serif;max-width:min(460px,96vw);max-height:60vh;overflow:auto;';
+box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b style="flex:1;">${LH('keyHelpTitle')}</b>` +
+`<button data-kh="close" title="Закрыть (Esc)" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px;">✕</button></div>` +
+`<div style="display:flex;flex-wrap:wrap;gap:4px;">${MOSSAD_KEY_TOKENS.map(([tok, lab]) =>
+`<code data-kh-ins="${tok.replace(/"/g, '&quot;')}" title="Дописать ${tok.replace(/"/g, '&quot;')}" style="cursor:pointer;color:#93c5fd;background:#1f2937;border:1px solid #374151;border-radius:4px;padding:1px 5px;">${lab.replace(/</g, '&lt;')}</code>`).join('')}</div>` +
+`<div style="margin-top:6px;color:#9ca3af;line-height:1.4;">${LH('keyHelpNote')}</div>`;
+document.body.appendChild(box);
+try {
+const r = (btn || input).getBoundingClientRect();
+const vw = window.innerWidth || 1024;
+box.style.left = Math.max(4, Math.min(r.left, vw - 470)) + 'px';
+box.style.top = Math.max(4, r.bottom + 4) + 'px';
+} catch (e) {}
+const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); mossadCloseKeyHelp(); } };
+const onDown = (e) => { const t = e.target; if (!box.contains(t) && t !== btn && t !== input) mossadCloseKeyHelp(); };
+window.addEventListener('keydown', onKey, true);
+document.addEventListener('pointerdown', onDown, true);
+_keyHelp = { box, input, cleanup: () => { window.removeEventListener('keydown', onKey, true); document.removeEventListener('pointerdown', onDown, true); } };
+box.addEventListener('click', (e) => {
+if (e.target.closest && e.target.closest('[data-kh="close"]')) { mossadCloseKeyHelp(); return; }
+const ins = e.target.closest && e.target.closest('[data-kh-ins]');
+if (!ins) return;
+input.value = String(input.value || '') + ins.getAttribute('data-kh-ins');
+input.dispatchEvent(new Event('input', { bubbles: true }));
+input.dispatchEvent(new Event('change', { bubbles: true }));
+});
+}
+
 // ── src/engines/instagram.js ──
 window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
 window.MOSSAD_ENGINES.instagram = (() => {
@@ -9978,6 +10094,12 @@ modal.innerHTML = `
               </div>
               <div id="mossad-gen-pjump-skip" style="font-size:11px;color:#9ca3af;margin-top:2px;"></div>
             </div>` : ''}
+            ${rootDomain === 'grok.com' ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Вне поля ввода эти клавиши не переводят фокус в промт Grok (например, R у расширения Speed Control). Другие расширения клавишу видят">
+              <span data-mossad-label="noPromptLabel" style="white-space:nowrap;">${LH('noPromptLabel')}</span>
+              <input id="mossad-gen-nokeys" type="text" value="${String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+              <button id="mossad-gen-nokeys-help" title="Именованные клавиши" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
+            </div>` : ''}
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
               <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
               <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -10428,6 +10550,11 @@ if (el) el.textContent = sk.length ? `${L('pinJumpSkipped')} ${sk.map(x => x.lab
 };
 paintSkip();
 genPJump.onchange = (e) => { Settings.setQuiet('pinterestJumpKeys', e.target.value); pinterestJumpApply(); paintSkip(); };
+}
+const genNoKeys = modal.querySelector('#mossad-gen-nokeys');
+if (genNoKeys) {
+genNoKeys.oninput = genNoKeys.onchange = (e) => Settings.setQuiet('grokNoPromptKeys', e.target.value);
+modal.querySelector('#mossad-gen-nokeys-help').onclick = (e) => { e.preventDefault(); e.stopPropagation(); mossadToggleKeyHelp(e.currentTarget, genNoKeys); };
 }
 const genTpl = modal.querySelector('#mossad-gen-tpl');
 if (genTpl) {

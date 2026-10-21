@@ -474,6 +474,12 @@
               </div>
               <div id="mossad-gen-pjump-skip" style="font-size:11px;color:#9ca3af;margin-top:2px;"></div>
             </div>` : ''}
+            ${rootDomain === 'grok.com' ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Вне поля ввода эти клавиши не переводят фокус в промт Grok (например, R у расширения Speed Control). Другие расширения клавишу видят">
+              <span data-mossad-label="noPromptLabel" style="white-space:nowrap;">${LH('noPromptLabel')}</span>
+              <input id="mossad-gen-nokeys" type="text" value="${String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+              <button id="mossad-gen-nokeys-help" title="Именованные клавиши" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
+            </div>` : ''}
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
               <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
               <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -973,6 +979,12 @@
             };
             paintSkip();
             genPJump.onchange = (e) => { Settings.setQuiet('pinterestJumpKeys', e.target.value); pinterestJumpApply(); paintSkip(); };
+        }
+        // v1.3.64: Grok — клавиши, которые не кидают в промт
+        const genNoKeys = modal.querySelector('#mossad-gen-nokeys');
+        if (genNoKeys) {
+            genNoKeys.oninput = genNoKeys.onchange = (e) => Settings.setQuiet('grokNoPromptKeys', e.target.value);
+            modal.querySelector('#mossad-gen-nokeys-help').onclick = (e) => { e.preventDefault(); e.stopPropagation(); mossadToggleKeyHelp(e.currentTarget, genNoKeys); };
         }
         // v1.3.53: шаблон имени для этого сайта (то же, что поле в меню)
         const genTpl = modal.querySelector('#mossad-gen-tpl');

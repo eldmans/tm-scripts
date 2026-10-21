@@ -39,6 +39,7 @@ MODULES = [
     "src/engines/grok/ui-bar.js",
     "src/engines/grok/ui-playlist.js",
     "src/engines/grok/prompt-cycle.js",
+    "src/engines/grok/key-guard.js",
     "src/engines/instagram.js",
     "src/engines/redgifs.js",
     "src/download/router.js",

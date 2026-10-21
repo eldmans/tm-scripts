@@ -33,6 +33,7 @@
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'30' (№ N — N-й похожий пин)
+        grokNoPromptKeys: 'R',             // v1.3.64: Grok — клавиши, которые не кидают в промт (символ = физ. клавиша, {Имя} — именованная)
         pinterestJumpKeys: 'off',          // v1.3.59: похожий пин по клавише: off | focus | keys | badges | shift
         pinterestDir: 'fwd',               // v1.3.51: малое слайдшоу на Pinterest: 'fwd' — новые пины, 'back' — назад по истории
         pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
