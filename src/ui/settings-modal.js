@@ -218,7 +218,7 @@
         { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
         { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото (балансировка серий)', step: 5, min: 0 },
         { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
-        { k: 'pinterestAutoFS',   t: 'bool', label: 'Pinterest: авто FS' },
+        { k: 'pinterestAutoFS',   t: 'bool', label: 'Pinterest: авто «полный масштаб»' },
     ];
 
     function initGlobalDefaultsTab(modal) {

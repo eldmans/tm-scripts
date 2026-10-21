@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.56
+// @version      1.3.57
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -26,7 +26,7 @@
     'use strict';
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.56';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.57';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1417,6 +1417,7 @@ const LABEL_DEFS = [
 ['pinPlus1', '+1', 'режим «по очереди: 1-й, 2-й, 3-й…»'],
 ['pinNum', '№', 'режим «всегда N-й похожий пин» (рядом поле с числом)'],
 ['pinDirBack', '◀', 'направление слайдшоу: назад по истории'],
+['pinAutoFS', '⛶ FS', 'авто «Показать в полном масштабе» (галочка в блоке Pinterest)'],
 ['pinDirFwd', '▶', 'направление слайдшоу: вперёд по новым пинам'],
 ['#', 'После скачивания (v1.3.56)'],
 ['pdLabel', 'После скачивания:', 'надпись у выбора действия после скачивания'],
@@ -6367,13 +6368,12 @@ if (document.fullscreenElement) return;
 retryAction((attempt) => {
 if (document.fullscreenElement) return true;
 if (rootDomain.includes('pinterest.')) {
-let btn = document.querySelector('[aria-label="Показать в полном масштабе"], [title="Показать в полном масштабе"], [aria-label*="полном масштабе"]');
-if (!btn) {
-const svg = document.querySelector('svg[aria-label*="полном масштабе"]');
-if (svg) btn = svg.closest('[role="button"]') || svg.closest('button') || svg;
-}
+const pid = pinterestCurrentPinId();
+if (pid && pid === _pinFsDoneId) return true;
+const btn = pinterestFindFullScaleButton();
 if (btn) {
-triggerClick(btn, 'Pinterest FullScale');
+_pinFsDoneId = pid;
+clickElementFull(btn);
 return true;
 }
 }
@@ -7146,6 +7146,67 @@ console.error('[MOSSAD] Pinterest main pin detect error:', e);
 }
 return { isFound: false, type: 'unknown', bestMp4Url: null };
 }
+const PIN_FS_POLL_MS = 250, PIN_FS_WAIT_MS = 8000;
+const PIN_FS_WORDS = ['полном масштабе', 'полный масштаб', 'во весь экран', 'полноэкран', 'развернуть',
+'full size', 'fullsize', 'full-size', 'full screen', 'fullscreen', 'expand', 'enlarge'];
+const PIN_FS_NOT = ['описан', 'коммент', 'description', 'comment', 'текст', 'text', 'more', 'ещё', 'еще'];
+let _pinFsDoneId = '', _pinFsPollId = '', _pinFsTimer = null;
+function clickElementFull(el) {
+if (!el) return;
+['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(type => {
+try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, buttons: 1 })); } catch (e) {}
+});
+try { if (typeof el.click === 'function') el.click(); else el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch (e) {}
+}
+function _pinFsText(el) {
+return [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-test-id'),
+(el.children.length <= 2 ? el.textContent : '')].filter(Boolean).join(' ').toLowerCase();
+}
+function pinterestFindFullScaleButton() {
+const roots = pinterestCloseupRoots();
+const scopes = roots.length ? roots : [document.querySelector('div[role="main"]') || document.body];
+for (const scope of scopes) {
+const els = scope.querySelectorAll('button, [role="button"], a[aria-label], div[aria-label], svg[aria-label], [title]');
+for (const el of els) {
+if (pinIsRelated(el) || pinIsOwnUi(el)) continue;
+const t = _pinFsText(el);
+if (!t || !PIN_FS_WORDS.some(w => t.includes(w)) || PIN_FS_NOT.some(w => t.includes(w))) continue;
+return (el.tagName && el.tagName.toLowerCase() === 'svg') ? (el.closest('button, [role="button"]') || el) : el;
+}
+}
+return null;
+}
+function pinterestAutoFullScaleCancel() {
+if (_pinFsTimer) { clearTimeout(_pinFsTimer); _pinFsTimer = null; }
+_pinFsPollId = '';
+}
+function pinterestAutoFullScale() {
+if (!rootDomain.includes('pinterest.') || !config.pinterestAutoFS) return;
+const id = pinterestCurrentPinId();
+if (!id || id === _pinFsDoneId || id === _pinFsPollId) return;
+pinterestAutoFullScaleCancel();
+_pinFsPollId = id;
+const t0 = Date.now();
+const tick = () => {
+_pinFsTimer = null;
+if (_pinFsPollId !== id) return;
+if (!config.pinterestAutoFS || pinterestCurrentPinId() !== id) { _pinFsPollId = ''; return; }
+const btn = pinterestFindFullScaleButton();
+if (btn) {
+_pinFsDoneId = id; _pinFsPollId = '';
+clickElementFull(btn);
+mossadDebug('fs', 'Pinterest: полный масштаб', { pin: id });
+return;
+}
+if (Date.now() - t0 >= PIN_FS_WAIT_MS) { _pinFsDoneId = id; _pinFsPollId = ''; return; }
+_pinFsTimer = setTimeout(tick, PIN_FS_POLL_MS);
+};
+_pinFsTimer = setTimeout(tick, PIN_FS_POLL_MS);
+}
+window.pinterestAutoFullScale = pinterestAutoFullScale;
+if (rootDomain.includes('pinterest.')) {
+setInterval(() => { if (config.pinterestAutoFS) pinterestAutoFullScale(); }, 500);
+}
 function getPinterestCandidatePins() {
 const currentPinId = pinterestCurrentPinId();
 const allLinks = Array.from(document.querySelectorAll('a[href*="/pin/"]'));
@@ -7876,8 +7937,8 @@ panel.innerHTML = `
                     <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,0.03); padding: 6px; border-radius: 8px; border: 1px solid #374151; flex: 1;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style="font-weight: bold; color: #60a5fa;">📌 Pinterest Режим</span>
-                            <label title="Авто разворачивание во весь экран" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:11px;">
-                                <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> FS
+                            <label title="Авто «Показать в полном масштабе»: на каждом новом пине (слайдшоу, стрелки, ручной переход) скрипт ждёт до 8 с кнопку главного пина и жмёт её один раз" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:11px;">
+                                <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> <span data-mossad-label="pinAutoFS">${LH('pinAutoFS')}</span>
                             </label>
                         </div>
                         <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
@@ -9134,7 +9195,7 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
 { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото (балансировка серий)', step: 5, min: 0 },
 { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
-{ k: 'pinterestAutoFS', t: 'bool', label: 'Pinterest: авто FS' },
+{ k: 'pinterestAutoFS', t: 'bool', label: 'Pinterest: авто «полный масштаб»' },
 ];
 function initGlobalDefaultsTab(modal) {
 const form = modal.querySelector('#mossad-def-form');

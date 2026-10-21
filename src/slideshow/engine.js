@@ -163,14 +163,15 @@
             if (document.fullscreenElement) return true;
 
             // 1. Pinterest: "Показать в полном масштабе"
+            // v1.3.57: только кнопка ГЛАВНОГО пина и не больше раза на пин (общий поиск с pinterestAutoFullScale;
+            // раньше — первая «полном масштабе» во всём документе, в т.ч. у похожих, на каждом шаге)
             if (rootDomain.includes('pinterest.')) {
-                let btn = document.querySelector('[aria-label="Показать в полном масштабе"], [title="Показать в полном масштабе"], [aria-label*="полном масштабе"]');
-                if (!btn) {
-                    const svg = document.querySelector('svg[aria-label*="полном масштабе"]');
-                    if (svg) btn = svg.closest('[role="button"]') || svg.closest('button') || svg;
-                }
+                const pid = pinterestCurrentPinId();
+                if (pid && pid === _pinFsDoneId) return true;
+                const btn = pinterestFindFullScaleButton();
                 if (btn) {
-                    triggerClick(btn, 'Pinterest FullScale');
+                    _pinFsDoneId = pid;
+                    clickElementFull(btn);
                     return true;
                 }
             }

@@ -199,8 +199,8 @@
                     <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,0.03); padding: 6px; border-radius: 8px; border: 1px solid #374151; flex: 1;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style="font-weight: bold; color: #60a5fa;">📌 Pinterest Режим</span>
-                            <label title="Авто разворачивание во весь экран" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:11px;">
-                                <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> FS
+                            <label title="Авто «Показать в полном масштабе»: на каждом новом пине (слайдшоу, стрелки, ручной переход) скрипт ждёт до 8 с кнопку главного пина и жмёт её один раз" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:11px;">
+                                <input id="mossad-cb-fs" type="checkbox" style="accent-color:#3b82f6;" ${config.pinterestAutoFS ? 'checked' : ''}> <span data-mossad-label="pinAutoFS">${LH('pinAutoFS')}</span>
                             </label>
                         </div>
                         <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">

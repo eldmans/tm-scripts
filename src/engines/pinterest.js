@@ -136,6 +136,76 @@
         return { isFound: false, type: 'unknown', bestMp4Url: null };
     }
 
+    // ── v1.3.57: авто «Показать в полном масштабе» (настройка pinterestAutoFS, по умолчанию выкл.) ──
+    // В v1.3.54 triggerPinterestFullScale/clickElementFull удалены как мёртвый код: их никто не вызывал,
+    // настройка «FS» в блоке Pinterest ничего не делала. Теперь: на каждом новом пине (слайдшоу, стрелки,
+    // ручной клик, переход внутри Pinterest) ждём кнопку главного пина и жмём её ОДИН раз на пин. ANTI_PATTERNS §36.
+    const PIN_FS_POLL_MS = 250, PIN_FS_WAIT_MS = 8000;
+    const PIN_FS_WORDS = ['полном масштабе', 'полный масштаб', 'во весь экран', 'полноэкран', 'развернуть',
+        'full size', 'fullsize', 'full-size', 'full screen', 'fullscreen', 'expand', 'enlarge'];
+    const PIN_FS_NOT = ['описан', 'коммент', 'description', 'comment', 'текст', 'text', 'more', 'ещё', 'еще'];
+    let _pinFsDoneId = '', _pinFsPollId = '', _pinFsTimer = null;
+
+    function clickElementFull(el) {
+        if (!el) return;
+        ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(type => {
+            try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, buttons: 1 })); } catch (e) {}
+        });
+        try { if (typeof el.click === 'function') el.click(); else el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch (e) {}
+    }
+    function _pinFsText(el) {
+        return [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-test-id'),
+                (el.children.length <= 2 ? el.textContent : '')].filter(Boolean).join(' ').toLowerCase();
+    }
+    /** Кнопка «полный масштаб» ГЛАВНОГО пина (не из сетки похожих). Скрытые до наведения (opacity/visibility) — тоже. */
+    function pinterestFindFullScaleButton() {
+        const roots = pinterestCloseupRoots();
+        const scopes = roots.length ? roots : [document.querySelector('div[role="main"]') || document.body];
+        for (const scope of scopes) {
+            const els = scope.querySelectorAll('button, [role="button"], a[aria-label], div[aria-label], svg[aria-label], [title]');
+            for (const el of els) {
+                if (pinIsRelated(el) || pinIsOwnUi(el)) continue;
+                const t = _pinFsText(el);
+                if (!t || !PIN_FS_WORDS.some(w => t.includes(w)) || PIN_FS_NOT.some(w => t.includes(w))) continue;
+                return (el.tagName && el.tagName.toLowerCase() === 'svg') ? (el.closest('button, [role="button"]') || el) : el;
+            }
+        }
+        return null;
+    }
+    function pinterestAutoFullScaleCancel() {
+        if (_pinFsTimer) { clearTimeout(_pinFsTimer); _pinFsTimer = null; }
+        _pinFsPollId = '';
+    }
+    /** Ждёт кнопку (250 мс, до 8 с; при смене пина — стоп) и жмёт один раз на пин. */
+    function pinterestAutoFullScale() {
+        if (!rootDomain.includes('pinterest.') || !config.pinterestAutoFS) return;
+        const id = pinterestCurrentPinId();
+        if (!id || id === _pinFsDoneId || id === _pinFsPollId) return;
+        pinterestAutoFullScaleCancel();
+        _pinFsPollId = id;
+        const t0 = Date.now();
+        const tick = () => {
+            _pinFsTimer = null;
+            if (_pinFsPollId !== id) return;
+            if (!config.pinterestAutoFS || pinterestCurrentPinId() !== id) { _pinFsPollId = ''; return; }
+            const btn = pinterestFindFullScaleButton();
+            if (btn) {
+                _pinFsDoneId = id; _pinFsPollId = '';
+                clickElementFull(btn);
+                mossadDebug('fs', 'Pinterest: полный масштаб', { pin: id });
+                return;
+            }
+            if (Date.now() - t0 >= PIN_FS_WAIT_MS) { _pinFsDoneId = id; _pinFsPollId = ''; return; } // нет кнопки — не ищем снова на этом пине
+            _pinFsTimer = setTimeout(tick, PIN_FS_POLL_MS);
+        };
+        _pinFsTimer = setTimeout(tick, PIN_FS_POLL_MS);
+    }
+    window.pinterestAutoFullScale = pinterestAutoFullScale;
+    // Лёгкий сторож: раз в 500 мс сравнить id пина (только на Pinterest и только при включённой настройке)
+    if (rootDomain.includes('pinterest.')) {
+        setInterval(() => { if (config.pinterestAutoFS) pinterestAutoFullScale(); }, 500);
+    }
+
     function getPinterestCandidatePins() {
         const currentPinId = pinterestCurrentPinId();
         const allLinks = Array.from(document.querySelectorAll('a[href*="/pin/"]'));
