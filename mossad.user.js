@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.59
+// @version      1.3.60
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -27,7 +27,7 @@
     'use strict';
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.59';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.60';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1430,6 +1430,15 @@ const LABEL_DEFS = [
 ['pinJumpSkipped', 'Заняты хоткеями MOSSAD (пропущены):', 'список пропущенных клавиш в настройках'],
 ['pinJumpNoSkipped', 'Все клавиши свободны', 'нет пропущенных клавиш'],
 ['pinDirFwd', '▶', 'направление слайдшоу: вперёд по новым пинам'],
+['#', 'Горячие клавиши: занятые сочетания (v1.3.60)'],
+['hkConflict', 'Эта клавиша уже занята:', 'начало предупреждения о занятом сочетании'],
+['hkConflictAsk', 'Переназначить?', 'вопрос в предупреждении'],
+['hkYes', 'Да', 'кнопка: переназначить (у другого действия клавиша очищается)'],
+['hkCancel', 'Отмена', 'кнопка: оставить как было'],
+['hkCleared', 'очищено:', 'тост после переназначения'],
+['hkDupHint', 'Дубликат — та же клавиша у:', 'подсказка на красной (дублирующейся) клавише'],
+['hkResetCleared', 'Сброс: клавиша уже занята — очищено:', 'тост, если сброс очистил клавишу из-за дубликата'],
+['hkPinJumpNote', 'На Pinterest эта клавиша будет пропущена в «Клавиши» похожих пинов', 'заметка: клавиша совпадает с клавишами похожих пинов'],
 ['#', 'После скачивания (v1.3.56)'],
 ['pdLabel', 'После скачивания:', 'надпись у выбора действия после скачивания'],
 ['pdNone', '—', 'ничего не делать'],
@@ -9307,6 +9316,38 @@ function hotkeyDefaultOrder() {
 const d = readHotkeyDefaults();
 return (d && d.order.length) ? d.order : HK_FACTORY_ORDER;
 }
+function hotkeyComboId(h) {
+const b = normalizeHotkeyBinding(h);
+if (!b.key) return '';
+let code = b.key === ' ' ? 'Space'
+: (String(b.key).length > 1 ? 'name:' + String(b.key).toLowerCase()
+: (b.code || mossadCodeForKey(b.key) || ('key:' + String(b.key).toLowerCase())));
+if (b.key === '+' || code === 'Equal' || code === 'NumpadAdd') code = 'PLUS';
+return [b.ctrl, b.alt, b.shift, !!b.meta].map(x => x ? 1 : 0).join('') + '|' + code;
+}
+function hotkeyConflicts(k, h, keys) {
+const id = hotkeyComboId(h);
+if (!id) return [];
+return (keys || Object.keys(config.hk || {})).filter(o => o !== k && hotkeyComboId(config.hk[o]) === id);
+}
+function hotkeyDuplicateGroups(keys) {
+const by = {};
+keys.forEach(k => { const id = hotkeyComboId(config.hk[k]); if (id) (by[id] = by[id] || []).push(k); });
+return Object.values(by).filter(g => g.length > 1);
+}
+function hotkeyDedupeAfterReset(order, pinnedList) {
+const pin = new Set(pinnedList || []);
+const seen = new Set(), cleared = [];
+const keys = order.filter(k => pin.has(k)).concat(order.filter(k => !pin.has(k)));
+keys.forEach(k => {
+const id = hotkeyComboId(config.hk[k]);
+if (!id) return;
+if (seen.has(id) && !pin.has(k)) { config.hk[k] = normalizeHotkeyBinding(null); cleared.push(k); return; }
+seen.add(id);
+});
+return cleared;
+}
+window.hotkeyComboId = hotkeyComboId;
 function resetHotkeysKeepPinned() {
 const pin = new Set(getHotkeyPinned());
 const keys = new Set(Object.keys(DEFAULT_CONFIG.hk).concat(Object.keys(config.hk || {})));
@@ -9747,16 +9788,54 @@ return;
 const usKey = mossadUsKeyForCode(e.code || '');
 const recKey = (usKey && /^[a-z]$/.test(usKey) && typeof e.key === 'string' && /[^\x00-\x7f]/.test(e.key)) ? usKey : e.key;
 const newHk = { key: recKey, code: e.code || '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
-setHk(newHk);
-btn.textContent = formatHotkey(cur());
-btn.style.color = '#3b82f6';
+assignWithConflictCheck(newHk);
 };
 document.addEventListener('keydown', handler, true);
 };
+const assignWithConflictCheck = (newHk) => {
+const prevBox = row.querySelector('.mossad-hk-conflict');
+if (prevBox) prevBox.remove();
+const others = hotkeyConflicts(k, newHk, Object.keys(keysMap));
+const pinNote = (rootDomain.includes('pinterest.') && typeof pinterestJumpMode === 'function' && pinterestJumpMode() !== 'off') &&
+!newHk.ctrl && !newHk.alt && !newHk.meta && PIN_JUMP_ALL_CODES.includes(newHk.code || mossadCodeForKey(newHk.key));
+if (!others.length) {
+setHk(newHk);
+btn.textContent = formatHotkey(cur()); btn.style.color = '#3b82f6';
+if (pinNote) showToast(L('hkPinJumpNote'));
+if (typeof modal._mossadPaintDupes === 'function') modal._mossadPaintDupes();
+return;
+}
+btn.textContent = formatHotkey(normalizeHotkeyBinding(newHk)); btn.style.color = '#fbbf24';
+const box = document.createElement('div');
+box.className = 'mossad-hk-conflict';
+box.style.cssText = 'flex-basis:100%; margin-top:6px; font-size:12px; color:#fbbf24; display:flex; gap:6px; align-items:center; flex-wrap:wrap;';
+const names = others.map(o => keysMap[o] || o).join(', ');
+box.innerHTML = `<span>${LH('hkConflict')} <b></b>. ${LH('hkConflictAsk')}</span>` +
+`<button class="mossad-hk-yes" style="background:#b91c1c;border:none;color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px;">${LH('hkYes')}</button>` +
+`<button class="mossad-hk-no" style="background:#374151;border:none;color:#e5e7eb;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px;">${LH('hkCancel')}</button>` +
+(pinNote ? `<span style="color:#9ca3af;">${LH('hkPinJumpNote')}</span>` : '');
+box.querySelector('b').textContent = names;
+row.style.flexWrap = 'wrap';
+row.appendChild(box);
+box.querySelector('.mossad-hk-yes').onclick = (ev) => {
+ev.stopPropagation();
+others.forEach(o => { config.hk[o] = normalizeHotkeyBinding(null); });
+setHk(newHk);
+box.remove();
+if (typeof modal._mossadRenderHotkeys === 'function') modal._mossadRenderHotkeys();
+showToast(`⌨️ ${formatHotkey(cur())} → ${keysMap[k] || k}; ${L('hkCleared')} ${names}`);
+};
+box.querySelector('.mossad-hk-no').onclick = (ev) => {
+ev.stopPropagation();
+box.remove();
+btn.textContent = formatHotkey(cur()); btn.style.color = '#3b82f6';
+};
+};
 resetBtn.onclick = () => {
 if (row.dataset.pinned) return;
-setHk(hotkeyDefaultFor(k));
-btn.textContent = formatHotkey(cur());
+const def = hotkeyDefaultFor(k);
+if (!normalizeHotkeyBinding(def).key) { setHk(def); btn.textContent = formatHotkey(cur()); return; }
+assignWithConflictCheck(def);
 };
 disableBtn.onclick = () => {
 setHk(null);
@@ -9799,6 +9878,21 @@ b.style.cursor = pinned ? 'default' : 'pointer';
 });
 row.style.borderColor = pinned ? 'rgba(251,191,36,0.45)' : '#374151';
 };
+const paintDupes = () => {
+const groups = hotkeyDuplicateGroups(Object.keys(keysMap));
+const dupOf = {};
+groups.forEach(g => g.forEach(k => { dupOf[k] = g.filter(x => x !== k); }));
+Array.from(list.children).forEach(r => {
+const b = r.querySelector && r.querySelector('.mossad-hk-key');
+if (!b) return;
+const d = dupOf[r.dataset.hk];
+b.style.outline = d ? '2px solid #ef4444' : '';
+b.style.color = d ? '#f87171' : '#3b82f6';
+b.title = d ? `${L('hkDupHint')} ${d.map(x => keysMap[x] || x).join(', ')}` : '';
+r.dataset.dup = d ? '1' : '';
+});
+};
+modal._mossadPaintDupes = paintDupes;
 const renderHotkeyList = () => {
 list.innerHTML = '';
 const pinned = new Set(getHotkeyPinned());
@@ -9807,6 +9901,7 @@ const row = renderHotkeyRow(k);
 paintPinned(row, pinned.has(k));
 list.append(row);
 });
+paintDupes();
 };
 const commitOrder = (order) => {
 const byKey = {};
@@ -10053,6 +10148,8 @@ modal.querySelector('#mossad-hk-reset').onclick = () => {
 const src = readHotkeyDefaults() ? 'сохранённым умолчаниям' : 'заводским';
 if (!confirm(`Сбросить горячие клавиши к ${src}? Закреплённые 🔒 не изменятся.`)) return;
 const n = resetHotkeysKeepPinned();
+const cleared = hotkeyDedupeAfterReset(orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()), getHotkeyPinned());
+if (cleared.length) setTimeout(() => showToast(`⚠️ ${L('hkResetCleared')} ${cleared.map(x => keysMap[x] || x).join(', ')}`, true), 1200);
 if (typeof window.saveGlobalHotkeys === 'function') window.saveGlobalHotkeys(false);
 else Settings.save();
 renderHotkeyList();
