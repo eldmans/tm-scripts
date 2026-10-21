@@ -10,7 +10,7 @@
 
     // ── v1.3.45: память последней вкладки (UI-состояние — localStorage, как размеры списка/позиция виджета) ──
     const SETTINGS_TAB_LS_KEY = 'mossad_settings_tab';
-    const SETTINGS_TABS = ['general', 'hotkeys', 'defaults', 'labels', 'todos'];
+    const SETTINGS_TABS = ['general', 'hotkeys', 'defaults', 'labels', 'todos', 'sites'];
     function getLastSettingsTab(fallback = 'hotkeys') {
         try {
             const t = localStorage.getItem(SETTINGS_TAB_LS_KEY);
@@ -385,7 +385,7 @@
         status.textContent = `Своих подписей: ${Object.keys(mossadGetLabelOverrides()).length}`;
     }
 
-    /** tab: 'general' | 'hotkeys' | 'defaults' | 'labels'; не задан / 'last' — последняя открытая вкладка (v1.3.45). */
+    /** tab: 'general' | 'hotkeys' | 'defaults' | 'labels' | 'todos' | 'sites'; не задан / 'last' — последняя открытая вкладка (v1.3.45). */
     function openSettingsWindow(tab) {
         if (!SETTINGS_TABS.includes(tab)) tab = getLastSettingsTab();
         const existing = document.getElementById('mossad-hk-modal');
@@ -414,6 +414,7 @@
               <button data-tab="defaults" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Общие умолчания для всех сайтов без своих сохранённых настроек" data-mossad-label="tabDefaults">${LH('tabDefaults')}</button>
               <button data-tab="labels" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Свои подписи кнопок MOSSAD (для всех сайтов)" data-mossad-label="tabLabels">${LH('tabLabels')}</button>
               <button data-tab="todos" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Задачи для ассистента (текст + фото)" data-mossad-label="tabTodos">${LH('tabTodos')}</button>
+              <button data-tab="sites" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="На каких сайтах работает MOSSAD (общий список для всех контейнеров)" data-mossad-label="tabSites">${LH('tabSites')}</button>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
@@ -448,7 +449,7 @@
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-19</span>
+              <span>v${SCRIPT_VERSION} · 2026-10-21</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -479,6 +480,7 @@
             </div>
             <div data-pane="labels" style="display:none; flex-direction:column; gap:6px;"></div>
             <div data-pane="todos" style="display:none; flex-direction:column; gap:6px;"></div>
+            <div data-pane="sites" style="display:none; flex-direction:column; gap:6px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <span></span>
                 <div style="display:flex; gap:6px;">
@@ -765,6 +767,7 @@
             rememberSettingsTab(want); // v1.3.45
             if (want === 'labels') initLabelsTab(modal); // v1.3.46: строится лениво, при первом открытии вкладки
             if (want === 'todos') initTodosTab(modal);   // v1.3.49: тоже лениво (фото читаются только здесь)
+            if (want === 'sites') initSitesTab(modal);   // v1.3.50: тоже лениво
             modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
             modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
                 const on = b.dataset.tab === want;

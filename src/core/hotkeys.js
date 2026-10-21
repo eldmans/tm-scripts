@@ -361,9 +361,12 @@
         }
         
         if (hotkeyMatches(e, config.hk.deleteVid)) {
-            if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
-            e.preventDefault();
-            runSmartDelete();
+            // v1.3.50: гасим Delete только там, где MOSSAD его обрабатывает (пост Grok); на остальных
+            // сайтах клавиша остаётся сайту (runSmartDelete там ничего не делает — ANTI_PATTERNS §26, §29)
+            if (rootDomain === 'grok.com' && isGrokPostPage()) {
+                e.preventDefault();
+                runSmartDelete();
+            }
         }
 
         if (hotkeyMatches(e, config.hk.sound)) {

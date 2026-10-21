@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.49
+// @version      1.3.50
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -12,6 +12,8 @@
 // @grant        GM_getValue
 // @grant        GM_addValueChangeListener
 // @grant        GM_deleteValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @connect      pinimg.com
 // @connect      *.pinimg.com
 // @connect      *
@@ -23,7 +25,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.49';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.50';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -36,30 +38,124 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
     const rootDomain = getRootDomain(hostname);
     const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
 
-    // Загрузка конфига из localStorage для проверки allowedDomains
-    const _quickCfg = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } })();
-    const _allowedDomains = _quickCfg.allowedDomains || ['grok.com','redgifs.com','pinterest.com','pinterest.ru','civitai.red','vkvideo.ru','vk.video','noodlemagazine.com','instagram.com'];
-    const _isAllowed = _allowedDomains.some(d => hostname.includes(d.split('/')[0]));
-    if (!_isAllowed) {
-        // Показываем маленькую кнопку «+ Добавить сайт в MOSSAD»
-        document.addEventListener('DOMContentLoaded', () => {
-            const btn = document.createElement('button');
-            btn.id = 'mossad-add-site';
-            btn.textContent = '➕ MOSSAD';
-            btn.title = 'Добавить этот сайт в MOSSAD';
-            btn.style.cssText = 'position:fixed;bottom:12px;right:12px;z-index:9999999;background:rgba(20,20,20,0.85);color:#60a5fa;border:1px solid #374151;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;font-family:system-ui;backdrop-filter:blur(8px);';
-            btn.onclick = () => {
-                const cfg = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } })();
-                const domains = cfg.allowedDomains || _allowedDomains;
-                if (!domains.includes(hostname)) domains.push(hostname);
-                cfg.allowedDomains = domains;
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
-                btn.textContent = '✅ Добавлено! Перезагрузи страницу';
-                btn.style.color = '#10b981';
+    // ── v1.3.50: список сайтов MOSSAD ──
+    // Встроенные сайты + свои сайты пользователя в GM-ключе `mossad_sites` (общий для всех сайтов и
+    // контейнеров). Сравнение по суффиксу: host === d или host оканчивается на '.' + d
+    // (раньше было hostname.includes(d) — «grok.com.evil.net» тоже проходил).
+    // Старый per-site localStorage `allowedDomains` читается и переносится в GM, но больше не пишется.
+    // Добавить/убрать сайт — команда в меню Tampermonkey или вкладка «🌍 Сайты» (Ctrl+F1).
+    // На сайте не из списка скрипт регистрирует ТОЛЬКО команду меню: ни DOM, ни слушателей.
+    const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'];
+    const MOSSAD_SITES_GM_KEY = 'mossad_sites';
+
+    /** «https://www.Site.com:8080/path» → «site.com»; мусор → ''. */
+    function mossadNormSite(s) {
+        let d = String(s == null ? '' : s).trim().toLowerCase();
+        d = d.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').split(/[/?#]/)[0].replace(/:\d+$/, '');
+        d = d.replace(/^\*\./, '').replace(/^\.+|\.+$/g, '').replace(/^www\./, '');
+        return /^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(d) ? d : '';
+    }
+    function mossadHostMatches(host, site) {
+        const d = mossadNormSite(site);
+        const h = String(host || '').toLowerCase();
+        return !!d && (h === d || h.endsWith('.' + d));
+    }
+    function mossadReadUserSites() {
+        let raw = null;
+        try { if (typeof GM_getValue === 'function') raw = GM_getValue(MOSSAD_SITES_GM_KEY, null); } catch (e) {}
+        let arr = raw;
+        try { if (typeof raw === 'string') arr = JSON.parse(raw); } catch (e) { arr = null; }
+        if (!Array.isArray(arr)) return [];
+        const out = [];
+        for (const x of arr) { const d = mossadNormSite(x); if (d && !out.includes(d)) out.push(d); }
+        return out;
+    }
+    function mossadWriteUserSites(list) {
+        const out = [];
+        for (const x of (list || [])) { const d = mossadNormSite(x); if (d && !out.includes(d) && !MOSSAD_BUILTIN_SITES.includes(d)) out.push(d); }
+        try { if (typeof GM_setValue === 'function') { GM_setValue(MOSSAD_SITES_GM_KEY, JSON.stringify(out)); return out; } } catch (e) {}
+        return null;
+    }
+    function mossadIsBuiltinHost(host) { return MOSSAD_BUILTIN_SITES.some(d => mossadHostMatches(host, d)); }
+    function mossadIsHostAllowed(host) { return mossadIsBuiltinHost(host) || mossadReadUserSites().some(d => mossadHostMatches(host, d)); }
+    /** Добавить сайт в общий список. Возвращает нормализованный домен или '' (мусор/нет GM). */
+    function mossadAddUserSite(site) {
+        const d = mossadNormSite(site);
+        if (!d) return '';
+        if (MOSSAD_BUILTIN_SITES.includes(d)) return d;
+        const list = mossadReadUserSites();
+        if (!list.includes(d)) list.push(d);
+        return mossadWriteUserSites(list) ? d : '';
+    }
+    /** Убрать из своего списка все записи, под которые попадает host (или ровно этот домен). */
+    function mossadRemoveUserSite(hostOrSite) {
+        const h = mossadNormSite(hostOrSite);
+        const list = mossadReadUserSites();
+        const keep = list.filter(d => d !== h && !mossadHostMatches(h, d));
+        if (keep.length === list.length) return 0;
+        return mossadWriteUserSites(keep) ? list.length - keep.length : 0;
+    }
+
+    // Миграция: свои домены из старого per-site localStorage `allowedDomains` → GM (один раз, при чтении)
+    try {
+        const _legacyCfg = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        if (_legacyCfg && Array.isArray(_legacyCfg.allowedDomains) && typeof GM_setValue === 'function') {
+            const cur = mossadReadUserSites();
+            const add = _legacyCfg.allowedDomains.map(mossadNormSite).filter(d => d && !MOSSAD_BUILTIN_SITES.includes(d) && !cur.includes(d));
+            if (add.length) { mossadWriteUserSites(cur.concat(add)); console.log('[MOSSAD] v1.3.50: сайты перенесены в общий список:', add.join(', ')); }
+            // Убрать старый ключ сразу, иначе удалённый во «🌍 Сайты» домен вернулся бы при следующей загрузке
+            delete _legacyCfg.allowedDomains;
+            // (старая кнопка «➕ MOSSAD» писала конфиг только из allowedDomains — пустой удаляем, чтобы сайт жил на 🌐 общих умолчаниях)
+            if (Object.keys(_legacyCfg).length) localStorage.setItem(STORAGE_KEY, JSON.stringify(_legacyCfg));
+            else localStorage.removeItem(STORAGE_KEY);
+        }
+    } catch (e) {}
+
+    const _isAllowed = mossadIsHostAllowed(hostname);
+
+    // Команда меню Tampermonkey: «➕ Добавить этот сайт» / «➖ Убрать этот сайт» (встроенный — только «🌍 Сайты»)
+    let _mossadMenuId = null;
+    function mossadRegisterSiteMenu() {
+        if (typeof GM_registerMenuCommand !== 'function') return;
+        try { if (_mossadMenuId !== null && typeof GM_unregisterMenuCommand === 'function') GM_unregisterMenuCommand(_mossadMenuId); } catch (e) {}
+        _mossadMenuId = null;
+        const builtin = mossadIsBuiltinHost(hostname);
+        const added = !builtin && mossadIsHostAllowed(hostname);
+        let title, fn;
+        if (builtin) {
+            if (!_isAllowed || typeof openSettingsWindow !== 'function') return;
+            title = '🌍 Сайты MOSSAD';
+            fn = () => { try { openSettingsWindow('sites'); } catch (e) {} };
+        } else if (added) {
+            title = '➖ Убрать этот сайт из MOSSAD';
+            fn = () => {
+                mossadRemoveUserSite(hostname);
+                mossadRegisterSiteMenu();
+                if (confirm(`MOSSAD: ${hostname} убран из списка сайтов.\nПерезагрузить страницу, чтобы выключить скрипт здесь?`)) location.reload();
             };
-            document.body.appendChild(btn);
-        });
-        return; // Выход — сайт не в списке
+        } else {
+            title = '➕ Добавить этот сайт в MOSSAD';
+            fn = () => {
+                const d = mossadAddUserSite(hostname);
+                if (!d) { alert('MOSSAD: не удалось сохранить (GM-хранилище недоступно)'); return; }
+                mossadRegisterSiteMenu();
+                if (confirm(`MOSSAD: ${d} добавлен в список сайтов.\nПерезагрузить страницу, чтобы включить скрипт здесь?`)) location.reload();
+            };
+        }
+        try { _mossadMenuId = GM_registerMenuCommand(title, fn); } catch (e) {}
+    }
+    mossadRegisterSiteMenu();
+    if (!_isAllowed) return; // Выход — сайт не в списке (только команда меню, без DOM и слушателей)
+
+    // Список изменили в другой вкладке/контейнере — обновить подпись команды меню и вкладку «🌍 Сайты»
+    if (typeof GM_addValueChangeListener === 'function') {
+        try {
+            GM_addValueChangeListener(MOSSAD_SITES_GM_KEY, (name, oldVal, newVal, remote) => {
+                if (!remote) return;
+                mossadRegisterSiteMenu();
+                try { mossadSitesRerender(); } catch (e) {}
+            });
+        } catch (e) {}
     }
 
 // ============================================
@@ -82,7 +178,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         deleteAutoconfirm: true,      // hold post включён (один чекбокс управляет обоими флагами, ANTI_PATTERNS §2)
         deleteHoldpost: true,
         allowDuplicates: false,       // Дубли: качать дубликаты сразу без подтверждения
-        allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
+        // v1.3.50: allowedDomains убран — список сайтов в GM `mossad_sites` (domain.js, вкладка «🌍 Сайты»)
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
         filenameTemplate: '{id8}-{domain[4]}~{RadugaStud}',  // шаблон имени файла по умолчанию (для всех сайтов)
@@ -262,8 +358,9 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
 
     /** JSON конфига для localStorage — без githubToken (если доступно GM-хранилище). */
     function serializeLocalConfig() {
-        if (!_hasGmStore) return JSON.stringify(config);
         const copy = Object.assign({}, config);
+        delete copy.allowedDomains; // v1.3.50: старый per-site список сайтов больше не пишется (перенесён в GM)
+        if (!_hasGmStore) return JSON.stringify(copy);
         delete copy.githubToken;
         return JSON.stringify(copy);
     }
@@ -626,6 +723,7 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         // Экспортируем конфиг без токена
         const exportCfg = JSON.parse(JSON.stringify(config));
         delete exportCfg.githubToken;
+        delete exportCfg.allowedDomains; // v1.3.50: список сайтов живёт в GM `mossad_sites`
         const content = btoa(unescape(encodeURIComponent(JSON.stringify(exportCfg, null, 2))));
         
         const body = JSON.stringify({
@@ -1529,6 +1627,13 @@ const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_i
         ['todoGitHub',     '📤 На GitHub',  'кнопка отправки задач в issue на GitHub'],
         ['todoExport',     '💾 Экспорт',    'кнопка экспорта в HTML-файл с фото'],
         ['todoClearDone',  'Удалить выполненные', 'кнопка удаления выполненных задач'],
+        ['#', 'Сайты (v1.3.50)'],
+        ['tabSites',       '🌍 Сайты',      'вкладка списка сайтов в окне настроек'],
+        ['sitesAdd',       'Добавить',      'кнопка «Добавить сайт из поля»'],
+        ['sitesAddCurrent', '➕ Этот сайт', 'кнопка «Добавить текущий сайт»'],
+        ['sitesRemove',    '✕',             'кнопка «Убрать сайт» у строки'],
+        ['sitesBuiltin',   'Встроенные',    'заголовок списка встроенных сайтов'],
+        ['sitesUser',      'Свои',          'заголовок списка своих сайтов'],
         ['#', 'Уведомления'],
         ['toastClose',     '×',             'крестик на тосте звука'],
     ];
@@ -10079,6 +10184,90 @@ function findMediaForDownload() {
     }
 
 // ============================================
+    // SITES (v1.3.50): вкладка «🌍 Сайты» — где работает MOSSAD.
+    // Встроенные сайты (MOSSAD_BUILTIN_SITES, только чтение) + свои (GM `mossad_sites`, общий для всех
+    // сайтов и контейнеров; логика — src/core/domain.js). Строится лениво при первом открытии вкладки;
+    // один делегированный обработчик на списке. Добавление/удаление вступает в силу после перезагрузки
+    // страницы нужного сайта.
+    // ============================================
+    let _mossadSitesPane = null;
+
+    function mossadEscHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    /** Перерисовать список, если вкладка уже построена (вызывается и из GM-слушателя в domain.js). */
+    function mossadSitesRerender() {
+        const pane = _mossadSitesPane;
+        if (!pane || !pane.isConnected) { _mossadSitesPane = null; return; }
+        const user = mossadReadUserSites();
+        const here = (d) => mossadHostMatches(hostname, d) ? ' <span style="color:#10b981;" title="Текущий сайт">● здесь</span>' : '';
+        const chip = 'display:flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid #374151;border-radius:6px;background:#0b1220;font:12px ui-monospace,Consolas,monospace;color:#e5e7eb;';
+        pane.querySelector('#mossad-sites-builtin').innerHTML = MOSSAD_BUILTIN_SITES.map(d =>
+            `<div style="${chip}color:#9ca3af;" title="Встроенный сайт — убрать нельзя">🔒 ${mossadEscHtml(d)}${here(d)}</div>`).join('');
+        pane.querySelector('#mossad-sites-user').innerHTML = user.length ? user.map(d =>
+            `<div data-site="${mossadEscHtml(d)}" style="${chip}">${mossadEscHtml(d)}${here(d)}<button data-site-del="${mossadEscHtml(d)}" title="Убрать сайт из списка" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#f87171;padding:0 7px;cursor:pointer;font-size:11px;font-weight:bold;">${LH('sitesRemove')}</button></div>`).join('')
+            : '<div style="font-size:11px;color:#6b7280;">Пока пусто</div>';
+        const cur = pane.querySelector('#mossad-sites-add-current');
+        const curNorm = mossadNormSite(hostname);
+        const already = mossadIsBuiltinHost(hostname) || user.some(d => mossadHostMatches(hostname, d));
+        cur.disabled = already || !curNorm;
+        cur.style.opacity = cur.disabled ? '0.5' : '1';
+        cur.title = already ? `${hostname} уже в списке` : `Добавить ${curNorm}`;
+    }
+
+    function initSitesTab(modal) {
+        const pane = modal.querySelector('[data-pane="sites"]');
+        if (!pane || pane.dataset.built) return;
+        pane.dataset.built = '1';
+        _mossadSitesPane = pane;
+        const btnCss = 'background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;';
+        pane.innerHTML = `
+            <div style="font-size:11px;color:#9ca3af;line-height:1.35;">Сайты, где работает MOSSAD. Список общий для всех сайтов и контейнеров. Поддомены входят автоматически (<code>site.com</code> → <code>m.site.com</code>). То же — в меню Tampermonkey: «➕ Добавить этот сайт в MOSSAD».</div>
+            <div style="font-size:11px;color:#fbbf24;">⚠️ После добавления или удаления перезагрузи страницу того сайта.</div>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input id="mossad-sites-input" type="text" placeholder="example.com" spellcheck="false" style="flex:1;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:4px 6px;font-size:12px;">
+              <button id="mossad-sites-add" style="${btnCss}background:#065f46;border-color:#10b981;" data-mossad-label="sitesAdd">${LH('sitesAdd')}</button>
+              <button id="mossad-sites-add-current" style="${btnCss}color:#60a5fa;" data-mossad-label="sitesAddCurrent">${LH('sitesAddCurrent')}</button>
+            </div>
+            <div id="mossad-sites-status" style="font-size:11px;color:#9ca3af;min-height:14px;"></div>
+            <div style="overflow-y:auto;max-height:calc(85vh - 320px);display:flex;flex-direction:column;gap:6px;padding-right:4px;">
+              <div style="font-size:11px;color:#6b7280;" data-mossad-label="sitesUser">${LH('sitesUser')}</div>
+              <div id="mossad-sites-user" style="display:flex;flex-direction:column;gap:3px;"></div>
+              <div style="font-size:11px;color:#6b7280;margin-top:4px;" data-mossad-label="sitesBuiltin">${LH('sitesBuiltin')}</div>
+              <div id="mossad-sites-builtin" style="display:flex;flex-direction:column;gap:3px;"></div>
+            </div>`;
+        const input = pane.querySelector('#mossad-sites-input');
+        const status = pane.querySelector('#mossad-sites-status');
+        const say = (t, bad) => { status.textContent = t; status.style.color = bad ? '#f87171' : '#10b981'; };
+        const add = (raw) => {
+            const d = mossadNormSite(raw);
+            if (!d) { say('Не похоже на домен: ' + String(raw || '').slice(0, 60), true); return false; }
+            if (MOSSAD_BUILTIN_SITES.includes(d)) { say(`${d} — встроенный, уже работает`); return false; }
+            if (mossadReadUserSites().includes(d)) { say(`${d} уже в списке`); return false; }
+            if (!mossadAddUserSite(d)) { say('GM-хранилище недоступно', true); return false; }
+            say(`✅ ${d} добавлен — перезагрузи страницу сайта`);
+            mossadSitesRerender();
+            try { mossadRegisterSiteMenu(); } catch (e) {}
+            return true;
+        };
+        pane.querySelector('#mossad-sites-add').onclick = () => { if (add(input.value)) input.value = ''; };
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (add(input.value)) input.value = ''; } });
+        pane.querySelector('#mossad-sites-add-current').onclick = () => add(hostname);
+        pane.querySelector('#mossad-sites-user').addEventListener('click', (e) => {
+            const b = e.target && e.target.closest ? e.target.closest('[data-site-del]') : null;
+            if (!b) return;
+            const d = b.dataset.siteDel;
+            const list = mossadReadUserSites().filter(x => x !== d);
+            if (!mossadWriteUserSites(list)) { say('GM-хранилище недоступно', true); return; }
+            say(`${d} убран — перезагрузи страницу сайта`);
+            mossadSitesRerender();
+            try { mossadRegisterSiteMenu(); } catch (e2) {}
+        });
+        mossadSitesRerender();
+    }
+
+// ============================================
     // SETTINGS WINDOW (Ctrl+F1): вкладки «Общие» и «Горячие клавиши» (v1.3.40),
     // GitHub-синхронизация, опции виджета (вынесено из ui/panel.js в v1.3.35)
     // ============================================
@@ -10090,7 +10279,7 @@ function findMediaForDownload() {
 
     // ── v1.3.45: память последней вкладки (UI-состояние — localStorage, как размеры списка/позиция виджета) ──
     const SETTINGS_TAB_LS_KEY = 'mossad_settings_tab';
-    const SETTINGS_TABS = ['general', 'hotkeys', 'defaults', 'labels', 'todos'];
+    const SETTINGS_TABS = ['general', 'hotkeys', 'defaults', 'labels', 'todos', 'sites'];
     function getLastSettingsTab(fallback = 'hotkeys') {
         try {
             const t = localStorage.getItem(SETTINGS_TAB_LS_KEY);
@@ -10465,7 +10654,7 @@ function findMediaForDownload() {
         status.textContent = `Своих подписей: ${Object.keys(mossadGetLabelOverrides()).length}`;
     }
 
-    /** tab: 'general' | 'hotkeys' | 'defaults' | 'labels'; не задан / 'last' — последняя открытая вкладка (v1.3.45). */
+    /** tab: 'general' | 'hotkeys' | 'defaults' | 'labels' | 'todos' | 'sites'; не задан / 'last' — последняя открытая вкладка (v1.3.45). */
     function openSettingsWindow(tab) {
         if (!SETTINGS_TABS.includes(tab)) tab = getLastSettingsTab();
         const existing = document.getElementById('mossad-hk-modal');
@@ -10494,6 +10683,7 @@ function findMediaForDownload() {
               <button data-tab="defaults" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Общие умолчания для всех сайтов без своих сохранённых настроек" data-mossad-label="tabDefaults">${LH('tabDefaults')}</button>
               <button data-tab="labels" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Свои подписи кнопок MOSSAD (для всех сайтов)" data-mossad-label="tabLabels">${LH('tabLabels')}</button>
               <button data-tab="todos" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Задачи для ассистента (текст + фото)" data-mossad-label="tabTodos">${LH('tabTodos')}</button>
+              <button data-tab="sites" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="На каких сайтах работает MOSSAD (общий список для всех контейнеров)" data-mossad-label="tabSites">${LH('tabSites')}</button>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
@@ -10528,7 +10718,7 @@ function findMediaForDownload() {
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-19</span>
+              <span>v${SCRIPT_VERSION} · 2026-10-21</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -10559,6 +10749,7 @@ function findMediaForDownload() {
             </div>
             <div data-pane="labels" style="display:none; flex-direction:column; gap:6px;"></div>
             <div data-pane="todos" style="display:none; flex-direction:column; gap:6px;"></div>
+            <div data-pane="sites" style="display:none; flex-direction:column; gap:6px;"></div>
             <div style="display:flex; justify-content:space-between; margin-top:10px; gap:8px;">
                 <span></span>
                 <div style="display:flex; gap:6px;">
@@ -10845,6 +11036,7 @@ function findMediaForDownload() {
             rememberSettingsTab(want); // v1.3.45
             if (want === 'labels') initLabelsTab(modal); // v1.3.46: строится лениво, при первом открытии вкладки
             if (want === 'todos') initTodosTab(modal);   // v1.3.49: тоже лениво (фото читаются только здесь)
+            if (want === 'sites') initSitesTab(modal);   // v1.3.50: тоже лениво
             modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
             modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
                 const on = b.dataset.tab === want;
@@ -11374,9 +11566,12 @@ function findMediaForDownload() {
         }
         
         if (hotkeyMatches(e, config.hk.deleteVid)) {
-            if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
-            e.preventDefault();
-            runSmartDelete();
+            // v1.3.50: гасим Delete только там, где MOSSAD его обрабатывает (пост Grok); на остальных
+            // сайтах клавиша остаётся сайту (runSmartDelete там ничего не делает — ANTI_PATTERNS §26, §29)
+            if (rootDomain === 'grok.com' && isGrokPostPage()) {
+                e.preventDefault();
+                runSmartDelete();
+            }
         }
 
         if (hotkeyMatches(e, config.hk.sound)) {

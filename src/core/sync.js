@@ -54,6 +54,7 @@
         // Экспортируем конфиг без токена
         const exportCfg = JSON.parse(JSON.stringify(config));
         delete exportCfg.githubToken;
+        delete exportCfg.allowedDomains; // v1.3.50: список сайтов живёт в GM `mossad_sites`
         const content = btoa(unescape(encodeURIComponent(JSON.stringify(exportCfg, null, 2))));
         
         const body = JSON.stringify({

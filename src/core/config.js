@@ -18,7 +18,7 @@
         deleteAutoconfirm: true,      // hold post включён (один чекбокс управляет обоими флагами, ANTI_PATTERNS §2)
         deleteHoldpost: true,
         allowDuplicates: false,       // Дубли: качать дубликаты сразу без подтверждения
-        allowedDomains: ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'],
+        // v1.3.50: allowedDomains убран — список сайтов в GM `mossad_sites` (domain.js, вкладка «🌍 Сайты»)
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
         filenameTemplate: '{id8}-{domain[4]}~{RadugaStud}',  // шаблон имени файла по умолчанию (для всех сайтов)
@@ -198,8 +198,9 @@
 
     /** JSON конфига для localStorage — без githubToken (если доступно GM-хранилище). */
     function serializeLocalConfig() {
-        if (!_hasGmStore) return JSON.stringify(config);
         const copy = Object.assign({}, config);
+        delete copy.allowedDomains; // v1.3.50: старый per-site список сайтов больше не пишется (перенесён в GM)
+        if (!_hasGmStore) return JSON.stringify(copy);
         delete copy.githubToken;
         return JSON.stringify(copy);
     }

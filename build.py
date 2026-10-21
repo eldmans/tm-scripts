@@ -36,6 +36,7 @@ MODULES = [
     "src/engines/pinterest.js",
     "src/ui/panel.js",
     "src/ui/todos.js",
+    "src/ui/sites.js",
     "src/ui/settings-modal.js",
     "src/core/hotkeys.js"
 ]
