@@ -56,6 +56,7 @@
    python build.py --verify
    ```
    *(Синтаксис проверяется через `node --check`, если Node.js есть в PATH; иначе — через Chrome/Edge на Windows.)*
+   *(С v1.3.54 бандл собирается сжатым — без комментариев и отступов — и всё, кроме `src/core/domain.js`, лежит внутри `function mossadMain()`, которая запускается только на сайтах из списка. Подробности и грабли — ANTI_PATTERNS §33.)*
 4. Фиксируем в Git:
    ```bash
    git add .
