@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.66
+// @version      1.3.67
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -214,6 +214,209 @@ mossadDndMenu(el, e.clientX, e.clientY);
 window.addEventListener('click', _dndOnClick, true);
 window.addEventListener('contextmenu', _dndOnContext, true);
 
+// ── src/light/speed.js ──
+const MOSSAD_SPEED_GM_KEY = 'mossad_speed';
+const MOSSAD_SPEED_LIST_DEFAULT = '0.1,0.2,0.3,0.5,0.7,0.8,0.9,1,1.1,1.2,1.3,1.5,1.7,2,2.5,3,4,5,7.5,10,15,20';
+const MOSSAD_SPEED_ACTIONS = [
+['badge', 'Показать/скрыть скорость'], ['slower', 'Медленнее'], ['faster', 'Быстрее'],
+['rewind', 'Перемотка назад'], ['advance', 'Вперёд'], ['reset', 'Сброс'], ['fav', 'Любимая скорость'],
+];
+const _spRow = (a, code, key, v) => ({ a, code, key, ctrl: false, alt: false, shift: false, v: v == null ? '' : String(v) });
+const MOSSAD_SPEED_ROWS_DEFAULT = [
+_spRow('badge', 'F2', 'F2'), _spRow('slower', 'KeyW', 'w'), _spRow('faster', 'KeyE', 'e'),
+_spRow('rewind', 'KeyZ', 'z', 5), _spRow('advance', 'KeyX', 'x', 5), _spRow('reset', 'KeyR', 'r'),
+_spRow('fav', 'KeyG', 'g', 2), _spRow('advance', 'KeyV', 'v', 30), _spRow('rewind', 'KeyC', 'c', 30),
+_spRow('rewind', 'Numpad0', '0', 5), _spRow('advance', 'NumpadDecimal', '.', 5), _spRow('reset', 'Numpad3', '3'),
+];
+let _spCfg = null;
+function mossadSpeedCfg(fresh) {
+if (_spCfg && !fresh) return _spCfg;
+let o = null;
+try { if (typeof GM_getValue === 'function') o = GM_getValue(MOSSAD_SPEED_GM_KEY, null); } catch (e) {}
+try { if (typeof o === 'string') o = JSON.parse(o); } catch (e) { o = null; }
+o = (o && typeof o === 'object') ? o : {};
+_spCfg = {
+enabled: o.enabled !== false, remember: o.remember !== false, hold: o.hold !== false, audio: !!o.audio,
+badge: ['off', 'ne1', 'always'].includes(o.badge) ? o.badge : 'ne1',
+list: typeof o.list === 'string' && o.list.trim() ? o.list : MOSSAD_SPEED_LIST_DEFAULT,
+rows: Array.isArray(o.rows) ? o.rows.filter(r => r && typeof r === 'object' && r.a) : MOSSAD_SPEED_ROWS_DEFAULT.map(r => Object.assign({}, r)),
+};
+return _spCfg;
+}
+function mossadSpeedSave(patch) {
+const c = Object.assign({}, mossadSpeedCfg(), patch || {});
+_spCfg = c;
+try { if (typeof GM_setValue === 'function') GM_setValue(MOSSAD_SPEED_GM_KEY, JSON.stringify(c)); } catch (e) {}
+return c;
+}
+if (typeof GM_addValueChangeListener === 'function') { try { GM_addValueChangeListener(MOSSAD_SPEED_GM_KEY, () => { _spCfg = null; }); } catch (e) {} }
+function mossadSpeedList() {
+const arr = String(mossadSpeedCfg().list).split(/[,;\s]+/).map(Number).filter(x => isFinite(x) && x > 0 && x <= 100);
+return Array.from(new Set(arr)).sort((a, b) => a - b);
+}
+function mossadSpeedMatch(e) {
+const c = mossadSpeedCfg();
+if (!c.enabled || !e.code) return null;
+return c.rows.find(r => r.code && r.code === e.code && !!r.ctrl === !!e.ctrlKey && !!r.alt === !!e.altKey && !!r.shift === !!e.shiftKey && !e.metaKey) || null;
+}
+function mossadSpeedBusyCodes() {
+const c = mossadSpeedCfg();
+return c.enabled ? c.rows.filter(r => r.code && !r.ctrl && !r.alt).map(r => r.code) : [];
+}
+const _sp = { x: -1, y: -1, last: 1, hidden: false, badge: null, badgeFor: null, onMove: null };
+function _spEditable(el) {
+if (!el || !el.tagName) return false;
+const t = el.tagName;
+if (t === 'TEXTAREA' || t === 'SELECT') return true;
+if (t === 'INPUT') return !/^(checkbox|radio|button|submit|reset|range|color|file|image)$/i.test(el.type || '');
+return !!(el.isContentEditable || (el.closest && el.closest('[contenteditable=""],[contenteditable="true"],[role="textbox"]')));
+}
+function _spArea(v) {
+const r = v.getBoundingClientRect();
+const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+return Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+}
+function mossadSpeedTarget() {
+const audio = mossadSpeedCfg().audio;
+if (_sp.x >= 0 && document.elementsFromPoint) {
+for (const el of document.elementsFromPoint(_sp.x, _sp.y)) {
+if (el.tagName === 'VIDEO' || (audio && el.tagName === 'AUDIO')) return el;
+}
+}
+const all = Array.from(document.querySelectorAll(audio ? 'video, audio' : 'video'));
+if (!all.length) return null;
+const vis = (m) => m.tagName === 'AUDIO' ? 1 : _spArea(m);
+const best = (list) => { let b = null, mx = 0; for (const m of list) { const a = vis(m); if (a > mx) { mx = a; b = m; } } return b; };
+return best(all.filter(m => !m.paused && !m.ended)) || best(all) || (audio ? all.find(m => m.tagName === 'AUDIO') : null);
+}
+function _spFmt(r) { return (Math.round(r * 100) / 100).toString(); }
+function _spBadgeWanted(m) {
+const mode = mossadSpeedCfg().badge;
+if (mode === 'off' || _sp.hidden || !m || m.tagName !== 'VIDEO') return false;
+return mode === 'always' || Math.abs(m.playbackRate - 1) > 1e-6;
+}
+function _spPlaceBadge() {
+const b = _sp.badge, m = _sp.badgeFor;
+if (!b || !m) return;
+if (!m.isConnected || !_spBadgeWanted(m)) { _spHideBadge(); return; }
+const r = m.getBoundingClientRect();
+b.textContent = _spFmt(m.playbackRate) + '×';
+const host = document.fullscreenElement && document.fullscreenElement !== m && document.fullscreenElement.contains(m) ? document.fullscreenElement : (document.body || document.documentElement);
+if (b.parentNode !== host) host.appendChild(b);
+b.style.top = Math.max(0, r.top) + 'px';
+b.style.left = Math.max(0, r.right - (b.offsetWidth || 40)) + 'px';
+}
+function _spHideBadge() {
+if (_sp.badge) _sp.badge.remove();
+_sp.badge = null; _sp.badgeFor = null;
+if (_sp.onMove) { window.removeEventListener('scroll', _sp.onMove, true); window.removeEventListener('resize', _sp.onMove); _sp.onMove = null; }
+}
+function mossadSpeedShowBadge(m) {
+if (!_spBadgeWanted(m)) { if (!m || _sp.badgeFor === m || !_sp.badgeFor || mossadSpeedCfg().badge === 'off') _spHideBadge(); return; }
+if (!_sp.badge) {
+const b = document.createElement('div');
+b.id = 'mossad-speed-badge';
+b.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none;padding:1px 6px;border-radius:0 0 0 6px;background:rgba(0,0,0,0.65);' +
+'color:#fff;font:600 12px/16px system-ui,sans-serif;';
+_sp.badge = b;
+_sp.onMove = () => _spPlaceBadge();
+window.addEventListener('scroll', _sp.onMove, { capture: true, passive: true });
+window.addEventListener('resize', _sp.onMove, { passive: true });
+}
+_sp.badgeFor = m;
+_spPlaceBadge();
+}
+function _spRememberKey() { return 'mossad_speed_rate'; }
+function mossadSetRate(m, r) {
+r = Math.max(0.0625, Math.round(r * 1000) / 1000);
+m._mossadRate = r;
+m._mossadGuardUntil = Date.now() + 2000;
+try { m.playbackRate = r; } catch (e) { r = Math.min(r, 16); m._mossadRate = r; try { m.playbackRate = r; } catch (e2) {} }
+if (mossadSpeedCfg().remember) { try { localStorage.setItem(_spRememberKey(), String(r)); } catch (e) {} }
+mossadSpeedShowBadge(m);
+if (!_sp.badge || _sp.badgeFor !== m) mossadLightToast('⏩ ' + _spFmt(r) + '×');
+return r;
+}
+function mossadSpeedAction(row, m) {
+const list = mossadSpeedList();
+const cur = m.playbackRate || 1;
+const num = parseFloat(row.v);
+switch (row.a) {
+case 'badge':
+_sp.hidden = !_sp.hidden;
+if (_sp.hidden) _spHideBadge(); else { mossadSpeedShowBadge(m); if (!_sp.badge) mossadLightToast('⏩ ' + _spFmt(cur) + '×'); }
+return;
+case 'faster': case 'slower': {
+const up = row.a === 'faster';
+let next;
+if (isFinite(num) && num > 0) next = up ? cur + num : cur - num;
+else next = up ? (list.find(x => x > cur + 1e-6) || list[list.length - 1] || cur) : (list.slice().reverse().find(x => x < cur - 1e-6) || list[0] || cur);
+if (Math.abs(cur - 1) > 1e-6) _sp.last = cur;
+mossadSetRate(m, next);
+return;
+}
+case 'rewind': case 'advance': {
+const s = isFinite(num) ? num : 5;
+try { m.currentTime = Math.max(0, (m.currentTime || 0) + (row.a === 'advance' ? s : -s)); } catch (e) {}
+return;
+}
+case 'reset':
+if (Math.abs(cur - 1) > 1e-6) { _sp.last = cur; mossadSetRate(m, 1); }
+else mossadSetRate(m, _sp.last && Math.abs(_sp.last - 1) > 1e-6 ? _sp.last : 1);
+return;
+case 'fav':
+if (Math.abs(cur - 1) > 1e-6) _sp.last = cur;
+mossadSetRate(m, isFinite(num) && num > 0 ? num : 2);
+return;
+}
+}
+function _spOnKey(e) {
+if (e.repeat && !/^(faster|slower|rewind|advance)$/.test((mossadSpeedMatch(e) || {}).a || '')) return;
+if (window.capturingFor != null || window.mossadSpeedCapturing) return;
+const row = mossadSpeedMatch(e);
+if (!row || _spEditable(document.activeElement) || _spEditable(e.target)) return;
+const m = mossadSpeedTarget();
+if (!m) return;
+mossadSpeedAction(row, m);
+}
+window.addEventListener('keydown', _spOnKey, true);
+window.addEventListener('pointermove', (e) => { _sp.x = e.clientX; _sp.y = e.clientY; }, { capture: true, passive: true });
+window.addEventListener('ratechange', (e) => {
+const m = e.target;
+if (!m || m._mossadRate == null) { if (m === _sp.badgeFor) _spPlaceBadge(); return; }
+if (Math.abs(m.playbackRate - m._mossadRate) > 1e-6 && (Date.now() < m._mossadGuardUntil || mossadSpeedCfg().hold)) {
+try { m.playbackRate = m._mossadRate; } catch (err) {}
+return;
+}
+if (m === _sp.badgeFor) _spPlaceBadge();
+}, true);
+window.addEventListener('play', (e) => {
+const m = e.target;
+const c = mossadSpeedCfg();
+if (!c.enabled || !m || (m.tagName !== 'VIDEO' && !(c.audio && m.tagName === 'AUDIO'))) return;
+if (c.remember && m._mossadRate == null) {
+let r = NaN;
+try { r = parseFloat(localStorage.getItem(_spRememberKey())); } catch (err) {}
+if (isFinite(r) && r > 0 && Math.abs(r - (m.playbackRate || 1)) > 1e-6) { m._mossadRate = r; m._mossadGuardUntil = Date.now() + 2000; try { m.playbackRate = r; } catch (err) {} }
+}
+if (c.badge === 'always' || (m._mossadRate != null && Math.abs(m.playbackRate - 1) > 1e-6)) mossadSpeedShowBadge(m);
+}, true);
+function mossadSpeedOwners(binding, comboId, exceptIdx) {
+const id = comboId(binding);
+if (!id) return [];
+const c = mossadSpeedCfg();
+const names = Object.fromEntries(MOSSAD_SPEED_ACTIONS);
+return c.rows.map((r, i) => ({ r, i })).filter(({ r, i }) => i !== exceptIdx && r.code && comboId({ key: r.key, code: r.code, ctrl: r.ctrl, alt: r.alt, shift: r.shift }) === id)
+.map(({ r, i }) => ({ label: '🎬 ' + (names[r.a] || r.a) + (r.v !== '' ? ' ' + r.v : ''), clear: () => {
+const rows = mossadSpeedCfg().rows.slice(); if (rows[i]) rows[i] = Object.assign({}, rows[i], { code: '', key: '' }); mossadSpeedSave({ rows });
+} }));
+}
+function mossadSpeedComboId(b) {
+if (!b || !(b.code || b.key)) return '';
+return [b.ctrl, b.alt, b.shift].map(x => x ? 1 : 0).join('') + '|' + (b.code || String(b.key).toLowerCase());
+}
+let mossadLightHkHook = null;
+
 // ── src/light/ui.js ──
 const mossadLightSections = [];
 mossadLightSections.push({ id: 'dnd', render(box) {
@@ -230,6 +433,82 @@ sec.innerHTML = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">⬇
 sec.querySelector('[data-dnd-cfg="enabled"]').onchange = (e) => mossadDndSave({ enabled: e.target.checked });
 const f = sec.querySelector('[data-dnd-cfg="folder"]');
 f.onchange = () => { const v = mossadDndNormFolder(f.value); f.value = v; mossadDndSave({ folder: v }); };
+box.appendChild(sec);
+} });
+mossadLightSections.push({ id: 'speed', render(box) {
+const c = mossadSpeedCfg(true);
+const esc = (x) => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+const inCss = 'background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;';
+const sec = document.createElement('div');
+sec.setAttribute('data-light', 'speed');
+sec.style.cssText = 'background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:#d1d5db;';
+const keyLabel = (r) => r.code ? [r.ctrl && 'Ctrl', r.alt && 'Alt', r.shift && 'Shift', r.code.replace(/^Key|^Digit/, '').replace(/^Numpad/, 'Num ').replace('Num Decimal', 'Num .')].filter(Boolean).join('+') : '—';
+const cb = (k, t) => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:3px;"><input data-sp-cfg="${k}" type="checkbox" ${c[k] ? 'checked' : ''} style="accent-color:#3b82f6;"> ${t}</label>`;
+sec.innerHTML = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">⏩ Видео / скорость (все сайты)</div>
+            <div data-sp-rows style="display:flex;flex-direction:column;gap:3px;margin-bottom:4px;"></div>
+            <button data-sp-add style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#e5e7eb;padding:2px 10px;cursor:pointer;font-size:12px;margin-bottom:8px;">+ Добавить</button>
+            ${cb('enabled', 'Включено')}${cb('remember', 'Запоминать скорость')}${cb('hold', 'Удерживать скорость (если сайт её сбрасывает)')}${cb('audio', 'Работать на аудио')}
+            <label style="display:flex;align-items:center;gap:6px;margin:4px 0;">Значок скорости:
+              <select data-sp-cfg="badge" style="${inCss}"><option value="off">не показывать</option><option value="ne1">показывать, когда ≠ 1</option><option value="always">всегда</option></select></label>
+            <label style="display:flex;align-items:center;gap:6px;">Скорости:
+              <input data-sp-cfg="list" type="text" value="${esc(c.list)}" style="flex:1;min-width:0;${inCss}"></label>
+            <div style="color:#9ca3af;line-height:1.35;margin-top:4px;">Медленнее/Быстрее: значение пусто — соседняя скорость из списка, число — шаг. Назад/Вперёд — секунды. Сброс: ≠1 → 1, при 1 — прошлая. Клавиши работают на всех сайтах, кроме полей ввода.</div>`;
+sec.querySelector('[data-sp-cfg="badge"]').value = c.badge;
+['enabled', 'remember', 'hold', 'audio'].forEach(k => { sec.querySelector(`[data-sp-cfg="${k}"]`).onchange = (e) => mossadSpeedSave({ [k]: e.target.checked }); });
+sec.querySelector('[data-sp-cfg="badge"]').onchange = (e) => { mossadSpeedSave({ badge: e.target.value }); };
+const listIn = sec.querySelector('[data-sp-cfg="list"]');
+listIn.onchange = () => { const v = listIn.value.trim() || MOSSAD_SPEED_LIST_DEFAULT; mossadSpeedSave({ list: v }); listIn.value = v; };
+const rowsBox = sec.querySelector('[data-sp-rows]');
+const opts = MOSSAD_SPEED_ACTIONS.map(([k, t]) => `<option value="${k}">${t}</option>`).join('');
+const setRows = (rows) => { mossadSpeedSave({ rows }); paint(); };
+const paint = () => {
+const rows = mossadSpeedCfg().rows;
+rowsBox.innerHTML = rows.map((r, i) => `<div data-sp-row="${i}" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                <select data-sp="a" style="width:190px;${inCss}">${opts}</select>
+                <button data-sp="key" style="min-width:70px;${inCss}cursor:pointer;color:#93c5fd;font-weight:bold;">${esc(keyLabel(r))}</button>
+                <input data-sp="v" type="text" value="${esc(r.v)}" placeholder="${r.a === 'slower' || r.a === 'faster' ? 'шаг списка' : (r.a === 'fav' ? '2' : (r.a === 'reset' || r.a === 'badge' ? '' : '5'))}" ${r.a === 'reset' || r.a === 'badge' ? 'disabled' : ''} style="width:60px;${inCss}">
+                <button data-sp="x" title="Удалить строку" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#f87171;cursor:pointer;padding:1px 7px;">X</button></div>`).join('');
+rowsBox.querySelectorAll('[data-sp-row]').forEach(el => { el.querySelector('[data-sp="a"]').value = rows[+el.dataset.spRow].a; });
+};
+rowsBox.addEventListener('change', (e) => {
+const rowEl = e.target.closest('[data-sp-row]'); if (!rowEl) return;
+const i = +rowEl.dataset.spRow, rows = mossadSpeedCfg().rows.slice(), k = e.target.getAttribute('data-sp');
+if (k === 'a') { rows[i] = Object.assign({}, rows[i], { a: e.target.value }); setRows(rows); }
+if (k === 'v') { rows[i] = Object.assign({}, rows[i], { v: e.target.value.trim() }); mossadSpeedSave({ rows }); }
+});
+rowsBox.addEventListener('click', (e) => {
+const b = e.target.closest('button[data-sp]'); if (!b) return;
+e.preventDefault(); e.stopPropagation();
+const rowEl = b.closest('[data-sp-row]'); const i = +rowEl.dataset.spRow;
+if (b.dataset.sp === 'x') { const rows = mossadSpeedCfg().rows.slice(); rows.splice(i, 1); setRows(rows); return; }
+b.textContent = '...'; b.style.color = '#ef4444';
+window.mossadSpeedCapturing = true;
+const h = (ev) => {
+ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation();
+if (['Control', 'Shift', 'Alt', 'Meta', 'AltGraph'].includes(ev.key)) return;
+window.removeEventListener('keydown', h, true);
+window.mossadSpeedCapturing = false;
+if (ev.key === 'Escape') { paint(); return; }
+const nb = { key: ev.key, code: ev.code || '', ctrl: ev.ctrlKey, alt: ev.altKey, shift: ev.shiftKey };
+const own = mossadSpeedOwners(nb, mossadLightHkHook ? mossadLightHkHook.comboId : mossadSpeedComboId, i);
+const hk = mossadLightHkHook ? mossadLightHkHook.owners(nb) : [];
+const all = own.concat(hk);
+const apply = () => { const rows = mossadSpeedCfg().rows.slice(); rows[i] = Object.assign({}, rows[i], nb); setRows(rows); };
+if (!all.length) { apply(); return; }
+const box2 = document.createElement('div');
+box2.className = 'mossad-sp-conflict';
+box2.style.cssText = 'flex-basis:100%;color:#fbbf24;display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
+box2.innerHTML = '<span>Эта клавиша уже занята: <b></b>. Переназначить?</span><button data-yes style="background:#b91c1c;border:none;color:#fff;border-radius:4px;padding:1px 8px;cursor:pointer;">Да</button><button data-no style="background:#374151;border:none;color:#e5e7eb;border-radius:4px;padding:1px 8px;cursor:pointer;">Отмена</button>';
+box2.querySelector('b').textContent = all.map(o => o.label).join(', ');
+rowEl.appendChild(box2);
+b.textContent = keyLabel(Object.assign({ a: '' }, nb)); b.style.color = '#fbbf24';
+box2.querySelector('[data-yes]').onclick = (e2) => { e2.stopPropagation(); all.forEach(o => o.clear()); apply(); };
+box2.querySelector('[data-no]').onclick = (e2) => { e2.stopPropagation(); paint(); };
+};
+window.addEventListener('keydown', h, true);
+});
+sec.querySelector('[data-sp-add]').onclick = (e) => { e.preventDefault(); setRows(mossadSpeedCfg().rows.concat([_spRow('faster', '', '', '')])); };
+paint();
 box.appendChild(sec);
 } });
 function mossadLightRenderSettings(container) {
@@ -251,7 +530,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.66';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.67';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -359,6 +638,15 @@ function mossadMain() {
 
 // ── src/core/boot.js ──
 mossadOpenSettingsHook = openSettingsWindow;
+mossadLightHkHook = {
+comboId: (b) => hotkeyComboId(b),
+owners: (b) => {
+const id = hotkeyComboId(b);
+if (!id || !config.hk) return [];
+return Object.keys(config.hk).filter(k => hotkeyComboId(config.hk[k]) === id)
+.map(k => ({ label: 'MOSSAD: ' + k, clear: () => { config.hk[k] = normalizeHotkeyBinding(null); Settings.save(); } }));
+},
+};
 if (mossadIsBuiltinHost(hostname)) mossadRegisterSiteMenu();
 if (typeof GM_addValueChangeListener === 'function') {
 try {
@@ -399,7 +687,7 @@ collectWatchSec: 30,
 showSoundToast: true,
 debugSlideshow: false,
 pinterestMode: 'rand',
-grokNoPromptKeys: 'R',
+grokNoPromptKeys: 'RWEZXGVC',
 pinterestJumpKeys: 'off',
 pinterestDir: 'fwd',
 pinterestFilterType: 'ratio',
@@ -6051,11 +6339,13 @@ const l = _kgList();
 return (!!e.code && l.codes.has(e.code)) || (typeof e.key === 'string' && l.names.has(e.key));
 }
 function _kgMossadHotkey(e, needHandled) {
+if (!needHandled && mossadSpeedMatch(e)) return true;
 if ((needHandled && !e.defaultPrevented) || !config.hk) return false;
 for (const k of Object.keys(config.hk)) { if (hotkeyMatches(e, config.hk[k])) return true; }
 return false;
 }
 function _kgArm() { _kg.until = Date.now() + GROK_KEYGUARD_MS; _kg.prev = document.activeElement; }
+if (rootDomain === 'grok.com' && config.grokNoPromptKeys === 'R') { config.grokNoPromptKeys = 'RWEZXGVC'; try { persistLocalConfig(); } catch (e) {} }
 if (rootDomain === 'grok.com') {
 window.addEventListener('keydown', (e) => {
 if (isEditableElement(document.activeElement)) return;
@@ -8315,6 +8605,7 @@ const code = b.code || mossadCodeForKey(b.key);
 if (code) busy.add(code);
 }
 }
+mossadSpeedBusyCodes().forEach(c => busy.add(c));
 return busy;
 }
 function pinterestJumpCodes() {
@@ -10498,9 +10789,10 @@ const assignWithConflictCheck = (newHk) => {
 const prevBox = row.querySelector('.mossad-hk-conflict');
 if (prevBox) prevBox.remove();
 const others = hotkeyConflicts(k, newHk, Object.keys(keysMap));
+const spd = mossadSpeedOwners(newHk, hotkeyComboId);
 const pinNote = (rootDomain.includes('pinterest.') && typeof pinterestJumpMode === 'function' && pinterestJumpMode() !== 'off') &&
 !newHk.ctrl && !newHk.alt && !newHk.meta && PIN_JUMP_ALL_CODES.includes(newHk.code || mossadCodeForKey(newHk.key));
-if (!others.length) {
+if (!others.length && !spd.length) {
 setHk(newHk);
 btn.textContent = formatHotkey(cur()); btn.style.color = '#3b82f6';
 if (pinNote) showToast(L('hkPinJumpNote'));
@@ -10511,7 +10803,7 @@ btn.textContent = formatHotkey(normalizeHotkeyBinding(newHk)); btn.style.color =
 const box = document.createElement('div');
 box.className = 'mossad-hk-conflict';
 box.style.cssText = 'flex-basis:100%; margin-top:6px; font-size:12px; color:#fbbf24; display:flex; gap:6px; align-items:center; flex-wrap:wrap;';
-const names = others.map(o => keysMap[o] || o).join(', ');
+const names = others.map(o => keysMap[o] || o).concat(spd.map(o => o.label)).join(', ');
 box.innerHTML = `<span>${LH('hkConflict')} <b></b>. ${LH('hkConflictAsk')}</span>` +
 `<button class="mossad-hk-yes" style="background:#b91c1c;border:none;color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px;">${LH('hkYes')}</button>` +
 `<button class="mossad-hk-no" style="background:#374151;border:none;color:#e5e7eb;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px;">${LH('hkCancel')}</button>` +
@@ -10522,6 +10814,7 @@ row.appendChild(box);
 box.querySelector('.mossad-hk-yes').onclick = (ev) => {
 ev.stopPropagation();
 others.forEach(o => { config.hk[o] = normalizeHotkeyBinding(null); });
+spd.forEach(o => o.clear());
 setHk(newHk);
 box.remove();
 if (typeof modal._mossadRenderHotkeys === 'function') modal._mossadRenderHotkeys();
@@ -10587,7 +10880,9 @@ groups.forEach(g => g.forEach(k => { dupOf[k] = g.filter(x => x !== k); }));
 Array.from(list.children).forEach(r => {
 const b = r.querySelector && r.querySelector('.mossad-hk-key');
 if (!b) return;
-const d = dupOf[r.dataset.hk];
+const sp = mossadSpeedOwners(config.hk[r.dataset.hk], hotkeyComboId).map(o => o.label);
+const d0 = dupOf[r.dataset.hk];
+const d = (d0 || sp.length) ? (d0 || []).concat(sp) : null;
 b.style.outline = d ? '2px solid #ef4444' : '';
 b.style.color = d ? '#f87171' : '#3b82f6';
 b.title = d ? `${L('hkDupHint')} ${d.map(x => keysMap[x] || x).join(', ')}` : '';

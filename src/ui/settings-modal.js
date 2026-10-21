@@ -644,9 +644,10 @@
                 const prevBox = row.querySelector('.mossad-hk-conflict');
                 if (prevBox) prevBox.remove();
                 const others = hotkeyConflicts(k, newHk, Object.keys(keysMap));
+                const spd = mossadSpeedOwners(newHk, hotkeyComboId); // v1.3.67: клавиши скорости видео (лёгкий слой)
                 const pinNote = (rootDomain.includes('pinterest.') && typeof pinterestJumpMode === 'function' && pinterestJumpMode() !== 'off') &&
                     !newHk.ctrl && !newHk.alt && !newHk.meta && PIN_JUMP_ALL_CODES.includes(newHk.code || mossadCodeForKey(newHk.key));
-                if (!others.length) {
+                if (!others.length && !spd.length) {
                     setHk(newHk);
                     btn.textContent = formatHotkey(cur()); btn.style.color = '#3b82f6';
                     if (pinNote) showToast(L('hkPinJumpNote'));
@@ -657,7 +658,7 @@
                 const box = document.createElement('div');
                 box.className = 'mossad-hk-conflict';
                 box.style.cssText = 'flex-basis:100%; margin-top:6px; font-size:12px; color:#fbbf24; display:flex; gap:6px; align-items:center; flex-wrap:wrap;';
-                const names = others.map(o => keysMap[o] || o).join(', ');
+                const names = others.map(o => keysMap[o] || o).concat(spd.map(o => o.label)).join(', ');
                 box.innerHTML = `<span>${LH('hkConflict')} <b></b>. ${LH('hkConflictAsk')}</span>` +
                     `<button class="mossad-hk-yes" style="background:#b91c1c;border:none;color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px;">${LH('hkYes')}</button>` +
                     `<button class="mossad-hk-no" style="background:#374151;border:none;color:#e5e7eb;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px;">${LH('hkCancel')}</button>` +
@@ -668,6 +669,7 @@
                 box.querySelector('.mossad-hk-yes').onclick = (ev) => {
                     ev.stopPropagation();
                     others.forEach(o => { config.hk[o] = normalizeHotkeyBinding(null); });
+                    spd.forEach(o => o.clear());
                     setHk(newHk);
                     box.remove();
                     if (typeof modal._mossadRenderHotkeys === 'function') modal._mossadRenderHotkeys();
@@ -740,7 +742,9 @@
             Array.from(list.children).forEach(r => {
                 const b = r.querySelector && r.querySelector('.mossad-hk-key');
                 if (!b) return;
-                const d = dupOf[r.dataset.hk];
+                const sp = mossadSpeedOwners(config.hk[r.dataset.hk], hotkeyComboId).map(o => o.label); // v1.3.67
+                const d0 = dupOf[r.dataset.hk];
+                const d = (d0 || sp.length) ? (d0 || []).concat(sp) : null;
                 b.style.outline = d ? '2px solid #ef4444' : '';
                 b.style.color = d ? '#f87171' : '#3b82f6';
                 b.title = d ? `${L('hkDupHint')} ${d.map(x => keysMap[x] || x).join(', ')}` : '';

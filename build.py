@@ -12,6 +12,7 @@ OUTPUT_FILE = "mossad.user.js"
 GATE_MODULES = [
     # v1.3.66: лёгкий слой — работает на ВСЕХ страницах (до выхода «сайт не в списке»), держать крошечным
     "src/light/dnd.js",
+    "src/light/speed.js",
     "src/light/ui.js",
     "src/core/domain.js",
 ]

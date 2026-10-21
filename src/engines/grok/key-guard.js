@@ -49,12 +49,15 @@
     }
     /** Нажатие — хоткей MOSSAD (needHandled: только если наш обработчик уже сделал preventDefault). */
     function _kgMossadHotkey(e, needHandled) {
+        if (!needHandled && mossadSpeedMatch(e)) return true; // v1.3.67: клавиши скорости видео (лёгкий слой)
         if ((needHandled && !e.defaultPrevented) || !config.hk) return false;
         for (const k of Object.keys(config.hk)) { if (hotkeyMatches(e, config.hk[k])) return true; }
         return false;
     }
     function _kgArm() { _kg.until = Date.now() + GROK_KEYGUARD_MS; _kg.prev = document.activeElement; }
 
+    // v1.3.67: старое умолчание 'R' → с клавишами скорости видео
+    if (rootDomain === 'grok.com' && config.grokNoPromptKeys === 'R') { config.grokNoPromptKeys = 'RWEZXGVC'; try { persistLocalConfig(); } catch (e) {} }
     if (rootDomain === 'grok.com') {
         // Взвод страховки — window/capture (раньше обработчиков на document/элементах)
         window.addEventListener('keydown', (e) => {

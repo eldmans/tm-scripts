@@ -38,6 +38,7 @@
                 if (code) busy.add(code);
             }
         }
+        mossadSpeedBusyCodes().forEach(c => busy.add(c)); // v1.3.67: клавиши скорости видео
         return busy;
     }
     /** { codes: доступные по порядку, skipped: [{code, label}] } */
