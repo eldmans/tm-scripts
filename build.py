@@ -4,8 +4,17 @@ import os, sys, re, datetime
 BANNER_FILE = "src/banner.js"
 OUTPUT_FILE = "mossad.user.js"
 
-MODULES = [
+# v1.3.54: GATE_MODULES выполняются на КАЖДОЙ странице (проверка сайта + команда меню Tampermonkey).
+# Всё из MODULES build() кладёт внутрь `function mossadMain() { … }`, которая вызывается только после
+# `if (!_isAllowed) return;` в domain.js. На сайтах не из списка V8 лишь пред-разбирает (pre-parse) её тело:
+# ни байткода, ни сотен функций-замыканий, ни объектов верхнего уровня.
+# ⚠️ Код в GATE_MODULES НЕ видит функций/переменных из MODULES (только наоборот) — см. src/core/boot.js.
+GATE_MODULES = [
     "src/core/domain.js",
+]
+
+MODULES = [
+    "src/core/boot.js",
     "src/core/config.js",
     "src/core/sync.js",
     "src/core/utils.js",
@@ -41,6 +50,196 @@ MODULES = [
     "src/ui/settings-modal.js",
     "src/core/hotkeys.js"
 ]
+
+# ── v1.3.54: облегчённый бандл ──────────────────────────────────────────────────────────────────
+# STRIP_COMMENTS: из бандла выкидываются комментарии, отступы, пустые строки и повторные пробелы.
+# Читаемый исходник остаётся в src/ — правки только там. Переносы строк между инструкциями сохраняются
+# (ASI не меняется), содержимое строк/шаблонов `…`/регэкспов копируется байт-в-байт.
+# Аварийный выключатель: STRIP_COMMENTS = False → `python build.py` (бандл станет как до v1.3.54, ~+40%).
+STRIP_COMMENTS = True
+
+_KW_BEFORE_REGEX = {"return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
+                    "throw", "case", "do", "else", "yield", "await"}
+_PAREN_KW = {"if", "while", "for", "with"}
+_PUNCT3 = (">>>=", "...", "===", "!==", "**=", "<<=", ">>=", ">>>", "&&=", "||=", "??=")
+_PUNCT2 = ("=>", "==", "!=", "<=", ">=", "&&", "||", "??", "?.", "++", "--", "+=", "-=", "*=",
+           "/=", "%=", "&=", "|=", "^=", "<<", ">>", "**")
+_NL = "\n\u2028\u2029"
+_WS = " \t\r\f\v\u00a0\ufeff"
+
+
+class StripError(Exception):
+    pass
+
+
+def _is_word_char(c):
+    return c.isalnum() or c in "_$\\" or ord(c) > 127 and c not in _NL and c not in _WS
+
+
+def js_tokens(src, name="?"):
+    """Минимальный JS-лексер: (текст, был_перенос_перед, был_пробел_перед). Комментарии/пробелы — не токены.
+    Строки, шаблоны (вместе с ${…}) и регэкспы — одним токеном-куском. При любой странности — StripError."""
+    toks = []
+    i, n = 0, len(src)
+    regex_ok = True
+    stack = []          # '(' / '(kw' / '[' / '{' / '${'
+    nl = sp = False
+    last_word = None
+
+    def err(msg, pos):
+        line = src.count("\n", 0, pos) + 1
+        raise StripError(f"{name}:{line}: {msg}")
+
+    def scan_template(j):
+        # j — позиция сразу после ` или после } закрывающего ${…}; возвращает (конец, закрыт_ли_шаблон)
+        while j < n:
+            c = src[j]
+            if c == "\\":
+                j += 2
+            elif c == "`":
+                return j + 1, True
+            elif c == "$" and j + 1 < n and src[j + 1] == "{":
+                return j + 2, False
+            else:
+                j += 1
+        err("незакрытый шаблон `", j)
+
+    while i < n:
+        c = src[i]
+        if c in _NL:
+            nl = True; i += 1; continue
+        if c in _WS:
+            sp = True; i += 1; continue
+        if c == "/" and src.startswith("//", i):
+            while i < n and src[i] not in _NL:
+                i += 1
+            sp = True; continue
+        if c == "/" and src.startswith("/*", i):
+            j = src.find("*/", i + 2)
+            if j < 0:
+                err("незакрытый /* комментарий", i)
+            if any(ch in src[i:j] for ch in _NL):
+                nl = True
+            sp = True; i = j + 2; continue
+        start = i
+        if c == "/" and regex_ok:
+            j = i + 1; in_cls = False
+            while True:
+                if j >= n or src[j] in _NL:
+                    err("незакрытый регэксп", i)
+                ch = src[j]
+                if ch == "\\":
+                    j += 2; continue
+                if ch == "[":
+                    in_cls = True
+                elif ch == "]":
+                    in_cls = False
+                elif ch == "/" and not in_cls:
+                    break
+                j += 1
+            j += 1
+            while j < n and (src[j].isalnum() or src[j] == "_"):
+                j += 1
+            i = j; regex_ok = False
+        elif c in "'\"":
+            j = i + 1
+            while True:
+                if j >= n or src[j] in "\n":
+                    err("незакрытая строка", i)
+                if src[j] == "\\":
+                    j += 2; continue
+                if src[j] == c:
+                    break
+                j += 1
+            i = j + 1; regex_ok = False
+        elif c == "`" or (c == "}" and stack and stack[-1] == "${"):
+            if c == "}":
+                stack.pop()
+            j, closed = scan_template(i + 1)
+            if not closed:
+                stack.append("${")
+            i = j; regex_ok = not closed
+        elif _is_word_char(c):
+            j = i
+            while j < n and _is_word_char(src[j]):
+                j += 1
+            word = src[i:j]
+            if j < n and src[j] == "." and word.isdigit():   # 1.5, 1.e3
+                j += 1
+                while j < n and _is_word_char(src[j]):
+                    j += 1
+            i = j
+            regex_ok = word in _KW_BEFORE_REGEX and not (toks and toks[-1][0] in (".", "?."))
+            last_word = word
+            toks.append((src[start:i], nl, sp)); nl = sp = False
+            continue
+        else:
+            tok = next((p for p in _PUNCT3 if src.startswith(p, i)), None) or \
+                  next((p for p in _PUNCT2 if src.startswith(p, i)), None) or c
+            if tok == "." and i + 1 < n and src[i + 1].isdigit():   # .5
+                j = i + 1
+                while j < n and _is_word_char(src[j]):
+                    j += 1
+                i = j; regex_ok = False
+                toks.append((src[start:i], nl, sp)); nl = sp = False
+                continue
+            i += len(tok)
+            if tok == "(":
+                stack.append("(kw" if (toks and toks[-1][0] in _PAREN_KW) else "(")
+                regex_ok = True
+            elif tok == "[" or tok == "{":
+                stack.append(tok); regex_ok = True
+            elif tok in ")]}":
+                want = {")": "(", "]": "[", "}": "{"}[tok]
+                if not stack or stack[-1].rstrip("kw") != want:
+                    err(f"непарная скобка {tok}", start)
+                top = stack.pop()
+                regex_ok = (tok == ")" and top == "(kw") or tok == "}"
+            elif tok in ("++", "--"):
+                regex_ok = False
+            else:
+                regex_ok = True
+        toks.append((src[start:i], nl, sp)); nl = sp = False
+    if stack:
+        err(f"незакрытые скобки в конце файла: {''.join(stack)}", n)
+    return toks
+
+
+def strip_js(src, name="?"):
+    """Выкинуть комментарии/отступы/пустые строки. Перенос строки сохраняется везде, где он был между
+    токенами (ASI), пробел — одним символом. Проверка: токены до и после совпадают 1:1."""
+    toks = js_tokens(src, name)
+    out = []
+    for k, (text, nl, sp) in enumerate(toks):
+        if out:
+            if nl:
+                out.append("\n")
+            elif sp:
+                out.append(" ")
+        out.append(text)
+    res = "".join(out)
+    again = js_tokens(res, name + " (после сжатия)")
+    if [t[0] for t in again] != [t[0] for t in toks]:
+        raise StripError(f"{name}: токены после сжатия не совпали — сжатие небезопасно")
+    return res
+
+
+def assemble(banner, gate_parts, main_parts, strip):
+    """Бандл: шапка → IIFE → GATE_MODULES → `mossadMain();` → function mossadMain() { MODULES }."""
+    def mod(path, text):
+        if strip:
+            return f"// ── {path} ──\n" + strip_js(text, path)
+        return text
+    gate = "\n\n".join(mod(p, t) for p, t in gate_parts)
+    main = "\n\n".join(mod(p, t) for p, t in main_parts)
+    code = banner + "\n\n(function () {\n    'use strict';\n\n"
+    code += gate
+    code += ("\n\n// ── v1.3.54: дальше — только на сайтах из списка (на остальных V8 тело лишь пред-разбирает) ──\n"
+             "mossadMain();\nfunction mossadMain() {\n\n")
+    code += main
+    code += "\n\n} // /mossadMain\n})();\n"
+    return code
+
 
 def get_current_version():
     with open(BANNER_FILE, "r", encoding="utf-8") as f:
@@ -175,17 +374,29 @@ def build():
     with open(BANNER_FILE, "r", encoding="utf-8") as f:
         banner = f.read().strip()
         
-    body_parts = []
-    for mod in MODULES:
-        if not os.path.exists(mod):
-            print(f"ERROR: Module not found: {mod}")
-            sys.exit(1)
-        with open(mod, "r", encoding="utf-8") as f:
-            body_parts.append(f.read().strip())
-            
-    code = banner + "\n\n(function () {\n    'use strict';\n\n"
-    code += "\n\n".join(body_parts)
-    code += "\n\n})();\n"
+    def read_parts(mods):
+        parts = []
+        for mod in mods:
+            if not os.path.exists(mod):
+                print(f"ERROR: Module not found: {mod}")
+                sys.exit(1)
+            with open(mod, "r", encoding="utf-8") as f:
+                parts.append((mod, f.read().strip()))
+        return parts
+    gate_parts, main_parts = read_parts(GATE_MODULES), read_parts(MODULES)
+
+    raw_out = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--raw-out=")), None)
+    if raw_out:
+        # Несжатая сборка (для проверки сжатия в CI: токены raw == токены бандла)
+        with open(raw_out, "wb") as f:
+            f.write(assemble(banner, gate_parts, main_parts, False).encode("utf-8"))
+        print(f"RAW BUILD: {raw_out}")
+    try:
+        code = assemble(banner, gate_parts, main_parts, STRIP_COMMENTS)
+    except StripError as ex:
+        print(f"BUILD FAILED: сжатие бандла: {ex}")
+        print("Если это ложная тревога лексера — STRIP_COMMENTS = False в build.py и пересобрать.")
+        sys.exit(1)
     
     syntax_ok = verify_syntax(code)
     if syntax_ok is False:
@@ -206,7 +417,7 @@ def build():
         sys.exit(1)
             
     if check_only:
-        print(f"CHECK OK: {len(MODULES)} modules, version {version}, {len(raw_bytes)} bytes.")
+        print(f"CHECK OK: {len(GATE_MODULES) + len(MODULES)} modules, version {version}, {len(raw_bytes)} bytes.")
         return
 
     if verify_only:
@@ -230,13 +441,13 @@ def build():
             if len(diff) > 60:
                 print(f"... ({len(diff) - 60} more lines)")
             sys.exit(1)
-        print(f"VERIFY OK: {OUTPUT_FILE} == build of src/ (v{version}, {len(raw_bytes)} bytes, {len(MODULES)} modules)")
+        print(f"VERIFY OK: {OUTPUT_FILE} == build of src/ (v{version}, {len(raw_bytes)} bytes, {len(GATE_MODULES) + len(MODULES)} modules)")
         return
         
     with open(OUTPUT_FILE, "wb") as f:
         f.write(raw_bytes)
         
-    print(f"BUILD SUCCESS: {OUTPUT_FILE} (v{version}, {len(raw_bytes)} bytes, {len(MODULES)} modules)")
+    print(f"BUILD SUCCESS: {OUTPUT_FILE} (v{version}, {len(raw_bytes)} bytes, {len(GATE_MODULES) + len(MODULES)} modules)")
 
 if __name__ == "__main__":
     # Не падаем на Windows-консолях без UTF-8 при печати эмодзи/кириллицы в диффе

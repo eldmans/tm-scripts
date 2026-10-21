@@ -2,16 +2,6 @@
     // GROK ENGINE: Playlist Structure & Navigation Resolver
     // ============================================================
 
-    /** Fisher-Yates перемешивание */
-    function fisherYatesShuffle(arr) {
-        const a = arr.slice();
-        for (let i = a.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [a[i], a[j]] = [a[j], a[i]];
-        }
-        return a;
-    }
-
     /**
      * Строит каноническую структуру плейлиста из сохранённой коллекции:
      * - items: плоский массив в хронологическом порядке (снизу вверх страницы Grok)
@@ -443,26 +433,6 @@
         _gSS.setItem(GALLERY_SS_KEY, JSON.stringify(ss));
 
         return { item: targetItem, circleCompleted };
-    }
-
-    /** Совместимость: возвращает плоскую очередь элементов */
-    function grokBuildGalleryQueue(allItems, ssState) {
-        const struct = grokGetPlaylistStructure();
-        if (struct && struct.items.length) {
-            const queue = [];
-            const grpOrder = struct.grpMode === 'rev'
-                ? struct.groups.slice().reverse()
-                : (struct.grpMode === 'rnd' ? fisherYatesShuffle(struct.groups) : struct.groups.slice());
-
-            for (const g of grpOrder) {
-                let itms = g.items.slice();
-                if (struct.itemMode === 'rev') itms.reverse();
-                else if (struct.itemMode === 'rnd' || struct.itemMode === 'off') itms = fisherYatesShuffle(itms);
-                queue.push(...itms);
-            }
-            return queue;
-        }
-        return (allItems || []).slice();
     }
 
     /**

@@ -5,7 +5,6 @@
     const GITHUB_REPO = 'tm-scripts';
     const GITHUB_BRANCH = 'grok';
 
-    let _syncQueue = []; // батч изменений
     let _syncTimer = null;
     let _syncStatusEl = null;
 

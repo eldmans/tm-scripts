@@ -72,10 +72,6 @@
         triggerDirectBlobDownload(url, filename, null, postUrl);
     }
 
-    function fetchAndDownloadBlob(url, filename, postUrl = null) {
-        triggerDirectBlobDownload(url, filename, null, postUrl);
-    }
-
     function fetchBlobFallback(url, filename, postUrl = null) {
         fetch(url).then(res => {
             if (!res.ok) throw new Error('HTTP ' + res.status);

@@ -1,45 +1,7 @@
     // ============================================
-    // PINTEREST ENGINE & AUTO FULLSCALE
+    // PINTEREST ENGINE
     // ============================================
-    function clickElementFull(el) {
-        if (!el) return;
-        ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {
-            try {
-                el.dispatchEvent(new MouseEvent(evtType, {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window,
-                    buttons: 1
-                }));
-            } catch (e) {}
-        });
-        if (typeof el.click === 'function') {
-            try { el.click(); } catch(e) {}
-        }
-    }
-
-    function triggerPinterestFullScale() {
-        if (!rootDomain.includes('pinterest.') || !config.pinterestAutoFS) return;
-        
-        let attempts = 0;
-        const interval = setInterval(() => {
-            attempts++;
-            let btn = document.querySelector('[aria-label="Показать в полном масштабе"], [title="Показать в полном масштабе"], [aria-label*="полном масштабе"]');
-            if (!btn) {
-                const svg = document.querySelector('svg[aria-label*="полном масштабе"]');
-                if (svg) btn = svg.closest('[role="button"]') || svg.closest('button') || svg;
-            }
-            
-            if (btn) {
-                clickElementFull(btn);
-                console.log('%c[MOSSAD] Auto FullScale clicked target element', 'color:#3b82f6;', btn);
-                clearInterval(interval);
-            } else if (attempts >= 25) { // Ожидание до 5 секунд (25 x 200ms)
-                clearInterval(interval);
-            }
-        }, 200);
-    }
-
+    // v1.3.54: мёртвые clickElementFull/triggerPinterestFullScale (нигде не вызывались) удалены — см. git v1.3.53.
     // ── v1.3.51: главный пин отделяем от «Похожих пинов» ──
     // Раньше тип и видео искались по всему документу (первый <video>, regex по innerHTML всей страницы):
     // превью похожего пина делало фото-пин «видео», а сериализация всего DOM повторялась до 60 раз за слайд.

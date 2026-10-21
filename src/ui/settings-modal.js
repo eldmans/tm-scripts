@@ -159,10 +159,6 @@
         mossadDebug('hotkey', 'общие умолчания клавиш применены', { reason, id: rec.id, keptPinned: localPinned.length });
         return true;
     }
-    function clearHotkeyOrder() {
-        try { if (typeof GM_deleteValue === 'function') GM_deleteValue(HK_ORDER_KEY); else if (typeof GM_setValue === 'function') GM_setValue(HK_ORDER_KEY, '[]'); } catch (e) {}
-        try { localStorage.removeItem(HK_ORDER_KEY); } catch (e) {}
-    }
     /** Ключи в порядке отображения: сохранённый порядок (только известные), затем новые — в заводском порядке. */
     function orderedHotkeyKeys(keys, order) {
         const known = new Set(keys);

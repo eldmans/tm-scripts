@@ -45,10 +45,6 @@
     let _lastCycleSlideKey = '';
     let _lastDownloadUrl = null;     // защита от повторного скачивания одного файла
     let _lastDownloadTime = 0;
-    const _filenameCounter = new Map(); // счётчик по базовому имени → (001)(002)...
-    let _samePageSlideCount = 0;     // счётчик попыток перелистнуть с одной и той же страницы
-    let _lastSlideUrl = '';          // URL во время последнего triggerNextSlide
-    const SAME_PAGE_LIMIT = 3;       // сколько раз пробовать перед остановкой
 
     // v1.3.38: ЕДИНСТВЕННЫЙ отложенный запуск цикла слайда. Раньше цикл запускали независимо
     // тик галереи (setTimeout 300 мс без id), монитор URL (150 мс) и др. — каждый перезапуск
@@ -319,13 +315,6 @@
         } else {
             stopSlideshow();
         }
-    }
-
-    function getArrowKey(dir) {
-        if (dir === 'up') return 'ArrowUp';
-        if (dir === 'down') return 'ArrowDown';
-        if (dir === 'left') return 'ArrowLeft';
-        return 'ArrowRight';
     }
 
     function triggerNextSlide(source = 'unknown') {

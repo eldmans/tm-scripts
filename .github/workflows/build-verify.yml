@@ -27,3 +27,8 @@ jobs:
         run: python build.py --verify
       - name: Syntax check of committed bundle
         run: node --check mossad.user.js
+      - name: Stripped bundle has the same AST as the unstripped build (v1.3.54)
+        run: |
+          python build.py --check --raw-out=/tmp/mossad.raw.js
+          npm install --no-save --no-audit --no-fund --prefix /tmp/acorn acorn@8
+          NODE_PATH=/tmp/acorn/node_modules node tools/check_strip.js /tmp/mossad.raw.js mossad.user.js

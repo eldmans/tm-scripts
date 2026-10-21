@@ -393,9 +393,6 @@
         mossadDebug('collect', 'окно досбора закрыто', { reason });
     }
 
-    /** Совместимость: раньше вешал постоянный наблюдатель; теперь досбор — только в окне после клика. */
-    function grokInitAutoCollector() {}
-
     /** Отдельная кнопка — скачать .txt с коллекцией (только тогда извлекает email) */
     function grokDownloadCollection() {
         const raw = _gSS.getItem(GALLERY_COLLECTION_KEY);

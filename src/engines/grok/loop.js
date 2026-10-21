@@ -19,31 +19,3 @@
     function saveGrokLoopSet(loopSet) {
         _gSS.setItem(GALLERY_LOOP_KEY, JSON.stringify(loopSet));
     }
-
-    function clearGrokLoopSet() {
-        _gSS.removeItem(GALLERY_LOOP_KEY);
-    }
-
-    function isGrokItemLooped(url, loopSet = null) {
-        if (!url) return false;
-        const set = loopSet || getGrokLoopSet();
-        const baseUrl = stripUrlQuery(url);
-        return set.urls.some(u => stripUrlQuery(u) === baseUrl);
-    }
-
-    function isGrokGroupLooped(convId, loopSet = null) {
-        if (!convId || convId === '__noconv__') return false;
-        const set = loopSet || getGrokLoopSet();
-        return set.groupIds.includes(convId);
-    }
-
-    function getGrokActiveLoopItems(allItems) {
-        const set = getGrokLoopSet();
-        if (set.urls.length === 0 && set.groupIds.length === 0) return [];
-        return allItems.filter(it => {
-            const baseUrl = stripUrlQuery(it.url);
-            const inUrls = set.urls.some(u => stripUrlQuery(u) === baseUrl);
-            const inGrps = it.convId && set.groupIds.includes(it.convId);
-            return inUrls || inGrps;
-        });
-    }

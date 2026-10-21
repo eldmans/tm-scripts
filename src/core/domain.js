@@ -1,4 +1,4 @@
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.53';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.54';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -88,6 +88,9 @@
 
     // Команда меню Tampermonkey: «➕ Добавить этот сайт» / «➖ Убрать этот сайт» (встроенный — только «🌍 Сайты»)
     let _mossadMenuId = null;
+    // v1.3.54: всё после выхода ниже лежит внутри mossadMain() (см. build.py), отсюда openSettingsWindow
+    // не виден — src/core/boot.js кладёт его сюда и перерегистрирует команду меню.
+    let mossadOpenSettingsHook = null;
     function mossadRegisterSiteMenu() {
         if (typeof GM_registerMenuCommand !== 'function') return;
         try { if (_mossadMenuId !== null && typeof GM_unregisterMenuCommand === 'function') GM_unregisterMenuCommand(_mossadMenuId); } catch (e) {}
@@ -96,9 +99,9 @@
         const added = !builtin && mossadIsHostAllowed(hostname);
         let title, fn;
         if (builtin) {
-            if (!_isAllowed || typeof openSettingsWindow !== 'function') return;
+            if (!_isAllowed || typeof mossadOpenSettingsHook !== 'function') return;
             title = '🌍 Сайты MOSSAD';
-            fn = () => { try { openSettingsWindow('sites'); } catch (e) {} };
+            fn = () => { try { mossadOpenSettingsHook('sites'); } catch (e) {} };
         } else if (added) {
             title = '➖ Убрать этот сайт из MOSSAD';
             fn = () => {
@@ -119,15 +122,3 @@
     }
     mossadRegisterSiteMenu();
     if (!_isAllowed) return; // Выход — сайт не в списке (только команда меню, без DOM и слушателей)
-
-    // Список изменили в другой вкладке/контейнере — обновить подпись команды меню и вкладку «🌍 Сайты»
-    if (typeof GM_addValueChangeListener === 'function') {
-        try {
-            GM_addValueChangeListener(MOSSAD_SITES_GM_KEY, (name, oldVal, newVal, remote) => {
-                if (!remote) return;
-                mossadRegisterSiteMenu();
-                try { mossadSitesRerender(); } catch (e) {}
-            });
-        } catch (e) {}
-    }
-
