@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.54
+// @version      1.3.55
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -26,7 +26,7 @@
     'use strict';
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.54';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.55';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -6396,6 +6396,7 @@ lastUrlForSlideshow = currentUrl;
 return;
 }
 if (slideChanged || videoChanged || urlChanged) {
+const prevUrlForSlideshow = lastUrlForSlideshow;
 lastUrlForSlideshow = currentUrl;
 lastActiveVideo = currentVideo;
 if (!slideChanged && videoChanged && rootDomain === 'grok.com' && currentVideoNode && currentVideo && !isCountingDown) {
@@ -6404,6 +6405,7 @@ return;
 }
 if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
 if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+if (urlChanged && rootDomain.includes('pinterest.')) pinterestNoteNavigation(currentUrl, prevUrlForSlideshow);
 isCountingDown = false;
 countdownSeconds = 0;
 if (urlChanged) {
@@ -6469,6 +6471,7 @@ try { return !!JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch 
 })();
 const dirs = config.slideshowDirections;
 const isPinterest = rootDomain.includes('pinterest.');
+const stepHref = location.href;
 if (!isBigGrokSs && !isPinterest && (!dirs || dirs.length === 0)) {
 stopSlideshow();
 return;
@@ -6482,6 +6485,10 @@ return;
 return;
 }
 if (isPinterest) {
+if (location.href !== stepHref) {
+mossadDebug('step', 'Pinterest: страница сменилась во время шага — шаг отменён', { from: stepHref, to: location.href });
+return;
+}
 selectNextPinterestPin(pinterestSlideDir(), { isManual: false, fromSlideshow: true });
 triggerUniversalFullScreen();
 return;
@@ -7155,6 +7162,44 @@ return config.pinterestDir === 'back' ? 'prev' : 'next';
 function pinterestModeIsNumber(mode) {
 return /^\d+$/.test(String(mode == null ? '' : mode));
 }
+const PIN_BAL_SS_KEY = 'mossad_pin_types';
+const PIN_BAL_N = 20, PIN_BAL_K = 1, PIN_BAL_STEP = 0.14, PIN_BAL_MAX = 0.45;
+function _pinReadShown() {
+try { const a = JSON.parse(sessionStorage.getItem(PIN_BAL_SS_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+function pinterestRecordShown(pinId, type) {
+if (!pinId || (type !== 'image' && type !== 'video')) return;
+const a = _pinReadShown();
+if (a.length && a[a.length - 1].id === pinId) a[a.length - 1].t = type;
+else a.push({ id: pinId, t: type });
+try { sessionStorage.setItem(PIN_BAL_SS_KEY, JSON.stringify(a.slice(-PIN_BAL_N))); } catch (e) {}
+}
+function pinterestCurrentShownType() {
+const id = pinterestCurrentPinId();
+if (!id) return '';
+if (_pinMediaCache.pinId === id && (_pinMediaCache.type === 'video' || _pinMediaCache.type === 'image')) return _pinMediaCache.type;
+const pd = getPinterestMainPinData();
+if (pd.isFound && (pd.type === 'video' || pd.type === 'image')) return pd.type;
+const ci = pinterestCachedPinInfo(id);
+if (ci) return ci.isVideo ? 'video' : 'image';
+return '';
+}
+function pinterestPhotoProbability(types, photoPercent) {
+const t = Math.min(1, Math.max(0, (Number(photoPercent) || 0) / 100));
+if (t <= 0 || t >= 1) return t;
+const r = (types || []).filter(x => x === 'image' || x === 'video').slice(-PIN_BAL_N);
+if (!r.length) return t;
+const s = r.filter(x => x === 'image').length / r.length;
+const last = r[r.length - 1];
+let L = 0;
+for (let i = r.length - 1; i >= 0 && r[i] === last; i--) L++;
+const pLast = last === 'image' ? t : 1 - t;
+const push = Math.min(PIN_BAL_MAX, PIN_BAL_STEP * Math.max(0, L + 1 - 1 / (1 - pLast)));
+const k = PIN_BAL_K * Math.min(1, r.length / PIN_BAL_N);
+const p = t + k * (t - s) + (last === 'image' ? -push : push);
+return Math.min(0.97, Math.max(0.03, p));
+}
+window.pinterestPhotoProbability = pinterestPhotoProbability;
 function pinterestChooseCandidate(candidates) {
 const dead = new Set(_pinReadDead());
 const hist = Array.isArray(config.pinterestHistory) ? config.pinterestHistory : [];
@@ -7170,8 +7215,8 @@ filtered = pool.filter(c => c.type === 'image');
 } else if (filterType === 'video') {
 filtered = pool.filter(c => c.type === 'video');
 } else if (filterType === 'ratio') {
-const photoPercent = config.pinterestPhotoPercent ?? 50;
-const targetType = (Math.random() * 100) < photoPercent ? 'image' : 'video';
+const pPhoto = pinterestPhotoProbability(_pinReadShown().map(x => x.t), config.pinterestPhotoPercent ?? 50);
+const targetType = Math.random() < pPhoto ? 'image' : 'video';
 filtered = pool.filter(c => c.type === targetType);
 if (filtered.length === 0) filtered = pool.filter(c => c.type !== targetType);
 } else {
@@ -7203,8 +7248,36 @@ else window.scrollBy({ top: Math.max(300, window.innerHeight || 600), behavior: 
 } catch (e) {}
 }
 let _pinWaitTimer = null;
+let _pinWaitGen = 0;
 function pinterestCancelWait() {
+_pinWaitGen++;
 if (_pinWaitTimer) { clearTimeout(_pinWaitTimer); _pinWaitTimer = null; }
+}
+function pinterestNoteNavigation(url, fromUrl) {
+pinterestCancelWait();
+const id = pinterestCurrentPinId(new URL(url, location.origin).pathname);
+if (!id) return;
+if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
+const hist = config.pinterestHistory;
+const idx = typeof config.pinterestHistoryIdx === 'number' ? config.pinterestHistoryIdx : hist.length - 1;
+const idOf = (u) => { const m = String(u || '').match(/\/pin\/(\d+)/); return m ? m[1] : ''; };
+if (idOf(hist[idx]) === id) return;
+const fromId = idOf(fromUrl);
+if (fromId && fromId !== id && idOf(hist[idx]) !== fromId) {
+config.pinterestHistory = hist.slice(0, Math.max(0, idx) + (hist.length ? 1 : 0));
+config.pinterestHistory.push(fromUrl);
+config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
+return pinterestNoteNavigation(url, '');
+}
+if (idx > 0 && idOf(hist[idx - 1]) === id) config.pinterestHistoryIdx = idx - 1;
+else if (idx + 1 < hist.length && idOf(hist[idx + 1]) === id) config.pinterestHistoryIdx = idx + 1;
+else {
+config.pinterestHistory = hist.slice(0, Math.max(0, idx) + 1);
+config.pinterestHistory.push(url);
+if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
+config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
+}
+pinterestSaveHistory();
 }
 window.pinterestCancelWait = pinterestCancelWait;
 function _pinGoToHistory(idx, toastMsg) {
@@ -7215,12 +7288,20 @@ navigatePinterestUrl(config.pinterestHistory[idx]);
 }
 function _pinterestPickAndGo(fromSlideshow) {
 pinterestCancelWait();
+const gen = _pinWaitGen;
 const startHref = location.href;
 const t0 = Date.now();
 let scrolled = false, waitToast = false;
 const tick = () => {
+if (gen !== _pinWaitGen) return;
 _pinWaitTimer = null;
-if (location.href !== startHref) return;
+if (location.href !== startHref) {
+if (fromSlideshow && slideshowActive && !slideshowPaused) {
+pinterestNoteNavigation(location.href, startHref);
+requestSlideCycle(150, 'pinterest:manual-nav-during-wait');
+}
+return;
+}
 if (fromSlideshow && (!slideshowActive || slideshowPaused)) return;
 const picked = pinterestChooseCandidate(getPinterestCandidatePins());
 if (picked && picked.target) {
@@ -7251,7 +7332,7 @@ return;
 }
 if (!scrolled) { scrolled = true; pinterestScrollToRelated(); }
 if (!waitToast && waited >= 1000) { waitToast = true; showToast('⏳ Жду похожие пины…'); }
-_pinWaitTimer = setTimeout(tick, PIN_POLL_MS);
+if (gen === _pinWaitGen) _pinWaitTimer = setTimeout(tick, PIN_POLL_MS);
 };
 tick();
 }
@@ -7259,6 +7340,7 @@ function selectNextPinterestPin(direction, options = {}) {
 const isManual = options.isManual || false;
 const fromSlideshow = options.fromSlideshow || false;
 if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
+if (fromSlideshow) pinterestRecordShown(pinterestCurrentPinId(), pinterestCurrentShownType());
 let idx = typeof config.pinterestHistoryIdx === 'number' ? config.pinterestHistoryIdx : config.pinterestHistory.length - 1;
 if (direction === 'prev') {
 if (idx > 0) {
@@ -7784,7 +7866,7 @@ panel.innerHTML = `
                         </div>
                         ${isRatio ? `
                         <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
-                            <label style="display:flex; align-items:center; gap:2px;">🖼 Фото %: <input id="mossad-in-photo-pct" type="number" min="0" max="100" value="${config.pinterestPhotoPercent ?? 50}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
+                            <label style="display:flex; align-items:center; gap:2px;" title="Не монетка и не строгое чередование: серии бывают, но чем длиннее серия фото, тем вероятнее видео (и наоборот); доля за ~20 последних пинов тянется к заданной. 50/50: после 3 фото подряд ≈80% видео">🖼 Фото %: <input id="mossad-in-photo-pct" type="number" min="0" max="100" value="${config.pinterestPhotoPercent ?? 50}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
                             <label style="display:flex; align-items:center; gap:2px;">🎬 Видео %: <input id="mossad-in-video-pct" type="number" min="0" max="100" value="${100 - (config.pinterestPhotoPercent ?? 50)}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
                         </div>
                         ` : ''}
@@ -9008,7 +9090,7 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'collectWatchSec', t: 'num', label: 'Досбор после «Собрать», сек', step: 5, min: 5 },
 { k: 'pinterestMode', t: 'text', label: 'Pinterest: режим (rand / +1 / 1–30)' },
 { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
-{ k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото', step: 5, min: 0 },
+{ k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото (балансировка серий)', step: 5, min: 0 },
 { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
 { k: 'pinterestAutoFS', t: 'bool', label: 'Pinterest: авто FS' },
 ];

@@ -226,7 +226,7 @@
                         </div>
                         ${isRatio ? `
                         <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
-                            <label style="display:flex; align-items:center; gap:2px;">🖼 Фото %: <input id="mossad-in-photo-pct" type="number" min="0" max="100" value="${config.pinterestPhotoPercent ?? 50}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
+                            <label style="display:flex; align-items:center; gap:2px;" title="Не монетка и не строгое чередование: серии бывают, но чем длиннее серия фото, тем вероятнее видео (и наоборот); доля за ~20 последних пинов тянется к заданной. 50/50: после 3 фото подряд ≈80% видео">🖼 Фото %: <input id="mossad-in-photo-pct" type="number" min="0" max="100" value="${config.pinterestPhotoPercent ?? 50}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
                             <label style="display:flex; align-items:center; gap:2px;">🎬 Видео %: <input id="mossad-in-video-pct" type="number" min="0" max="100" value="${100 - (config.pinterestPhotoPercent ?? 50)}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;"></label>
                         </div>
                         ` : ''}

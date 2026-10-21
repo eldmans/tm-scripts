@@ -195,6 +195,55 @@
         return /^\d+$/.test(String(mode == null ? '' : mode));
     }
 
+    // v1.3.55: «Соотношение» фото/видео — вероятностная балансировка с памятью (не чередование и не монетка).
+    // Память: типы последних PIN_BAL_N пинов, реально показанных слайдшоу (sessionStorage вкладки).
+    // P(фото) = clamp(t + k·(t − s) ∓ push, 0.03, 0.97), где
+    //   t — целевая доля фото (% фото / 100), s — доля фото в памяти, k = PIN_BAL_K · min(1, n / PIN_BAL_N);
+    //   L — длина текущей серии одного типа, Lexp = 1 / (1 − p) — её средняя длина при доле p этого типа;
+    //   push = min(PIN_BAL_MAX, PIN_BAL_STEP · max(0, L + 1 − Lexp)) — серия фото уменьшает P(фото), серия видео увеличивает.
+    // 50/50: после 3 фото подряд P(видео) ≈ 0.8, после 2 — ≈ 0.64; доля сходится к t (симуляция: ±1.5%).
+    const PIN_BAL_SS_KEY = 'mossad_pin_types';
+    const PIN_BAL_N = 20, PIN_BAL_K = 1, PIN_BAL_STEP = 0.14, PIN_BAL_MAX = 0.45;
+    function _pinReadShown() {
+        try { const a = JSON.parse(sessionStorage.getItem(PIN_BAL_SS_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+    }
+    /** Тип показанного пина ('image'|'video') — в память балансировки (повтор того же id подряд не пишется). */
+    function pinterestRecordShown(pinId, type) {
+        if (!pinId || (type !== 'image' && type !== 'video')) return;
+        const a = _pinReadShown();
+        if (a.length && a[a.length - 1].id === pinId) a[a.length - 1].t = type;
+        else a.push({ id: pinId, t: type });
+        try { sessionStorage.setItem(PIN_BAL_SS_KEY, JSON.stringify(a.slice(-PIN_BAL_N))); } catch (e) {}
+    }
+    /** Фактический тип текущего (главного) пина: кэш → DOM → API; не знаем — ''. */
+    function pinterestCurrentShownType() {
+        const id = pinterestCurrentPinId();
+        if (!id) return '';
+        if (_pinMediaCache.pinId === id && (_pinMediaCache.type === 'video' || _pinMediaCache.type === 'image')) return _pinMediaCache.type;
+        const pd = getPinterestMainPinData();
+        if (pd.isFound && (pd.type === 'video' || pd.type === 'image')) return pd.type;
+        const ci = pinterestCachedPinInfo(id);
+        if (ci) return ci.isVideo ? 'video' : 'image';
+        return '';
+    }
+    /** P(следующий пин — фото). types — массив 'image'|'video' (старые → новые), photoPercent 0..100. */
+    function pinterestPhotoProbability(types, photoPercent) {
+        const t = Math.min(1, Math.max(0, (Number(photoPercent) || 0) / 100));
+        if (t <= 0 || t >= 1) return t;
+        const r = (types || []).filter(x => x === 'image' || x === 'video').slice(-PIN_BAL_N);
+        if (!r.length) return t;
+        const s = r.filter(x => x === 'image').length / r.length;
+        const last = r[r.length - 1];
+        let L = 0;
+        for (let i = r.length - 1; i >= 0 && r[i] === last; i--) L++;
+        const pLast = last === 'image' ? t : 1 - t;
+        const push = Math.min(PIN_BAL_MAX, PIN_BAL_STEP * Math.max(0, L + 1 - 1 / (1 - pLast)));
+        const k = PIN_BAL_K * Math.min(1, r.length / PIN_BAL_N);
+        const p = t + k * (t - s) + (last === 'image' ? -push : push);
+        return Math.min(0.97, Math.max(0.03, p));
+    }
+    window.pinterestPhotoProbability = pinterestPhotoProbability;
+
     /**
      * Выбор следующего пина из похожих. Пропускаются тупики (_pinMarkDead) и, если есть из чего выбрать,
      * недавно посещённые (иначе «№ 3» мог ходить по кругу A → B → A).
@@ -215,8 +264,8 @@
         } else if (filterType === 'video') {
             filtered = pool.filter(c => c.type === 'video');
         } else if (filterType === 'ratio') {
-            const photoPercent = config.pinterestPhotoPercent ?? 50;
-            const targetType = (Math.random() * 100) < photoPercent ? 'image' : 'video';
+            const pPhoto = pinterestPhotoProbability(_pinReadShown().map(x => x.t), config.pinterestPhotoPercent ?? 50);
+            const targetType = Math.random() < pPhoto ? 'image' : 'video';
             filtered = pool.filter(c => c.type === targetType);
             if (filtered.length === 0) filtered = pool.filter(c => c.type !== targetType);
         } else {
@@ -252,8 +301,44 @@
     }
 
     let _pinWaitTimer = null;
+    let _pinWaitGen = 0; // v1.3.55: поколение ожидания — «старый» тик после отмены/перехода ничего не делает
     function pinterestCancelWait() {
+        _pinWaitGen++;
         if (_pinWaitTimer) { clearTimeout(_pinWaitTimer); _pinWaitTimer = null; }
+    }
+
+    /**
+     * v1.3.55: пользователь сам открыл пин (переход Pinterest внутри страницы, без перезагрузки) во время слайдшоу.
+     * Зовёт монитор URL движка. Ожидание похожих для СТАРОГО пина отменяется, новый пин — в историю
+     * (как ветка: хвост «вперёд» отрезается; назад/вперёд браузера по истории — только сдвиг индекса).
+     * Дальше движок показывает новый пин как обычный слайд и следующий шаг идёт уже от него.
+     */
+    function pinterestNoteNavigation(url, fromUrl) {
+        pinterestCancelWait();
+        const id = pinterestCurrentPinId(new URL(url, location.origin).pathname);
+        if (!id) return;
+        if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
+        const hist = config.pinterestHistory;
+        const idx = typeof config.pinterestHistoryIdx === 'number' ? config.pinterestHistoryIdx : hist.length - 1;
+        const idOf = (u) => { const m = String(u || '').match(/\/pin\/(\d+)/); return m ? m[1] : ''; }; // без подстановки location
+        if (idOf(hist[idx]) === id) return;
+        // Пин, с которого ушли, — тоже в историю (если ушли до первого шага слайдшоу, его там ещё нет)
+        const fromId = idOf(fromUrl);
+        if (fromId && fromId !== id && idOf(hist[idx]) !== fromId) {
+            config.pinterestHistory = hist.slice(0, Math.max(0, idx) + (hist.length ? 1 : 0));
+            config.pinterestHistory.push(fromUrl);
+            config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
+            return pinterestNoteNavigation(url, '');
+        }
+        if (idx > 0 && idOf(hist[idx - 1]) === id) config.pinterestHistoryIdx = idx - 1;
+        else if (idx + 1 < hist.length && idOf(hist[idx + 1]) === id) config.pinterestHistoryIdx = idx + 1;
+        else {
+            config.pinterestHistory = hist.slice(0, Math.max(0, idx) + 1);
+            config.pinterestHistory.push(url);
+            if (config.pinterestHistory.length > 100) config.pinterestHistory.shift();
+            config.pinterestHistoryIdx = config.pinterestHistory.length - 1;
+        }
+        pinterestSaveHistory();
     }
     window.pinterestCancelWait = pinterestCancelWait;
 
@@ -270,12 +355,23 @@
      */
     function _pinterestPickAndGo(fromSlideshow) {
         pinterestCancelWait();
+        const gen = _pinWaitGen;
         const startHref = location.href;
         const t0 = Date.now();
         let scrolled = false, waitToast = false;
         const tick = () => {
+            if (gen !== _pinWaitGen) return; // отменено (стоп / ручной переход / новое ожидание)
             _pinWaitTimer = null;
-            if (location.href !== startHref) return;
+            if (location.href !== startHref) {
+                // v1.3.55: страницу сменил пользователь (переход внутри Pinterest). Раньше шаг тихо пропадал.
+                // Новый пин — в историю; слайдшоу продолжает с него: монитор URL движка уже запускает цикл слайда,
+                // здесь — страховка, если он ещё не заметил смену (без второго перехода: сами никуда не идём).
+                if (fromSlideshow && slideshowActive && !slideshowPaused) {
+                    pinterestNoteNavigation(location.href, startHref);
+                    requestSlideCycle(150, 'pinterest:manual-nav-during-wait');
+                }
+                return;
+            }
             if (fromSlideshow && (!slideshowActive || slideshowPaused)) return;
             const picked = pinterestChooseCandidate(getPinterestCandidatePins());
             if (picked && picked.target) {
@@ -306,7 +402,7 @@
             }
             if (!scrolled) { scrolled = true; pinterestScrollToRelated(); }
             if (!waitToast && waited >= 1000) { waitToast = true; showToast('⏳ Жду похожие пины…'); }
-            _pinWaitTimer = setTimeout(tick, PIN_POLL_MS);
+            if (gen === _pinWaitGen) _pinWaitTimer = setTimeout(tick, PIN_POLL_MS);
         };
         tick();
     }
@@ -320,6 +416,8 @@
         const isManual = options.isManual || false;
         const fromSlideshow = options.fromSlideshow || false;
         if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
+        // v1.3.55: текущий пин слайдшоу показало — его фактический тип в память балансировки фото/видео
+        if (fromSlideshow) pinterestRecordShown(pinterestCurrentPinId(), pinterestCurrentShownType());
         let idx = typeof config.pinterestHistoryIdx === 'number' ? config.pinterestHistoryIdx : config.pinterestHistory.length - 1;
 
         if (direction === 'prev') {

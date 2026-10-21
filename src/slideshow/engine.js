@@ -242,6 +242,7 @@
         }
 
         if (slideChanged || videoChanged || urlChanged) {
+            const prevUrlForSlideshow = lastUrlForSlideshow;
             lastUrlForSlideshow = currentUrl;
             lastActiveVideo = currentVideo;
 
@@ -254,6 +255,9 @@
 
             if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
             if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+            // v1.3.55: Pinterest — пин открыли вручную (переход внутри страницы): отменить ожидание похожих
+            // старого пина и записать новый в историю; ниже — обычный цикл слайда уже для нового пина.
+            if (urlChanged && rootDomain.includes('pinterest.')) pinterestNoteNavigation(currentUrl, prevUrlForSlideshow);
 
             // Сбрасываем таймер в интерфейсе немедленно!
             isCountingDown = false;
@@ -333,6 +337,7 @@
 
         const dirs = config.slideshowDirections;
         const isPinterest = rootDomain.includes('pinterest.');
+        const stepHref = location.href;
         if (!isBigGrokSs && !isPinterest && (!dirs || dirs.length === 0)) {
             stopSlideshow();
             return;
@@ -352,6 +357,12 @@
             // Похожих пинов ждёт сам движок (до 15 с), тупик — шаг назад; «конец ленты» и остановки здесь нет.
             // Раньше: D-pad ▲ по умолчанию = «назад по истории» → «начало истории» → через 5 с «конец ленты». ANTI_PATTERNS §30.
             if (isPinterest) {
+                // v1.3.55: пока ждали скачивание (до 8 с) пользователь открыл другой пин — монитор URL уже
+                // запустил для него цикл слайда; шаг «от старого пина» не делаем (иначе новый пин сразу пролистнётся).
+                if (location.href !== stepHref) {
+                    mossadDebug('step', 'Pinterest: страница сменилась во время шага — шаг отменён', { from: stepHref, to: location.href });
+                    return;
+                }
                 selectNextPinterestPin(pinterestSlideDir(), { isManual: false, fromSlideshow: true });
                 triggerUniversalFullScreen();
                 return;
