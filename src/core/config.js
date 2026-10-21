@@ -59,6 +59,7 @@
             focusWidget:      { key: 'F7',         ctrl: false, alt: false, shift: false },
             snapWidget:       { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
             openTodos:        { key: '',           ctrl: false, alt: false, shift: false }, // v1.3.49: «📝 Тудушки» — пусто по умолчанию
+            grokCycle:        { key: '\\',         ctrl: false, alt: false, shift: false }, // v1.3.61: Grok — промт → фото/видео → длина/соотношение (e.code Backslash)
             nextSlide:        { key: 'ArrowRight', ctrl: false, alt: false, shift: false }, // v1.3.45: одна привязка (резервный Пробел убран)
             prevSlide:        { key: 'ArrowLeft',  ctrl: false, alt: false, shift: false },
             nextGroup:        { key: 'PageDown',   ctrl: false, alt: true,  shift: false }, // Alt+PageDown

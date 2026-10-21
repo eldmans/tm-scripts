@@ -75,7 +75,7 @@
     // Закреплённые (🔒) строки НЕ меняются ни сбросом, ни рассылкой: ни клавиша, ни место.
     const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
     const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos'];
+    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle'];
     function readHotkeyDefaults() {
         let raw = null;
         try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -561,7 +561,8 @@
             duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             rewind:           'Мотать в начало (Alt+R)',
             snapWidget:       'Привязать к левому верхнему краю (F8)',
-            openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)'
+            openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)',
+            grokCycle:        'Grok — цикл: промт → фото/видео → длина/соотношение (\\)'
         };
         
         const renderHotkeyRow = (k) => {
