@@ -219,6 +219,7 @@
         { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото (балансировка серий)', step: 5, min: 0 },
         { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
         { k: 'pinterestAutoFS',   t: 'bool', label: 'Pinterest: авто «полный масштаб»' },
+        { k: 'pinterestJumpKeys', t: 'sel', label: 'Pinterest: похожий пин по клавише', opts: [['off', 'Выкл'], ['focus', 'Фокус'], ['keys', 'Переход'], ['badges', 'Переход + номера'], ['shift', 'Переход, номера по Shift / CapsLock']] },
     ];
 
     function initGlobalDefaultsTab(modal) {
@@ -425,6 +426,13 @@
                 <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">⬇</button>
               </div>
             </div>
+            ${rootDomain.includes('pinterest.') ? `<div style="font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Переход к похожему пину клавишей: 1..9, 0, Q..P, A..L, Z..M (по клавиатуре, в любой раскладке)">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span data-mossad-label="pinJumpLabel">${LH('pinJumpLabel')}</span>
+                <select id="mossad-gen-pjump" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;"><option value="off" ${pinterestJumpMode() === 'off' ? 'selected' : ''} data-mossad-label="pinJumpOff">${LH('pinJumpOff')}</option><option value="focus" ${pinterestJumpMode() === 'focus' ? 'selected' : ''} data-mossad-label="pinJumpFocus">${LH('pinJumpFocus')}</option><option value="keys" ${pinterestJumpMode() === 'keys' ? 'selected' : ''} data-mossad-label="pinJumpKeys">${LH('pinJumpKeys')}</option><option value="badges" ${pinterestJumpMode() === 'badges' ? 'selected' : ''} data-mossad-label="pinJumpBadges">${LH('pinJumpBadges')}</option><option value="shift" ${pinterestJumpMode() === 'shift' ? 'selected' : ''} data-mossad-label="pinJumpShift">${LH('pinJumpShift')}</option></select>
+              </div>
+              <div id="mossad-gen-pjump-skip" style="font-size:11px;color:#9ca3af;margin-top:2px;"></div>
+            </div>` : ''}
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
               <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
               <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -792,6 +800,17 @@
             Settings.setQuiet('playlistRows', v);
         };
 
+        // v1.3.59: Pinterest — похожий пин по клавише + какие клавиши пропущены (заняты хоткеями MOSSAD)
+        const genPJump = modal.querySelector('#mossad-gen-pjump');
+        if (genPJump) {
+            const paintSkip = () => {
+                const sk = pinterestJumpCodes().skipped;
+                const el = modal.querySelector('#mossad-gen-pjump-skip');
+                if (el) el.textContent = sk.length ? `${L('pinJumpSkipped')} ${sk.map(x => x.label).join(' ')}` : L('pinJumpNoSkipped');
+            };
+            paintSkip();
+            genPJump.onchange = (e) => { Settings.setQuiet('pinterestJumpKeys', e.target.value); pinterestJumpApply(); paintSkip(); };
+        }
         // v1.3.53: шаблон имени для этого сайта (то же, что поле в меню)
         const genTpl = modal.querySelector('#mossad-gen-tpl');
         if (genTpl) {

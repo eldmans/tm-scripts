@@ -33,6 +33,7 @@
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'30' (№ N — N-й похожий пин)
+        pinterestJumpKeys: 'off',          // v1.3.59: похожий пин по клавише: off | focus | keys | badges | shift
         pinterestDir: 'fwd',               // v1.3.51: малое слайдшоу на Pinterest: 'fwd' — новые пины, 'back' — назад по истории
         pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
         pinterestPhotoPercent: 50,         // 0..100 % (видео = 100 - photo)
@@ -85,7 +86,7 @@
         'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates',
         'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
         'playlistRows', 'playlistWidth', 'collectWatchSec',
-        'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS',
+        'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS', 'pinterestJumpKeys',
     ];
     const GlobalDefaults = {
         KEY: GLOBAL_DEFAULTS_GM_KEY,
@@ -194,6 +195,7 @@
     if (!(config.pinterestMode === 'rand' || config.pinterestMode === '+1' || /^\d+$/.test(String(config.pinterestMode)))) config.pinterestMode = 'rand';
     if (/^\d+$/.test(String(config.pinterestMode))) config.pinterestMode = String(Math.min(30, Math.max(1, parseInt(config.pinterestMode, 10))));
     if (config.pinterestDir !== 'back') config.pinterestDir = 'fwd';
+    if (!['off', 'focus', 'keys', 'badges', 'shift'].includes(config.pinterestJumpKeys)) config.pinterestJumpKeys = 'off';
 
     // ── GitHub-токен: хранится в общем хранилище Tampermonkey (GM_setValue), а НЕ в localStorage сайта ──
     // v1.3.34: раньше токен лежал в localStorage каждого сайта (`mossad_{domain}_config`) и был

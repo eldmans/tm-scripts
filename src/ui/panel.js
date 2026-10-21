@@ -215,6 +215,10 @@
                                 <button class="mossad-pdir" data-dir="fwd" title="▶ Слайдшоу вперёд по новым пинам" style="border:none; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="pinDirFwd">${LH('pinDirFwd')}</button>
                             </div>
                         </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;" title="Похожий пин клавишей 1..9, 0, Q..P, A..L, Z..M (по клавиатуре, в любой раскладке; занятые хоткеями MOSSAD пропускаются). «Фокус» — только выделить пин (как Tab), открыть — Пробел/Enter. «Переход» — сразу открыть. «…номера по Shift» — номера видны, пока зажат Shift или включён CapsLock">
+                            <span style="color:#9ca3af;" data-mossad-label="pinJumpLabel">${LH('pinJumpLabel')}</span>
+                            <select id="mossad-sel-pjump" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px; font-size:11px;"><option value="off" ${pinterestJumpMode() === 'off' ? 'selected' : ''} data-mossad-label="pinJumpOff">${LH('pinJumpOff')}</option><option value="focus" ${pinterestJumpMode() === 'focus' ? 'selected' : ''} data-mossad-label="pinJumpFocus">${LH('pinJumpFocus')}</option><option value="keys" ${pinterestJumpMode() === 'keys' ? 'selected' : ''} data-mossad-label="pinJumpKeys">${LH('pinJumpKeys')}</option><option value="badges" ${pinterestJumpMode() === 'badges' ? 'selected' : ''} data-mossad-label="pinJumpBadges">${LH('pinJumpBadges')}</option><option value="shift" ${pinterestJumpMode() === 'shift' ? 'selected' : ''} data-mossad-label="pinJumpShift">${LH('pinJumpShift')}</option></select>
+                        </div>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style="color:#9ca3af;">Тип:</span>
                             <select id="mossad-sel-ptype" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px; font-size:11px;">
@@ -366,6 +370,8 @@
                         paintPinterestSegs();
                     }, 300);
                 }
+                const selPJump = panel.querySelector('#mossad-sel-pjump');
+                if (selPJump) selPJump.onchange = (e) => { Settings.setQuiet('pinterestJumpKeys', e.target.value); pinterestJumpApply(); };
                 panel.querySelectorAll('.mossad-pdir').forEach(el => {
                     el.onclick = () => {
                         Settings.setQuiet('pinterestDir', el.dataset.dir === 'back' ? 'back' : 'fwd');

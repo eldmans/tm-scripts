@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.58
+// @version      1.3.59
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -27,7 +27,7 @@
     'use strict';
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.58';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.59';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -175,6 +175,7 @@ collectWatchSec: 30,
 showSoundToast: true,
 debugSlideshow: false,
 pinterestMode: 'rand',
+pinterestJumpKeys: 'off',
 pinterestDir: 'fwd',
 pinterestFilterType: 'ratio',
 pinterestPhotoPercent: 50,
@@ -220,7 +221,7 @@ const GLOBAL_DEFAULT_KEYS = [
 'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates',
 'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
 'playlistRows', 'playlistWidth', 'collectWatchSec',
-'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS',
+'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS', 'pinterestJumpKeys',
 ];
 const GlobalDefaults = {
 KEY: GLOBAL_DEFAULTS_GM_KEY,
@@ -314,6 +315,7 @@ config = mergeDeep(base, config);
 if (!(config.pinterestMode === 'rand' || config.pinterestMode === '+1' || /^\d+$/.test(String(config.pinterestMode)))) config.pinterestMode = 'rand';
 if (/^\d+$/.test(String(config.pinterestMode))) config.pinterestMode = String(Math.min(30, Math.max(1, parseInt(config.pinterestMode, 10))));
 if (config.pinterestDir !== 'back') config.pinterestDir = 'fwd';
+if (!['off', 'focus', 'keys', 'badges', 'shift'].includes(config.pinterestJumpKeys)) config.pinterestJumpKeys = 'off';
 const GITHUB_TOKEN_GM_KEY = 'mossad_github_token';
 const _hasGmStore = (typeof GM_getValue === 'function' && typeof GM_setValue === 'function');
 function serializeLocalConfig() {
@@ -1419,6 +1421,14 @@ const LABEL_DEFS = [
 ['pinNum', '№', 'режим «всегда N-й похожий пин» (рядом поле с числом)'],
 ['pinDirBack', '◀', 'направление слайдшоу: назад по истории'],
 ['pinAutoFS', '⛶ FS', 'авто «Показать в полном масштабе» (галочка в блоке Pinterest)'],
+['pinJumpLabel', 'Клавиши:', 'переход к похожему пину по клавише'],
+['pinJumpOff', 'Выкл', 'режим клавиш: выключено'],
+['pinJumpFocus', 'Фокус', 'режим клавиш: фокус на N-й похожий пин (открыть — Пробел/Enter)'],
+['pinJumpKeys', 'Переход', 'режим клавиш: сразу открыть N-й похожий, без номеров'],
+['pinJumpBadges', 'Переход + номера', 'режим клавиш: переход, номера на пинах всегда'],
+['pinJumpShift', 'Переход, номера по Shift', 'режим клавиш: переход, номера пока зажат Shift или включён CapsLock'],
+['pinJumpSkipped', 'Заняты хоткеями MOSSAD (пропущены):', 'список пропущенных клавиш в настройках'],
+['pinJumpNoSkipped', 'Все клавиши свободны', 'нет пропущенных клавиш'],
 ['pinDirFwd', '▶', 'направление слайдшоу: вперёд по новым пинам'],
 ['#', 'После скачивания (v1.3.56)'],
 ['pdLabel', 'После скачивания:', 'надпись у выбора действия после скачивания'],
@@ -7605,6 +7615,209 @@ return { urls: Array.from(new Set([_pinOriginalsUrl(src), src])), type: 'photo',
 return null;
 }
 
+// ── src/engines/pinterest-keys.js ──
+const PIN_JUMP_MODES = ['off', 'focus', 'keys', 'badges', 'shift'];
+const PIN_FOCUS_SEL = 'a[href*="/pin/"], [role="link"], [tabindex]:not([tabindex="-1"])';
+const PIN_JUMP_ALL_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0',
+'KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP',
+'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL',
+'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM'];
+const PIN_BADGE_THROTTLE_MS = 340;
+const PIN_BADGE_LAYER_ID = 'mossad-pin-badges';
+function pinterestJumpMode() {
+const m = config.pinterestJumpKeys;
+return PIN_JUMP_MODES.includes(m) ? m : 'off';
+}
+function pinterestJumpCodeLabel(code) {
+return code.startsWith('Digit') ? code.slice(5) : code.slice(3);
+}
+function pinterestJumpBusyCodes() {
+const busy = new Set();
+const hk = config.hk || {};
+for (const name of Object.keys(hk)) {
+const list = Array.isArray(hk[name]) ? hk[name] : [hk[name]];
+for (const b of list) {
+if (!b || !b.key || b.ctrl || b.alt || b.meta) continue;
+const code = b.code || mossadCodeForKey(b.key);
+if (code) busy.add(code);
+}
+}
+return busy;
+}
+function pinterestJumpCodes() {
+const busy = pinterestJumpBusyCodes();
+const codes = [], skipped = [];
+for (const c of PIN_JUMP_ALL_CODES) (busy.has(c) ? skipped : codes).push(c);
+return { codes, skipped: skipped.map(c => ({ code: c, label: pinterestJumpCodeLabel(c) })) };
+}
+window.pinterestJumpCodes = pinterestJumpCodes;
+function _pinJumpIsTyping(e) {
+const t = e.target;
+if (!t || !t.tagName) return false;
+const tag = t.tagName.toLowerCase();
+return tag === 'input' || tag === 'textarea' || tag === 'select' || !!t.isContentEditable;
+}
+function pinterestJumpTo(index) {
+const cands = getPinterestCandidatePins();
+const target = cands[index];
+if (!target) { showToast(`⚠️ Нет похожего пина №${index + 1}`, true); return false; }
+pinterestCancelWait();
+if (!Array.isArray(config.pinterestHistory)) config.pinterestHistory = [];
+let hist = config.pinterestHistory;
+let idx = typeof config.pinterestHistoryIdx === 'number' ? config.pinterestHistoryIdx : hist.length - 1;
+if (!(idx >= 0 && idx < hist.length && pinterestCurrentPinId(hist[idx]) === pinterestCurrentPinId())) {
+hist = hist.slice(0, Math.max(0, idx) + (hist.length ? 1 : 0));
+hist.push(location.href);
+idx = hist.length - 1;
+}
+hist = hist.slice(0, idx + 1);
+hist.push(target.url);
+while (hist.length > 100) hist.shift();
+config.pinterestHistory = hist;
+config.pinterestHistoryIdx = hist.length - 1;
+pinterestSaveHistory();
+if (target.type) sessionStorage.setItem('mossad_expected_type', target.type);
+showToast(`📌 Похожий пин №${index + 1} (${target.type === 'video' ? '🎬 Видео' : '🖼 Фото'})`);
+navigatePinterestUrl(target.url);
+return true;
+}
+function pinterestJumpFocusEl(c) {
+const tile = (c.element && c.element.closest && c.element.closest('[data-grid-item]')) || c.element;
+if (!tile) return null;
+const media = tile.querySelector('img, video');
+let el = media ? media.closest(PIN_FOCUS_SEL) : null;
+if (el && !tile.contains(el)) el = null;
+if (!el) el = tile.querySelector('a[href*="/pin/"]') || c.element;
+return el;
+}
+function pinterestJumpFocus(index) {
+const c = getPinterestCandidatePins()[index];
+const el = c && pinterestJumpFocusEl(c);
+if (!el) { showToast(`⚠️ Нет похожего пина №${index + 1}`, true); return false; }
+try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
+try { el.focus({ preventScroll: true }); } catch (e) { try { el.focus(); } catch (e2) {} }
+return document.activeElement === el;
+}
+const _pj = { mode: 'off', onKeyDown: null, onKeyUp: null, onBlur: null, onScroll: null, mo: null, moTarget: null,
+watch: null, pinId: '', shift: false, caps: false, shown: false, last: 0, pending: null };
+function _pjLayer(create) {
+let l = document.getElementById(PIN_BADGE_LAYER_ID);
+if (!l && create) {
+l = document.createElement('div');
+l.id = PIN_BADGE_LAYER_ID;
+l.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483640;pointer-events:none;';
+document.body.appendChild(l);
+}
+return l;
+}
+function _pjClearBadges() { const l = _pjLayer(false); if (l) l.remove(); }
+function _pjBadgesWanted() {
+return _pj.mode === 'badges' || (_pj.mode === 'shift' && (_pj.shift || _pj.caps));
+}
+function pinterestRenderBadges() {
+_pj.pending = null; _pj.last = Date.now();
+if (!_pjBadgesWanted()) { _pjClearBadges(); return; }
+const { codes } = pinterestJumpCodes();
+const cands = getPinterestCandidatePins().slice(0, codes.length);
+const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+const parts = [];
+cands.forEach((c, i) => {
+const tile = (c.element && c.element.closest && c.element.closest('[data-grid-item]')) || c.element;
+if (!tile || !tile.getBoundingClientRect) return;
+const r = tile.getBoundingClientRect();
+if (r.width <= 0 || r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) return;
+parts.push(`<span data-pin-badge="${i}" style="position:absolute;left:${Math.round(r.left + 6)}px;top:${Math.round(Math.max(0, r.top) + 6)}px;` +
+`min-width:18px;padding:1px 5px;border-radius:6px;background:rgba(17,24,39,0.85);color:#fbbf24;border:1px solid #fbbf24;` +
+`font:700 13px/18px system-ui,sans-serif;text-align:center;">${pinterestJumpCodeLabel(codes[i])}</span>`);
+});
+const l = _pjLayer(true);
+l.innerHTML = parts.join('');
+}
+function _pjScheduleBadges() {
+if (!_pjBadgesWanted()) { _pjClearBadges(); return; }
+if (_pj.pending) return;
+const wait = Math.max(0, PIN_BADGE_THROTTLE_MS - (Date.now() - _pj.last));
+_pj.pending = setTimeout(pinterestRenderBadges, wait);
+}
+function _pjObserve(on) {
+if (!on) {
+if (_pj.mo) { _pj.mo.disconnect(); _pj.mo = null; _pj.moTarget = null; }
+if (_pj.onScroll) { window.removeEventListener('scroll', _pj.onScroll, true); window.removeEventListener('resize', _pj.onScroll); _pj.onScroll = null; }
+if (_pj.pending) { clearTimeout(_pj.pending); _pj.pending = null; }
+return;
+}
+if (!_pj.onScroll) {
+_pj.onScroll = () => _pjScheduleBadges();
+window.addEventListener('scroll', _pj.onScroll, { capture: true, passive: true });
+window.addEventListener('resize', _pj.onScroll, { passive: true });
+}
+const first = document.querySelector('[data-grid-item]');
+const target = document.querySelector(PIN_RELATED_SEL) || (first && (first.parentElement && first.parentElement.parentElement || first.parentElement));
+if (target && target !== _pj.moTarget) {
+if (_pj.mo) _pj.mo.disconnect();
+_pj.mo = new MutationObserver(() => _pjScheduleBadges());
+_pj.mo.observe(target, { childList: true, subtree: true });
+_pj.moTarget = target;
+}
+}
+function _pjUpdateShown() {
+const want = _pjBadgesWanted();
+if (want === _pj.shown) { if (want) _pjScheduleBadges(); return; }
+_pj.shown = want;
+_pjObserve(want);
+if (want) pinterestRenderBadges(); else _pjClearBadges();
+}
+function _pjKeyDown(e) {
+if (typeof e.getModifierState === 'function') _pj.caps = !!e.getModifierState('CapsLock');
+if (e.key === 'Shift') { _pj.shift = true; _pjUpdateShown(); return; }
+if (_pj.mode === 'shift') _pjUpdateShown();
+if (e.ctrlKey || e.altKey || e.metaKey || e.repeat || _pjJumpBlocked(e)) return;
+const { codes } = pinterestJumpCodes();
+const i = codes.indexOf(e.code);
+if (i < 0) return;
+e.preventDefault(); e.stopPropagation();
+if (_pj.mode === 'focus') pinterestJumpFocus(i); else pinterestJumpTo(i);
+}
+function _pjJumpBlocked(e) {
+if (_pjJumpIsTypingSafe(e)) return true;
+if (_pj.mode !== 'focus' && !pinterestCurrentPinId()) return true;
+return !!document.getElementById('mossad-hk-modal') && window.capturingFor !== null && window.capturingFor !== undefined;
+}
+function _pjJumpIsTypingSafe(e) { try { return _pinJumpIsTyping(e); } catch (err) { return true; } }
+function _pjKeyUp(e) {
+if (typeof e.getModifierState === 'function') _pj.caps = !!e.getModifierState('CapsLock');
+if (e.key === 'Shift') _pj.shift = false;
+if (_pj.mode === 'shift') _pjUpdateShown();
+}
+function _pjBlur() { _pj.shift = false; if (_pj.mode === 'shift') _pjUpdateShown(); }
+function pinterestJumpApply() {
+if (!rootDomain.includes('pinterest.')) return;
+const mode = pinterestJumpMode();
+if (_pj.onKeyDown) { window.removeEventListener('keydown', _pj.onKeyDown, true); window.removeEventListener('keyup', _pj.onKeyUp, true); window.removeEventListener('blur', _pj.onBlur); }
+_pj.onKeyDown = _pj.onKeyUp = _pj.onBlur = null;
+if (_pj.watch) { clearInterval(_pj.watch); _pj.watch = null; }
+_pjObserve(false); _pjClearBadges(); _pj.shown = false; _pj.shift = false;
+_pj.mode = mode;
+if (mode === 'off') return;
+_pj.onKeyDown = _pjKeyDown; _pj.onKeyUp = _pjKeyUp; _pj.onBlur = _pjBlur;
+window.addEventListener('keydown', _pj.onKeyDown, true);
+window.addEventListener('keyup', _pj.onKeyUp, true);
+window.addEventListener('blur', _pj.onBlur);
+if (mode === 'keys' || mode === 'focus') return;
+_pj.pinId = pinterestCurrentPinId();
+_pj.watch = setInterval(() => {
+const id = pinterestCurrentPinId();
+if (id !== _pj.pinId) {
+_pj.pinId = id;
+_pjClearBadges();
+if (_pj.shown) { _pjObserve(false); _pjObserve(true); _pjScheduleBadges(); }
+} else if (_pj.shown && !_pj.moTarget) _pjObserve(true);
+}, 1000);
+_pjUpdateShown();
+}
+window.pinterestJumpApply = pinterestJumpApply;
+if (rootDomain.includes('pinterest.')) setTimeout(pinterestJumpApply, 0);
+
 // ── src/ui/tpl-help.js ──
 let _tplHelp = null;
 function _tplEsc(s) {
@@ -7954,6 +8167,10 @@ panel.innerHTML = `
                                 <button class="mossad-pdir" data-dir="fwd" title="▶ Слайдшоу вперёд по новым пинам" style="border:none; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="pinDirFwd">${LH('pinDirFwd')}</button>
                             </div>
                         </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;" title="Похожий пин клавишей 1..9, 0, Q..P, A..L, Z..M (по клавиатуре, в любой раскладке; занятые хоткеями MOSSAD пропускаются). «Фокус» — только выделить пин (как Tab), открыть — Пробел/Enter. «Переход» — сразу открыть. «…номера по Shift» — номера видны, пока зажат Shift или включён CapsLock">
+                            <span style="color:#9ca3af;" data-mossad-label="pinJumpLabel">${LH('pinJumpLabel')}</span>
+                            <select id="mossad-sel-pjump" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px; font-size:11px;"><option value="off" ${pinterestJumpMode() === 'off' ? 'selected' : ''} data-mossad-label="pinJumpOff">${LH('pinJumpOff')}</option><option value="focus" ${pinterestJumpMode() === 'focus' ? 'selected' : ''} data-mossad-label="pinJumpFocus">${LH('pinJumpFocus')}</option><option value="keys" ${pinterestJumpMode() === 'keys' ? 'selected' : ''} data-mossad-label="pinJumpKeys">${LH('pinJumpKeys')}</option><option value="badges" ${pinterestJumpMode() === 'badges' ? 'selected' : ''} data-mossad-label="pinJumpBadges">${LH('pinJumpBadges')}</option><option value="shift" ${pinterestJumpMode() === 'shift' ? 'selected' : ''} data-mossad-label="pinJumpShift">${LH('pinJumpShift')}</option></select>
+                        </div>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style="color:#9ca3af;">Тип:</span>
                             <select id="mossad-sel-ptype" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px; font-size:11px;">
@@ -8100,6 +8317,8 @@ Settings.setQuiet('pinterestMode', numVal());
 paintPinterestSegs();
 }, 300);
 }
+const selPJump = panel.querySelector('#mossad-sel-pjump');
+if (selPJump) selPJump.onchange = (e) => { Settings.setQuiet('pinterestJumpKeys', e.target.value); pinterestJumpApply(); };
 panel.querySelectorAll('.mossad-pdir').forEach(el => {
 el.onclick = () => {
 Settings.setQuiet('pinterestDir', el.dataset.dir === 'back' ? 'back' : 'fwd');
@@ -9197,6 +9416,7 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото (балансировка серий)', step: 5, min: 0 },
 { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
 { k: 'pinterestAutoFS', t: 'bool', label: 'Pinterest: авто «полный масштаб»' },
+{ k: 'pinterestJumpKeys', t: 'sel', label: 'Pinterest: похожий пин по клавише', opts: [['off', 'Выкл'], ['focus', 'Фокус'], ['keys', 'Переход'], ['badges', 'Переход + номера'], ['shift', 'Переход, номера по Shift / CapsLock']] },
 ];
 function initGlobalDefaultsTab(modal) {
 const form = modal.querySelector('#mossad-def-form');
@@ -9387,6 +9607,13 @@ modal.innerHTML = `
                 <button id="mossad-gh-pull" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#60a5fa;padding:4px 10px;cursor:pointer;font-size:12px;" title="Получить конфиг с GitHub">⬇</button>
               </div>
             </div>
+            ${rootDomain.includes('pinterest.') ? `<div style="font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Переход к похожему пину клавишей: 1..9, 0, Q..P, A..L, Z..M (по клавиатуре, в любой раскладке)">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span data-mossad-label="pinJumpLabel">${LH('pinJumpLabel')}</span>
+                <select id="mossad-gen-pjump" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;"><option value="off" ${pinterestJumpMode() === 'off' ? 'selected' : ''} data-mossad-label="pinJumpOff">${LH('pinJumpOff')}</option><option value="focus" ${pinterestJumpMode() === 'focus' ? 'selected' : ''} data-mossad-label="pinJumpFocus">${LH('pinJumpFocus')}</option><option value="keys" ${pinterestJumpMode() === 'keys' ? 'selected' : ''} data-mossad-label="pinJumpKeys">${LH('pinJumpKeys')}</option><option value="badges" ${pinterestJumpMode() === 'badges' ? 'selected' : ''} data-mossad-label="pinJumpBadges">${LH('pinJumpBadges')}</option><option value="shift" ${pinterestJumpMode() === 'shift' ? 'selected' : ''} data-mossad-label="pinJumpShift">${LH('pinJumpShift')}</option></select>
+              </div>
+              <div id="mossad-gen-pjump-skip" style="font-size:11px;color:#9ca3af;margin-top:2px;"></div>
+            </div>` : ''}
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
               <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
               <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -9716,6 +9943,16 @@ const v = Math.max(5, Math.min(200, parseInt(e.target.value, 10) || 30));
 e.target.value = String(v);
 Settings.setQuiet('playlistRows', v);
 };
+const genPJump = modal.querySelector('#mossad-gen-pjump');
+if (genPJump) {
+const paintSkip = () => {
+const sk = pinterestJumpCodes().skipped;
+const el = modal.querySelector('#mossad-gen-pjump-skip');
+if (el) el.textContent = sk.length ? `${L('pinJumpSkipped')} ${sk.map(x => x.label).join(' ')}` : L('pinJumpNoSkipped');
+};
+paintSkip();
+genPJump.onchange = (e) => { Settings.setQuiet('pinterestJumpKeys', e.target.value); pinterestJumpApply(); paintSkip(); };
+}
 const genTpl = modal.querySelector('#mossad-gen-tpl');
 if (genTpl) {
 genTpl.onchange = genTpl.onblur = (e) => mossadSaveSiteTemplate(e.target.value);
@@ -10043,6 +10280,8 @@ window.addEventListener('keydown', function (e) {
 if (window.capturingFor !== null) return;
 const activeEl = document.activeElement;
 const isEditing = isEditableElement(activeEl);
+if (rootDomain.includes('pinterest.') && (e.key === ' ' || e.key === 'Enter') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey &&
+activeEl && activeEl.closest && activeEl.closest('[data-grid-item]')) return;
 const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
 const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
 if (isHistoryHk && rootDomain === 'grok.com') {

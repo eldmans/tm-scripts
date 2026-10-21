@@ -244,6 +244,10 @@
 
         const activeEl = document.activeElement;
         const isEditing = isEditableElement(activeEl);
+        // v1.3.59: Pinterest — фокус на плитке пина (режим «Фокус» или Tab): Пробел/Enter без модификаторов — сайту
+        // (открыть пин), даже если на них назначен хоткей MOSSAD.
+        if (rootDomain.includes('pinterest.') && (e.key === ' ' || e.key === 'Enter') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey &&
+            activeEl && activeEl.closest && activeEl.closest('[data-grid-item]')) return;
 
         // 1. Навигация Home / Saved Grok (срабатывает из любого места grok.com)
         const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
