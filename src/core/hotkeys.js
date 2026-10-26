@@ -257,6 +257,25 @@
         if (rootDomain.includes('pinterest.') && (e.key === ' ' || e.key === 'Enter') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey &&
             activeEl && activeEl.closest && activeEl.closest('[data-grid-item]')) return;
 
+        // 0. Универсальный запуск генерации / отправка промпта (Ctrl+Enter) для Hugging Face и Grok
+        // Срабатывает в любом месте страницы, включая текстовые поля ввода и настройки
+        if (config.hk.generate && hotkeyMatches(e, config.hk.generate)) {
+            if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                window.MOSSAD_ENGINES.huggingface.triggerGenerate();
+                return;
+            }
+            if (rootDomain === 'grok.com') {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (typeof triggerGrokSubmit === 'function') {
+                    triggerGrokSubmit();
+                }
+                return;
+            }
+        }
+
         // 1. Навигация Home / Saved Grok (срабатывает из любого места grok.com)
         const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
         const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;

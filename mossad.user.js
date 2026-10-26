@@ -1,11 +1,10 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.69
+// @version      1.3.70
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
-// @noframes
 // @grant        GM_openInTab
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
@@ -530,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.69';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.70';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -540,7 +539,7 @@ return parts.slice(-2).join('.');
 }
 const rootDomain = getRootDomain(hostname);
 const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
-const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'];
+const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space'];
 const MOSSAD_SITES_GM_KEY = 'mossad_sites';
 function mossadNormSite(s) {
 let d = String(s == null ? '' : s).trim().toLowerCase();
@@ -679,6 +678,7 @@ githubToken: '',
 githubConfigPath: 'mossad-config.json',
 filenameTemplate: '',
 filenameTemplateEnabled: true,
+hfAutoSave: 'off',
 playlistRows: 30,
 playlistWidth: 0,
 widgetZoom: 0.9,
@@ -720,6 +720,7 @@ nextGroup: { key: 'PageDown', ctrl: false, alt: true, shift: false },
 prevGroup: { key: 'PageUp', ctrl: false, alt: true, shift: false },
 duplicateNext: { key: ' ', ctrl: true, alt: false, shift: false },
 rewind: { key: 'r', ctrl: false, alt: true, shift: false },
+generate: { key: 'Enter', ctrl: true, alt: false, shift: false },
 }
 };
 let config = {};
@@ -1861,7 +1862,9 @@ const MOSSAD_TPL_ALIAS = {};
 for (const t of MOSSAD_TPL_TAGS) { MOSSAD_TPL_ALIAS[t.k] = t.k; for (const a of t.aliases) MOSSAD_TPL_ALIAS[a] = t.k; }
 const MOSSAD_TPL_TAG_RE = /\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g;
 function getDefaultFilenameTemplate() {
-return rootDomain === 'grok.com' ? MOSSAD_DEFAULT_TPL_GROK : MOSSAD_DEFAULT_TPL;
+if (rootDomain === 'grok.com') return MOSSAD_DEFAULT_TPL_GROK;
+if (rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) return '{hf}-{space}-{subtype}-{id8}.{ext}';
+return MOSSAD_DEFAULT_TPL;
 }
 window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
 function mossadDomainWord(root) {
@@ -1885,6 +1888,11 @@ const titleRaw = ctx.title != null ? ctx.title : (document.title || '');
 return {
 id: postId,
 conv: String(ctx.convId || ''),
+hf: 'HF',
+space: (ctx.spaceName || (window.MOSSAD_ENGINES?.huggingface?.getSpaceMetadata && window.MOSSAD_ENGINES.huggingface.getSpaceMetadata().space) || ''),
+subtype: (ctx.subtype || (window.MOSSAD_ENGINES?.huggingface?.getSpaceMetadata && window.MOSSAD_ENGINES.huggingface.getSpaceMetadata().subtype) || ''),
+model: (ctx.subtype || (window.MOSSAD_ENGINES?.huggingface?.getSpaceMetadata && window.MOSSAD_ENGINES.huggingface.getSpaceMetadata().subtype) || ''),
+mediatype: ctx.type || '',
 domain: mossadDomainWord(rootDomain),
 domainfull: rootDomain.replace(/[^a-z0-9._-]/gi, '_'),
 account: String(ctx.account || '').trim(),
@@ -3079,6 +3087,41 @@ if (d.includes('M12') && d.includes('C12')) return true;
 return false;
 }) || null;
 }
+function triggerGrokSubmit() {
+if (rootDomain !== 'grok.com') return false;
+const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+let submitBtn = buttons.find(b => {
+if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+if (b.querySelector('g#name\\=arrow-up, g[id*="arrow-up"]')) return true;
+const path = b.querySelector('path');
+const d = path ? (path.getAttribute('d') || '') : '';
+return (d.includes('M6 11L12 5') || d.includes('5V19')) && (b.closest('div.query-bar') || b.closest('div.relative.z-10') || (b.className && b.className.includes('rounded-full')));
+});
+if (!submitBtn) {
+submitBtn = buttons.find(b => {
+if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+const type = (b.getAttribute('type') || '').toLowerCase();
+if (type === 'submit' && (b.closest('div.query-bar') || b.closest('form') || b.closest('div.relative.z-10'))) return true;
+return (aria === 'submit' || aria === 'make video' || aria === 'edit' || aria.includes('send') || aria.includes('отправить')) &&
+(b.closest('div.query-bar') || b.closest('div.relative.z-10') || (b.className && b.className.includes('rounded-full')));
+});
+}
+if (!submitBtn) {
+submitBtn = document.querySelector('div.query-bar button[type="submit"], div.query-bar div.relative.z-10 button');
+}
+if (submitBtn) {
+if (submitBtn.disabled || submitBtn.getAttribute('aria-disabled') === 'true') {
+showToast('⚠️ Кнопка отправки Grok неактивна (введите промпт)', true);
+return true;
+}
+triggerClick(submitBtn, 'Grok Universal Submit (Ctrl+Enter)');
+showToast('🚀 Запрос Grok отправлен!');
+return true;
+}
+return false;
+}
+window.triggerGrokSubmit = triggerGrokSubmit;
 
 // ── src/engines/grok/sound.js ──
 const GROK_MUTE_WORDS = [
@@ -7108,8 +7151,255 @@ if (window.MOSSAD_ENGINES?.redgifs) {
 window.MOSSAD_ENGINES.redgifs.init();
 }
 
+// ── src/engines/huggingface.js ──
+window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
+window.MOSSAD_ENGINES.huggingface = (() => {
+let _lastDownloadedSrc = null;
+let _autoSaveTimer = null;
+let _isWaitingForGeneration = false;
+function isSupported() {
+return hostname.includes('huggingface.co') || hostname.includes('hf.space');
+}
+function getSpaceMetadata() {
+let author = '';
+let space = '';
+let subtype = '';
+if (hostname.includes('huggingface.co')) {
+const m = location.pathname.match(/\/spaces\/([^/]+)\/([^/?#]+)/i);
+if (m) {
+author = m[1];
+space = m[2];
+}
+} else if (hostname.includes('hf.space')) {
+const sub = hostname.replace('.hf.space', '');
+const parts = sub.split('-');
+if (parts.length >= 2) {
+author = parts[0];
+space = parts.slice(1).join('-');
+} else {
+space = sub;
+}
+}
+if (!space) {
+const h1 = document.querySelector('h1, h2, title');
+if (h1) space = (h1.textContent || '').trim().toLowerCase();
+}
+const cleanStr = (s) => (s || '').replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_{2,}/g, '_');
+author = cleanStr(author);
+space = cleanStr(space);
+const fullContext = `${author} ${space} ${document.title || ''} ${(document.querySelector('h1, h2, .gradio-container')?.textContent || '').slice(0, 500)}`.toLowerCase();
+const models = [
+'qwen2.5', 'qwen2', 'qwen', 'flux-schnell', 'flux-dev', 'flux', 'sdxl', 'sd-turbo', 'stable-diffusion',
+'wan2.1', 'wan', 'hunyuan', 'cogvideo', 'svd', 'animatediff', 'midjourney', 'omnigen', 'kolors', 'lumina',
+'mochi', 'ltx-video', 'aura-flow', 'pixart', 'playground'
+];
+for (const m of models) {
+if (fullContext.includes(m)) {
+subtype = m.replace(/[^a-z0-9._-]/g, '_');
+break;
+}
+}
+if (!subtype) {
+const verMatch = fullContext.match(/\b(?:v)?(\d+\.\d+|\d{2}\.\d{2})\b/);
+if (verMatch) subtype = verMatch[1].replace('.', '_');
+}
+if (!subtype && space) {
+subtype = space.slice(0, 12);
+}
+return {
+author: author || 'hf',
+space: space || 'space',
+subtype: subtype || 'model'
+};
+}
+function findSubmitButton() {
+const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]'));
+const byGradioId = buttons.find(b => {
+if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+const id = (b.id || '').toLowerCase();
+const cls = (b.className || '').toLowerCase();
+const variant = (b.getAttribute('variant') || '').toLowerCase();
+return id === 'submit' || id === 'generate' || id === 'run' ||
+variant === 'primary' || cls.includes('primary') || cls.includes('generate-btn');
+});
+if (byGradioId) return byGradioId;
+const submitKeywords = [
+'generate', 'submit', 'run', 'queue', 'render', 'start', 'create',
+'сгенерировать', 'запуск', 'создать', 'отправить', 'старт'
+];
+const byText = buttons.find(b => {
+if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+const txt = (b.textContent || '').trim().toLowerCase();
+const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+const title = (b.getAttribute('title') || '').toLowerCase();
+return submitKeywords.some(kw => txt === kw || aria === kw || title === kw || txt.startsWith(kw + ' '));
+});
+if (byText) return byText;
+return buttons.find(b => {
+if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+const txt = (b.textContent || '').trim().toLowerCase();
+return submitKeywords.some(kw => txt.includes(kw));
+}) || null;
+}
+function findMedia() {
+if (!isSupported()) return null;
+const videos = Array.from(document.querySelectorAll('.gradio-video video, .output-video video, div[data-testid="video"] video, video'));
+const validVideo = videos.find(v => {
+const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
+return src && !src.startsWith('blob:http') && !src.includes('tampermonkey') && v.videoWidth > 100;
+}) || videos.find(v => (v.src || v.currentSrc) && (v.offsetWidth > 150 || v.videoWidth > 100));
+if (validVideo) {
+const src = validVideo.src || (validVideo.querySelector('source') && validVideo.querySelector('source').src) || validVideo.currentSrc;
+if (src) {
+const meta = getSpaceMetadata();
+return {
+urls: [src],
+type: 'video',
+userName: meta.author,
+spaceName: meta.space,
+subtype: meta.subtype,
+itemId: String(Date.now()).slice(-8),
+postUrl: location.href
+};
+}
+}
+const dlLinks = Array.from(document.querySelectorAll('a[download], a.download-button, a[title*="Download" i]'));
+for (const a of dlLinks) {
+const href = a.href;
+if (href && (href.startsWith('http') || href.startsWith('blob:'))) {
+const isVid = /\.(mp4|webm)(\?|$)/i.test(href);
+const meta = getSpaceMetadata();
+return {
+urls: [href],
+type: isVid ? 'video' : 'image',
+userName: meta.author,
+spaceName: meta.space,
+subtype: meta.subtype,
+itemId: String(Date.now()).slice(-8),
+postUrl: location.href
+};
+}
+}
+const imgSelectors = [
+'.gradio-image img',
+'div[data-testid="image"] img',
+'.output-image img',
+'.gallery img',
+'div.image-container img',
+'div[data-testid="stImage"] img'
+];
+for (const sel of imgSelectors) {
+const imgs = Array.from(document.querySelectorAll(sel));
+const goodImg = imgs.find(i => (i.naturalWidth > 150 || i.width > 150) && i.src && !i.src.includes('avatar') && !i.src.includes('icon'));
+if (goodImg && goodImg.src) {
+const meta = getSpaceMetadata();
+return {
+urls: [goodImg.src],
+type: 'image',
+userName: meta.author,
+spaceName: meta.space,
+subtype: meta.subtype,
+itemId: String(Date.now()).slice(-8),
+postUrl: location.href
+};
+}
+}
+const allImgs = Array.from(document.querySelectorAll('img')).filter(i => {
+if (i.naturalWidth < 200 && i.width < 200) return false;
+const src = i.src || '';
+if (src.includes('logo') || src.includes('avatar') || src.includes('badge')) return false;
+return true;
+});
+if (allImgs.length > 0) {
+const meta = getSpaceMetadata();
+return {
+urls: [allImgs[allImgs.length - 1].src],
+type: 'image',
+userName: meta.author,
+spaceName: meta.space,
+subtype: meta.subtype,
+itemId: String(Date.now()).slice(-8),
+postUrl: location.href
+};
+}
+return null;
+}
+function triggerGenerate() {
+if (!isSupported()) return false;
+const btn = findSubmitButton();
+if (btn) {
+if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') {
+showToast('⚠️ Кнопка генерации Space неактивна', true);
+return true;
+}
+triggerClick(btn, 'HuggingFace Space Generate');
+showToast('🚀 Генерация в Space запущена!');
+if (isAutoSaveEnabled()) {
+startWatcher();
+}
+return true;
+}
+return false;
+}
+function isAutoSaveEnabled() {
+const mode = config.hfAutoSave || 'off';
+if (mode === 'always') return true;
+if (mode === 'page') return true;
+if (mode === 'space') {
+const meta = getSpaceMetadata();
+const key = `mossad_hf_autosave_${meta.space}`;
+return localStorage.getItem(key) === 'true';
+}
+return false;
+}
+function startWatcher() {
+if (_isWaitingForGeneration) return;
+_isWaitingForGeneration = true;
+showToast('⏳ Ждун автосохранения активен...');
+const startMedia = findMedia();
+const initialSrc = startMedia && startMedia.urls ? startMedia.urls[0] : null;
+let checkCount = 0;
+const maxChecks = 300;
+if (_autoSaveTimer) clearInterval(_autoSaveTimer);
+_autoSaveTimer = setInterval(() => {
+checkCount++;
+const curMedia = findMedia();
+const curSrc = curMedia && curMedia.urls ? curMedia.urls[0] : null;
+const isGenerating = Boolean(document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"]'));
+if (curSrc && curSrc !== initialSrc && curSrc !== _lastDownloadedSrc && !isGenerating) {
+clearInterval(_autoSaveTimer);
+_autoSaveTimer = null;
+_isWaitingForGeneration = false;
+_lastDownloadedSrc = curSrc;
+showToast('🎉 Генерация завершена! Автоскачивание...');
+triggerDownload(true);
+return;
+}
+if (checkCount >= maxChecks) {
+clearInterval(_autoSaveTimer);
+_autoSaveTimer = null;
+_isWaitingForGeneration = false;
+console.log('[MOSSAD HF] Тайм-аут ожидания генерации');
+}
+}, 1000);
+}
+return {
+isSupported,
+getSpaceMetadata,
+findSubmitButton,
+findMedia,
+triggerGenerate,
+startWatcher,
+isAutoSaveEnabled
+};
+})();
+
 // ── src/download/router.js ──
 function findMediaForDownload() {
+if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
+const hfMedia = window.MOSSAD_ENGINES.huggingface.findMedia();
+if (hfMedia) return hfMedia;
+}
 if (window.MOSSAD_ENGINES.instagram?.isSupported()) {
 return window.MOSSAD_ENGINES.instagram.findMedia();
 }
@@ -7194,6 +7484,8 @@ authorName = getRedGifsUserName();
 } else if (rootDomain.includes('instagram.com')) {
 const m = location.pathname.match(/^\/([A-Za-z0-9_.]+)\//);
 if (m && !['p', 'reel', 'stories', 'explore'].includes(m[1])) authorName = m[1];
+} else if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
+authorName = media.userName || '';
 }
 let desc = media.desc || '';
 if (!desc && !rootDomain.includes('pinterest.')) {
@@ -9384,6 +9676,18 @@ panel.innerHTML = `
                     <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="saveTplGlobal">${LH('saveTplGlobal')}</button>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                ${(window.MOSSAD_ENGINES?.huggingface?.isSupported() || rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) ? `
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
+                    <span style="font-size:11px; color:#cbd5e1;" title="Автосохранение сгенерированных результатов Space">🤖 HF Авто-DL:</span>
+                    <select id="mossad-sel-hf-autosave" style="background:#1f2937; border:1px solid #374151; color:#38bdf8; border-radius:4px; padding:2px; font-size:11px; flex:1;">
+                        <option value="off" ${config.hfAutoSave === 'off' ? 'selected' : ''}>Не сохранять</option>
+                        <option value="page" ${config.hfAutoSave === 'page' ? 'selected' : ''}>На этой странице</option>
+                        <option value="space" ${config.hfAutoSave === 'space' ? 'selected' : ''}>Для этого Space всегда</option>
+                        <option value="always" ${config.hfAutoSave === 'always' ? 'selected' : ''}>Для всех Space всегда</option>
+                    </select>
+                </div>
+                <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                ` : ''}
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <select id="mossad-sel-dl" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
                         <option value="none" ${config.downloadType === 'none' ? 'selected' : ''}>Не скачивать</option>
@@ -9508,6 +9812,18 @@ panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set(
 panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, numOr(e.target.value, config.delayAfterVideo))), 300);
 panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
 panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
+const selHfAutoSave = panel.querySelector('#mossad-sel-hf-autosave');
+if (selHfAutoSave) {
+selHfAutoSave.onchange = (e) => {
+const val = e.target.value;
+Settings.set('hfAutoSave', val);
+if (val === 'space' && window.MOSSAD_ENGINES?.huggingface) {
+const meta = window.MOSSAD_ENGINES.huggingface.getSpaceMetadata();
+localStorage.setItem(`mossad_hf_autosave_${meta.space}`, 'true');
+}
+showToast(`🤖 HF Автосохранение: ${selHfAutoSave.options[selHfAutoSave.selectedIndex].text}`);
+};
+}
 panel.querySelector('#mossad-cb-fn-tpl').onchange = (e) => Settings.set('filenameTemplateEnabled', e.target.checked);
 const fnTplInput = panel.querySelector('#mossad-in-fn-tpl');
 const _saveFnTpl = (e) => mossadSaveSiteTemplate(e.target.value);
@@ -10434,7 +10750,7 @@ return out.filter(k => k != null);
 }
 const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
 const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'pinFullScale'];
+const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'pinFullScale', 'generate'];
 function readHotkeyDefaults() {
 let raw = null;
 try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -10828,7 +11144,7 @@ modal.innerHTML = `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-21</span>
+              <span>v${SCRIPT_VERSION} · 2026-10-26</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -10891,7 +11207,8 @@ rewind: 'Мотать в начало (Alt+R)',
 snapWidget: 'Привязать к левому верхнему краю (F8)',
 openTodos: 'Открыть «📝 Тудушки» (по умолчанию не назначено)',
 grokCycle: 'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
-pinFullScale: 'Pinterest — ⛶ «Показать в полном масштабе» (не назначено)'
+pinFullScale: 'Pinterest — ⛶ «Показать в полном масштабе» (не назначено)',
+generate: 'Генерация Space / Отправка Grok (Ctrl+Enter)'
 };
 const renderHotkeyRow = (k) => {
 const row = document.createElement('div');
@@ -11615,6 +11932,22 @@ const activeEl = document.activeElement;
 const isEditing = isEditableElement(activeEl);
 if (rootDomain.includes('pinterest.') && (e.key === ' ' || e.key === 'Enter') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey &&
 activeEl && activeEl.closest && activeEl.closest('[data-grid-item]')) return;
+if (config.hk.generate && hotkeyMatches(e, config.hk.generate)) {
+if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
+e.preventDefault();
+e.stopImmediatePropagation();
+window.MOSSAD_ENGINES.huggingface.triggerGenerate();
+return;
+}
+if (rootDomain === 'grok.com') {
+e.preventDefault();
+e.stopImmediatePropagation();
+if (typeof triggerGrokSubmit === 'function') {
+triggerGrokSubmit();
+}
+return;
+}
+}
 const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
 const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
 if (isHistoryHk && rootDomain === 'grok.com') {

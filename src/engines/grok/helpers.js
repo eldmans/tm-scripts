@@ -44,3 +44,49 @@
             return false;
         }) || null;
     }
+
+    /**
+     * v1.3.70: Универсальный запуск генерации / отправки промпта на Grok по Ctrl+Enter.
+     * Стабильный маркер кнопки: SVG <g id="name=arrow-up"> или path d="...5V19...".
+     * Работает из любого места (внутри textarea, настроек, кнопок и т.д.)
+     */
+    function triggerGrokSubmit() {
+        if (rootDomain !== 'grok.com') return false;
+
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+        let submitBtn = buttons.find(b => {
+            if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+            if (b.querySelector('g#name\\=arrow-up, g[id*="arrow-up"]')) return true;
+            const path = b.querySelector('path');
+            const d = path ? (path.getAttribute('d') || '') : '';
+            return (d.includes('M6 11L12 5') || d.includes('5V19')) && (b.closest('div.query-bar') || b.closest('div.relative.z-10') || (b.className && b.className.includes('rounded-full')));
+        });
+
+        if (!submitBtn) {
+            submitBtn = buttons.find(b => {
+                if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+                const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                const type = (b.getAttribute('type') || '').toLowerCase();
+                if (type === 'submit' && (b.closest('div.query-bar') || b.closest('form') || b.closest('div.relative.z-10'))) return true;
+                return (aria === 'submit' || aria === 'make video' || aria === 'edit' || aria.includes('send') || aria.includes('отправить')) &&
+                       (b.closest('div.query-bar') || b.closest('div.relative.z-10') || (b.className && b.className.includes('rounded-full')));
+            });
+        }
+
+        if (!submitBtn) {
+            submitBtn = document.querySelector('div.query-bar button[type="submit"], div.query-bar div.relative.z-10 button');
+        }
+
+        if (submitBtn) {
+            if (submitBtn.disabled || submitBtn.getAttribute('aria-disabled') === 'true') {
+                showToast('⚠️ Кнопка отправки Grok неактивна (введите промпт)', true);
+                return true;
+            }
+            triggerClick(submitBtn, 'Grok Universal Submit (Ctrl+Enter)');
+            showToast('🚀 Запрос Grok отправлен!');
+            return true;
+        }
+
+        return false;
+    }
+    window.triggerGrokSubmit = triggerGrokSubmit;

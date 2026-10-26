@@ -46,6 +46,7 @@ MODULES = [
     "src/engines/grok/key-guard.js",
     "src/engines/instagram.js",
     "src/engines/redgifs.js",
+    "src/engines/huggingface.js",
     "src/download/router.js",
     "src/slideshow/engine.js",
     "src/engines/pinterest.js",

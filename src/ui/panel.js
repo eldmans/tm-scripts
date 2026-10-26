@@ -286,6 +286,18 @@
                     <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="saveTplGlobal">${LH('saveTplGlobal')}</button>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                ${(window.MOSSAD_ENGINES?.huggingface?.isSupported() || rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) ? `
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
+                    <span style="font-size:11px; color:#cbd5e1;" title="Автосохранение сгенерированных результатов Space">🤖 HF Авто-DL:</span>
+                    <select id="mossad-sel-hf-autosave" style="background:#1f2937; border:1px solid #374151; color:#38bdf8; border-radius:4px; padding:2px; font-size:11px; flex:1;">
+                        <option value="off" ${config.hfAutoSave === 'off' ? 'selected' : ''}>Не сохранять</option>
+                        <option value="page" ${config.hfAutoSave === 'page' ? 'selected' : ''}>На этой странице</option>
+                        <option value="space" ${config.hfAutoSave === 'space' ? 'selected' : ''}>Для этого Space всегда</option>
+                        <option value="always" ${config.hfAutoSave === 'always' ? 'selected' : ''}>Для всех Space всегда</option>
+                    </select>
+                </div>
+                <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                ` : ''}
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <select id="mossad-sel-dl" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
                         <option value="none" ${config.downloadType === 'none' ? 'selected' : ''}>Не скачивать</option>
@@ -418,6 +430,18 @@
             panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, numOr(e.target.value, config.delayAfterVideo))), 300);
             panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
+            const selHfAutoSave = panel.querySelector('#mossad-sel-hf-autosave');
+            if (selHfAutoSave) {
+                selHfAutoSave.onchange = (e) => {
+                    const val = e.target.value;
+                    Settings.set('hfAutoSave', val);
+                    if (val === 'space' && window.MOSSAD_ENGINES?.huggingface) {
+                        const meta = window.MOSSAD_ENGINES.huggingface.getSpaceMetadata();
+                        localStorage.setItem(`mossad_hf_autosave_${meta.space}`, 'true');
+                    }
+                    showToast(`🤖 HF Автосохранение: ${selHfAutoSave.options[selHfAutoSave.selectedIndex].text}`);
+                };
+            }
             panel.querySelector('#mossad-cb-fn-tpl').onchange = (e) => Settings.set('filenameTemplateEnabled', e.target.checked);
             const fnTplInput = panel.querySelector('#mossad-in-fn-tpl');
             const _saveFnTpl = (e) => mossadSaveSiteTemplate(e.target.value); // v1.3.53: обновляет и 💾 GM-шаблон сайта

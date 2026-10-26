@@ -1,4 +1,4 @@
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.69';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.70';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -18,7 +18,7 @@
     // Старый per-site localStorage `allowedDomains` читается и переносится в GM, но больше не пишется.
     // Добавить/убрать сайт — команда в меню Tampermonkey или вкладка «🌍 Сайты» (Ctrl+F1).
     // На сайте не из списка скрипт регистрирует ТОЛЬКО команду меню: ни DOM, ни слушателей.
-    const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com'];
+    const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space'];
     const MOSSAD_SITES_GM_KEY = 'mossad_sites';
 
     /** «https://www.Site.com:8080/path» → «site.com»; мусор → ''. */

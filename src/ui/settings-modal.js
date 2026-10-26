@@ -75,7 +75,7 @@
     // Закреплённые (🔒) строки НЕ меняются ни сбросом, ни рассылкой: ни клавиша, ни место.
     const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
     const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'pinFullScale'];
+    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'pinFullScale', 'generate'];
     function readHotkeyDefaults() {
         let raw = null;
         try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -512,7 +512,7 @@
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-21</span>
+              <span>v${SCRIPT_VERSION} · 2026-10-26</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -576,7 +576,8 @@
             snapWidget:       'Привязать к левому верхнему краю (F8)',
             openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)',
             grokCycle:        'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
-            pinFullScale:     'Pinterest — ⛶ «Показать в полном масштабе» (не назначено)'
+            pinFullScale:     'Pinterest — ⛶ «Показать в полном масштабе» (не назначено)',
+            generate:         'Генерация Space / Отправка Grok (Ctrl+Enter)'
         };
         
         const renderHotkeyRow = (k) => {

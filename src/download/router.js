@@ -1,4 +1,10 @@
     function findMediaForDownload() {
+        // Hugging Face Spaces — делегируем к движку
+        if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
+            const hfMedia = window.MOSSAD_ENGINES.huggingface.findMedia();
+            if (hfMedia) return hfMedia;
+        }
+
         // Instagram — делегируем к движку
         if (window.MOSSAD_ENGINES.instagram?.isSupported()) {
             return window.MOSSAD_ENGINES.instagram.findMedia();
@@ -103,6 +109,8 @@
         } else if (rootDomain.includes('instagram.com')) {
             const m = location.pathname.match(/^\/([A-Za-z0-9_.]+)\//);
             if (m && !['p', 'reel', 'stories', 'explore'].includes(m[1])) authorName = m[1];
+        } else if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
+            authorName = media.userName || '';
         }
 
         // {desc}: Pinterest — из API пина (media.desc); иначе описание страницы (og:description), если есть

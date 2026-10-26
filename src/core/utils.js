@@ -608,7 +608,9 @@
 
     /** Шаблон по умолчанию для текущего сайта (серый плейсхолдер; пустое поле = он). */
     function getDefaultFilenameTemplate() {
-        return rootDomain === 'grok.com' ? MOSSAD_DEFAULT_TPL_GROK : MOSSAD_DEFAULT_TPL;
+        if (rootDomain === 'grok.com') return MOSSAD_DEFAULT_TPL_GROK;
+        if (rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) return '{hf}-{space}-{subtype}-{id8}.{ext}';
+        return MOSSAD_DEFAULT_TPL;
     }
     window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
 
@@ -641,6 +643,11 @@
         return {
             id:         postId,
             conv:       String(ctx.convId || ''),
+            hf:         'HF',
+            space:      (ctx.spaceName || (window.MOSSAD_ENGINES?.huggingface?.getSpaceMetadata && window.MOSSAD_ENGINES.huggingface.getSpaceMetadata().space) || ''),
+            subtype:    (ctx.subtype || (window.MOSSAD_ENGINES?.huggingface?.getSpaceMetadata && window.MOSSAD_ENGINES.huggingface.getSpaceMetadata().subtype) || ''),
+            model:      (ctx.subtype || (window.MOSSAD_ENGINES?.huggingface?.getSpaceMetadata && window.MOSSAD_ENGINES.huggingface.getSpaceMetadata().subtype) || ''),
+            mediatype:  ctx.type || '',
             domain:     mossadDomainWord(rootDomain),
             domainfull: rootDomain.replace(/[^a-z0-9._-]/gi, '_'),
             account:    String(ctx.account || '').trim(),

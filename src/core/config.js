@@ -23,6 +23,7 @@
         githubConfigPath: 'mossad-config.json',
         filenameTemplate: '',            // v1.3.53: пусто = шаблон сайта по умолчанию (getDefaultFilenameTemplate: Grok '{id8}-{domain}~{account}', прочие '{id8}-{domain}')
         filenameTemplateEnabled: true,   // использовать шаблон?
+        hfAutoSave: 'off',               // v1.3.70: HF Spaces авто-сохранение: 'off' | 'page' | 'space' | 'always'
         playlistRows: 30,                // v1.3.40: видимых строк списка при открытии / по ⤢
         playlistWidth: 0,                // ширина списка плейлиста в px (0 = авто под ширину меню)
         widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
@@ -68,6 +69,7 @@
             prevGroup:        { key: 'PageUp',     ctrl: false, alt: true,  shift: false }, // Alt+PageUp
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
+            generate:         { key: 'Enter',      ctrl: true,  alt: false, shift: false }, // v1.3.70: Ctrl+Enter — запуск генерации Space / отправка Grok
         }
     };
 
