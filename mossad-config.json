@@ -2,57 +2,58 @@
   "slideshowMode": "auto",
   "slideshowOrientation": "h",
   "slideshowLoopMode": "off",
+  "loopFeed": true,
   "slideshowDirections": [
     "up"
   ],
   "videoLoops": 1,
-  "slideshowDelay": 3,
-  "delayAfterVideo": 0,
+  "slideshowDelay": 1,
+  "delayAfterVideo": 1,
   "downloadType": "none",
   "pdAction": "none",
-  "stopOnTabSwitch": true,
+  "stopOnTabSwitch": false,
   "stopOnBrsrSwitch": false,
-  "deleteAutoconfirm": false,
-  "deleteHoldpost": false,
-  "allowedDomains": [
-    "grok.com",
-    "redgifs.com",
-    "pinterest.com",
-    "pinterest.ru",
-    "civitai.red",
-    "vkvideo.ru",
-    "vk.video",
-    "noodlemagazine.com"
-  ],
+  "deleteAutoconfirm": true,
+  "deleteHoldpost": true,
+  "allowDuplicates": false,
   "githubConfigPath": "mossad-config.json",
+  "filenameTemplate": "{conv8}~{domain}",
+  "filenameTemplateEnabled": true,
+  "playlistRows": 30,
+  "playlistWidth": 0,
+  "widgetZoom": 0.9,
+  "closePanelOnOutsideClick": true,
+  "collectWatchSec": 30,
+  "showSoundToast": true,
+  "debugSlideshow": false,
   "pinterestMode": "rand",
+  "grokNoPromptKeys": "RWEZXGVC",
+  "pinterestJumpKeys": "off",
+  "pinterestDir": "fwd",
   "pinterestFilterType": "ratio",
   "pinterestPhotoPercent": 50,
   "pinterestMaxVideoDuration": 0,
-  "pinterestAutoFS": true,
-  "pinterestHistory": [],
-  "pinterestHistoryIdx": -1,
+  "pinterestAutoFS": false,
+  "autoFS": false,
   "hk": {
-    "download": [
-      {
-        "key": "PageDown",
-        "ctrl": false,
-        "alt": false,
-        "shift": false
-      },
-      null
-    ],
-    "upscale": {
-      "key": "PageUp",
+    "download": {
+      "key": "PageDown",
       "ctrl": false,
       "alt": false,
       "shift": false
+    },
+    "upscale": {
+      "key": "+",
+      "ctrl": false,
+      "alt": false,
+      "shift": true
     },
     "deleteVid": {
       "key": "Delete",
       "ctrl": false,
       "alt": false,
-      "shift": false
+      "shift": true,
+      "code": "Delete"
     },
     "sound": {
       "key": "ScrollLock",
@@ -64,13 +65,14 @@
       "key": "Pause",
       "ctrl": false,
       "alt": false,
-      "shift": false
+      "shift": false,
+      "code": "Pause"
     },
     "help": {
-      "key": "F1",
+      "key": "Insert",
       "ctrl": true,
       "alt": false,
-      "shift": false
+      "shift": true
     },
     "history": {
       "key": "Home",
@@ -88,10 +90,92 @@
       "key": "Insert",
       "ctrl": false,
       "alt": false,
-      "shift": false
+      "shift": false,
+      "code": "Insert"
+    },
+    "galleryPlayPause": {
+      "key": "Insert",
+      "ctrl": false,
+      "alt": false,
+      "shift": true,
+      "code": "Insert"
+    },
+    "galleryStop": {
+      "key": "Unidentified",
+      "ctrl": true,
+      "alt": false,
+      "shift": true
     },
     "focusWidget": {
       "key": "F7",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "snapWidget": {
+      "key": "LaunchMediaPlayer",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "nextSlide": {
+      "key": "ArrowRight",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "prevSlide": {
+      "key": "ArrowLeft",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "nextGroup": {
+      "key": "PageDown",
+      "ctrl": false,
+      "alt": true,
+      "shift": false
+    },
+    "prevGroup": {
+      "key": "PageUp",
+      "ctrl": false,
+      "alt": true,
+      "shift": false
+    },
+    "duplicateNext": {
+      "key": " ",
+      "ctrl": true,
+      "alt": false,
+      "shift": false
+    },
+    "rewind": {
+      "key": "r",
+      "ctrl": false,
+      "alt": true,
+      "shift": false,
+      "code": "Home"
+    },
+    "updateScript": {
+      "key": "r",
+      "ctrl": false,
+      "alt": true,
+      "shift": false,
+      "meta": true
+    },
+    "openTodos": {
+      "key": "",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "pinFullScale": {
+      "key": "",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "grokCycle": {
+      "key": "\\",
       "ctrl": false,
       "alt": false,
       "shift": false
