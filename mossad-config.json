@@ -2,9 +2,9 @@
   "slideshowMode": "auto",
   "slideshowOrientation": "h",
   "slideshowLoopMode": "off",
-  "loopFeed": true,
+  "loopFeed": false,
   "slideshowDirections": [
-    "up"
+    "down"
   ],
   "videoLoops": 1,
   "slideshowDelay": 1,
@@ -19,6 +19,7 @@
   "githubConfigPath": "mossad-config.json",
   "filenameTemplate": "{conv8}~{domain}",
   "filenameTemplateEnabled": true,
+  "hfAutoSave": "off",
   "playlistRows": 30,
   "playlistWidth": 0,
   "widgetZoom": 0.9,
@@ -177,6 +178,12 @@
     "grokCycle": {
       "key": "\\",
       "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "generate": {
+      "key": "Enter",
+      "ctrl": true,
       "alt": false,
       "shift": false
     }
