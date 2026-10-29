@@ -17,7 +17,7 @@
   "deleteHoldpost": true,
   "allowDuplicates": true,
   "githubConfigPath": "mossad-config.json",
-  "filenameTemplate": "Darya~{conv8}~{domain}",
+  "filenameTemplate": "ahu~cucu~{conv8}~{domain}",
   "filenameTemplateEnabled": true,
   "hfAutoSave": "off",
   "playlistRows": 30,
