@@ -17,7 +17,7 @@
   "deleteHoldpost": true,
   "allowDuplicates": false,
   "githubConfigPath": "mossad-config.json",
-  "filenameTemplate": "ahu~cucu~{conv8}~{domain}",
+  "filenameTemplate": "WAN~NSFW~~{conv8}~{domain}",
   "filenameTemplateEnabled": true,
   "hfAutoSave": "off",
   "playlistRows": 30,
