@@ -15,7 +15,7 @@
   "stopOnBrsrSwitch": false,
   "deleteAutoconfirm": true,
   "deleteHoldpost": true,
-  "allowDuplicates": true,
+  "allowDuplicates": false,
   "githubConfigPath": "mossad-config.json",
   "filenameTemplate": "ahu~cucu~{conv8}~{domain}",
   "filenameTemplateEnabled": true,
