@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.71
+// @version      1.3.72
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.71';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.72';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -687,6 +687,8 @@ collectWatchSec: 30,
 showSoundToast: true,
 debugSlideshow: false,
 pinterestMode: 'rand',
+promptHotkeysOn: true,
+promptHotkeys: 'download',
 grokNoPromptKeys: 'RWEZXGVC',
 pinterestJumpKeys: 'off',
 pinterestDir: 'fwd',
@@ -2121,6 +2123,8 @@ const LABEL_DEFS = [
 ['pdDel', 'Delete', 'удалить пост (только Grok)'],
 ['#', 'Шаблон имени файла (v1.3.53)'],
 ['noPromptLabel', 'Клавиши, которые не кидают в промт:', 'Grok, «Общие»: поле клавиш, после которых Grok не переводит фокус в промт (v1.3.64)'],
+['promptHkLabel', 'Кнопки скачивания работают даже в поле промпта', '«Общие»: галочка — выбранные хоткеи работают и при фокусе в поле ввода (v1.3.72)'],
+['promptHkHelpTitle', 'Хоткеи — клик добавляет в список', 'окно «?» у поля «работают даже в поле промпта»'],
 ['keyHelpTitle', 'Клавиши — клик дописывает в поле', 'окно «?» у поля клавиш'],
 ['keyHelpNote', 'Буква/цифра/знак — сама клавиша в любой раскладке (К = R). Пробел = Space. Остальные — {Имя}: {Enter}, {F5}, {ArrowUp}. Ctrl/Alt не учитываются (с ними Grok фокус не забирает).', 'окно «?» у поля клавиш: пояснение формата'],
 ['tplSepLabel', 'Разделитель при вставке:', 'окно тегов шаблона: поле разделителя (v1.3.65)'],
@@ -6603,7 +6607,9 @@ const MOSSAD_KEY_TOKENS = [
 ];
 let _keyHelp = null;
 function mossadCloseKeyHelp() { if (_keyHelp) { _keyHelp.cleanup(); _keyHelp.box.remove(); _keyHelp = null; } }
-function mossadToggleKeyHelp(btn, input) {
+function mossadToggleKeyHelp(btn, input, opts) {
+const o = opts || {};
+const tokens = o.tokens || MOSSAD_KEY_TOKENS;
 if (_keyHelp && _keyHelp.input === input) { mossadCloseKeyHelp(); return; }
 mossadCloseKeyHelp();
 if (!input) return;
@@ -6611,11 +6617,11 @@ const box = document.createElement('div');
 box.id = 'mossad-key-help';
 box.style.cssText = 'position:fixed;z-index:2147483646;background:rgba(17,24,39,0.97);border:1px solid #4b5563;border-radius:10px;padding:10px 12px;' +
 'box-shadow:0 10px 30px rgba(0,0,0,0.6);color:#e5e7eb;font:12px system-ui,-apple-system,sans-serif;max-width:min(460px,96vw);max-height:60vh;overflow:auto;';
-box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b style="flex:1;">${LH('keyHelpTitle')}</b>` +
+box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b style="flex:1;">${LH(o.title || 'keyHelpTitle')}</b>` +
 `<button data-kh="close" title="Закрыть (Esc)" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px;">✕</button></div>` +
-`<div style="display:flex;flex-wrap:wrap;gap:4px;">${MOSSAD_KEY_TOKENS.map(([tok, lab]) =>
+`<div style="display:flex;flex-wrap:wrap;gap:4px;">${tokens.map(([tok, lab]) =>
 `<code data-kh-ins="${tok.replace(/"/g, '&quot;')}" title="Дописать ${tok.replace(/"/g, '&quot;')}" style="cursor:pointer;color:#93c5fd;background:#1f2937;border:1px solid #374151;border-radius:4px;padding:1px 5px;">${lab.replace(/</g, '&lt;')}</code>`).join('')}</div>` +
-`<div style="margin-top:6px;color:#9ca3af;line-height:1.4;">${LH('keyHelpNote')}</div>`;
+(o.note === '' ? '' : `<div style="margin-top:6px;color:#9ca3af;line-height:1.4;">${LH(o.note || 'keyHelpNote')}</div>`);
 document.body.appendChild(box);
 try {
 const r = (btn || input).getBoundingClientRect();
@@ -6632,7 +6638,12 @@ box.addEventListener('click', (e) => {
 if (e.target.closest && e.target.closest('[data-kh="close"]')) { mossadCloseKeyHelp(); return; }
 const ins = e.target.closest && e.target.closest('[data-kh-ins]');
 if (!ins) return;
-input.value = String(input.value || '') + ins.getAttribute('data-kh-ins');
+const tok = ins.getAttribute('data-kh-ins'), cur = String(input.value || '');
+if (o.sep) {
+const have = cur.split(/[\s,;]+/).filter(Boolean);
+if (have.includes(tok)) return;
+input.value = have.concat(tok).join(o.sep);
+} else input.value = cur + tok;
 input.dispatchEvent(new Event('input', { bubbles: true }));
 input.dispatchEvent(new Event('change', { bubbles: true }));
 });
@@ -11225,6 +11236,14 @@ modal.innerHTML = `
                 style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
               <button id="mossad-gen-nokeys-help" title="Именованные клавиши" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
             </div>` : ''}
+            <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Выбранные хоткеи MOSSAD срабатывают, даже когда фокус в поле промпта (ввода). Список — id действий через запятую; выбор — кнопкой «?»">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input id="mossad-gen-prompthk-on" type="checkbox" style="accent-color:#3b82f6;" ${config.promptHotkeysOn ? 'checked' : ''}><span data-mossad-label="promptHkLabel">${LH('promptHkLabel')}</span></label>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:3px;padding-left:22px;">
+                <input id="mossad-gen-prompthk" type="text" value="${String(config.promptHotkeys == null ? '' : config.promptHotkeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                  style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+                <button id="mossad-gen-prompthk-help" title="Выбрать хоткеи (клик — добавить)" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
+              </div>
+            </div>
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
               <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
               <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -11694,6 +11713,14 @@ if (genNoKeys) {
 genNoKeys.oninput = genNoKeys.onchange = (e) => Settings.setQuiet('grokNoPromptKeys', e.target.value);
 modal.querySelector('#mossad-gen-nokeys-help').onclick = (e) => { e.preventDefault(); e.stopPropagation(); mossadToggleKeyHelp(e.currentTarget, genNoKeys); };
 }
+const genPHk = modal.querySelector('#mossad-gen-prompthk');
+modal.querySelector('#mossad-gen-prompthk-on').onchange = (e) => Settings.setQuiet('promptHotkeysOn', e.target.checked);
+genPHk.oninput = genPHk.onchange = (e) => Settings.setQuiet('promptHotkeys', e.target.value.split(/[\s,;]+/).filter(Boolean).join(', '));
+modal.querySelector('#mossad-gen-prompthk-help').onclick = (e) => {
+e.preventDefault(); e.stopPropagation();
+const toks = orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()).map(k => [k, `${keysMap[k] || k}${config.hk[k] && config.hk[k].key ? ' · ' + formatHotkey(config.hk[k]) : ''}`]);
+mossadToggleKeyHelp(e.currentTarget, genPHk, { tokens: toks, title: 'promptHkHelpTitle', note: '', sep: ', ' });
+};
 const genTpl = modal.querySelector('#mossad-gen-tpl');
 if (genTpl) {
 genTpl.onchange = genTpl.onblur = (e) => mossadSaveSiteTemplate(e.target.value);
@@ -12025,10 +12052,14 @@ if (e.__mossadGrokCtlArrow) return true;
 if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return false;
 try { return typeof grokComposerArrowCtl === 'function' && !!grokComposerArrowCtl(e); } catch (err) { return false; }
 }
+function mossadPromptHotkeyPass(e) {
+if (!config.promptHotkeysOn || !config.hk) return false;
+return String(config.promptHotkeys || '').split(/[\s,;]+/).some(k => k && config.hk[k] && config.hk[k].key && hotkeyMatches(e, config.hk[k]));
+}
 window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
 if (window.capturingFor !== null) return;
 if (_mossadGrokCtlArrow(e)) return;
-if (isEditableElement(document.activeElement)) return;
+if (isEditableElement(document.activeElement) && !mossadPromptHotkeyPass(e)) return;
 if (!mossadSlideshowHotkeysEnabled()) return;
 const isGrokPost = (rootDomain === 'grok.com' && isGrokPostPage());
 const hasGrokCollection = isGrokPost && !!_gSS.getItem(GALLERY_COLLECTION_KEY);
@@ -12106,7 +12137,7 @@ window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 return;
 }
-if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
+if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey) && !mossadPromptHotkeyPass(e)) return;
 const ssKey = mossadMatchSlideshowHotkey(e);
 const isUpdateCombo = hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR'));
 if (ssKey && !isUpdateCombo && !mossadSlideshowHotkeysEnabled()) {

@@ -581,6 +581,14 @@
                 style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
               <button id="mossad-gen-nokeys-help" title="Именованные клавиши" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
             </div>` : ''}
+            <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Выбранные хоткеи MOSSAD срабатывают, даже когда фокус в поле промпта (ввода). Список — id действий через запятую; выбор — кнопкой «?»">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input id="mossad-gen-prompthk-on" type="checkbox" style="accent-color:#3b82f6;" ${config.promptHotkeysOn ? 'checked' : ''}><span data-mossad-label="promptHkLabel">${LH('promptHkLabel')}</span></label>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:3px;padding-left:22px;">
+                <input id="mossad-gen-prompthk" type="text" value="${String(config.promptHotkeys == null ? '' : config.promptHotkeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                  style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+                <button id="mossad-gen-prompthk-help" title="Выбрать хоткеи (клик — добавить)" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
+              </div>
+            </div>
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
               <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
               <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -1100,6 +1108,15 @@
             genNoKeys.oninput = genNoKeys.onchange = (e) => Settings.setQuiet('grokNoPromptKeys', e.target.value);
             modal.querySelector('#mossad-gen-nokeys-help').onclick = (e) => { e.preventDefault(); e.stopPropagation(); mossadToggleKeyHelp(e.currentTarget, genNoKeys); };
         }
+        // v1.3.72: хоткеи, работающие даже в поле промпта — галочка + список через запятую, «?» — выбор кликами
+        const genPHk = modal.querySelector('#mossad-gen-prompthk');
+        modal.querySelector('#mossad-gen-prompthk-on').onchange = (e) => Settings.setQuiet('promptHotkeysOn', e.target.checked);
+        genPHk.oninput = genPHk.onchange = (e) => Settings.setQuiet('promptHotkeys', e.target.value.split(/[\s,;]+/).filter(Boolean).join(', '));
+        modal.querySelector('#mossad-gen-prompthk-help').onclick = (e) => {
+            e.preventDefault(); e.stopPropagation();
+            const toks = orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()).map(k => [k, `${keysMap[k] || k}${config.hk[k] && config.hk[k].key ? ' · ' + formatHotkey(config.hk[k]) : ''}`]);
+            mossadToggleKeyHelp(e.currentTarget, genPHk, { tokens: toks, title: 'promptHkHelpTitle', note: '', sep: ', ' });
+        };
         // v1.3.53: шаблон имени для этого сайта (то же, что поле в меню)
         const genTpl = modal.querySelector('#mossad-gen-tpl');
         if (genTpl) {

@@ -198,11 +198,16 @@
         if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return false;
         try { return typeof grokComposerArrowCtl === 'function' && !!grokComposerArrowCtl(e); } catch (err) { return false; }
     }
+    /** v1.3.72: хоткей из списка «работают даже в поле промпта» (config.promptHotkeys, через запятую). */
+    function mossadPromptHotkeyPass(e) {
+        if (!config.promptHotkeysOn || !config.hk) return false;
+        return String(config.promptHotkeys || '').split(/[\s,;]+/).some(k => k && config.hk[k] && config.hk[k].key && hotkeyMatches(e, config.hk[k]));
+    }
     // Ранний перехват клавиш слайдера (PageUp / PageDown, ArrowDown / ArrowUp) ДО сайта на window в фазе capture
     window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
         if (window.capturingFor !== null) return;
         if (_mossadGrokCtlArrow(e)) return; // v1.3.69: ↑/↓ в длительности/соотношении композера Grok
-        if (isEditableElement(document.activeElement)) return;
+        if (isEditableElement(document.activeElement) && !mossadPromptHotkeyPass(e)) return;
 
         // v1.3.47: раньше стрелки и Alt+PageDown/Up перехватывались и без слайдшоу — достаточно было
         // коллекции в sessionStorage и страницы поста (hasGrokCollection). После «Стоп» коллекция остаётся,
@@ -301,7 +306,7 @@
             return;
         }
 
-        if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey)) return;
+        if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey) && !mossadPromptHotkeyPass(e)) return;
 
         // v1.3.47: хоткеи слайдшоу (стоп, перемотка, дубль+слайд) без слайдшоу — не наши: отдаём сайту
         const ssKey = mossadMatchSlideshowHotkey(e);

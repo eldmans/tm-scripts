@@ -34,6 +34,8 @@
         
         // PINTEREST ENGINE CONFIGS
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'30' (№ N — N-й похожий пин)
+        promptHotkeysOn: true,             // v1.3.72: хоткеи из promptHotkeys работают даже в поле промпта (галочка в «Общих»)
+        promptHotkeys: 'download',         // v1.3.72: действия через запятую (id хоткеев), выбор — окно «?»
         grokNoPromptKeys: 'RWEZXGVC',      // v1.3.64: Grok — клавиши, которые не кидают в промт (символ = физ. клавиша, {Имя} — именованная); v1.3.67: + клавиши скорости
         pinterestJumpKeys: 'off',          // v1.3.59: похожий пин по клавише: off | focus | keys | badges | shift
         pinterestDir: 'fwd',               // v1.3.51: малое слайдшоу на Pinterest: 'fwd' — новые пины, 'back' — назад по истории

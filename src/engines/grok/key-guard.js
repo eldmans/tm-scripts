@@ -101,7 +101,10 @@
     let _keyHelp = null;
     function mossadCloseKeyHelp() { if (_keyHelp) { _keyHelp.cleanup(); _keyHelp.box.remove(); _keyHelp = null; } }
     /** Окно «?» со списком клавиш для поля input (btn — кнопка «?»). Клик по клавише — дописать в конец поля. */
-    function mossadToggleKeyHelp(btn, input) {
+    // v1.3.72: opts = { tokens: [[вставка, подпись]], title, note, sep } — то же окно для списка хоткеев (через запятую, без повторов)
+    function mossadToggleKeyHelp(btn, input, opts) {
+        const o = opts || {};
+        const tokens = o.tokens || MOSSAD_KEY_TOKENS;
         if (_keyHelp && _keyHelp.input === input) { mossadCloseKeyHelp(); return; }
         mossadCloseKeyHelp();
         if (!input) return;
@@ -109,11 +112,11 @@
         box.id = 'mossad-key-help';
         box.style.cssText = 'position:fixed;z-index:2147483646;background:rgba(17,24,39,0.97);border:1px solid #4b5563;border-radius:10px;padding:10px 12px;' +
             'box-shadow:0 10px 30px rgba(0,0,0,0.6);color:#e5e7eb;font:12px system-ui,-apple-system,sans-serif;max-width:min(460px,96vw);max-height:60vh;overflow:auto;';
-        box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b style="flex:1;">${LH('keyHelpTitle')}</b>` +
+        box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b style="flex:1;">${LH(o.title || 'keyHelpTitle')}</b>` +
             `<button data-kh="close" title="Закрыть (Esc)" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px;">✕</button></div>` +
-            `<div style="display:flex;flex-wrap:wrap;gap:4px;">${MOSSAD_KEY_TOKENS.map(([tok, lab]) =>
+            `<div style="display:flex;flex-wrap:wrap;gap:4px;">${tokens.map(([tok, lab]) =>
                 `<code data-kh-ins="${tok.replace(/"/g, '&quot;')}" title="Дописать ${tok.replace(/"/g, '&quot;')}" style="cursor:pointer;color:#93c5fd;background:#1f2937;border:1px solid #374151;border-radius:4px;padding:1px 5px;">${lab.replace(/</g, '&lt;')}</code>`).join('')}</div>` +
-            `<div style="margin-top:6px;color:#9ca3af;line-height:1.4;">${LH('keyHelpNote')}</div>`;
+            (o.note === '' ? '' : `<div style="margin-top:6px;color:#9ca3af;line-height:1.4;">${LH(o.note || 'keyHelpNote')}</div>`);
         document.body.appendChild(box);
         try {
             const r = (btn || input).getBoundingClientRect();
@@ -130,7 +133,12 @@
             if (e.target.closest && e.target.closest('[data-kh="close"]')) { mossadCloseKeyHelp(); return; }
             const ins = e.target.closest && e.target.closest('[data-kh-ins]');
             if (!ins) return;
-            input.value = String(input.value || '') + ins.getAttribute('data-kh-ins');
+            const tok = ins.getAttribute('data-kh-ins'), cur = String(input.value || '');
+            if (o.sep) {
+                const have = cur.split(/[\s,;]+/).filter(Boolean);
+                if (have.includes(tok)) return;
+                input.value = have.concat(tok).join(o.sep);
+            } else input.value = cur + tok;
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
         });
