@@ -177,6 +177,8 @@
         if (o) return o;
         return Object.prototype.hasOwnProperty.call(LABEL_DEFAULTS, key) ? LABEL_DEFAULTS[key] : '';
     }
+    /** v1.3.73: значок подписи — первое слово («📝 Тудушки» → «📝»). */
+    function mossadLabelIcon(s) { return String(s || '').trim().split(/\s+/)[0] || ''; }
     /** То же, экранированное для вставки в innerHTML-шаблоны. */
     function LH(key) {
         return String(L(key)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -200,6 +202,8 @@
         const r = root || document;
         let n = 0;
         r.querySelectorAll('[data-mossad-label]').forEach(el => {
+            // v1.3.73: data-mossad-icon — показывать только значок (первое слово подписи), полная подпись — во всплывающей подсказке
+            if (el.dataset.mossadIcon) { const full = L(el.dataset.mossadLabel); el.title = full + (el.dataset.mossadTip ? ' — ' + el.dataset.mossadTip : ''); const ic = mossadLabelIcon(full); if (el.textContent !== ic) { el.textContent = ic; n++; } return; }
             const t = (el.dataset.mossadPre || '') + L(el.dataset.mossadLabel) + (el.dataset.mossadSuf || '');
             if (el.textContent !== t) { el.textContent = t; n++; }
         });

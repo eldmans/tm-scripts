@@ -264,7 +264,13 @@
     function initTodosTab(modal) {
         const pane = modal.querySelector('[data-pane="todos"]');
         if (!pane) return;
-        if (pane.dataset.built) { renderTodos(); return; }
+        // v1.3.73: повторное открытие — перерисовка ПРЕЖНЕЙ сборкой. Раньше здесь вызывалась renderTodos() нового вызова,
+        // чьи const (listEl…) ещё не инициализированы → ReferenceError → вкладка «Тудушки» переставала щёлкаться.
+        if (pane.dataset.built) {
+            if (typeof modal._mossadTodosFlush === 'function') modal._mossadTodosFlush();
+            if (typeof modal._mossadRenderTodos === 'function') modal._mossadRenderTodos();
+            return;
+        }
         pane.dataset.built = '1';
         const btnCss = 'background:#374151;border:1px solid #4b5563;padding:5px 9px;border-radius:6px;color:#e5e7eb;cursor:pointer;font-weight:bold;font-size:11px;';
         const inputCss = 'background:#111827;border:1px solid #374151;border-radius:6px;color:#e5e7eb;padding:5px 8px;font-size:12px;font-family:inherit;';

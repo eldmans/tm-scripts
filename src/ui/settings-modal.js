@@ -312,6 +312,25 @@
         return d;
     }
 
+    // ── v1.3.73: листание вкладок окна настроек по кругу: ←/→ и б/ю (по e.code: Comma = «б ,» влево, Period = «ю .» вправо) ──
+    // Один слушатель window/capture (до хоткеев MOSSAD и сайта); работает только при открытом окне и фокусе не в поле ввода.
+    function mossadSettingsTabsKey(e) {
+        const c = e.code || '';
+        const dir = (c === 'ArrowRight' || c === 'Period') ? 1 : (c === 'ArrowLeft' || c === 'Comma') ? -1 : 0;
+        if (!dir || e.ctrlKey || e.altKey || e.metaKey) return;
+        const modal = document.getElementById('mossad-hk-modal');
+        if (!modal || typeof modal._mossadSetTab !== 'function') return;
+        if (window.capturingFor !== null && window.capturingFor !== undefined) return;
+        if (isEditableElement(document.activeElement) || document.getElementById('mossad-hk-defdlg') || document.getElementById('mossad-key-help')) return;
+        const tabs = Array.from(modal.querySelectorAll('#mossad-settings-tabs [data-tab]')).map(b => b.dataset.tab);
+        if (!tabs.length) return;
+        const i = tabs.indexOf(modal.dataset.tab);
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        modal._mossadSetTab(tabs[((i < 0 ? 0 : i) + dir + tabs.length) % tabs.length]);
+    }
+    window.addEventListener('keydown', mossadSettingsTabsKey, true);
+
     /** Переключает/закрывает окно настроек: если открыто на той же вкладке — закрыть, иначе показать вкладку. */
     function toggleSettingsWindow(tab = 'hotkeys') {
         const modal = document.getElementById('mossad-hk-modal');
@@ -549,13 +568,13 @@
               <button id="mossad-settings-x" title="Закрыть (настройки сохраняются)" style="background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">×</button>
             </div>
             <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px;">
-              <button data-tab="general" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" data-mossad-label="tabGeneral">${LH('tabGeneral')}</button>
-              <button data-tab="hotkeys" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" data-mossad-label="tabHotkeys">${LH('tabHotkeys')}</button>
-              <button data-tab="video" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Лёгкий слой на всех сайтах: DND-скачивание, скорость видео" data-mossad-label="tabVideo">${LH('tabVideo')}</button>
-              <button data-tab="defaults" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Общие умолчания для всех сайтов без своих сохранённых настроек" data-mossad-label="tabDefaults">${LH('tabDefaults')}</button>
-              <button data-tab="labels" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Свои подписи кнопок MOSSAD (для всех сайтов)" data-mossad-label="tabLabels">${LH('tabLabels')}</button>
-              <button data-tab="todos" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="Задачи для ассистента (текст + фото)" data-mossad-label="tabTodos">${LH('tabTodos')}</button>
-              <button data-tab="sites" style="padding:5px 12px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-size:12px;font-weight:bold;" title="На каких сайтах работает MOSSAD (общий список для всех контейнеров)" data-mossad-label="tabSites">${LH('tabSites')}</button>
+              <button data-tab="general" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabGeneral')}" data-mossad-label="tabGeneral" data-mossad-icon="1">${mossadLabelIcon(LH('tabGeneral'))}</button>
+              <button data-tab="hotkeys" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabHotkeys')}" data-mossad-label="tabHotkeys" data-mossad-icon="1">${mossadLabelIcon(LH('tabHotkeys'))}</button>
+              <button data-tab="video" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabVideo')} — Лёгкий слой на всех сайтах: DND-скачивание, скорость видео" data-mossad-label="tabVideo" data-mossad-icon="1" data-mossad-tip="Лёгкий слой на всех сайтах: DND-скачивание, скорость видео">${mossadLabelIcon(LH('tabVideo'))}</button>
+              <button data-tab="defaults" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabDefaults')} — Общие умолчания для всех сайтов без своих сохранённых настроек" data-mossad-label="tabDefaults" data-mossad-icon="1" data-mossad-tip="Общие умолчания для всех сайтов без своих сохранённых настроек">${mossadLabelIcon(LH('tabDefaults'))}</button>
+              <button data-tab="labels" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabLabels')} — Свои подписи кнопок MOSSAD (для всех сайтов)" data-mossad-label="tabLabels" data-mossad-icon="1" data-mossad-tip="Свои подписи кнопок MOSSAD (для всех сайтов)">${mossadLabelIcon(LH('tabLabels'))}</button>
+              <button data-tab="todos" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabTodos')} — Задачи для ассистента (текст + фото)" data-mossad-label="tabTodos" data-mossad-icon="1" data-mossad-tip="Задачи для ассистента (текст + фото)">${mossadLabelIcon(LH('tabTodos'))}</button>
+              <button data-tab="sites" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabSites')} — На каких сайтах работает MOSSAD (общий список для всех контейнеров)" data-mossad-label="tabSites" data-mossad-icon="1" data-mossad-tip="На каких сайтах работает MOSSAD (общий список для всех контейнеров)">${mossadLabelIcon(LH('tabSites'))}</button>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
@@ -1068,9 +1087,12 @@
             modal.dataset.tab = want;
             rememberSettingsTab(want); // v1.3.45
             if (want === 'labels') initLabelsTab(modal); // v1.3.46: строится лениво, при первом открытии вкладки
-            if (want === 'todos') initTodosTab(modal);   // v1.3.49: тоже лениво (фото читаются только здесь)
-            if (want === 'sites') initSitesTab(modal);   // v1.3.50: тоже лениво
-            if (want === 'video') mossadLightRenderSettings(modal.querySelector('[data-pane="video"]')); // v1.3.66: лёгкий слой
+            // v1.3.73: ошибка ленивой сборки вкладки не должна мешать переключению (раньше «Тудушки» переставали щёлкаться)
+            try {
+                if (want === 'todos') initTodosTab(modal);   // v1.3.49: тоже лениво (фото читаются только здесь)
+                if (want === 'sites') initSitesTab(modal);   // v1.3.50: тоже лениво
+                if (want === 'video') mossadLightRenderSettings(modal.querySelector('[data-pane="video"]')); // v1.3.66: лёгкий слой
+            } catch (err) { console.warn('[MOSSAD] вкладка ' + want + ':', err); }
             modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
             modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
                 const on = b.dataset.tab === want;

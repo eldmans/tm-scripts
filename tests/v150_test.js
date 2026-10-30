@@ -65,10 +65,10 @@ function bare(url, preGm={}, preLs={}){
  ({w,T}=load({items, url:'https://sub.mysite.io/x', pre:menuStub, preGm:{mossad_sites:'["mysite.io","zzz.org"]'}})); await sleep(600);
  ok('5a user site loads full MOSSAD; menu «➖»', !!T && w.__menu[0].t==='➖ Убрать этот сайт из MOSSAD');
  T.openSettingsWindow('general'); let m=w.document.getElementById('mossad-hk-modal');
- ok('5b sites pane lazy (empty until opened)', m.querySelector('[data-pane="sites"]').innerHTML==='' && !!m.querySelector('[data-tab="sites"]') && m.querySelector('[data-tab="sites"]').textContent==='🌍 Сайты');
+ ok('5b sites pane lazy (empty until opened)', m.querySelector('[data-pane="sites"]').innerHTML==='' && !!m.querySelector('[data-tab="sites"]') && m.querySelector('[data-tab="sites"]').textContent==='🌍' && /🌍 Сайты/.test(m.querySelector('[data-tab="sites"]').title)); // v1.3.73: только значок, имя — в подсказке
  m.querySelector('[data-tab="sites"]').click();
  const pane=m.querySelector('[data-pane="sites"]');
- ok('5c built-ins read-only, user sites with ✕, current marked', pane.querySelectorAll('#mossad-sites-builtin > div').length===9 && !pane.querySelector('#mossad-sites-builtin [data-site-del]') && pane.querySelectorAll('#mossad-sites-user [data-site-del]').length===2 && /здесь/.test(pane.querySelector('[data-site="mysite.io"]').textContent));
+ ok('5c built-ins read-only, user sites with ✕, current marked', pane.querySelectorAll('#mossad-sites-builtin > div').length===11 && !pane.querySelector('#mossad-sites-builtin [data-site-del]') && pane.querySelectorAll('#mossad-sites-user [data-site-del]').length===2 && /здесь/.test(pane.querySelector('[data-site="mysite.io"]').textContent));
  ok('5d «➕ Этот сайт» disabled (already listed); reload hint shown', pane.querySelector('#mossad-sites-add-current').disabled && /перезагрузи/i.test(pane.textContent));
  const ti=pane.querySelector('#mossad-sites-input'); ti.value='https://www.New-Site.com/a'; pane.querySelector('#mossad-sites-add').click();
  ok('5e add from input → normalized into GM + list', JSON.parse(w.__gm.mossad_sites).includes('new-site.com') && !!pane.querySelector('[data-site="new-site.com"]') && ti.value==='');
