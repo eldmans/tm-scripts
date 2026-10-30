@@ -9,9 +9,9 @@ const H=(key,o={})=>Object.assign({key,ctrl:false,alt:false,shift:false},o);
  const row=k=>list().querySelector(`[data-hk="${k}"]`);
  const k0=keys();
  // footer
- const foot=m.querySelector('#mossad-hk-reset').parentNode;
- ok('1a footer: «По умолчанию:» + Клавиши / Порядок / Применить на всех сайтах / Сохранить как умолчание (v1.3.68)', /^По умолчанию:/.test(foot.textContent.trim()) && m.querySelector('#mossad-hk-reset').textContent==='Клавиши' && m.querySelector('#mossad-hk-order-reset').textContent==='Порядок' && m.querySelector('#mossad-hk-save-defaults').textContent==='Сохранить как умолчание' && m.querySelector('#mossad-hk-apply-all').textContent==='Применить на всех сайтах' && !/↺ По умолчанию|↕ Порядок/.test(foot.textContent));
- ok('1b labels in L()', T.L('hkResetKeys')==='Клавиши' && T.L('hkSaveDefaults')==='Сохранить как умолчание' && T.L('hkApplyAll')==='Применить на всех сайтах' && T.L('hkDefaultsLabel')==='По умолчанию:');
+ const foot=m.querySelector('#mossad-hk-defaults-box').parentNode; // v1.3.71: «По умолчанию» в рамке над Клавиши/Порядок
+ ok('1a footer: «По умолчанию» + Клавиши / Порядок / Применить на всех сайтах / Сохранить как умолчание (v1.3.68, v1.3.71)', /^По умолчанию/.test(foot.textContent.trim()) && m.querySelector('#mossad-hk-reset').textContent==='Клавиши' && m.querySelector('#mossad-hk-order-reset').textContent==='Порядок' && m.querySelector('#mossad-hk-save-defaults').textContent==='Сохранить как умолчание' && m.querySelector('#mossad-hk-apply-all').textContent==='Применить на всех сайтах' && !/↺ По умолчанию|↕ Порядок/.test(foot.textContent));
+ ok('1b labels in L()', T.L('hkResetKeys')==='Клавиши' && T.L('hkSaveDefaults')==='Сохранить как умолчание' && T.L('hkApplyAll')==='Применить на всех сайтах' && T.L('hkDefaultsLabel')==='По умолчанию');
  // change keys + pin sound at its slot
  T.config.hk.download=H('F2'); T.config.hk.sound=H('F3');
  row('sound').querySelector('.mossad-hk-pin').click();
@@ -27,7 +27,7 @@ const H=(key,o={})=>Object.assign({key,ctrl:false,alt:false,shift:false},o);
  T.config.hk.download=H('F4'); T.config.hk.prevSlide=H('F6');
  row('snapWidget').querySelector('.mossad-hk-top').click();
  const savedOrder=keys().slice();
- m.querySelector('#mossad-hk-save-defaults').click();
+ m.querySelector('#mossad-hk-save-defaults').click(); { const dl=d.getElementById('mossad-hk-defdlg'); dl.querySelector('[data-mode=all]').click(); dl.querySelector('[data-ans]').value=dl.dataset.sum; dl.querySelector('[data-ok]').click(); } // v1.3.71: окно выбора → ДЛЯ ВСЕГО
  const rec=JSON.parse(w.__gm.mossad_hk_defaults);
  ok('3a saved defaults record: hk + order + pinned + id', rec.hk.download.key==='F4' && rec.order.join()===savedOrder.join() && rec.pinned.includes('sound') && !!rec.id);
  // now change and reset → saved defaults used

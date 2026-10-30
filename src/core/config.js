@@ -505,10 +505,16 @@
      * (разосланное важнее), об этом сообщается. Умолчания для «Сброс клавиш» не меняются. ANTI_PATTERNS §46.
      * Возврат: { sites, kept: ['домен: действие'], cleared: ['домен: действие'] }.
      */
-    function mossadHkPushAllSites() {
+    function mossadHkPushAllSites(skip) {
+        // v1.3.71: skip — действия (закреплённые 🔒), которые НЕ рассылаются: общая клавиша и клавиши других сайтов остаются прежними
+        const sk = new Set(skip || []);
         const eff = JSON.parse(JSON.stringify(config.hk || {}));
-        Object.keys(_hkGlobalShadow).forEach(k => { _hkGlobalShadow[k] = normalizeHotkeyBinding(eff[k]); });
-        if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(eff)); } catch (e) {} }
+        const prevGlobal = sk.size ? mossadHkGlobalTable() : null;
+        sk.forEach(k => { delete eff[k]; });
+        Object.keys(_hkGlobalShadow).forEach(k => { if (!sk.has(k)) _hkGlobalShadow[k] = normalizeHotkeyBinding(eff[k]); });
+        const glob = sk.size ? Object.assign({}, eff) : eff;
+        sk.forEach(k => { if (prevGlobal && prevGlobal[k]) glob[k] = prevGlobal[k]; });
+        if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(glob)); } catch (e) {} }
         const comboId = (b) => (typeof window.hotkeyComboId === 'function' ? window.hotkeyComboId(b) : (b && b.key ? JSON.stringify(b) : ''));
         const mine = HK_SITE_SEED[rootDomain] || [];
         const all = _hkSiteReadAll();
@@ -532,11 +538,32 @@
             rep.sites++;
         }
         all[rootDomain] = { hk: {}, order: mossadHkSiteEntry().order };
-        Object.keys(_hkGlobalShadow).forEach(k => { all[rootDomain].hk[k] = normalizeHotkeyBinding(eff[k]); });
+        Object.keys(_hkGlobalShadow).forEach(k => { all[rootDomain].hk[k] = normalizeHotkeyBinding(config.hk[k]); });
         _hkSiteWriteAll(all);
         try { persistLocalConfig(); } catch (e) {}
         mossadDebug('hotkey', 'клавиши сайта применены на всех сайтах', rep);
         return rep;
+    }
+    /**
+     * v1.3.71: розовая «Для всех {домен}» — все действующие клавиши становятся «своими» для этого сайта
+     * (mossad_hk_site, общее для всех контейнеров): одинаковы на всех страницах домена, правка общих их не меняет.
+     * Общие клавиши (mossad_hk_global) и умолчания не меняются. Возврат: сколько действий стало «своими».
+     */
+    function mossadHkAllToSite(orderHint) {
+        const entry = mossadHkSiteEntry();
+        let n = 0;
+        for (const k of Object.keys(config.hk || {})) {
+            if (!Object.prototype.hasOwnProperty.call(DEFAULT_CONFIG.hk, k)) continue;
+            if (!Object.prototype.hasOwnProperty.call(_hkGlobalShadow, k)) { _hkGlobalShadow[k] = normalizeHotkeyBinding(config.hk[k]); n++; }
+            entry.hk[k] = normalizeHotkeyBinding(config.hk[k]);
+        }
+        const hint = Array.isArray(orderHint) ? orderHint : [];
+        entry.order = hint.filter(x => entry.hk[x]).concat(entry.order.filter(x => entry.hk[x] && !hint.includes(x)));
+        Object.keys(entry.hk).forEach(x => { if (!entry.order.includes(x)) entry.order.push(x); });
+        _hkSiteSaveEntry(entry);
+        try { persistLocalConfig(); } catch (e) {}
+        mossadDebug('hotkey', 'все клавиши — только для этого сайта', { site: rootDomain, n });
+        return n;
     }
     try { mossadApplySiteHotkeys(); } catch (e) {}
 

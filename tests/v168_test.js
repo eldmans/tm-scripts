@@ -30,14 +30,15 @@ const preSites={'grok.com':{hk:{grokCycle:B('\\'),sound:B('F10')},order:['grokCy
    T.config.hk.history=B('F2'); m.querySelector('#mossad-hk-apply-all').click(); await sleep(10);
    ok('3a site-only key that clashes with a pushed key is cleared on that site', !siteGm(w)['pinterest.com'].hk.pinFullScale.key && glob(w).history.key==='F2', JSON.stringify(siteGm(w)['pinterest.com'].hk.pinFullScale));
    // save as default
-   T.config.hk.history=B('F8'); let asked2=''; w.confirm=(t)=>{asked2=t;return true;};
-   m.querySelector('#mossad-hk-save-defaults').click(); await sleep(10);
+   // v1.3.71: «Сохранить как умолчание» — окно выбора; «ДЛЯ ВСЕГО» = прежнее поведение (с примером на сложение)
+   const pickAll=async()=>{ m.querySelector('#mossad-hk-save-defaults').click(); const dl=d.getElementById('mossad-hk-defdlg'); dl.querySelector('[data-mode=all]').click(); dl.querySelector('[data-ans]').value=dl.dataset.sum; dl.querySelector('[data-ok]').click(); await sleep(10); };
+   T.config.hk.history=B('F8'); await pickAll();
    const rec=JSON.parse(w.__gm.mossad_hk_defaults||'null');
-   ok('4a «Сохранить как умолчание»: confirm mentions reset baseline; pushed + baseline stored (effective incl. own sound F10)', /Сохранить как умолчание\?/.test(asked2) && /сброс/.test(asked2) && rec && rec.hk.sound.key==='F10' && rec.hk.history.key==='F8' && glob(w).history.key==='F8' && Array.isArray(rec.order));
-   T.config.hk.sound=B('F11'); T.config.hk.history=B('F12'); m.querySelector('#mossad-hk-reset').click(); await sleep(10);
+   ok('4a «Сохранить как умолчание» → ДЛЯ ВСЕГО: pushed + baseline stored (effective incl. own sound F10)', rec && rec.hk.sound.key==='F10' && rec.hk.history.key==='F8' && glob(w).history.key==='F8' && Array.isArray(rec.order));
+   w.confirm=()=>true; T.config.hk.sound=B('F11'); T.config.hk.history=B('F12'); m.querySelector('#mossad-hk-reset').click(); await sleep(10);
    ok('4b «Клавиши» reset returns to that baseline', T.config.hk.sound.key==='F10' && T.config.hk.history.key==='F8', JSON.stringify([T.config.hk.sound,T.config.hk.history]));
-   w.confirm=()=>false; const r0=w.__gm.mossad_hk_defaults; T.config.hk.history=B('F3'); m.querySelector('#mossad-hk-save-defaults').click(); await sleep(10);
-   ok('4c Cancel on «Сохранить как умолчание» → nothing', w.__gm.mossad_hk_defaults===r0 && glob(w).history.key==='F8');
+   const r0=w.__gm.mossad_hk_defaults; T.config.hk.history=B('F3'); m.querySelector('#mossad-hk-save-defaults').click(); d.getElementById('mossad-hk-defdlg').querySelector('[data-cancel]').click(); await sleep(10);
+   ok('4c Cancel on «Сохранить как умолчание» → nothing', w.__gm.mossad_hk_defaults===r0 && glob(w).history.key==='F8' && !d.getElementById('mossad-hk-defdlg'));
    gmAfter=Object.assign({},w.__gm); }
  // another site picks it up
  { const {w,T}=load({items,url:'https://www.pinterest.com/',seedSiteHk:true,preGm:{mossad_hk_site:gmAfter.mossad_hk_site,mossad_hk_global:gmAfter.mossad_hk_global}}); await sleep(80);
