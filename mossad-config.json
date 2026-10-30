@@ -4,7 +4,7 @@
   "slideshowLoopMode": "off",
   "loopFeed": false,
   "slideshowDirections": [
-    "up"
+    "down"
   ],
   "videoLoops": 1,
   "slideshowDelay": 1,
@@ -28,6 +28,8 @@
   "showSoundToast": true,
   "debugSlideshow": false,
   "pinterestMode": "rand",
+  "promptHotkeysOn": true,
+  "promptHotkeys": "download",
   "grokNoPromptKeys": "RWEZXGVC",
   "pinterestJumpKeys": "off",
   "pinterestDir": "fwd",
