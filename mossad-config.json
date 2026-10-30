@@ -4,7 +4,7 @@
   "slideshowLoopMode": "off",
   "loopFeed": false,
   "slideshowDirections": [
-    "down"
+    "up"
   ],
   "videoLoops": 1,
   "slideshowDelay": 1,
