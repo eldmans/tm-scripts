@@ -670,10 +670,58 @@
         return '';
     }
 
-    /** Разбор содержимого тега (без скобок) → spec { kind, name, chars, words, minus[], err }. */
+    /** Ключ тега страницы: "в кавычках" или до первого модификатора (--, [[, [N]). → [key, rest] */
+    function _tplPageKey(s) {
+        if (s[0] === '"') {
+            const j = s.indexOf('"', 1);
+            return j < 0 ? [null, ''] : [s.slice(1, j), s.slice(j + 1)];
+        }
+        const k = s.search(MOSSAD_TPL_MOD_START);
+        return k < 0 ? [s.trim(), ''] : [s.slice(0, k).trim(), s.slice(k)];
+    }
+    /** Разрезать по неэкранированному «/» (\/ → /, остальные \ остаются для регулярки). */
+    function _tplSplitSlash(s) {
+        const out = []; let cur = '';
+        for (let i = 0; i < s.length; i++) {
+            if (s[i] === '\\' && s[i + 1] === '/') { cur += '/'; i++; continue; }
+            if (s[i] === '\\') { cur += s[i] + (s[i + 1] || ''); i++; continue; }
+            if (s[i] === '/') { out.push(cur); cur = ''; continue; }
+            cur += s[i];
+        }
+        out.push(cur);
+        return out;
+    }
+
+    /** Разбор содержимого тега (без скобок) → spec { kind: var|meta|ld|css|re, name, key, attr, src, re, repl, chars, words, minus[], err }.
+     *  v1.3.75: теги страницы — meta:ИМЯ, ld:путь.к.полю, css:СЕЛЕКТОР[@атрибут], re:ИСТОЧНИК/РЕГУЛЯРКА/ЗАМЕНА[/модификаторы]. */
     function mossadTplParse(inner) {
         const s = String(inner || '');
         const spec = { kind: 'var', name: '', chars: 0, words: null, minus: [], err: '' };
+        const pm = /^(meta|ld|css|re):/i.exec(s);
+        if (pm) {
+            spec.kind = pm[1].toLowerCase();
+            const body = s.slice(pm[0].length);
+            if (spec.kind === 're') {
+                const parts = _tplSplitSlash(body);
+                if (parts.length < 2 || !parts[1]) { spec.err = 'нужно re:ИСТОЧНИК/РЕГУЛЯРКА/ЗАМЕНА'; return spec; }
+                spec.src = mossadTplParse(parts[0]);
+                if (spec.src.err) { spec.err = 'источник: ' + spec.src.err; return spec; }
+                try { spec.re = new RegExp(parts[1], 'i'); } catch (e) { spec.err = 'ошибка в регулярке: ' + e.message; return spec; }
+                spec.repl = parts.length > 2 ? parts[2] : null;
+                spec.err = _tplParseMods(parts.slice(3).join('/'), spec);
+                return spec;
+            }
+            const [key, rest] = _tplPageKey(body);
+            if (!key) { spec.err = key === null ? 'нет закрывающей кавычки' : 'пустое имя после ' + pm[0]; return spec; }
+            spec.key = key;
+            if (spec.kind === 'css') {
+                const am = /@([\w:-]+)$/.exec(key);
+                if (am) { spec.attr = am[1]; spec.key = key.slice(0, am.index).trim(); }
+                try { document.createDocumentFragment().querySelector(spec.key); } catch (e) { spec.err = 'ошибка в CSS-селекторе'; return spec; }
+            }
+            spec.err = _tplParseMods(rest, spec);
+            return spec;
+        }
         const m = /^([a-zA-Z]+)(\d+)?/.exec(s);
         if (!m) { spec.err = 'нет имени тега'; return spec; }
         spec.name = m[1];
@@ -830,11 +878,107 @@
         if (base.err) return { val: '', err: base.err };
         return { val: mossadTplApplyMods(base.val, spec), err: '' };
     }
-    /** Значение тега без модификаторов. */
-    function mossadTplEvalBase(spec, vars, cache) {
-        const v = mossadTplValue(vars, spec.name);
-        return v === undefined ? { val: '', err: 'неизвестный тег' } : { val: v, err: '' };
+    /** Значение тега без модификаторов. raw — без mossadSafeNamePart (для источника регулярки). */
+    function mossadTplEvalBase(spec, vars, cache, raw) {
+        if (spec.kind === 'var') {
+            const v = mossadTplValue(vars, spec.name);
+            return v === undefined ? { val: '', err: 'неизвестный тег' } : { val: v, err: '' };
+        }
+        const doc = cache.doc || document;
+        let v = '';
+        if (spec.kind === 'meta') v = mossadPageMeta(spec.key, doc);
+        else if (spec.kind === 'ld') v = mossadPageLd(spec.key, doc, cache);
+        else if (spec.kind === 'css') {
+            let el = null;
+            try { el = doc.querySelector(spec.key); } catch (e) { return { val: '', err: 'ошибка в CSS-селекторе' }; }
+            if (el) v = spec.attr ? (el.getAttribute(spec.attr) || '')
+                : ((el.textContent || '').trim() || el.getAttribute('content') || el.value || el.getAttribute('alt') || el.getAttribute('title') || '');
+        } else if (spec.kind === 're') {
+            const src = mossadTplEvalBase(spec.src, vars, cache, true);
+            if (src.err) return src;
+            const m = spec.re.exec(mossadTplApplyMods(src.val, spec.src));
+            if (m) v = spec.repl == null ? (m[1] != null ? m[1] : m[0])
+                : spec.repl.replace(/\$(\$|&|\d)/g, (x, c) => c === '$' ? '$' : c === '&' ? m[0] : (m[+c] || ''));
+        }
+        v = String(v == null ? '' : v);
+        return { val: raw ? v : mossadSafeNamePart(v), err: '' };
     }
+
+    // ── v1.3.75: теги со страницы ──
+    /** <meta property|name|itemprop="key" content> (регистр имени не важен). */
+    function mossadPageMeta(key, doc) {
+        const k = String(key).toLowerCase();
+        for (const el of (doc || document).querySelectorAll('meta[content]')) {
+            const n = el.getAttribute('property') || el.getAttribute('name') || el.getAttribute('itemprop') || '';
+            if (n.toLowerCase() === k) return el.getAttribute('content') || '';
+        }
+        return '';
+    }
+    const MOSSAD_LD_MEDIA = /^(VideoObject|ImageObject|MediaObject|AudioObject|Movie|Clip|Episode)$/i;
+    /** Объекты из <script type="application/ld+json"> (массивы и @graph раскрыты); первым — VideoObject/ImageObject/MediaObject. */
+    function mossadPageLdNodes(doc, cache) {
+        if (cache && cache.ld) return cache.ld;
+        const nodes = [];
+        const add = (o) => {
+            if (Array.isArray(o)) { o.forEach(add); return; }
+            if (!o || typeof o !== 'object') return;
+            nodes.push(o);
+            if (Array.isArray(o['@graph'])) o['@graph'].forEach(add);
+        };
+        for (const sc of (doc || document).querySelectorAll('script[type="application/ld+json"]')) {
+            try { add(JSON.parse(sc.textContent || '')); } catch (e) {}
+        }
+        const isMedia = (o) => [].concat(o['@type'] || []).some(t => MOSSAD_LD_MEDIA.test(String(t)));
+        const out = nodes.filter(isMedia).concat(nodes.filter(o => !isMedia(o)));
+        if (cache) cache.ld = out;
+        return out;
+    }
+    /** Значение по пути «author.name» / «thumbnailUrl.0»: массив без номера — первый элемент, объект — его name / @id / url. */
+    function _ldGet(o, path) {
+        let cur = o;
+        for (const part of path.split('.')) {
+            if (cur == null) return undefined;
+            if (Array.isArray(cur) && !/^\d+$/.test(part)) cur = cur[0];
+            if (cur == null || typeof cur !== 'object') return undefined;
+            cur = cur[part];
+        }
+        if (Array.isArray(cur)) cur = cur[0];
+        if (cur && typeof cur === 'object') cur = cur.name || cur['@id'] || cur.url;
+        return cur == null || typeof cur === 'object' ? undefined : cur;
+    }
+    function mossadPageLd(path, doc, cache) {
+        for (const o of mossadPageLdNodes(doc, cache)) {
+            const v = _ldGet(o, path);
+            if (v !== undefined && v !== '') return String(v);
+        }
+        return '';
+    }
+    /** Для окна «?»: что есть на странице — meta [[имя, значение]] и ld+json [[путь, значение]]. */
+    function mossadPageTagCatalog(doc) {
+        const d = doc || document, meta = [], ld = [], seen = new Set();
+        for (const el of d.querySelectorAll('meta[content]')) {
+            const n = el.getAttribute('property') || el.getAttribute('name') || el.getAttribute('itemprop');
+            if (!n || seen.has(n.toLowerCase())) continue;
+            seen.add(n.toLowerCase());
+            meta.push([n, el.getAttribute('content') || '']);
+            if (meta.length >= 80) break;
+        }
+        const lseen = new Set();
+        const walk = (o, pre, depth) => {
+            if (ld.length >= 120 || depth > 4 || o == null) return;
+            if (Array.isArray(o)) { o.slice(0, 3).forEach((x, i) => walk(x, pre ? `${pre}.${i}` : String(i), depth + 1)); return; }
+            if (typeof o === 'object') {
+                for (const k of Object.keys(o)) { if (k === '@context' || k === '@graph') continue; walk(o[k], pre ? `${pre}.${k}` : k, depth + 1); }
+                return;
+            }
+            if (!pre || lseen.has(pre)) return;
+            lseen.add(pre);
+            ld.push([pre, String(o)]);
+        };
+        mossadPageLdNodes(d, null).forEach(o => walk(o, '', 0));
+        return { meta, ld };
+    }
+    window.mossadPageTagCatalog = mossadPageTagCatalog;
     /** Проблемные теги шаблона: [{ raw: '{foo}', err: 'неизвестный тег' }] (повторы — один раз). */
     function mossadTemplateTagIssues(tpl, vars) {
         const out = [], cache = {};

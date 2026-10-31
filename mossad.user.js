@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.74
+// @version      1.3.75
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.74';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.75';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1937,9 +1937,53 @@ return 'непонятно: ' + rest;
 }
 return '';
 }
+function _tplPageKey(s) {
+if (s[0] === '"') {
+const j = s.indexOf('"', 1);
+return j < 0 ? [null, ''] : [s.slice(1, j), s.slice(j + 1)];
+}
+const k = s.search(MOSSAD_TPL_MOD_START);
+return k < 0 ? [s.trim(), ''] : [s.slice(0, k).trim(), s.slice(k)];
+}
+function _tplSplitSlash(s) {
+const out = []; let cur = '';
+for (let i = 0; i < s.length; i++) {
+if (s[i] === '\\' && s[i + 1] === '/') { cur += '/'; i++; continue; }
+if (s[i] === '\\') { cur += s[i] + (s[i + 1] || ''); i++; continue; }
+if (s[i] === '/') { out.push(cur); cur = ''; continue; }
+cur += s[i];
+}
+out.push(cur);
+return out;
+}
 function mossadTplParse(inner) {
 const s = String(inner || '');
 const spec = { kind: 'var', name: '', chars: 0, words: null, minus: [], err: '' };
+const pm = /^(meta|ld|css|re):/i.exec(s);
+if (pm) {
+spec.kind = pm[1].toLowerCase();
+const body = s.slice(pm[0].length);
+if (spec.kind === 're') {
+const parts = _tplSplitSlash(body);
+if (parts.length < 2 || !parts[1]) { spec.err = 'нужно re:ИСТОЧНИК/РЕГУЛЯРКА/ЗАМЕНА'; return spec; }
+spec.src = mossadTplParse(parts[0]);
+if (spec.src.err) { spec.err = 'источник: ' + spec.src.err; return spec; }
+try { spec.re = new RegExp(parts[1], 'i'); } catch (e) { spec.err = 'ошибка в регулярке: ' + e.message; return spec; }
+spec.repl = parts.length > 2 ? parts[2] : null;
+spec.err = _tplParseMods(parts.slice(3).join('/'), spec);
+return spec;
+}
+const [key, rest] = _tplPageKey(body);
+if (!key) { spec.err = key === null ? 'нет закрывающей кавычки' : 'пустое имя после ' + pm[0]; return spec; }
+spec.key = key;
+if (spec.kind === 'css') {
+const am = /@([\w:-]+)$/.exec(key);
+if (am) { spec.attr = am[1]; spec.key = key.slice(0, am.index).trim(); }
+try { document.createDocumentFragment().querySelector(spec.key); } catch (e) { spec.err = 'ошибка в CSS-селекторе'; return spec; }
+}
+spec.err = _tplParseMods(rest, spec);
+return spec;
+}
 const m = /^([a-zA-Z]+)(\d+)?/.exec(s);
 if (!m) { spec.err = 'нет имени тега'; return spec; }
 spec.name = m[1];
@@ -2072,10 +2116,100 @@ const base = mossadTplEvalBase(spec, vars, cache || {});
 if (base.err) return { val: '', err: base.err };
 return { val: mossadTplApplyMods(base.val, spec), err: '' };
 }
-function mossadTplEvalBase(spec, vars, cache) {
+function mossadTplEvalBase(spec, vars, cache, raw) {
+if (spec.kind === 'var') {
 const v = mossadTplValue(vars, spec.name);
 return v === undefined ? { val: '', err: 'неизвестный тег' } : { val: v, err: '' };
 }
+const doc = cache.doc || document;
+let v = '';
+if (spec.kind === 'meta') v = mossadPageMeta(spec.key, doc);
+else if (spec.kind === 'ld') v = mossadPageLd(spec.key, doc, cache);
+else if (spec.kind === 'css') {
+let el = null;
+try { el = doc.querySelector(spec.key); } catch (e) { return { val: '', err: 'ошибка в CSS-селекторе' }; }
+if (el) v = spec.attr ? (el.getAttribute(spec.attr) || '')
+: ((el.textContent || '').trim() || el.getAttribute('content') || el.value || el.getAttribute('alt') || el.getAttribute('title') || '');
+} else if (spec.kind === 're') {
+const src = mossadTplEvalBase(spec.src, vars, cache, true);
+if (src.err) return src;
+const m = spec.re.exec(mossadTplApplyMods(src.val, spec.src));
+if (m) v = spec.repl == null ? (m[1] != null ? m[1] : m[0])
+: spec.repl.replace(/\$(\$|&|\d)/g, (x, c) => c === '$' ? '$' : c === '&' ? m[0] : (m[+c] || ''));
+}
+v = String(v == null ? '' : v);
+return { val: raw ? v : mossadSafeNamePart(v), err: '' };
+}
+function mossadPageMeta(key, doc) {
+const k = String(key).toLowerCase();
+for (const el of (doc || document).querySelectorAll('meta[content]')) {
+const n = el.getAttribute('property') || el.getAttribute('name') || el.getAttribute('itemprop') || '';
+if (n.toLowerCase() === k) return el.getAttribute('content') || '';
+}
+return '';
+}
+const MOSSAD_LD_MEDIA = /^(VideoObject|ImageObject|MediaObject|AudioObject|Movie|Clip|Episode)$/i;
+function mossadPageLdNodes(doc, cache) {
+if (cache && cache.ld) return cache.ld;
+const nodes = [];
+const add = (o) => {
+if (Array.isArray(o)) { o.forEach(add); return; }
+if (!o || typeof o !== 'object') return;
+nodes.push(o);
+if (Array.isArray(o['@graph'])) o['@graph'].forEach(add);
+};
+for (const sc of (doc || document).querySelectorAll('script[type="application/ld+json"]')) {
+try { add(JSON.parse(sc.textContent || '')); } catch (e) {}
+}
+const isMedia = (o) => [].concat(o['@type'] || []).some(t => MOSSAD_LD_MEDIA.test(String(t)));
+const out = nodes.filter(isMedia).concat(nodes.filter(o => !isMedia(o)));
+if (cache) cache.ld = out;
+return out;
+}
+function _ldGet(o, path) {
+let cur = o;
+for (const part of path.split('.')) {
+if (cur == null) return undefined;
+if (Array.isArray(cur) && !/^\d+$/.test(part)) cur = cur[0];
+if (cur == null || typeof cur !== 'object') return undefined;
+cur = cur[part];
+}
+if (Array.isArray(cur)) cur = cur[0];
+if (cur && typeof cur === 'object') cur = cur.name || cur['@id'] || cur.url;
+return cur == null || typeof cur === 'object' ? undefined : cur;
+}
+function mossadPageLd(path, doc, cache) {
+for (const o of mossadPageLdNodes(doc, cache)) {
+const v = _ldGet(o, path);
+if (v !== undefined && v !== '') return String(v);
+}
+return '';
+}
+function mossadPageTagCatalog(doc) {
+const d = doc || document, meta = [], ld = [], seen = new Set();
+for (const el of d.querySelectorAll('meta[content]')) {
+const n = el.getAttribute('property') || el.getAttribute('name') || el.getAttribute('itemprop');
+if (!n || seen.has(n.toLowerCase())) continue;
+seen.add(n.toLowerCase());
+meta.push([n, el.getAttribute('content') || '']);
+if (meta.length >= 80) break;
+}
+const lseen = new Set();
+const walk = (o, pre, depth) => {
+if (ld.length >= 120 || depth > 4 || o == null) return;
+if (Array.isArray(o)) { o.slice(0, 3).forEach((x, i) => walk(x, pre ? `${pre}.${i}` : String(i), depth + 1)); return; }
+if (typeof o === 'object') {
+for (const k of Object.keys(o)) { if (k === '@context' || k === '@graph') continue; walk(o[k], pre ? `${pre}.${k}` : k, depth + 1); }
+return;
+}
+if (!pre || lseen.has(pre)) return;
+lseen.add(pre);
+ld.push([pre, String(o)]);
+};
+mossadPageLdNodes(d, null).forEach(o => walk(o, '', 0));
+return { meta, ld };
+}
+window.mossadPageTagCatalog = mossadPageTagCatalog;
 function mossadTemplateTagIssues(tpl, vars) {
 const out = [], cache = {};
 const vv = vars || buildFilenameVars({});
@@ -9426,6 +9560,22 @@ const MOSSAD_TPL_HELP_MODS = `
               ${_tplEx('{title--Watch Online[[3]][40]}', 'всё вместе: убрать, взять 3 слова, обрезать до 40 символов')}
               <div style="color:#9ca3af;">Слова разделяются пробелом, точкой, запятой, «_», «|» и тире (- – —); разделители между оставшимися словами остаются как были.
               Ошибка в модификаторе — тег красный и в имени пропадает.</div>
+            </div>
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid #374151;line-height:1.5;">
+              <b style="color:#e5e7eb;">🌐 Теги со страницы</b> <span style="color:#9ca3af;">(то, что видно в «Просмотр кода страницы»; берётся в момент скачивания)</span>
+              ${_tplEx('{meta:og:title}', 'содержимое &lt;meta property=&quot;og:title&quot; content=&quot;…&quot;&gt; (так же name= и itemprop=)')}
+              ${_tplEx('{ld:name}', 'поле из блока schema.org &lt;script type=&quot;application/ld+json&quot;&gt; (сначала VideoObject / ImageObject)')}
+              ${_tplEx('{ld:author.name}', 'вложенное поле — через точку; номер элемента списка — {ld:thumbnailUrl.0}')}
+              ${_tplEx('{css:h1}', 'текст первого элемента по CSS-селектору; можно с пробелами и [атрибутами]: {css:div.info [itemprop=name]}')}
+              ${_tplEx('{css:video@poster}', 'значение атрибута элемента — через @ в конце')}
+              ${_tplEx('{css:"a.b--c"}', 'селектор с «--» или «[[» — в кавычках')}
+              ${_tplEx('{ld:description--watch online hight quality video}', 'модификаторы --, [[ ]], [ ] работают и тут')}
+              ${_tplEx('{re:ld:description/^(.+?) watch online/$1}', 'регулярка с группами, как в PowerRename: re:ИСТОЧНИК/РЕГУЛЯРКА/ЗАМЕНА')}
+              <div style="color:#9ca3af;">Регулярка: ИСТОЧНИК — любой тег без скобок (title, desc, meta:…, ld:…, css:…); регистр не важен; в ЗАМЕНЕ $1…$9 — группы в любом порядке
+              (например <code>$2 - $1</code>), $&amp; — всё совпадение. Результат — только ЗАМЕНА с подставленными группами (нет совпадения — пусто); без ЗАМЕНЫ — группа 1 (или всё совпадение).
+              «/» внутри регулярки — <code>\\/</code>. Модификаторы к результату — после ещё одного «/»: <code>{re:title/(\\w+)/$1/[10]}</code>. Ошибка в регулярке — тег красный.</div>
+              <div style="color:#9ca3af;">Пример: страница с og:title «Pppe 062 en» и описанием «Pppe 062 en watch online hight quality video» — все три
+              <code>{meta:og:title}</code>, <code>{ld:description--watch online hight quality video}</code>, <code>{re:ld:description/^(.+?) watch online/$1}</code> дают «Pppe 062 en».</div>
             </div>`;
 function _tplEsc(s) {
 return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -9512,6 +9662,19 @@ return `<tr>
 }).join('');
 h.box.querySelector('[data-th="tbody"]').innerHTML = rows;
 }
+function _tplRenderPageTags() {
+const h = _tplHelp;
+const el = h && h.box.querySelector('[data-th="pagelist"]');
+if (!el) return;
+const cat = mossadPageTagCatalog(document);
+const q = (k) => /--|\[\[|\[\d+\]/.test(k) ? `"${k}"` : k;
+const row = (tag, name, val) => `<tr><td style="padding:1px 6px;white-space:nowrap;"><code data-th-ins="${_tplEsc(tag)}" title="Вставить ${_tplEsc(tag)}" style="cursor:pointer;color:#93c5fd;">${_tplEsc(name)}</code></td>` +
+`<td style="padding:1px 6px;color:#fbbf24;word-break:break-word;" title="${_tplEsc(val)}">${_tplEsc(val.length > 120 ? val.slice(0, 120) + '…' : val) || '<span style="color:#6b7280;">пусто</span>'}</td></tr>`;
+const tbl = (title, rows) => `<div style="color:#9ca3af;margin-top:4px;">${title}</div>` +
+(rows.length ? `<table style="border-collapse:collapse;width:100%;">${rows.join('')}</table>` : '<div style="color:#6b7280;">— нет на этой странице</div>');
+el.innerHTML = tbl('meta → {meta:…}', cat.meta.map(([n, v]) => row(`{meta:${q(n)}}`, n, v))) +
+tbl('ld+json → {ld:…}', cat.ld.map(([n, v]) => row(`{ld:${q(n)}}`, n, v)));
+}
 function mossadCloseTplHelp() {
 const h = _tplHelp;
 if (!h) return;
@@ -9553,6 +9716,10 @@ box.innerHTML = `
               если имя на него не оканчивается. Пустые теги убирают лишние «-», «_», «~». Клик по тегу — вставить в шаблон.
             </div>
             ${MOSSAD_TPL_HELP_MODS}
+            <details data-th="page" style="margin-top:8px;padding-top:6px;border-top:1px solid #374151;" open>
+              <summary style="cursor:pointer;color:#e5e7eb;font-weight:700;">📄 На этой странице: meta и ld+json (клик — вставить тег)</summary>
+              <div data-th="pagelist" style="margin-top:4px;"></div>
+            </details>
             <div style="margin-top:6px;display:flex;align-items:center;gap:6px;" title="Через запятую. Убираются из {title} и {desc} всегда, без правки шаблона (без учёта регистра). Текст с запятой или пробелами по краям — в кавычках: &quot; - Brave&quot;. Свой список у каждого сайта">
               <span style="color:#9ca3af;white-space:nowrap;">Минус-слова сайта ${_tplEsc(rootDomain)} (title, desc):</span>
               <input data-th="junk" type="text" placeholder="Watch Online, &quot; - Brave&quot;" style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:1px 4px;font-size:12px;">
@@ -9588,6 +9755,7 @@ box.querySelector('[data-th="close"]').onclick = () => mossadCloseTplHelp();
 const sepIn = box.querySelector('[data-th="sep"]');
 sepIn.value = mossadTplSep();
 sepIn.oninput = () => mossadSetTplSep(sepIn.value);
+_tplRenderPageTags();
 const junkIn = box.querySelector('[data-th="junk"]');
 junkIn.value = mossadJunkText();
 junkIn.oninput = () => {

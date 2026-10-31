@@ -25,6 +25,22 @@
               ${_tplEx('{title--Watch Online[[3]][40]}', 'всё вместе: убрать, взять 3 слова, обрезать до 40 символов')}
               <div style="color:#9ca3af;">Слова разделяются пробелом, точкой, запятой, «_», «|» и тире (- – —); разделители между оставшимися словами остаются как были.
               Ошибка в модификаторе — тег красный и в имени пропадает.</div>
+            </div>
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid #374151;line-height:1.5;">
+              <b style="color:#e5e7eb;">🌐 Теги со страницы</b> <span style="color:#9ca3af;">(то, что видно в «Просмотр кода страницы»; берётся в момент скачивания)</span>
+              ${_tplEx('{meta:og:title}', 'содержимое &lt;meta property=&quot;og:title&quot; content=&quot;…&quot;&gt; (так же name= и itemprop=)')}
+              ${_tplEx('{ld:name}', 'поле из блока schema.org &lt;script type=&quot;application/ld+json&quot;&gt; (сначала VideoObject / ImageObject)')}
+              ${_tplEx('{ld:author.name}', 'вложенное поле — через точку; номер элемента списка — {ld:thumbnailUrl.0}')}
+              ${_tplEx('{css:h1}', 'текст первого элемента по CSS-селектору; можно с пробелами и [атрибутами]: {css:div.info [itemprop=name]}')}
+              ${_tplEx('{css:video@poster}', 'значение атрибута элемента — через @ в конце')}
+              ${_tplEx('{css:"a.b--c"}', 'селектор с «--» или «[[» — в кавычках')}
+              ${_tplEx('{ld:description--watch online hight quality video}', 'модификаторы --, [[ ]], [ ] работают и тут')}
+              ${_tplEx('{re:ld:description/^(.+?) watch online/$1}', 'регулярка с группами, как в PowerRename: re:ИСТОЧНИК/РЕГУЛЯРКА/ЗАМЕНА')}
+              <div style="color:#9ca3af;">Регулярка: ИСТОЧНИК — любой тег без скобок (title, desc, meta:…, ld:…, css:…); регистр не важен; в ЗАМЕНЕ $1…$9 — группы в любом порядке
+              (например <code>$2 - $1</code>), $&amp; — всё совпадение. Результат — только ЗАМЕНА с подставленными группами (нет совпадения — пусто); без ЗАМЕНЫ — группа 1 (или всё совпадение).
+              «/» внутри регулярки — <code>\\/</code>. Модификаторы к результату — после ещё одного «/»: <code>{re:title/(\\w+)/$1/[10]}</code>. Ошибка в регулярке — тег красный.</div>
+              <div style="color:#9ca3af;">Пример: страница с og:title «Pppe 062 en» и описанием «Pppe 062 en watch online hight quality video» — все три
+              <code>{meta:og:title}</code>, <code>{ld:description--watch online hight quality video}</code>, <code>{re:ld:description/^(.+?) watch online/$1}</code> дают «Pppe 062 en».</div>
             </div>`;
 
     function _tplEsc(s) {
@@ -124,6 +140,21 @@
         h.box.querySelector('[data-th="tbody"]').innerHTML = rows;
     }
 
+    /** v1.3.75: список meta-тегов и полей ld+json текущей страницы со значениями (клик — вставить тег). */
+    function _tplRenderPageTags() {
+        const h = _tplHelp;
+        const el = h && h.box.querySelector('[data-th="pagelist"]');
+        if (!el) return;
+        const cat = mossadPageTagCatalog(document);
+        const q = (k) => /--|\[\[|\[\d+\]/.test(k) ? `"${k}"` : k;
+        const row = (tag, name, val) => `<tr><td style="padding:1px 6px;white-space:nowrap;"><code data-th-ins="${_tplEsc(tag)}" title="Вставить ${_tplEsc(tag)}" style="cursor:pointer;color:#93c5fd;">${_tplEsc(name)}</code></td>` +
+            `<td style="padding:1px 6px;color:#fbbf24;word-break:break-word;" title="${_tplEsc(val)}">${_tplEsc(val.length > 120 ? val.slice(0, 120) + '…' : val) || '<span style="color:#6b7280;">пусто</span>'}</td></tr>`;
+        const tbl = (title, rows) => `<div style="color:#9ca3af;margin-top:4px;">${title}</div>` +
+            (rows.length ? `<table style="border-collapse:collapse;width:100%;">${rows.join('')}</table>` : '<div style="color:#6b7280;">— нет на этой странице</div>');
+        el.innerHTML = tbl('meta → {meta:…}', cat.meta.map(([n, v]) => row(`{meta:${q(n)}}`, n, v))) +
+            tbl('ld+json → {ld:…}', cat.ld.map(([n, v]) => row(`{ld:${q(n)}}`, n, v)));
+    }
+
     function mossadCloseTplHelp() {
         const h = _tplHelp;
         if (!h) return;
@@ -167,6 +198,10 @@
               если имя на него не оканчивается. Пустые теги убирают лишние «-», «_», «~». Клик по тегу — вставить в шаблон.
             </div>
             ${MOSSAD_TPL_HELP_MODS}
+            <details data-th="page" style="margin-top:8px;padding-top:6px;border-top:1px solid #374151;" open>
+              <summary style="cursor:pointer;color:#e5e7eb;font-weight:700;">📄 На этой странице: meta и ld+json (клик — вставить тег)</summary>
+              <div data-th="pagelist" style="margin-top:4px;"></div>
+            </details>
             <div style="margin-top:6px;display:flex;align-items:center;gap:6px;" title="Через запятую. Убираются из {title} и {desc} всегда, без правки шаблона (без учёта регистра). Текст с запятой или пробелами по краям — в кавычках: &quot; - Brave&quot;. Свой список у каждого сайта">
               <span style="color:#9ca3af;white-space:nowrap;">Минус-слова сайта ${_tplEsc(rootDomain)} (title, desc):</span>
               <input data-th="junk" type="text" placeholder="Watch Online, &quot; - Brave&quot;" style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:1px 4px;font-size:12px;">
@@ -204,6 +239,7 @@
         const sepIn = box.querySelector('[data-th="sep"]');
         sepIn.value = mossadTplSep();
         sepIn.oninput = () => mossadSetTplSep(sepIn.value);
+        _tplRenderPageTags(); // v1.3.75
         const junkIn = box.querySelector('[data-th="junk"]'); // v1.3.74
         junkIn.value = mossadJunkText();
         junkIn.oninput = () => {
