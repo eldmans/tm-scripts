@@ -132,10 +132,10 @@
             const shown = val.length > 60 ? val.slice(0, 60) + '…' : val;
             return `<tr>
                 <td style="padding:2px 6px;white-space:nowrap;"><code data-th-ins="{${t.k}}" title="Вставить в шаблон" style="cursor:pointer;color:#93c5fd;">{${t.k}}</code></td>
-                <td style="padding:2px 6px;color:#9ca3af;white-space:nowrap;">${t.aliases.map(a => `{${a}}`).join(' ')}</td>
-                <td style="padding:2px 6px;color:#9ca3af;white-space:nowrap;">${nRange}</td>
-                <td style="padding:2px 6px;color:#fbbf24;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_tplEsc(val)}">${val ? _tplEsc(shown) : '<span style="color:#6b7280;">пусто</span>'}</td>
-                <td style="padding:2px 6px;color:#d1d5db;">${_tplEsc(t.what)}</td></tr>`;
+                <td style="padding:2px 4px;color:#9ca3af;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_tplEsc(t.aliases.map(a => `{${a}}`).join(' '))}">${t.aliases.map(a => `{${a}}`).join(' ')}</td>
+                <td style="padding:2px 4px;color:#9ca3af;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${nRange}</td>
+                <td style="padding:2px 6px;color:#fbbf24;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_tplEsc(val)}">${val ? _tplEsc(shown) : '<span style="color:#6b7280;">пусто</span>'}</td>
+                <td data-th-what style="padding:2px 6px;color:#d1d5db;line-height:1.35;">${_tplEsc(t.what)}</td></tr>`;
         }).join('');
         h.box.querySelector('[data-th="tbody"]').innerHTML = rows;
     }
@@ -143,11 +143,11 @@
     /** v1.3.75: список meta-тегов и полей ld+json текущей страницы со значениями (клик — вставить тег). */
     function _tplRenderPageTags() {
         const h = _tplHelp;
-        const el = h && h.box.querySelector('[data-th="pagelist"]');
+        const el = h && h.page && h.page.querySelector('[data-th="pagelist"]');
         if (!el) return;
         const cat = mossadPageTagCatalog(document);
         const q = (k) => /--|\[\[|\[\d+\]/.test(k) ? `"${k}"` : k;
-        const row = (tag, name, val) => `<tr><td style="padding:1px 6px;white-space:nowrap;"><code data-th-ins="${_tplEsc(tag)}" title="Вставить ${_tplEsc(tag)}" style="cursor:pointer;color:#93c5fd;">${_tplEsc(name)}</code></td>` +
+        const row = (tag, name, val) => `<tr data-th-ins="${_tplEsc(tag)}" title="Вставить ${_tplEsc(tag)}" style="cursor:pointer;"><td style="padding:1px 6px;white-space:nowrap;vertical-align:top;"><code data-th-ins="${_tplEsc(tag)}" title="Вставить ${_tplEsc(tag)}" style="cursor:pointer;color:#93c5fd;">${_tplEsc(name)}</code></td>` +
             `<td style="padding:1px 6px;color:#fbbf24;word-break:break-word;" title="${_tplEsc(val)}">${_tplEsc(val.length > 120 ? val.slice(0, 120) + '…' : val) || '<span style="color:#6b7280;">пусто</span>'}</td></tr>`;
         const tbl = (title, rows) => `<div style="color:#9ca3af;margin-top:4px;">${title}</div>` +
             (rows.length ? `<table style="border-collapse:collapse;width:100%;">${rows.join('')}</table>` : '<div style="color:#6b7280;">— нет на этой странице</div>');
@@ -155,11 +155,59 @@
             tbl('ld+json → {ld:…}', cat.ld.map(([n, v]) => row(`{ld:${q(n)}}`, n, v)));
     }
 
+    const MOSSAD_TPL_WIN_CSS = 'position:fixed;z-index:2147483646;background:rgba(17,24,39,0.97);border:1px solid #4b5563;border-radius:10px;' +
+        'padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,0.6);color:#e5e7eb;font:12px system-ui,-apple-system,sans-serif;box-sizing:border-box;overflow:auto;';
+
+    /** v1.3.76: окно «Теги этой страницы» — рядом с окном «?» (справа, если влезает, иначе слева). */
+    function _tplDockPage() {
+        const h = _tplHelp;
+        if (!h || !h.page) return;
+        try {
+            const r = h.box.getBoundingClientRect(), vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+            const w = Math.min(460, Math.max(240, vw * 0.4));
+            h.page.style.width = w + 'px';
+            h.page.style.left = (r.right + 6 + w <= vw - 4 ? r.right + 6 : Math.max(4, r.left - w - 6)) + 'px';
+            h.page.style.top = Math.max(4, Math.min(r.top, vh - 120)) + 'px';
+            h.page.style.maxHeight = Math.max(160, Math.min(vh * 0.8, vh - Math.max(4, r.top) - 4)) + 'px';
+        } catch (e) {}
+    }
+
+    function _tplTogglePage(force) {
+        const h = _tplHelp;
+        if (!h) return;
+        const want = force == null ? !h.page : !!force;
+        const btn = h.box.querySelector('[data-th="pagebtn"]');
+        if (!want) {
+            if (h.page) { h.page.remove(); h.page = null; }
+            if (btn) btn.style.background = '#1f2937';
+            return;
+        }
+        if (h.page) return;
+        const pg = document.createElement('div');
+        pg.id = 'mossad-tpl-page';
+        pg.style.cssText = MOSSAD_TPL_WIN_CSS;
+        pg.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <b style="flex:1;">📄 Теги этой страницы</b>
+              <button data-th="pageclose" title="Закрыть" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px;">✕</button>
+            </div>
+            <div style="color:#9ca3af;margin-bottom:4px;">meta и ld+json из кода страницы. Клик по строке — вставить тег в шаблон.</div>
+            <div data-th="pagelist"></div>`;
+        document.body.appendChild(pg);
+        h.page = pg;
+        if (btn) btn.style.background = '#374151';
+        pg.querySelector('[data-th="pageclose"]').onclick = () => _tplTogglePage(false);
+        pg.addEventListener('click', h.onIns);
+        _tplRenderPageTags();
+        _tplDockPage();
+    }
+
     function mossadCloseTplHelp() {
         const h = _tplHelp;
         if (!h) return;
         _tplHelp = null;
         if (h.cleanup) h.cleanup();
+        if (h.page) h.page.remove();
         h.box.remove();
     }
     window.mossadCloseTplHelp = mossadCloseTplHelp;
@@ -171,9 +219,7 @@
         if (!input) return;
         const box = document.createElement('div');
         box.id = 'mossad-tpl-help';
-        box.style.cssText = 'position:fixed;z-index:2147483646;background:rgba(17,24,39,0.97);border:1px solid #4b5563;border-radius:10px;' +
-            'padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,0.6);color:#e5e7eb;font:12px system-ui,-apple-system,sans-serif;' +
-            'max-width:min(640px,96vw);max-height:72vh;overflow:auto;';
+        box.style.cssText = MOSSAD_TPL_WIN_CSS + 'width:min(920px,96vw);max-height:80vh;'; // v1.3.76: шире, колонка «Что это» — основная
         box.innerHTML = `
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
               <b style="flex:1;" data-mossad-label="tplHelpTitle">${LH('tplHelpTitle')}</b>
@@ -188,19 +234,22 @@
             <div style="margin-bottom:4px;color:#9ca3af;">Шаблон: <code data-th="tpl" style="word-break:break-all;"></code></div>
             <div data-th="warn" style="display:none;color:#f87171;margin-bottom:4px;"></div>
             <div data-th="off" style="display:none;color:#fbbf24;margin-bottom:4px;">Галочка «Шаблон» выключена — сейчас файл сохранится с именем по умолчанию (без шаблона).</div>
-            <table style="border-collapse:collapse;width:100%;margin-top:4px;">
-              <thead><tr style="color:#6b7280;text-align:left;"><th style="padding:2px 6px;">Тег</th><th style="padding:2px 6px;">Синонимы</th><th style="padding:2px 6px;">Длина N</th><th style="padding:2px 6px;">Сейчас</th><th style="padding:2px 6px;">Что это</th></tr></thead>
+            <table style="border-collapse:collapse;width:100%;margin-top:4px;table-layout:fixed;">
+              <colgroup><col style="width:92px;"><col style="width:96px;"><col style="width:72px;"><col style="width:24%;"><col></colgroup>
+              <thead><tr style="color:#6b7280;text-align:left;"><th style="padding:2px 6px;">Тег</th><th style="padding:2px 4px;">Синонимы</th><th style="padding:2px 4px;">Длина N</th><th style="padding:2px 6px;">Сейчас</th><th style="padding:2px 6px;">Что это</th></tr></thead>
               <tbody data-th="tbody"></tbody>
             </table>
+            <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <button data-th="pagebtn" title="Открыть рядом окно с meta-тегами и полями ld+json этой страницы" style="background:#1f2937;border:1px solid #4b5563;color:#e5e7eb;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:12px;">📄 Теги этой страницы (meta, ld+json)</button>
+            </div>
+            <details data-th="howto" style="margin-top:8px;padding-top:6px;border-top:1px solid #374151;">
+            <summary style="cursor:pointer;color:#e5e7eb;font-weight:700;">❔ Как пользоваться (модификаторы --, [[ ]], [ ], теги meta / ld / css / re)</summary>
             <div style="margin-top:6px;color:#9ca3af;line-height:1.4;">
               {тег} — целиком; {тегN} или {тег[N]} — первые N символов (например {id8}, {desc[40]}).
               Регистр не важен. Неизвестный тег в имени файла пропадает. Расширение (.mp4 / .jpg) добавляется само,
               если имя на него не оканчивается. Пустые теги убирают лишние «-», «_», «~». Клик по тегу — вставить в шаблон.
             </div>
             ${MOSSAD_TPL_HELP_MODS}
-            <details data-th="page" style="margin-top:8px;padding-top:6px;border-top:1px solid #374151;" open>
-              <summary style="cursor:pointer;color:#e5e7eb;font-weight:700;">📄 На этой странице: meta и ld+json (клик — вставить тег)</summary>
-              <div data-th="pagelist" style="margin-top:4px;"></div>
             </details>
             <div style="margin-top:6px;display:flex;align-items:center;gap:6px;" title="Через запятую. Убираются из {title} и {desc} всегда, без правки шаблона (без учёта регистра). Текст с запятой или пробелами по краям — в кавычках: &quot; - Brave&quot;. Свой список у каждого сайта">
               <span style="color:#9ca3af;white-space:nowrap;">Минус-слова сайта ${_tplEsc(rootDomain)} (title, desc):</span>
@@ -224,13 +273,13 @@
         };
         const onDown = (e) => {
             const t = e.target;
-            if (box.contains(t) || t === btn || t === input) return;
+            if (box.contains(t) || t === btn || t === input || (mine.page && mine.page.contains(t))) return;
             mossadCloseTplHelp();
         };
         input.addEventListener('input', onInput);
         window.addEventListener('keydown', onKey, true);
         document.addEventListener('pointerdown', onDown, true);
-        const mine = _tplHelp = { box, input, btn, ctx: null, vars: null, cleanup: () => {
+        const mine = _tplHelp = { box, input, btn, page: null, ctx: null, vars: null, onIns: null, cleanup: () => {
             input.removeEventListener('input', onInput);
             window.removeEventListener('keydown', onKey, true);
             document.removeEventListener('pointerdown', onDown, true);
@@ -239,14 +288,14 @@
         const sepIn = box.querySelector('[data-th="sep"]');
         sepIn.value = mossadTplSep();
         sepIn.oninput = () => mossadSetTplSep(sepIn.value);
-        _tplRenderPageTags(); // v1.3.75
+        box.querySelector('[data-th="pagebtn"]').onclick = (e) => { e.preventDefault(); _tplTogglePage(); }; // v1.3.76
         const junkIn = box.querySelector('[data-th="junk"]'); // v1.3.74
         junkIn.value = mossadJunkText();
         junkIn.oninput = () => {
             mossadSetJunkText(junkIn.value);
             if (mine.ctx) { mine.vars = buildFilenameVars(mine.ctx); _tplRenderTable(); _tplRenderDynamic(); }
         };
-        box.addEventListener('click', (e) => {
+        mine.onIns = (e) => {
             const ins = e.target.closest && e.target.closest('[data-th-ins]');
             if (!ins) return;
             const s0 = input.selectionStart ?? input.value.length, s1 = input.selectionEnd ?? input.value.length;
@@ -255,7 +304,8 @@
             try { input.setSelectionRange(s0 + text.length, s0 + text.length); } catch (err) {}
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
-        });
+        };
+        box.addEventListener('click', mine.onIns);
         _tplRenderTable();
         mossadTplPreviewContext().then(ctx => {
             if (_tplHelp !== mine) return; // окно уже закрыто/переоткрыто

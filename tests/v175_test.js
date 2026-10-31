@@ -44,11 +44,11 @@ const items=[{uuid:U(1),convId:'c'}];
  P.mossadToggleTplHelp(d.body, inp); await sleep(100); const box=d.getElementById('mossad-tpl-help');
  ok('7a help has page-tag syntax + example', /Теги со страницы/.test(box.textContent) && box.querySelector('[data-th-ins="{re:ld:description/^(.+?) watch online/$1}"]') && /\$2 - \$1/.test(box.textContent));
  ok('7b invalid regex red in preview', /line-through/.test(box.querySelector('[data-th="tpl"]').innerHTML) && /регулярк/.test(box.querySelector('[data-th="warn"]').textContent));
- const ins=box.querySelector('[data-th="pagelist"] [data-th-ins="{meta:og:title}"]');
+ box.querySelector('[data-th="pagebtn"]').click(); const pg=d.getElementById('mossad-tpl-page'); const ins=pg&&pg.querySelector('[data-th="pagelist"] [data-th-ins="{meta:og:title}"]');
  ok('7c page list shows meta with value', ins && /Pppe 062 en/.test(ins.closest('tr').textContent));
  inp.value=''; ins.click(); ok('7d click inserts page tag', inp.value==='{meta:og:title}', inp.value);
  ok('7e preview evaluates live', box.querySelector('[data-th="name"]').textContent==='Pppe 062 en.mp4' || /^Pppe 062 en\./.test(box.querySelector('[data-th="name"]').textContent), box.querySelector('[data-th="name"]').textContent);
- ok('7f ld field clickable', box.querySelector('[data-th="pagelist"] [data-th-ins="{ld:author.name}"]'));
+ ok('7f ld field clickable', pg.querySelector('[data-th="pagelist"] [data-th-ins="{ld:author.name}"]'));
  } catch(e){ console.log('FAIL exception', e.stack); res.push(false); }
  const f=res.filter(x=>!x).length; console.log(`\n${res.length-f}/${res.length} passed`); process.exit(f?1:0);
 })();

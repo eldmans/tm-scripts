@@ -1,0 +1,44 @@
+// v1.3.76 — окно «?»: шире, «Что это» — основная колонка, справка свёрнута, теги страницы — отдельное окно рядом. Run: node v176_test.js
+const fs=require('fs'); const path=require('path');
+const src=fs.readFileSync(process.env.BUNDLE_SRC||path.join(__dirname,'..','mossad.user.js'),'utf8');
+const extra=`window.__P={ mossadToggleTplHelp, mossadCloseTplHelp };\n`;
+const i0=src.lastIndexOf('} // /mossadMain'); const tmp=path.join(__dirname,'.bundle_v176.js');
+fs.writeFileSync(tmp, src.slice(0,i0)+extra+src.slice(i0)); process.env.BUNDLE=tmp;
+const {load,sleep,U}=require('./ss_harness');
+const res=[]; const ok=(n,c,i='')=>{res.push(!!c);console.log(c?'PASS':'FAIL',n,c?'':i);};
+const items=[{uuid:U(1),convId:'c'}];
+(async()=>{ try {
+ const {w}=load({items}); await sleep(80); const P=w.__P; const d=w.document;
+ d.head.insertAdjacentHTML('beforeend','<meta property="og:title" content="Pppe 062 en"/>');
+ const sc=d.createElement('script'); sc.type='application/ld+json'; sc.textContent='{"@type":"VideoObject","name":"Vid","author":{"name":"Bob"}}'; d.head.appendChild(sc);
+ const inp=d.createElement('input'); d.body.appendChild(inp); inp.value='';
+ P.mossadToggleTplHelp(d.body, inp); await sleep(100); const box=d.getElementById('mossad-tpl-help');
+ ok('1a window wider (920px)', /920px/.test(box.style.width), box.style.cssText);
+ const tbl=box.querySelector('[data-th="tbody"]').closest('table');
+ ok('1b fixed layout, last column (Что это) gets the rest', tbl.style.tableLayout==='fixed' && tbl.querySelectorAll('col').length===5 && !tbl.querySelectorAll('col')[4].style.width);
+ const syn=box.querySelector('[data-th="tbody"] tr').children[1];
+ ok('1c synonyms compact (ellipsis + full list in title)', /ellipsis/.test(syn.style.textOverflow) && syn.title.length>0, syn.outerHTML.slice(0,200));
+ ok('1d description cell wraps', box.querySelector('[data-th-what]') && !/nowrap/.test(box.querySelector('[data-th-what]').style.whiteSpace));
+ const how=box.querySelector('details[data-th="howto"]');
+ ok('2a syntax help in collapsed "Как пользоваться"', how && !how.open && /Как пользоваться/.test(how.querySelector('summary').textContent) && /Модификаторы/.test(how.textContent) && /Теги со страницы/.test(how.textContent));
+ ok('2b examples still clickable inside', how.querySelector('[data-th-ins="{title[[2]]}"]'));
+ ok('3a no page list inside main window', !box.querySelector('[data-th="pagelist"]'));
+ const pb=box.querySelector('[data-th="pagebtn"]'); ok('3b page-tags button', pb && /Теги этой страницы/.test(pb.textContent));
+ pb.click(); const pg=d.getElementById('mossad-tpl-page');
+ ok('3c separate window opened, same style', pg && pg.style.position==='fixed' && /border-radius: 10px/.test(pg.style.cssText) && pg.style.left && pg.style.top);
+ ok('3d lists meta + ld', pg.querySelector('[data-th-ins="{meta:og:title}"]') && pg.querySelector('[data-th-ins="{ld:author.name}"]'));
+ const row=pg.querySelector('tr[data-th-ins="{meta:og:title}"]');
+ ok('3e row has value', row && /Pppe 062 en/.test(row.textContent));
+ row.children[1].dispatchEvent(new w.Event('pointerdown',{bubbles:true}));
+ ok('3f pointerdown inside page window keeps both open', d.getElementById('mossad-tpl-help') && d.getElementById('mossad-tpl-page'));
+ row.children[1].click(); ok('3g click on row (value cell) inserts tag', inp.value==='{meta:og:title}', inp.value);
+ pg.querySelector('[data-th="pageclose"]').click(); ok('4a ✕ closes only the page window', !d.getElementById('mossad-tpl-page') && d.getElementById('mossad-tpl-help'));
+ pb.click(); ok('4b button reopens it', d.getElementById('mossad-tpl-page'));
+ pb.click(); ok('4c button toggles it closed', !d.getElementById('mossad-tpl-page'));
+ pb.click(); w.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+ ok('4d Esc closes both', !d.getElementById('mossad-tpl-page') && !d.getElementById('mossad-tpl-help'));
+ P.mossadToggleTplHelp(d.body, inp); await sleep(50); d.getElementById('mossad-tpl-help').querySelector('[data-th="pagebtn"]').click();
+ P.mossadCloseTplHelp(); ok('4e closing main closes page window', !d.getElementById('mossad-tpl-page'));
+ } catch(e){ console.log('FAIL exception', e.stack); res.push(false); }
+ const f=res.filter(x=>!x).length; console.log(`\n${res.length-f}/${res.length} passed`); process.exit(f?1:0);
+})();
