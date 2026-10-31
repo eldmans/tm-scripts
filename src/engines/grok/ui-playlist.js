@@ -154,22 +154,46 @@
      * Пока строку не измерить, высота считается по шрифту и пересчитывается, когда layout появится.
      */
     function grokApplyPlaylistAutoHeight(panel) {
-        if (!panel || panel.dataset.autoHeight !== '1') return;
+        if (!panel) return;
+        const body = panel.querySelector('.mossad-playlist-body');
+        // v1.3.77: панель — всегда flex-колонка (иначе тело не ограничено и не прокручивается)
+        if (panel.style.display && panel.style.display !== 'none' && panel.style.display !== 'flex') panel.style.display = 'flex';
+        if (panel.dataset.autoHeight !== '1') { if (body) body.style.maxHeight = ''; return; }
         const rows = grokPlaylistRows();
         if (grokPlaylistRowCount(panel) <= rows) {
             panel.style.height = 'auto';
             panel.dataset.rowsTarget = 'auto';
+            if (body) body.style.maxHeight = '';
             return;
         }
         const header = panel.firstElementChild;
         const headerH = (header && header.getBoundingClientRect().height) || 33;
         const rowH = grokPlaylistRowHeight(panel);
-        const body = panel.querySelector('.mossad-playlist-body');
         const bodyChrome = body ? 4 : 0; // padding 2px сверху/снизу
         const target = Math.round(headerH + bodyChrome + rows * rowH + 2); // + рамка
         panel.style.height = `${target}px`;
         panel.dataset.rowsTarget = String(target);
+        // v1.3.77: предел ещё и на самом теле — N строк, остальное прокручивается колесом,
+        // даже если высоту панели перебьёт чужой стиль / display:block
+        if (body) body.style.maxHeight = `${Math.round(bodyChrome + rows * rowH)}px`;
         if (!grokPlaylistMeasuredRowHeight(panel)) grokSchedulePlaylistReMeasure(panel);
+    }
+
+    /**
+     * v1.3.77: колесо мыши над списком прокручивает ТОЛЬКО список. Сайт (просмотр поста Grok) может ловить
+     * колесо на window и отменять прокрутку (preventDefault) — тогда строки ниже N были недостижимы.
+     * Прокручиваем сами и не отдаём событие странице, пока список может ехать в эту сторону.
+     */
+    function grokPlaylistWheel(e) {
+        const body = e.currentTarget;
+        const max = body.scrollHeight - body.clientHeight;
+        if (max <= 0 || !e.deltaY) return;
+        const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * body.clientHeight : e.deltaY;
+        const top = body.scrollTop;
+        if ((dy < 0 && top <= 0) || (dy > 0 && top >= max - 0.5)) { e.preventDefault(); e.stopPropagation(); return; } // край — страницу не листаем
+        body.scrollTop = Math.max(0, Math.min(max, top + dy));
+        e.preventDefault();
+        e.stopPropagation();
     }
 
     /** Повторный расчёт, когда список станет видимым (до ~5 с, затем — при наведении). */
@@ -287,6 +311,7 @@
         const existing = document.getElementById('mossad-playlist-panel');
         if (existing) {
             if (forceOpen) {
+                grokApplyPlaylistAutoHeight(existing); // v1.3.77
                 grokHighlightActivePlaylistItem();
                 return;
             }
@@ -486,6 +511,7 @@
         const body = document.createElement('div');
         body.className = 'mossad-playlist-body';
         // v1.3.40: прокручивается тело, а не вся панель (полоса прокрутки не перекрывает зону ресайза края)
+        body.addEventListener('wheel', grokPlaylistWheel, { passive: false });
         body.style.cssText = `padding: 2px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden; overflow-y: auto; flex: 1 1 auto; min-height: 0; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;`;
 
         // ── Утилита: кнопка R ──

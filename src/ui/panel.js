@@ -637,8 +637,9 @@
                     galleryRow.style.pointerEvents = 'auto';
                 }
                 if (playlistPanel) {
-                    playlistPanel.style.display = 'block';
+                    playlistPanel.style.display = 'flex'; // v1.3.77: было 'block' — тело списка теряло предел и прокрутку
                     playlistPanel.style.pointerEvents = 'auto';
+                    if (typeof grokApplyPlaylistAutoHeight === 'function') grokApplyPlaylistAutoHeight(playlistPanel);
                 }
                 btnTogglePanel.style.transform = 'rotate(0deg)';
                 btnTogglePanel.style.color = '#9ca3af';
@@ -652,8 +653,9 @@
                     galleryRow.style.pointerEvents = 'auto';
                 }
                 if (playlistPanel) {
-                    playlistPanel.style.display = 'block';
+                    playlistPanel.style.display = 'flex'; // v1.3.77: было 'block' — тело списка теряло предел и прокрутку
                     playlistPanel.style.pointerEvents = 'auto';
+                    if (typeof grokApplyPlaylistAutoHeight === 'function') grokApplyPlaylistAutoHeight(playlistPanel);
                 }
                 renderPanel(); // re-render to reflect settings
                 panel.style.display = 'flex';

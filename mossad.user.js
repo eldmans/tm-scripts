@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.76
+// @version      1.3.77
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.76';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.77';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -6045,22 +6045,37 @@ function grokPlaylistRowCount(panel) {
 return panel.querySelectorAll('.mossad-playlist-item, .mossad-playlist-grp-header').length;
 }
 function grokApplyPlaylistAutoHeight(panel) {
-if (!panel || panel.dataset.autoHeight !== '1') return;
+if (!panel) return;
+const body = panel.querySelector('.mossad-playlist-body');
+if (panel.style.display && panel.style.display !== 'none' && panel.style.display !== 'flex') panel.style.display = 'flex';
+if (panel.dataset.autoHeight !== '1') { if (body) body.style.maxHeight = ''; return; }
 const rows = grokPlaylistRows();
 if (grokPlaylistRowCount(panel) <= rows) {
 panel.style.height = 'auto';
 panel.dataset.rowsTarget = 'auto';
+if (body) body.style.maxHeight = '';
 return;
 }
 const header = panel.firstElementChild;
 const headerH = (header && header.getBoundingClientRect().height) || 33;
 const rowH = grokPlaylistRowHeight(panel);
-const body = panel.querySelector('.mossad-playlist-body');
 const bodyChrome = body ? 4 : 0;
 const target = Math.round(headerH + bodyChrome + rows * rowH + 2);
 panel.style.height = `${target}px`;
 panel.dataset.rowsTarget = String(target);
+if (body) body.style.maxHeight = `${Math.round(bodyChrome + rows * rowH)}px`;
 if (!grokPlaylistMeasuredRowHeight(panel)) grokSchedulePlaylistReMeasure(panel);
+}
+function grokPlaylistWheel(e) {
+const body = e.currentTarget;
+const max = body.scrollHeight - body.clientHeight;
+if (max <= 0 || !e.deltaY) return;
+const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * body.clientHeight : e.deltaY;
+const top = body.scrollTop;
+if ((dy < 0 && top <= 0) || (dy > 0 && top >= max - 0.5)) { e.preventDefault(); e.stopPropagation(); return; }
+body.scrollTop = Math.max(0, Math.min(max, top + dy));
+e.preventDefault();
+e.stopPropagation();
 }
 function grokSchedulePlaylistReMeasure(panel) {
 if (panel._mossadReMeasure) return;
@@ -6164,6 +6179,7 @@ function grokTogglePlaylistPanel(forceOpen = false) {
 const existing = document.getElementById('mossad-playlist-panel');
 if (existing) {
 if (forceOpen) {
+grokApplyPlaylistAutoHeight(existing);
 grokHighlightActivePlaylistItem();
 return;
 }
@@ -6331,6 +6347,7 @@ header.append(titleEl, fontControls, btnClearLoop, btnResetSize, btnClose);
 panel.appendChild(header);
 const body = document.createElement('div');
 body.className = 'mossad-playlist-body';
+body.addEventListener('wheel', grokPlaylistWheel, { passive: false });
 body.style.cssText = `padding: 2px; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: hidden; overflow-y: auto; flex: 1 1 auto; min-height: 0; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;`;
 const makeRBtn = (isActive, onToggle) => {
 const btn = document.createElement('button');
@@ -10422,8 +10439,9 @@ galleryRow.style.display = 'flex';
 galleryRow.style.pointerEvents = 'auto';
 }
 if (playlistPanel) {
-playlistPanel.style.display = 'block';
+playlistPanel.style.display = 'flex';
 playlistPanel.style.pointerEvents = 'auto';
+if (typeof grokApplyPlaylistAutoHeight === 'function') grokApplyPlaylistAutoHeight(playlistPanel);
 }
 btnTogglePanel.style.transform = 'rotate(0deg)';
 btnTogglePanel.style.color = '#9ca3af';
@@ -10437,8 +10455,9 @@ galleryRow.style.display = 'flex';
 galleryRow.style.pointerEvents = 'auto';
 }
 if (playlistPanel) {
-playlistPanel.style.display = 'block';
+playlistPanel.style.display = 'flex';
 playlistPanel.style.pointerEvents = 'auto';
+if (typeof grokApplyPlaylistAutoHeight === 'function') grokApplyPlaylistAutoHeight(playlistPanel);
 }
 renderPanel();
 panel.style.display = 'flex';
@@ -12112,6 +12131,8 @@ modal.querySelector('#mossad-playlist-rows').onchange = (e) => {
 const v = Math.max(5, Math.min(200, parseInt(e.target.value, 10) || 30));
 e.target.value = String(v);
 Settings.setQuiet('playlistRows', v);
+const pl = document.getElementById('mossad-playlist-panel');
+if (pl && typeof grokApplyPlaylistAutoHeight === 'function') grokApplyPlaylistAutoHeight(pl);
 };
 const genPJump = modal.querySelector('#mossad-gen-pjump');
 if (genPJump) {

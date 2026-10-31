@@ -1116,6 +1116,8 @@
             const v = Math.max(5, Math.min(200, parseInt(e.target.value, 10) || 30));
             e.target.value = String(v);
             Settings.setQuiet('playlistRows', v);
+            const pl = document.getElementById('mossad-playlist-panel'); // v1.3.77: открытый список — сразу под новое N
+            if (pl && typeof grokApplyPlaylistAutoHeight === 'function') grokApplyPlaylistAutoHeight(pl);
         };
 
         // v1.3.59: Pinterest — похожий пин по клавише + какие клавиши пропущены (заняты хоткеями MOSSAD)
