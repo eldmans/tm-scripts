@@ -286,6 +286,7 @@
                 const d = drag; drag = null;
                 delete panel.dataset.edge;
                 if (!d || !d.moved) return;
+                if (panel._mossadWinDirty) panel._mossadWinDirty(); // v1.3.78: подсветить S/A
                 const fr = panel.getBoundingClientRect();
                 if (/[ew]/.test(d.edge)) {
                     const w = Math.round(fr.width);
@@ -721,6 +722,9 @@
         }
 
         grokUpdatePlaylistBtnState(true);
+
+        // v1.3.78: S/A — запомнить размер списка (сайт / все сайты); положение — у виджета
+        if (mossadWinAttach(panel, 'playlist', { resize: false, move: !container }) && panel.style.height && panel.style.height !== 'auto') panel.dataset.autoHeight = '0';
 
         // v1.3.40: высота по умолчанию = N строк; ресайз за любой край
         grokApplyPlaylistAutoHeight(panel);

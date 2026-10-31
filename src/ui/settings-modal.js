@@ -1085,6 +1085,12 @@
         modal._mossadEndDrag = () => endDrag(null);
 
         document.body.appendChild(modal);
+        // v1.3.78: ресайз за края, перетаскивание за шапку, S/A — запомнить геометрию окна.
+        // Заданная высота окна → вкладки тянутся на всю высоту и прокручиваются сами
+        mossadWinAttach(modal, 'settings', { handle: modal.firstElementChild, onGeom: (m) => {
+            if (!m.style.height || m.style.height === 'auto') return;
+            m.querySelectorAll('[data-pane]').forEach(p => { p.style.maxHeight = 'none'; p.style.flex = '1 1 auto'; p.style.minHeight = '0'; p.style.overflowY = 'auto'; });
+        } });
 
         // ── Вкладки ──
         const setTab = (t) => {

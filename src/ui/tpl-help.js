@@ -161,7 +161,7 @@
     /** v1.3.76: окно «Теги этой страницы» — рядом с окном «?» (справа, если влезает, иначе слева). */
     function _tplDockPage() {
         const h = _tplHelp;
-        if (!h || !h.page) return;
+        if (!h || !h.page || h.page.dataset.winRestored || h.page.dataset.winMoved) return; // v1.3.78: своё место — не двигаем
         try {
             const r = h.box.getBoundingClientRect(), vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
             const w = Math.min(460, Math.max(240, vw * 0.4));
@@ -195,6 +195,7 @@
             <div data-th="pagelist"></div>`;
         document.body.appendChild(pg);
         h.page = pg;
+        mossadWinAttach(pg, 'tplpage', { handle: pg.firstElementChild }); // v1.3.78
         if (btn) btn.style.background = '#374151';
         pg.querySelector('[data-th="pageclose"]').onclick = () => _tplTogglePage(false);
         pg.addEventListener('click', h.onIns);
@@ -285,6 +286,7 @@
             document.removeEventListener('pointerdown', onDown, true);
         } };
         box.querySelector('[data-th="close"]').onclick = () => mossadCloseTplHelp();
+        mossadWinAttach(box, 'tplhelp', { handle: box.firstElementChild, onGeom: () => _tplDockPage() }); // v1.3.78
         const sepIn = box.querySelector('[data-th="sep"]');
         sepIn.value = mossadTplSep();
         sepIn.oninput = () => mossadSetTplSep(sepIn.value);
