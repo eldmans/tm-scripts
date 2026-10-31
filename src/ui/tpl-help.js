@@ -7,6 +7,26 @@
     // ============================================
     let _tplHelp = null; // { box, input, btn, ctx, vars, cleanup }
 
+    // v1.3.74: справка по модификаторам (клик по примеру — вставить в шаблон)
+    const _tplEx = (t, what) => `<div><code data-th-ins="${t.replace(/"/g, '&quot;')}" title="Вставить в шаблон" style="cursor:pointer;color:#93c5fd;">${t.replace(/</g, '&lt;')}</code> — ${what}</div>`;
+    const MOSSAD_TPL_HELP_MODS = `
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid #374151;line-height:1.5;">
+              <b style="color:#e5e7eb;">✂ Модификаторы — дописываются внутрь скобок любого тега</b>
+              <div style="color:#9ca3af;">Применяются всегда по порядку: минус-слова → слова → символы.</div>
+              ${_tplEx('{title--Watch Online}', 'убрать «Watch Online» (регистр не важен, все повторы; лишние пробелы и разделители по краям подчищаются)')}
+              ${_tplEx('{title--Watch Online--Brave}', 'убрать несколько: каждое после своих «--»')}
+              ${_tplEx('{title--" - Brave"}', 'текст со своими дефисами или пробелами по краям — в кавычках')}
+              ${_tplEx('{title[[2]]}', 'первые 2 слова')}
+              ${_tplEx('{title[[-2]]}', 'последние 2 слова')}
+              ${_tplEx('{title[[2:]]}', 'без первых 2 слов')}
+              ${_tplEx('{title[[:-2]]}', 'без последних 2 слов')}
+              ${_tplEx('{title[[1:3]]}', 'слова со 2-го по 3-е (как срез в Python, счёт с 0)')}
+              ${_tplEx('{title[40]}', 'первые 40 символов (то же, что {title40})')}
+              ${_tplEx('{title--Watch Online[[3]][40]}', 'всё вместе: убрать, взять 3 слова, обрезать до 40 символов')}
+              <div style="color:#9ca3af;">Слова разделяются пробелом, точкой, запятой, «_», «|» и тире (- – —); разделители между оставшимися словами остаются как были.
+              Ошибка в модификаторе — тег красный и в имени пропадает.</div>
+            </div>`;
+
     function _tplEsc(s) {
         return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
@@ -76,13 +96,14 @@
         if (!h || !h.vars) return;
         const tpl = _tplCurrent(h.input);
         const name = renderFilenameTemplate(tpl, h.vars, false, '', h.vars.ext);
-        const unknown = mossadTemplateUnknownTags(tpl, h.vars);
+        const issues = mossadTemplateTagIssues(tpl, h.vars); // v1.3.74: понимает --минус, [[слова]]
+        const bad = (raw) => issues.find(x => x.raw === raw);
         h.box.querySelector('[data-th="name"]').textContent = name;
-        h.box.querySelector('[data-th="tpl"]').innerHTML = _tplEsc(tpl).replace(/\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g, (m) =>
-            unknown.includes(m) ? `<span style="color:#f87171;text-decoration:line-through;">${m}</span>` : `<span style="color:#93c5fd;">${m}</span>`);
+        h.box.querySelector('[data-th="tpl"]').innerHTML = mossadTplScan(tpl).map(p => p.raw == null ? _tplEsc(p.text) :
+            (bad(p.raw) ? `<span style="color:#f87171;text-decoration:line-through;" title="${_tplEsc(bad(p.raw).err)}">${_tplEsc(p.raw)}</span>` : `<span style="color:#93c5fd;">${_tplEsc(p.raw)}</span>`)).join('');
         const warn = h.box.querySelector('[data-th="warn"]');
-        warn.style.display = unknown.length ? 'block' : 'none';
-        warn.textContent = unknown.length ? `${L('tplHelpUnknown')} ${unknown.join(' ')}` : '';
+        warn.style.display = issues.length ? 'block' : 'none';
+        warn.textContent = issues.length ? `${L('tplHelpUnknown')} ${issues.map(x => `${x.raw} (${x.err})`).join(' ')}` : '';
         h.box.querySelector('[data-th="off"]').style.display = config.filenameTemplateEnabled ? 'none' : 'block';
     }
 
@@ -144,6 +165,11 @@
               {тег} — целиком; {тегN} или {тег[N]} — первые N символов (например {id8}, {desc[40]}).
               Регистр не важен. Неизвестный тег в имени файла пропадает. Расширение (.mp4 / .jpg) добавляется само,
               если имя на него не оканчивается. Пустые теги убирают лишние «-», «_», «~». Клик по тегу — вставить в шаблон.
+            </div>
+            ${MOSSAD_TPL_HELP_MODS}
+            <div style="margin-top:6px;display:flex;align-items:center;gap:6px;" title="Через запятую. Убираются из {title} и {desc} всегда, без правки шаблона (без учёта регистра). Текст с запятой или пробелами по краям — в кавычках: &quot; - Brave&quot;. Свой список у каждого сайта">
+              <span style="color:#9ca3af;white-space:nowrap;">Минус-слова сайта ${_tplEsc(rootDomain)} (title, desc):</span>
+              <input data-th="junk" type="text" placeholder="Watch Online, &quot; - Brave&quot;" style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:1px 4px;font-size:12px;">
             </div>`;
         document.body.appendChild(box);
         // Позиция: под кнопкой, в пределах экрана
@@ -169,7 +195,7 @@
         input.addEventListener('input', onInput);
         window.addEventListener('keydown', onKey, true);
         document.addEventListener('pointerdown', onDown, true);
-        _tplHelp = { box, input, btn, ctx: null, vars: null, cleanup: () => {
+        const mine = _tplHelp = { box, input, btn, ctx: null, vars: null, cleanup: () => {
             input.removeEventListener('input', onInput);
             window.removeEventListener('keydown', onKey, true);
             document.removeEventListener('pointerdown', onDown, true);
@@ -178,6 +204,12 @@
         const sepIn = box.querySelector('[data-th="sep"]');
         sepIn.value = mossadTplSep();
         sepIn.oninput = () => mossadSetTplSep(sepIn.value);
+        const junkIn = box.querySelector('[data-th="junk"]'); // v1.3.74
+        junkIn.value = mossadJunkText();
+        junkIn.oninput = () => {
+            mossadSetJunkText(junkIn.value);
+            if (mine.ctx) { mine.vars = buildFilenameVars(mine.ctx); _tplRenderTable(); _tplRenderDynamic(); }
+        };
         box.addEventListener('click', (e) => {
             const ins = e.target.closest && e.target.closest('[data-th-ins]');
             if (!ins) return;
@@ -189,7 +221,6 @@
             input.dispatchEvent(new Event('change', { bubbles: true }));
         });
         _tplRenderTable();
-        const mine = _tplHelp;
         mossadTplPreviewContext().then(ctx => {
             if (_tplHelp !== mine) return; // окно уже закрыто/переоткрыто
             mine.ctx = ctx;

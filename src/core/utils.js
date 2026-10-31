@@ -604,7 +604,156 @@
     ];
     const MOSSAD_TPL_ALIAS = {};
     for (const t of MOSSAD_TPL_TAGS) { MOSSAD_TPL_ALIAS[t.k] = t.k; for (const a of t.aliases) MOSSAD_TPL_ALIAS[a] = t.k; }
-    const MOSSAD_TPL_TAG_RE = /\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g;
+
+    // ── v1.3.74: модификаторы тега (внутри фигурных скобок, в любом теге) ──
+    //   {tag--Минус слово--"текст с - дефисами"}  — удалить (без учёта регистра, все вхождения)
+    //   {tag[[2]]} {tag[[-2]]} {tag[[2:]]} {tag[[:-2]]} {tag[[1:3]]} — слова (как срезы Python)
+    //   {tag[N]} / {tagN} — первые N символов
+    // Порядок применения всегда: минус-слова → слова → символы (как бы они ни были записаны).
+    const MOSSAD_TPL_SEP_CLS = '\\s.,_|\\-\u2013\u2014';
+    const MOSSAD_TPL_MOD_START = /--|\[\[|\[\d+\]/;
+
+    /** Разбить шаблон на куски: { text } и { raw: '{…}', inner: '…' }. Скобки внутри тега считаются по глубине
+     *  (регулярка {re:…\d{2}…} не рвёт тег), \x — экранирование, "…" внутри тега — кавычки. */
+    function mossadTplScan(tpl) {
+        const s = String(tpl || ''), out = [];
+        let i = 0, text = '';
+        while (i < s.length) {
+            if (s[i] !== '{') { text += s[i++]; continue; }
+            let j = i + 1, depth = 1, q = false;
+            for (; j < s.length; j++) {
+                const c = s[j];
+                if (c === '\\') { j++; continue; }
+                if (c === '"') { q = !q; continue; }
+                if (q) continue;
+                if (c === '{') depth++;
+                else if (c === '}' && --depth === 0) break;
+            }
+            if (j >= s.length) { text += s.slice(i); break; } // нет закрывающей — обычный текст
+            if (text) { out.push({ text }); text = ''; }
+            out.push({ raw: s.slice(i, j + 1), inner: s.slice(i + 1, j) });
+            i = j + 1;
+        }
+        if (text) out.push({ text });
+        return out;
+    }
+
+    /** Разобрать модификаторы (строка после имени тега) в spec. Возвращает текст ошибки или ''. */
+    function _tplParseMods(s, spec) {
+        let i = 0, m;
+        while (i < s.length) {
+            const rest = s.slice(i);
+            if (rest.startsWith('--')) {
+                i += 2;
+                if (s[i] === '"') {
+                    const j = s.indexOf('"', i + 1);
+                    if (j < 0) return 'нет закрывающей кавычки';
+                    if (j > i + 1) spec.minus.push(s.slice(i + 1, j));
+                    i = j + 1;
+                } else {
+                    const r2 = s.slice(i), k = r2.search(MOSSAD_TPL_MOD_START);
+                    const w = k < 0 ? r2 : r2.slice(0, k);
+                    if (w.trim()) spec.minus.push(w.trim());
+                    i += w.length;
+                }
+                continue;
+            }
+            if ((m = /^\[\[\s*(-?\d+)?\s*(:)?\s*(-?\d+)?\s*\]\]/.exec(rest))) {
+                if (m[1] == null && m[3] == null && !m[2]) return 'пустые [[ ]]';
+                if (!m[2] && m[1] == null) return 'нужно число в [[ ]]';
+                spec.words = { a: m[1] != null ? parseInt(m[1], 10) : null, b: m[3] != null ? parseInt(m[3], 10) : null, colon: !!m[2] };
+                i += m[0].length; continue;
+            }
+            if ((m = /^\[(\d+)\]/.exec(rest))) { spec.chars = parseInt(m[1], 10); i += m[0].length; continue; }
+            return 'непонятно: ' + rest;
+        }
+        return '';
+    }
+
+    /** Разбор содержимого тега (без скобок) → spec { kind, name, chars, words, minus[], err }. */
+    function mossadTplParse(inner) {
+        const s = String(inner || '');
+        const spec = { kind: 'var', name: '', chars: 0, words: null, minus: [], err: '' };
+        const m = /^([a-zA-Z]+)(\d+)?/.exec(s);
+        if (!m) { spec.err = 'нет имени тега'; return spec; }
+        spec.name = m[1];
+        if (m[2]) spec.chars = parseInt(m[2], 10);
+        spec.err = _tplParseMods(s.slice(m[0].length), spec);
+        return spec;
+    }
+
+    /** Убрать слова/фразы list из val (без учёта регистра, все вхождения); если что-то убрано — подчистить пробелы и висячие разделители. */
+    function mossadTplMinus(val, list) {
+        let v = String(val == null ? '' : val), hit = false;
+        for (const w of (list || [])) {
+            if (!w) continue;
+            const re = new RegExp(String(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            const v2 = v.replace(re, '');
+            if (v2 !== v) { hit = true; v = v2; }
+        }
+        if (!hit) return v;
+        const S = MOSSAD_TPL_SEP_CLS;
+        return v.replace(/\s+/g, ' ')
+            .replace(new RegExp(`(\\s*[${S.slice(2)}]\\s*)(?:[${S.slice(2)}]\\s*)+`, 'g'), '$1')
+            .replace(new RegExp(`^[${S}]+|[${S}]+$`, 'g'), '');
+    }
+
+    /** Слова из val по срезу (a, b, colon) — как Python: [[2]] первые 2, [[-2]] последние 2, [[2:]] без первых 2, [[:-2]] без последних 2.
+     *  Разделители слов: пробел . , _ | - – —; между оставшимися словами разделители остаются как были. */
+    function mossadTplWords(val, w) {
+        const v = String(val == null ? '' : val);
+        if (!w) return v;
+        const spans = [], re = new RegExp(`[^${MOSSAD_TPL_SEP_CLS}]+`, 'g');
+        let m;
+        while ((m = re.exec(v))) spans.push([m.index, m.index + m[0].length]);
+        const n = spans.length;
+        const norm = (x, d) => x == null ? d : (x < 0 ? Math.max(0, n + x) : Math.min(x, n));
+        let s, e;
+        if (!w.colon) {
+            if (w.a > 0) { s = 0; e = Math.min(w.a, n); }
+            else if (w.a < 0) { s = Math.max(0, n + w.a); e = n; }
+            else return '';
+        } else { s = norm(w.a, 0); e = norm(w.b, n); }
+        if (e <= s) return '';
+        return v.slice(spans[s][0], spans[e - 1][1]);
+    }
+
+    /** Модификаторы spec к значению: минус-слова → слова → символы. */
+    function mossadTplApplyMods(val, spec) {
+        let v = String(val == null ? '' : val);
+        if (spec.minus && spec.minus.length) v = mossadTplMinus(v, spec.minus);
+        if (spec.words) v = mossadTplWords(v, spec.words);
+        if (spec.chars > 0) v = v.slice(0, spec.chars);
+        return v;
+    }
+
+    /** Список «через запятую» с кавычками: 'Watch Online, " - Brave", HD' → ['Watch Online', ' - Brave', 'HD']. */
+    function mossadParseJunkList(text) {
+        const out = [], s = String(text || '');
+        const re = /\s*(?:"([^"]*)"|([^,]*))\s*(?:,|$)/g;
+        let m;
+        while (re.lastIndex < s.length && (m = re.exec(s))) {
+            if (m[0] === '') { re.lastIndex++; continue; }
+            const w = m[1] != null ? m[1] : (m[2] || '').trim();
+            if (w && !out.includes(w)) out.push(w);
+        }
+        return out;
+    }
+    // v1.3.74: минус-слова сайта (всегда убираются из {title} и {desc}): GM `mossad_junk_<домен>` (общий для контейнеров), копия в localStorage
+    const MOSSAD_JUNK_KEY = 'mossad_junk_' + rootDomain;
+    function mossadJunkText() {
+        let v = null;
+        try { if (typeof GM_getValue === 'function') v = GM_getValue(MOSSAD_JUNK_KEY, null); } catch (e) {}
+        if (v == null) { try { v = localStorage.getItem(MOSSAD_JUNK_KEY); } catch (e) {} }
+        return v == null ? '' : String(v);
+    }
+    function mossadSetJunkText(v) {
+        const x = String(v == null ? '' : v);
+        try { if (typeof GM_setValue === 'function') GM_setValue(MOSSAD_JUNK_KEY, x); } catch (e) {}
+        try { localStorage.setItem(MOSSAD_JUNK_KEY, x); } catch (e) {}
+        document.querySelectorAll('#mossad-gen-junk, [data-th="junk"]').forEach(el => { if (el.value !== x && el !== document.activeElement) el.value = x; });
+    }
+    window.mossadSetJunkText = mossadSetJunkText;
 
     /** Шаблон по умолчанию для текущего сайта (серый плейсхолдер; пустое поле = он). */
     function getDefaultFilenameTemplate() {
@@ -640,6 +789,7 @@
         const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
         const ext = ctx.ext || (ctx.type === 'video' ? 'mp4' : 'jpg');
         const titleRaw = ctx.title != null ? ctx.title : (document.title || '');
+        const junk = mossadParseJunkList(ctx.junk != null ? ctx.junk : mossadJunkText()); // v1.3.74: минус-слова сайта
         return {
             id:         postId,
             conv:       String(ctx.convId || ''),
@@ -652,8 +802,8 @@
             domainfull: rootDomain.replace(/[^a-z0-9._-]/gi, '_'),
             account:    String(ctx.account || '').trim(),
             username:   String(ctx.authorName || '') || shortId,
-            desc:       mossadSafeNamePart(ctx.desc || ''),
-            title:      mossadSafeNamePart(titleRaw) || `media_${now.getTime()}`,
+            desc:       mossadSafeNamePart(junk.length ? mossadTplMinus(ctx.desc || '', junk) : (ctx.desc || '')),
+            title:      mossadSafeNamePart(junk.length ? mossadTplMinus(titleRaw, junk) : titleRaw) || `media_${now.getTime()}`,
             date:       `${p2(now.getDate())}.${p2(now.getMonth() + 1)}.${String(now.getFullYear()).slice(-2)}`,
             time:       `${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`,
             ext,
@@ -672,15 +822,37 @@
         if (raw in vars) return vars[raw] != null ? String(vars[raw]) : '';
         return undefined;
     }
-    /** Неизвестные теги шаблона (как написаны: '{RadugaStud}'). */
-    function mossadTemplateUnknownTags(tpl, vars) {
-        const out = [];
-        String(tpl || '').replace(MOSSAD_TPL_TAG_RE, (m, name) => { if (mossadTplValue(vars || buildFilenameVars({}), name) === undefined && !out.includes(m)) out.push(m); return m; });
+    /** v1.3.74: значение одного тега (кусок из mossadTplScan) → { val, err }. err — неизвестный тег / ошибка синтаксиса. */
+    function mossadTplEvalTag(inner, vars, cache) {
+        const spec = mossadTplParse(inner);
+        if (spec.err) return { val: '', err: spec.err };
+        const base = mossadTplEvalBase(spec, vars, cache || {});
+        if (base.err) return { val: '', err: base.err };
+        return { val: mossadTplApplyMods(base.val, spec), err: '' };
+    }
+    /** Значение тега без модификаторов. */
+    function mossadTplEvalBase(spec, vars, cache) {
+        const v = mossadTplValue(vars, spec.name);
+        return v === undefined ? { val: '', err: 'неизвестный тег' } : { val: v, err: '' };
+    }
+    /** Проблемные теги шаблона: [{ raw: '{foo}', err: 'неизвестный тег' }] (повторы — один раз). */
+    function mossadTemplateTagIssues(tpl, vars) {
+        const out = [], cache = {};
+        const vv = vars || buildFilenameVars({});
+        for (const p of mossadTplScan(tpl)) {
+            if (p.raw == null || out.some(x => x.raw === p.raw)) continue;
+            const r = mossadTplEvalTag(p.inner, vv, cache);
+            if (r.err) out.push({ raw: p.raw, err: r.err });
+        }
         return out;
+    }
+    /** Неизвестные / ошибочные теги шаблона (как написаны: '{RadugaStud}'). */
+    function mossadTemplateUnknownTags(tpl, vars) {
+        return mossadTemplateTagIssues(tpl, vars).map(x => x.raw);
     }
 
     /**
-     * Имя файла по шаблону. {tag}, {tagN}, {tag[N]} — первые N символов. Неизвестный тег → пусто
+     * Имя файла по шаблону. {tag}, {tagN}, {tag[N]} — первые N символов; v1.3.74: модификаторы --минус, [[слова]] (mossadTplParse). Неизвестный тег → пусто
      * (решение v1.3.53: в имени — пропадает, в окне «?» — показывается красным с предупреждением).
      * Расширение: добавляется, если имя не оканчивается на известное медиа-расширение (v1.3.53; раньше
      * любая точка в имени — например pinterest.com — отменяла расширение).
@@ -689,12 +861,8 @@
         const tplStr = (rawTpl && rawTpl.trim()) ? rawTpl.trim() : getDefaultFilenameTemplate();
         const hasDblVar = /\{dbl\}/i.test(tplStr);
 
-        let filename = tplStr.replace(MOSSAD_TPL_TAG_RE, (_, name, inlineLen, bracketLen) => {
-            const val = mossadTplValue(vars, name);
-            if (val === undefined) return '';
-            const len = parseInt(bracketLen || inlineLen || '0', 10);
-            return len > 0 ? val.slice(0, len) : val;
-        }).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');
+        const cache = {};
+        let filename = mossadTplScan(tplStr).map(p => p.raw == null ? p.text : mossadTplEvalTag(p.inner, vars, cache).val).join('').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');
 
         // Висячие разделители при пустых тегах (например, нет conv / account)
         filename = filename

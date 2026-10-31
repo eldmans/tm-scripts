@@ -614,6 +614,11 @@
                 style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
               <button class="mossad-tpl-help-btn" data-for="mossad-gen-tpl" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
             </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="v1.3.74: минус-слова для ${rootDomain} — через запятую, всегда убираются из {title} и {desc} (без учёта регистра). Текст с запятой или пробелами по краям — в кавычках: &quot; - Brave&quot;. В самом шаблоне то же делает {title--слово}">
+              <span data-mossad-label="tplJunkLabel" style="white-space:nowrap;">${LH('tplJunkLabel')}</span>
+              <input id="mossad-gen-junk" type="text" placeholder="Watch Online, &quot; - Brave&quot;" value="${mossadJunkText().replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+            </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Клик мышью вне окон MOSSAD сворачивает панель настроек виджета до краткого меню">
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
               Сворачивать панель кликом вне её
@@ -636,7 +641,7 @@
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-30</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-01</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -1145,6 +1150,8 @@
             genTpl.onchange = genTpl.onblur = (e) => mossadSaveSiteTemplate(e.target.value);
             mossadWireTplHelp(genTpl.parentElement);
         }
+        const genJunk = modal.querySelector('#mossad-gen-junk'); // v1.3.74
+        if (genJunk) genJunk.oninput = genJunk.onchange = (e) => mossadSetJunkText(e.target.value);
         modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
             Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
         };

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.73
+// @version      1.3.74
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.73';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.74';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1883,7 +1883,133 @@ const MOSSAD_TPL_TAGS = [
 ];
 const MOSSAD_TPL_ALIAS = {};
 for (const t of MOSSAD_TPL_TAGS) { MOSSAD_TPL_ALIAS[t.k] = t.k; for (const a of t.aliases) MOSSAD_TPL_ALIAS[a] = t.k; }
-const MOSSAD_TPL_TAG_RE = /\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g;
+const MOSSAD_TPL_SEP_CLS = '\\s.,_|\\-\u2013\u2014';
+const MOSSAD_TPL_MOD_START = /--|\[\[|\[\d+\]/;
+function mossadTplScan(tpl) {
+const s = String(tpl || ''), out = [];
+let i = 0, text = '';
+while (i < s.length) {
+if (s[i] !== '{') { text += s[i++]; continue; }
+let j = i + 1, depth = 1, q = false;
+for (; j < s.length; j++) {
+const c = s[j];
+if (c === '\\') { j++; continue; }
+if (c === '"') { q = !q; continue; }
+if (q) continue;
+if (c === '{') depth++;
+else if (c === '}' && --depth === 0) break;
+}
+if (j >= s.length) { text += s.slice(i); break; }
+if (text) { out.push({ text }); text = ''; }
+out.push({ raw: s.slice(i, j + 1), inner: s.slice(i + 1, j) });
+i = j + 1;
+}
+if (text) out.push({ text });
+return out;
+}
+function _tplParseMods(s, spec) {
+let i = 0, m;
+while (i < s.length) {
+const rest = s.slice(i);
+if (rest.startsWith('--')) {
+i += 2;
+if (s[i] === '"') {
+const j = s.indexOf('"', i + 1);
+if (j < 0) return 'нет закрывающей кавычки';
+if (j > i + 1) spec.minus.push(s.slice(i + 1, j));
+i = j + 1;
+} else {
+const r2 = s.slice(i), k = r2.search(MOSSAD_TPL_MOD_START);
+const w = k < 0 ? r2 : r2.slice(0, k);
+if (w.trim()) spec.minus.push(w.trim());
+i += w.length;
+}
+continue;
+}
+if ((m = /^\[\[\s*(-?\d+)?\s*(:)?\s*(-?\d+)?\s*\]\]/.exec(rest))) {
+if (m[1] == null && m[3] == null && !m[2]) return 'пустые [[ ]]';
+if (!m[2] && m[1] == null) return 'нужно число в [[ ]]';
+spec.words = { a: m[1] != null ? parseInt(m[1], 10) : null, b: m[3] != null ? parseInt(m[3], 10) : null, colon: !!m[2] };
+i += m[0].length; continue;
+}
+if ((m = /^\[(\d+)\]/.exec(rest))) { spec.chars = parseInt(m[1], 10); i += m[0].length; continue; }
+return 'непонятно: ' + rest;
+}
+return '';
+}
+function mossadTplParse(inner) {
+const s = String(inner || '');
+const spec = { kind: 'var', name: '', chars: 0, words: null, minus: [], err: '' };
+const m = /^([a-zA-Z]+)(\d+)?/.exec(s);
+if (!m) { spec.err = 'нет имени тега'; return spec; }
+spec.name = m[1];
+if (m[2]) spec.chars = parseInt(m[2], 10);
+spec.err = _tplParseMods(s.slice(m[0].length), spec);
+return spec;
+}
+function mossadTplMinus(val, list) {
+let v = String(val == null ? '' : val), hit = false;
+for (const w of (list || [])) {
+if (!w) continue;
+const re = new RegExp(String(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+const v2 = v.replace(re, '');
+if (v2 !== v) { hit = true; v = v2; }
+}
+if (!hit) return v;
+const S = MOSSAD_TPL_SEP_CLS;
+return v.replace(/\s+/g, ' ')
+.replace(new RegExp(`(\\s*[${S.slice(2)}]\\s*)(?:[${S.slice(2)}]\\s*)+`, 'g'), '$1')
+.replace(new RegExp(`^[${S}]+|[${S}]+$`, 'g'), '');
+}
+function mossadTplWords(val, w) {
+const v = String(val == null ? '' : val);
+if (!w) return v;
+const spans = [], re = new RegExp(`[^${MOSSAD_TPL_SEP_CLS}]+`, 'g');
+let m;
+while ((m = re.exec(v))) spans.push([m.index, m.index + m[0].length]);
+const n = spans.length;
+const norm = (x, d) => x == null ? d : (x < 0 ? Math.max(0, n + x) : Math.min(x, n));
+let s, e;
+if (!w.colon) {
+if (w.a > 0) { s = 0; e = Math.min(w.a, n); }
+else if (w.a < 0) { s = Math.max(0, n + w.a); e = n; }
+else return '';
+} else { s = norm(w.a, 0); e = norm(w.b, n); }
+if (e <= s) return '';
+return v.slice(spans[s][0], spans[e - 1][1]);
+}
+function mossadTplApplyMods(val, spec) {
+let v = String(val == null ? '' : val);
+if (spec.minus && spec.minus.length) v = mossadTplMinus(v, spec.minus);
+if (spec.words) v = mossadTplWords(v, spec.words);
+if (spec.chars > 0) v = v.slice(0, spec.chars);
+return v;
+}
+function mossadParseJunkList(text) {
+const out = [], s = String(text || '');
+const re = /\s*(?:"([^"]*)"|([^,]*))\s*(?:,|$)/g;
+let m;
+while (re.lastIndex < s.length && (m = re.exec(s))) {
+if (m[0] === '') { re.lastIndex++; continue; }
+const w = m[1] != null ? m[1] : (m[2] || '').trim();
+if (w && !out.includes(w)) out.push(w);
+}
+return out;
+}
+const MOSSAD_JUNK_KEY = 'mossad_junk_' + rootDomain;
+function mossadJunkText() {
+let v = null;
+try { if (typeof GM_getValue === 'function') v = GM_getValue(MOSSAD_JUNK_KEY, null); } catch (e) {}
+if (v == null) { try { v = localStorage.getItem(MOSSAD_JUNK_KEY); } catch (e) {} }
+return v == null ? '' : String(v);
+}
+function mossadSetJunkText(v) {
+const x = String(v == null ? '' : v);
+try { if (typeof GM_setValue === 'function') GM_setValue(MOSSAD_JUNK_KEY, x); } catch (e) {}
+try { localStorage.setItem(MOSSAD_JUNK_KEY, x); } catch (e) {}
+document.querySelectorAll('#mossad-gen-junk, [data-th="junk"]').forEach(el => { if (el.value !== x && el !== document.activeElement) el.value = x; });
+}
+window.mossadSetJunkText = mossadSetJunkText;
 function getDefaultFilenameTemplate() {
 if (rootDomain === 'grok.com') return MOSSAD_DEFAULT_TPL_GROK;
 if (rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) return '{hf}-{space}-{subtype}-{id8}.{ext}';
@@ -1908,6 +2034,7 @@ const postId = String(ctx.postId || '');
 const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
 const ext = ctx.ext || (ctx.type === 'video' ? 'mp4' : 'jpg');
 const titleRaw = ctx.title != null ? ctx.title : (document.title || '');
+const junk = mossadParseJunkList(ctx.junk != null ? ctx.junk : mossadJunkText());
 return {
 id: postId,
 conv: String(ctx.convId || ''),
@@ -1920,8 +2047,8 @@ domain: mossadDomainWord(rootDomain),
 domainfull: rootDomain.replace(/[^a-z0-9._-]/gi, '_'),
 account: String(ctx.account || '').trim(),
 username: String(ctx.authorName || '') || shortId,
-desc: mossadSafeNamePart(ctx.desc || ''),
-title: mossadSafeNamePart(titleRaw) || `media_${now.getTime()}`,
+desc: mossadSafeNamePart(junk.length ? mossadTplMinus(ctx.desc || '', junk) : (ctx.desc || '')),
+title: mossadSafeNamePart(junk.length ? mossadTplMinus(titleRaw, junk) : titleRaw) || `media_${now.getTime()}`,
 date: `${p2(now.getDate())}.${p2(now.getMonth() + 1)}.${String(now.getFullYear()).slice(-2)}`,
 time: `${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`,
 ext,
@@ -1938,20 +2065,35 @@ const raw = String(name).toLowerCase();
 if (raw in vars) return vars[raw] != null ? String(vars[raw]) : '';
 return undefined;
 }
-function mossadTemplateUnknownTags(tpl, vars) {
-const out = [];
-String(tpl || '').replace(MOSSAD_TPL_TAG_RE, (m, name) => { if (mossadTplValue(vars || buildFilenameVars({}), name) === undefined && !out.includes(m)) out.push(m); return m; });
+function mossadTplEvalTag(inner, vars, cache) {
+const spec = mossadTplParse(inner);
+if (spec.err) return { val: '', err: spec.err };
+const base = mossadTplEvalBase(spec, vars, cache || {});
+if (base.err) return { val: '', err: base.err };
+return { val: mossadTplApplyMods(base.val, spec), err: '' };
+}
+function mossadTplEvalBase(spec, vars, cache) {
+const v = mossadTplValue(vars, spec.name);
+return v === undefined ? { val: '', err: 'неизвестный тег' } : { val: v, err: '' };
+}
+function mossadTemplateTagIssues(tpl, vars) {
+const out = [], cache = {};
+const vv = vars || buildFilenameVars({});
+for (const p of mossadTplScan(tpl)) {
+if (p.raw == null || out.some(x => x.raw === p.raw)) continue;
+const r = mossadTplEvalTag(p.inner, vv, cache);
+if (r.err) out.push({ raw: p.raw, err: r.err });
+}
 return out;
+}
+function mossadTemplateUnknownTags(tpl, vars) {
+return mossadTemplateTagIssues(tpl, vars).map(x => x.raw);
 }
 function renderFilenameTemplate(rawTpl, vars, isDup = false, dblSuffix = '', defaultExt = 'mp4') {
 const tplStr = (rawTpl && rawTpl.trim()) ? rawTpl.trim() : getDefaultFilenameTemplate();
 const hasDblVar = /\{dbl\}/i.test(tplStr);
-let filename = tplStr.replace(MOSSAD_TPL_TAG_RE, (_, name, inlineLen, bracketLen) => {
-const val = mossadTplValue(vars, name);
-if (val === undefined) return '';
-const len = parseInt(bracketLen || inlineLen || '0', 10);
-return len > 0 ? val.slice(0, len) : val;
-}).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');
+const cache = {};
+let filename = mossadTplScan(tplStr).map(p => p.raw == null ? p.text : mossadTplEvalTag(p.inner, vars, cache).val).join('').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');
 filename = filename
 .replace(/-{2,}/g, '-')
 .replace(/_{2,}/g, '_')
@@ -2134,6 +2276,7 @@ const LABEL_DEFS = [
 ['tplHelpNow', 'Сейчас скачается как:', 'строка с итоговым именем в окне «?»'],
 ['tplHelpUnknown', '⚠ Неизвестные теги — в имени файла пропадут:', 'предупреждение в окне «?»'],
 ['tplSiteLabel', 'Шаблон имени:', 'поле шаблона сайта во вкладке «Общие»'],
+['tplJunkLabel', 'Минус-слова (title, desc):', 'v1.3.74: поле минус-слов сайта во вкладке «Общие»'],
 ['#', 'Уведомления'],
 ['toastClose', '×', 'крестик на тосте звука'],
 ];
@@ -9266,6 +9409,24 @@ if (rootDomain.includes('pinterest.')) setTimeout(pinterestJumpApply, 0);
 
 // ── src/ui/tpl-help.js ──
 let _tplHelp = null;
+const _tplEx = (t, what) => `<div><code data-th-ins="${t.replace(/"/g, '&quot;')}" title="Вставить в шаблон" style="cursor:pointer;color:#93c5fd;">${t.replace(/</g, '&lt;')}</code> — ${what}</div>`;
+const MOSSAD_TPL_HELP_MODS = `
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid #374151;line-height:1.5;">
+              <b style="color:#e5e7eb;">✂ Модификаторы — дописываются внутрь скобок любого тега</b>
+              <div style="color:#9ca3af;">Применяются всегда по порядку: минус-слова → слова → символы.</div>
+              ${_tplEx('{title--Watch Online}', 'убрать «Watch Online» (регистр не важен, все повторы; лишние пробелы и разделители по краям подчищаются)')}
+              ${_tplEx('{title--Watch Online--Brave}', 'убрать несколько: каждое после своих «--»')}
+              ${_tplEx('{title--" - Brave"}', 'текст со своими дефисами или пробелами по краям — в кавычках')}
+              ${_tplEx('{title[[2]]}', 'первые 2 слова')}
+              ${_tplEx('{title[[-2]]}', 'последние 2 слова')}
+              ${_tplEx('{title[[2:]]}', 'без первых 2 слов')}
+              ${_tplEx('{title[[:-2]]}', 'без последних 2 слов')}
+              ${_tplEx('{title[[1:3]]}', 'слова со 2-го по 3-е (как срез в Python, счёт с 0)')}
+              ${_tplEx('{title[40]}', 'первые 40 символов (то же, что {title40})')}
+              ${_tplEx('{title--Watch Online[[3]][40]}', 'всё вместе: убрать, взять 3 слова, обрезать до 40 символов')}
+              <div style="color:#9ca3af;">Слова разделяются пробелом, точкой, запятой, «_», «|» и тире (- – —); разделители между оставшимися словами остаются как были.
+              Ошибка в модификаторе — тег красный и в имени пропадает.</div>
+            </div>`;
 function _tplEsc(s) {
 return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -9325,13 +9486,14 @@ const h = _tplHelp;
 if (!h || !h.vars) return;
 const tpl = _tplCurrent(h.input);
 const name = renderFilenameTemplate(tpl, h.vars, false, '', h.vars.ext);
-const unknown = mossadTemplateUnknownTags(tpl, h.vars);
+const issues = mossadTemplateTagIssues(tpl, h.vars);
+const bad = (raw) => issues.find(x => x.raw === raw);
 h.box.querySelector('[data-th="name"]').textContent = name;
-h.box.querySelector('[data-th="tpl"]').innerHTML = _tplEsc(tpl).replace(/\{([a-zA-Z]+)(\d+)?(?:\[(\d+)\])?\}/g, (m) =>
-unknown.includes(m) ? `<span style="color:#f87171;text-decoration:line-through;">${m}</span>` : `<span style="color:#93c5fd;">${m}</span>`);
+h.box.querySelector('[data-th="tpl"]').innerHTML = mossadTplScan(tpl).map(p => p.raw == null ? _tplEsc(p.text) :
+(bad(p.raw) ? `<span style="color:#f87171;text-decoration:line-through;" title="${_tplEsc(bad(p.raw).err)}">${_tplEsc(p.raw)}</span>` : `<span style="color:#93c5fd;">${_tplEsc(p.raw)}</span>`)).join('');
 const warn = h.box.querySelector('[data-th="warn"]');
-warn.style.display = unknown.length ? 'block' : 'none';
-warn.textContent = unknown.length ? `${L('tplHelpUnknown')} ${unknown.join(' ')}` : '';
+warn.style.display = issues.length ? 'block' : 'none';
+warn.textContent = issues.length ? `${L('tplHelpUnknown')} ${issues.map(x => `${x.raw} (${x.err})`).join(' ')}` : '';
 h.box.querySelector('[data-th="off"]').style.display = config.filenameTemplateEnabled ? 'none' : 'block';
 }
 function _tplRenderTable() {
@@ -9389,6 +9551,11 @@ box.innerHTML = `
               {тег} — целиком; {тегN} или {тег[N]} — первые N символов (например {id8}, {desc[40]}).
               Регистр не важен. Неизвестный тег в имени файла пропадает. Расширение (.mp4 / .jpg) добавляется само,
               если имя на него не оканчивается. Пустые теги убирают лишние «-», «_», «~». Клик по тегу — вставить в шаблон.
+            </div>
+            ${MOSSAD_TPL_HELP_MODS}
+            <div style="margin-top:6px;display:flex;align-items:center;gap:6px;" title="Через запятую. Убираются из {title} и {desc} всегда, без правки шаблона (без учёта регистра). Текст с запятой или пробелами по краям — в кавычках: &quot; - Brave&quot;. Свой список у каждого сайта">
+              <span style="color:#9ca3af;white-space:nowrap;">Минус-слова сайта ${_tplEsc(rootDomain)} (title, desc):</span>
+              <input data-th="junk" type="text" placeholder="Watch Online, &quot; - Brave&quot;" style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:1px 4px;font-size:12px;">
             </div>`;
 document.body.appendChild(box);
 try {
@@ -9412,7 +9579,7 @@ mossadCloseTplHelp();
 input.addEventListener('input', onInput);
 window.addEventListener('keydown', onKey, true);
 document.addEventListener('pointerdown', onDown, true);
-_tplHelp = { box, input, btn, ctx: null, vars: null, cleanup: () => {
+const mine = _tplHelp = { box, input, btn, ctx: null, vars: null, cleanup: () => {
 input.removeEventListener('input', onInput);
 window.removeEventListener('keydown', onKey, true);
 document.removeEventListener('pointerdown', onDown, true);
@@ -9421,6 +9588,12 @@ box.querySelector('[data-th="close"]').onclick = () => mossadCloseTplHelp();
 const sepIn = box.querySelector('[data-th="sep"]');
 sepIn.value = mossadTplSep();
 sepIn.oninput = () => mossadSetTplSep(sepIn.value);
+const junkIn = box.querySelector('[data-th="junk"]');
+junkIn.value = mossadJunkText();
+junkIn.oninput = () => {
+mossadSetJunkText(junkIn.value);
+if (mine.ctx) { mine.vars = buildFilenameVars(mine.ctx); _tplRenderTable(); _tplRenderDynamic(); }
+};
 box.addEventListener('click', (e) => {
 const ins = e.target.closest && e.target.closest('[data-th-ins]');
 if (!ins) return;
@@ -9432,7 +9605,6 @@ input.dispatchEvent(new Event('input', { bubbles: true }));
 input.dispatchEvent(new Event('change', { bubbles: true }));
 });
 _tplRenderTable();
-const mine = _tplHelp;
 mossadTplPreviewContext().then(ctx => {
 if (_tplHelp !== mine) return;
 mine.ctx = ctx;
@@ -11272,6 +11444,11 @@ modal.innerHTML = `
                 style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
               <button class="mossad-tpl-help-btn" data-for="mossad-gen-tpl" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
             </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="v1.3.74: минус-слова для ${rootDomain} — через запятую, всегда убираются из {title} и {desc} (без учёта регистра). Текст с запятой или пробелами по краям — в кавычках: &quot; - Brave&quot;. В самом шаблоне то же делает {title--слово}">
+              <span data-mossad-label="tplJunkLabel" style="white-space:nowrap;">${LH('tplJunkLabel')}</span>
+              <input id="mossad-gen-junk" type="text" placeholder="Watch Online, &quot; - Brave&quot;" value="${mossadJunkText().replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+            </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Клик мышью вне окон MOSSAD сворачивает панель настроек виджета до краткого меню">
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
               Сворачивать панель кликом вне её
@@ -11294,7 +11471,7 @@ modal.innerHTML = `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-10-30</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-01</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -11750,6 +11927,8 @@ if (genTpl) {
 genTpl.onchange = genTpl.onblur = (e) => mossadSaveSiteTemplate(e.target.value);
 mossadWireTplHelp(genTpl.parentElement);
 }
+const genJunk = modal.querySelector('#mossad-gen-junk');
+if (genJunk) genJunk.oninput = genJunk.onchange = (e) => mossadSetJunkText(e.target.value);
 modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
 Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
 };
