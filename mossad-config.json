@@ -4,7 +4,7 @@
   "slideshowLoopMode": "off",
   "loopFeed": false,
   "slideshowDirections": [
-    "up"
+    "down"
   ],
   "videoLoops": 1,
   "slideshowDelay": 1,
@@ -21,7 +21,7 @@
   "filenameTemplateEnabled": true,
   "hfAutoSave": "off",
   "playlistRows": 30,
-  "playlistWidth": 278,
+  "playlistWidth": 0,
   "widgetZoom": 0.9,
   "closePanelOnOutsideClick": true,
   "collectWatchSec": 30,
