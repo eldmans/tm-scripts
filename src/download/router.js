@@ -182,6 +182,9 @@
         const now = Date.now();
         if (primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
             console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, пропущено.');
+            // v1.3.82: раньше — молча; теперь сигнал «уже скачивали» и подсказка
+            try { mossadBeep('dup'); } catch (e) {}
+            showToast(`⚠️ Только что скачано (${Math.max(1, Math.round((now - _lastDownloadTime) / 1000))} с назад)`, false, 2500);
             return;
         }
         _lastDownloadUrl = primaryUrl;
@@ -245,7 +248,7 @@
             showToast('⏳ Запуск скачивания...');
             // v1.3.52: слайдшоу листает, как только файл сохранён (раньше колбэк не вызывался — всегда ждали 8 с страховки)
             triggerDirectBlobDownload(targetUrl, filename, tryNext, canonicalPostUrl, onDoneCallback);
-            if (!postActionDone) { postActionDone = true; performPostDownloadAction(); }
+            if (!postActionDone) { postActionDone = true; try { mossadBeep('start'); } catch (e) {} performPostDownloadAction(); } // v1.3.82: сигнал старта — один раз
         }
         
         tryNext();

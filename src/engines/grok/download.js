@@ -159,6 +159,7 @@
 
         if (media && media.url) {
             showToast(`⏳ Загрузка: ${grokFilename}...`);
+            try { mossadBeep('start'); } catch (e) {} // v1.3.82
             const isBlobUrl = media.url.startsWith('blob:');
 
             const handleBlobResponse = async (rawBlob) => {
@@ -223,6 +224,7 @@
         }
 
         // Если медиа-URL не найден — стандартный клик кнопки
+        try { mossadBeep('start'); } catch (e) {} // v1.3.82
         fallbackGrokNativeClick(onDownloadFinalized);
         return true;
     }

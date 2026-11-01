@@ -627,6 +627,27 @@
               <input id="mossad-cb-sound-toast" type="checkbox" style="accent-color:#3b82f6;" ${config.showSoundToast !== false ? 'checked' : ''}>
               Показывать тост переключения звука
             </label>
+            ${(() => { // v1.3.82: 🔔 Сигналы скачивания (issue #2, п.5)
+                const B = mossadBeepsRead();
+                const tf = (id, v, w, tip) => `<input id="${id}" type="text" inputmode="numeric" value="${v}" title="${tip}" style="width:${w}px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">`;
+                const row = (k, name) => `
+                <div class="mossad-beep-row" data-beep="${k}" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:3px 0 0 18px;">
+                  <label style="display:flex;align-items:center;gap:4px;cursor:pointer;min-width:150px;"><input id="mossad-beep-${k}-on" type="checkbox" style="accent-color:#3b82f6;" ${B[k].on ? 'checked' : ''}>${name}</label>
+                  Гц ${tf(`mossad-beep-${k}-hz`, B[k].hz, 52, 'Высота тона, Гц (50–8000). Низкий ≈ 200–400, высокий ≈ 1000–2000')}
+                  раз ${tf(`mossad-beep-${k}-count`, B[k].count, 28, 'Сколько гудков подряд (1–5)')}
+                  мс ${tf(`mossad-beep-${k}-ms`, B[k].ms, 40, 'Длительность одного гудка, мс (20–1000)')}
+                  <button id="mossad-beep-${k}-test" type="button" title="Проиграть с текущими значениями полей" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#e5e7eb;cursor:pointer;font-size:11px;padding:1px 7px;">▶</button>
+                </div>`;
+                return `
+            <div id="mossad-beeps" style="font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Звуковые сигналы скачивания. Сохраняются для всех сайтов">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input id="mossad-beep-on" type="checkbox" style="accent-color:#3b82f6;" ${B.on ? 'checked' : ''}>🔔 Сигналы скачивания</label>
+                <span>громкость, %</span>${tf('mossad-beep-volume', B.volume, 36, 'Громкость сигналов, % (0–100)')}
+              </div>
+              ${row('dup', '«Уже скачивали»')}
+              ${row('start', 'Скачивание началось')}
+            </div>`;
+            })()}
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="После клика «Собрать» на /imagine/saved скрипт столько секунд подхватывает ссылки, подгружаемые при скролле (каждый клик продлевает; закрывается при старте слайдшоу)">
               Досбор после «Собрать», сек:
               <input id="mossad-collect-watch-sec" type="number" min="5" max="600" step="5" value="${Number(config.collectWatchSec) || 30}" style="width:56px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
@@ -1172,6 +1193,27 @@
         modal.querySelector('#mossad-cb-sound-toast').onchange = (e) => {
             Settings.setQuiet('showSoundToast', e.target.checked);
         };
+        // v1.3.82: 🔔 Сигналы — читаем поля, нормализуем, сохраняем (GM, общее для всех сайтов)
+        const beepsFromForm = () => {
+            const q = (id) => modal.querySelector('#' + id);
+            const b = { on: q('mossad-beep-on').checked, volume: q('mossad-beep-volume').value };
+            ['dup', 'start'].forEach(k => { b[k] = { on: q(`mossad-beep-${k}-on`).checked, hz: q(`mossad-beep-${k}-hz`).value, count: q(`mossad-beep-${k}-count`).value, ms: q(`mossad-beep-${k}-ms`).value }; });
+            return mossadBeepsNormalize(b);
+        };
+        const beepsSave = () => {
+            const n = mossadBeepsWrite(beepsFromForm());
+            const q = (id) => modal.querySelector('#' + id);
+            q('mossad-beep-volume').value = String(n.volume);
+            ['dup', 'start'].forEach(k => { ['hz', 'count', 'ms'].forEach(f => { q(`mossad-beep-${k}-${f}`).value = String(n[k][f]); }); });
+        };
+        modal.querySelectorAll('#mossad-beeps input').forEach(inp => { inp.addEventListener('change', beepsSave); });
+        modal._mossadBeepsSave = beepsSave;
+        ['dup', 'start'].forEach(k => {
+            modal.querySelector(`#mossad-beep-${k}-test`).onclick = (e) => {
+                e.preventDefault(); e.stopPropagation();
+                mossadBeep(k, { test: true, cfg: beepsFromForm() });
+            };
+        });
         modal.querySelector('#mossad-cb-debug').onchange = (e) => {
             Settings.setQuiet('debugSlideshow', e.target.checked);
             if (e.target.checked) mossadDebug('settings', 'debug-лог включён');
@@ -1224,6 +1266,7 @@
             }
             if (typeof modal._mossadLabelsFlush === 'function') modal._mossadLabelsFlush(); // v1.3.46
             if (typeof modal._mossadTodosFlush === 'function') modal._mossadTodosFlush();   // v1.3.49
+            if (typeof modal._mossadBeepsSave === 'function') modal._mossadBeepsSave();     // v1.3.82
             const tokEl = modal.querySelector('#mossad-gh-token');
             if (tokEl && tokEl.value !== (config.githubToken || '')) setGithubToken(tokEl.value);
         };

@@ -249,6 +249,7 @@
      */
     function showDuplicateDownloadNotice(record, onConfirmDownload, lockedPostUrl, lockedMediaUrl) {
         // Если включена галочка «Качать дубли»: качаем сразу и показываем укороченное уведомление без таймера
+        try { mossadBeep('dup'); } catch (e) {} // v1.3.82: двойной низкий сигнал «уже скачивали»
         if (config.allowDuplicates) {
             showToast(`⚠️ Дубликат: ${record.filename || 'файл'} (${record.date || 'ранее'})`, false, 3000);
             if (typeof onConfirmDownload === 'function') {
@@ -262,7 +263,12 @@
         if (existing) existing.remove();
         if (_dupTimerInterval) clearInterval(_dupTimerInterval);
 
-        const container = document.getElementById('mossad-widget-container') || document.body;
+        // v1.3.82: уведомление было внутри виджета — при скрытом виджете (состояние «hidden») или в полноэкранном
+        // плеере его не было видно («не всегда появляется»). Тогда — отдельной плашкой поверх страницы.
+        const widget = document.getElementById('mossad-widget-container');
+        const widgetVisible = !!(widget && !document.fullscreenElement && widget.style.display !== 'none'
+            && (typeof getComputedStyle !== 'function' || (getComputedStyle(widget).display !== 'none' && getComputedStyle(widget).visibility !== 'hidden')));
+        const container = widgetVisible ? widget : (document.fullscreenElement || document.body);
 
         const notice = document.createElement('div');
         notice.id = 'mossad-dup-warning';
@@ -271,8 +277,12 @@
             border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 10px; padding: 8px 12px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.6); font-family: system-ui, -apple-system, sans-serif;
             color: #e5e7eb; font-size: 12px; display: flex; flex-direction: column; gap: 4px;
-            animation: mossadFadeIn 0.2s ease; margin-top: 6px; z-index: 999999;
+            animation: mossadFadeIn 0.2s ease; margin-top: 6px; z-index: 999999; pointer-events: auto;
         `;
+        if (!widgetVisible) {
+            notice.style.position = 'fixed'; notice.style.top = '16px'; notice.style.left = '50%';
+            notice.style.transform = 'translateX(-50%)'; notice.style.zIndex = '2147483646'; notice.style.marginTop = '0';
+        }
 
         let secondsLeft = 6;
 

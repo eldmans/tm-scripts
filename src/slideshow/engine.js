@@ -505,6 +505,7 @@
                     const _h = Array.isArray(config.hk?.download) ? config.hk.download[0] : config.hk?.download;
                     const _dlLabel = _h?.key ? `${_h.ctrl?'Ctrl+':''}${_h.alt?'Alt+':''}${_h.shift?'Shift+':''}${_h.key}` : 'DL';
                     showToast(`⚠️ ${secsAgo}с назад уже скачано. Повтор: ${_dlLabel}`);
+                    try { mossadBeep('dup'); } catch (e) {} // v1.3.82
                     advanceToNext();
                     return;
                 } else {
