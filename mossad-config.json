@@ -7,7 +7,7 @@
     "down"
   ],
   "videoLoops": 1,
-  "slideshowDelay": 1,
+  "slideshowDelay": 7,
   "delayAfterVideo": 1,
   "downloadType": "none",
   "pdAction": "none",
