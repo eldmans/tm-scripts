@@ -126,6 +126,19 @@
                 `<code data-kh-ins="${tok.replace(/"/g, '&quot;')}" title="Дописать ${tok.replace(/"/g, '&quot;')}" style="cursor:pointer;color:#93c5fd;background:#1f2937;border:1px solid #374151;border-radius:4px;padding:1px 5px;">${lab.replace(/</g, '&lt;')}</code>`).join('')}</div>` +
             (o.note === '' ? '' : `<div style="margin-top:6px;color:#9ca3af;line-height:1.4;">${LH(o.note || 'keyHelpNote')}</div>`);
         document.body.appendChild(box);
+        // v1.3.83: режим toggle — выбранные отмечены ✓ и зелёной рамкой
+        const markSel = () => {
+            if (!o.toggle) return;
+            const have = String(input.value || '').split(/[\s,;]+/).filter(Boolean);
+            box.querySelectorAll('[data-kh-ins]').forEach(c => {
+                const on = have.includes(c.getAttribute('data-kh-ins'));
+                c.classList.toggle('mossad-kh-on', on);
+                c.style.borderColor = on ? '#10b981' : '#374151';
+                c.style.color = on ? '#6ee7b7' : '#93c5fd';
+                c.title = (on ? 'Убрать ' : 'Добавить ') + c.getAttribute('data-kh-ins');
+            });
+        };
+        markSel();
         try {
             const r = (btn || input).getBoundingClientRect();
             const vw = window.innerWidth || 1024;
@@ -144,8 +157,11 @@
             const tok = ins.getAttribute('data-kh-ins'), cur = String(input.value || '');
             if (o.sep) {
                 const have = cur.split(/[\s,;]+/).filter(Boolean);
-                if (have.includes(tok)) return;
-                input.value = have.concat(tok).join(o.sep);
+                if (have.includes(tok)) {
+                    if (!o.toggle) return;
+                    input.value = have.filter(x => x !== tok).join(o.sep); // v1.3.83: повторный клик — убрать
+                } else input.value = have.concat(tok).join(o.sep);
+                markSel();
             } else input.value = cur + tok;
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));

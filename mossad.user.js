@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.82
+// @version      1.3.83
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.82';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.83';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -7255,6 +7255,18 @@ box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bott
 `<code data-kh-ins="${tok.replace(/"/g, '&quot;')}" title="Дописать ${tok.replace(/"/g, '&quot;')}" style="cursor:pointer;color:#93c5fd;background:#1f2937;border:1px solid #374151;border-radius:4px;padding:1px 5px;">${lab.replace(/</g, '&lt;')}</code>`).join('')}</div>` +
 (o.note === '' ? '' : `<div style="margin-top:6px;color:#9ca3af;line-height:1.4;">${LH(o.note || 'keyHelpNote')}</div>`);
 document.body.appendChild(box);
+const markSel = () => {
+if (!o.toggle) return;
+const have = String(input.value || '').split(/[\s,;]+/).filter(Boolean);
+box.querySelectorAll('[data-kh-ins]').forEach(c => {
+const on = have.includes(c.getAttribute('data-kh-ins'));
+c.classList.toggle('mossad-kh-on', on);
+c.style.borderColor = on ? '#10b981' : '#374151';
+c.style.color = on ? '#6ee7b7' : '#93c5fd';
+c.title = (on ? 'Убрать ' : 'Добавить ') + c.getAttribute('data-kh-ins');
+});
+};
+markSel();
 try {
 const r = (btn || input).getBoundingClientRect();
 const vw = window.innerWidth || 1024;
@@ -7273,8 +7285,11 @@ if (!ins) return;
 const tok = ins.getAttribute('data-kh-ins'), cur = String(input.value || '');
 if (o.sep) {
 const have = cur.split(/[\s,;]+/).filter(Boolean);
-if (have.includes(tok)) return;
-input.value = have.concat(tok).join(o.sep);
+if (have.includes(tok)) {
+if (!o.toggle) return;
+input.value = have.filter(x => x !== tok).join(o.sep);
+} else input.value = have.concat(tok).join(o.sep);
+markSel();
 } else input.value = cur + tok;
 input.dispatchEvent(new Event('input', { bubbles: true }));
 input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -12146,9 +12161,9 @@ modal.innerHTML = `
             <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Выбранные хоткеи MOSSAD срабатывают, даже когда фокус в поле промпта (ввода). Список — id действий через запятую; выбор — кнопкой «?»">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input id="mossad-gen-prompthk-on" type="checkbox" style="accent-color:#3b82f6;" ${config.promptHotkeysOn ? 'checked' : ''}><span data-mossad-label="promptHkLabel">${LH('promptHkLabel')}</span></label>
               <div style="display:flex;align-items:center;gap:6px;margin-top:3px;padding-left:22px;">
-                <input id="mossad-gen-prompthk" type="text" value="${String(config.promptHotkeys == null ? '' : config.promptHotkeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
-                  style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
-                <button id="mossad-gen-prompthk-help" title="Выбрать хоткеи (клик — добавить)" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
+                <input id="mossad-gen-prompthk" type="text" readonly title="Только выбор кнопкой «?» (клик — добавить, повторный клик — убрать)" value="${String(config.promptHotkeys == null ? '' : config.promptHotkeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                  style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#9ca3af;padding:2px 6px;font-size:12px;cursor:pointer;">
+                <button id="mossad-gen-prompthk-help" title="Выбрать хоткеи (клик — добавить, повторный клик — убрать)" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
@@ -12658,11 +12673,13 @@ modal.querySelector('#mossad-gen-nokeys-help').onclick = (e) => { e.preventDefau
 const genPHk = modal.querySelector('#mossad-gen-prompthk');
 modal.querySelector('#mossad-gen-prompthk-on').onchange = (e) => Settings.setQuiet('promptHotkeysOn', e.target.checked);
 genPHk.oninput = genPHk.onchange = (e) => Settings.setQuiet('promptHotkeys', e.target.value.split(/[\s,;]+/).filter(Boolean).join(', '));
-modal.querySelector('#mossad-gen-prompthk-help').onclick = (e) => {
+const openPHkHelp = (e) => {
 e.preventDefault(); e.stopPropagation();
 const toks = orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()).map(k => [k, `${keysMap[k] || k}${config.hk[k] && config.hk[k].key ? ' · ' + formatHotkey(config.hk[k]) : ''}`]);
-mossadToggleKeyHelp(e.currentTarget, genPHk, { tokens: toks, title: 'promptHkHelpTitle', note: '', sep: ', ' });
+mossadToggleKeyHelp(modal.querySelector('#mossad-gen-prompthk-help'), genPHk, { tokens: toks, title: 'promptHkHelpTitle', note: '', sep: ', ', toggle: true });
 };
+modal.querySelector('#mossad-gen-prompthk-help').onclick = openPHkHelp;
+genPHk.onclick = openPHkHelp;
 const genTpl = modal.querySelector('#mossad-gen-tpl');
 if (genTpl) {
 genTpl.onchange = genTpl.onblur = (e) => mossadSaveSiteTemplate(e.target.value);

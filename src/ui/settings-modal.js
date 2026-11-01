@@ -603,9 +603,9 @@
             <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Выбранные хоткеи MOSSAD срабатывают, даже когда фокус в поле промпта (ввода). Список — id действий через запятую; выбор — кнопкой «?»">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input id="mossad-gen-prompthk-on" type="checkbox" style="accent-color:#3b82f6;" ${config.promptHotkeysOn ? 'checked' : ''}><span data-mossad-label="promptHkLabel">${LH('promptHkLabel')}</span></label>
               <div style="display:flex;align-items:center;gap:6px;margin-top:3px;padding-left:22px;">
-                <input id="mossad-gen-prompthk" type="text" value="${String(config.promptHotkeys == null ? '' : config.promptHotkeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
-                  style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
-                <button id="mossad-gen-prompthk-help" title="Выбрать хоткеи (клик — добавить)" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
+                <input id="mossad-gen-prompthk" type="text" readonly title="Только выбор кнопкой «?» (клик — добавить, повторный клик — убрать)" value="${String(config.promptHotkeys == null ? '' : config.promptHotkeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
+                  style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#9ca3af;padding:2px 6px;font-size:12px;cursor:pointer;">
+                <button id="mossad-gen-prompthk-help" title="Выбрать хоткеи (клик — добавить, повторный клик — убрать)" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
@@ -1169,11 +1169,14 @@
         const genPHk = modal.querySelector('#mossad-gen-prompthk');
         modal.querySelector('#mossad-gen-prompthk-on').onchange = (e) => Settings.setQuiet('promptHotkeysOn', e.target.checked);
         genPHk.oninput = genPHk.onchange = (e) => Settings.setQuiet('promptHotkeys', e.target.value.split(/[\s,;]+/).filter(Boolean).join(', '));
-        modal.querySelector('#mossad-gen-prompthk-help').onclick = (e) => {
+        // v1.3.83 (issue #1.2 «вручную не вводить»): поле только для чтения, выбор — в «?» (клик — добавить, повторный — убрать)
+        const openPHkHelp = (e) => {
             e.preventDefault(); e.stopPropagation();
             const toks = orderedHotkeyKeys(Object.keys(keysMap), getHotkeyOrder()).map(k => [k, `${keysMap[k] || k}${config.hk[k] && config.hk[k].key ? ' · ' + formatHotkey(config.hk[k]) : ''}`]);
-            mossadToggleKeyHelp(e.currentTarget, genPHk, { tokens: toks, title: 'promptHkHelpTitle', note: '', sep: ', ' });
+            mossadToggleKeyHelp(modal.querySelector('#mossad-gen-prompthk-help'), genPHk, { tokens: toks, title: 'promptHkHelpTitle', note: '', sep: ', ', toggle: true });
         };
+        modal.querySelector('#mossad-gen-prompthk-help').onclick = openPHkHelp;
+        genPHk.onclick = openPHkHelp;
         // v1.3.53: шаблон имени для этого сайта (то же, что поле в меню)
         const genTpl = modal.querySelector('#mossad-gen-tpl');
         if (genTpl) {
