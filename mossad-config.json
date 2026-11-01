@@ -31,7 +31,6 @@
   "promptHotkeysOn": true,
   "promptHotkeys": "download",
   "grokNoPromptKeys": "RWEZXGVCf",
-  "grokKeepSound": true,
   "pinterestJumpKeys": "off",
   "pinterestDir": "fwd",
   "pinterestFilterType": "ratio",
@@ -192,5 +191,6 @@
       "shift": false
     }
   },
+  "grokKeepSound": true,
   "npkExpandAdded": true
 }
