@@ -75,7 +75,7 @@ const key=(w,code,o={})=>{ const t=o.target||w.document.activeElement||w.documen
  { const {load}=require('./ss_harness'); const {w,T}=load({items:[{uuid:'00000001-0000-4000-8000-000000000000',convId:'c'}],url:'https://ru.pinterest.com/pin/1/',seedSpeed:true}); await sleep(50);
    const j=w.pinterestJumpCodes(); ok('16a Pinterest pin keys skip speed letters W E R Z X C V G', ['W','E','R','Z','X','C','V','G'].every(l=>j.skipped.some(s=>s.label===l)) && !j.codes.includes('KeyW'), JSON.stringify(j.skipped)); }
  { const {load}=require('./ss_harness'); const {w,T}=load({items:[{uuid:'00000001-0000-4000-8000-000000000000',convId:'c'}],preLs:{mossad_grok_com_config:JSON.stringify({grokNoPromptKeys:'R'})}}); await sleep(50);
-   ok('17a Grok: saved old default R migrated to RWEZXGVC', T.config.grokNoPromptKeys==='RWEZXGVC', T.config.grokNoPromptKeys); }
+   ok('17a Grok: saved old default R migrated to RWEZXGVC (+F v1.3.79)', T.config.grokNoPromptKeys==='RWEZXGVCF', T.config.grokNoPromptKeys); }
  } catch(e){ console.log('FAIL exception', e.stack); res.push(false); }
  const f=res.filter(x=>!x).length; console.log(`\n${res.length-f}/${res.length} passed`); process.exit(f?1:0);
 })();

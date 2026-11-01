@@ -152,6 +152,63 @@
     }
 
     // ============================================
+    // v1.3.79: ⛶ «Развернуть / полный экран» по клавише (config.hk.expand, по умолчанию F — а/А/f/F в любой раскладке)
+    // Один хоткей на все сайты: Grok — кнопка плеера «Expand video»; Pinterest — «Показать в полном масштабе»
+    // (то же, что хоткей pinFullScale); остальные — кнопка полного экрана сайта или сам <video>.
+    // Если уже полный экран — выход из него (повторное нажатие сворачивает).
+    // ============================================
+    function _mossadBtnLabel(b) { return [b.getAttribute('aria-label'), b.getAttribute('title')].map(x => x || '').join(' ').toLowerCase(); }
+    function _mossadOwnUi(b) { return !!(b.closest && b.closest('[id^="mossad"]')); }
+    /** Кнопка «Expand video» плеера Grok (в т.ч. скрытая до наведения: opacity-0). */
+    function grokFindExpandButton() {
+        const exact = document.querySelector('button[aria-label="Expand video"]');
+        if (exact) return exact;
+        return Array.from(document.querySelectorAll('button, [role="button"]')).find(b => !_mossadOwnUi(b) &&
+            (/expand video|развернуть видео/.test(_mossadBtnLabel(b)) || !!b.querySelector('svg.lucide-expand, g[id="name=expand"]'))) || null;
+    }
+    /** Кнопка «свернуть» плеера Grok (если сайт развернул видео без настоящего полного экрана). */
+    function grokFindCollapseButton() {
+        return Array.from(document.querySelectorAll('button, [role="button"]')).find(b => !_mossadOwnUi(b) &&
+            (/collapse video|minimi[sz]e video|exit full|close full|свернуть видео|выйти из полно/.test(_mossadBtnLabel(b)) || !!b.querySelector('svg.lucide-shrink, svg.lucide-minimize, g[id="name=collapse"], g[id="name=shrink"]'))) || null;
+    }
+    /** Совпадение с хоткеем «Развернуть»: буква без модификаторов срабатывает и с Shift (f и F, а и А). */
+    function mossadExpandHotkeyMatch(e) {
+        const hk = config.hk && config.hk.expand;
+        if (!hk || !hk.key) return false;
+        if (hotkeyMatches(e, hk)) return true;
+        return !hk.ctrl && !hk.alt && !hk.shift && e.shiftKey && hotkeyMatches(e, Object.assign({}, hk, { shift: true }));
+    }
+    function mossadToggleExpand() {
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        if (fsEl) {
+            const ex = document.exitFullscreen || document.webkitExitFullscreen;
+            try { const p = ex && ex.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+            return 'exit';
+        }
+        if (rootDomain.includes('pinterest.') && typeof pinterestFindFullScaleButton === 'function') {
+            const b = pinterestFindFullScaleButton();
+            if (b) { clickElementFull(b); return 'pinterest'; }
+        }
+        if (rootDomain === 'grok.com') {
+            const b = grokFindExpandButton();
+            if (b) { clickElementFull(b); return 'grok'; } // один клик: triggerClick кликает дважды (кнопка-переключатель свернулась бы)
+            const c = grokFindCollapseButton();
+            if (c) { clickElementFull(c); return 'grok-collapse'; }
+        }
+        const g = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+            if (_mossadOwnUi(b)) return false;
+            const t = _mossadBtnLabel(b);
+            return /full\s*-?screen|во весь экран|полноэкранн/.test(t) && !/exit|выйти|выход/.test(t);
+        });
+        if (g) { clickElementFull(g); return 'button'; }
+        const v = typeof getActiveVideo === 'function' ? getActiveVideo() : null;
+        const rq = v && (v.requestFullscreen || v.webkitRequestFullscreen);
+        if (rq) { try { const p = rq.call(v); if (p && p.catch) p.catch(() => {}); } catch (e) {} return 'video'; }
+        showToast('⚠️ Нечего разворачивать: нет видео и кнопки полного экрана', true);
+        return null;
+    }
+
+    // ============================================
     // UNIVERSAL AUTO FULL SCREEN (FS)
     // ============================================
     function triggerUniversalFullScreen() {
@@ -179,7 +236,7 @@
             // 2. Grok: кнопка Full Screen (Expand video / lucide-expand)
             if (rootDomain === 'grok.com') {
                 const fsKeywords = ['expand video', 'expand', 'во весь экран', 'полноэкран', 'full screen', 'fullscreen'];
-                const btn = document.querySelector('button[aria-label="Expand video"], button[aria-label*="Expand" i]')
+                const btn = grokFindExpandButton() || document.querySelector('button[aria-label*="Expand" i]')
                     || (findGrokButton(fsKeywords))
                     || Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
                         const aria = (b.getAttribute('aria-label') || '').toLowerCase();

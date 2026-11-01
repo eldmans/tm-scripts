@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.78
+// @version      1.3.79
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.78';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.79';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -689,7 +689,7 @@ debugSlideshow: false,
 pinterestMode: 'rand',
 promptHotkeysOn: true,
 promptHotkeys: 'download',
-grokNoPromptKeys: 'RWEZXGVC',
+grokNoPromptKeys: 'RWEZXGVCF',
 pinterestJumpKeys: 'off',
 pinterestDir: 'fwd',
 pinterestFilterType: 'ratio',
@@ -715,6 +715,7 @@ focusWidget: { key: 'F7', ctrl: false, alt: false, shift: false },
 snapWidget: { key: 'F8', ctrl: false, alt: false, shift: false },
 openTodos: { key: '', ctrl: false, alt: false, shift: false },
 pinFullScale: { key: '', ctrl: false, alt: false, shift: false },
+expand: { key: 'f', ctrl: false, alt: false, shift: false },
 grokCycle: { key: '\\', ctrl: false, alt: false, shift: false },
 nextSlide: { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
 prevSlide: { key: 'ArrowLeft', ctrl: false, alt: false, shift: false },
@@ -7036,10 +7037,16 @@ function _kgMossadHotkey(e, needHandled) {
 if (!needHandled && mossadSpeedMatch(e)) return true;
 if ((needHandled && !e.defaultPrevented) || !config.hk) return false;
 for (const k of Object.keys(config.hk)) { if (hotkeyMatches(e, config.hk[k])) return true; }
+if (typeof mossadExpandHotkeyMatch === 'function' && mossadExpandHotkeyMatch(e)) return true;
 return false;
 }
 function _kgArm() { _kg.until = Date.now() + GROK_KEYGUARD_MS; _kg.prev = document.activeElement; }
 if (rootDomain === 'grok.com' && config.grokNoPromptKeys === 'R') { config.grokNoPromptKeys = 'RWEZXGVC'; try { persistLocalConfig(); } catch (e) {} }
+if (rootDomain === 'grok.com' && !config.npkExpandAdded) {
+config.npkExpandAdded = true;
+const cur = String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys);
+if (!mossadParseKeyList(cur).codes.has('KeyF')) { config.grokNoPromptKeys = cur + 'F'; try { persistLocalConfig(); } catch (e) {} }
+}
 if (rootDomain === 'grok.com') {
 window.addEventListener('keydown', (e) => {
 if (isEditableElement(document.activeElement)) return;
@@ -8227,6 +8234,53 @@ bestVideo = v;
 }
 return bestVideo;
 }
+function _mossadBtnLabel(b) { return [b.getAttribute('aria-label'), b.getAttribute('title')].map(x => x || '').join(' ').toLowerCase(); }
+function _mossadOwnUi(b) { return !!(b.closest && b.closest('[id^="mossad"]')); }
+function grokFindExpandButton() {
+const exact = document.querySelector('button[aria-label="Expand video"]');
+if (exact) return exact;
+return Array.from(document.querySelectorAll('button, [role="button"]')).find(b => !_mossadOwnUi(b) &&
+(/expand video|развернуть видео/.test(_mossadBtnLabel(b)) || !!b.querySelector('svg.lucide-expand, g[id="name=expand"]'))) || null;
+}
+function grokFindCollapseButton() {
+return Array.from(document.querySelectorAll('button, [role="button"]')).find(b => !_mossadOwnUi(b) &&
+(/collapse video|minimi[sz]e video|exit full|close full|свернуть видео|выйти из полно/.test(_mossadBtnLabel(b)) || !!b.querySelector('svg.lucide-shrink, svg.lucide-minimize, g[id="name=collapse"], g[id="name=shrink"]'))) || null;
+}
+function mossadExpandHotkeyMatch(e) {
+const hk = config.hk && config.hk.expand;
+if (!hk || !hk.key) return false;
+if (hotkeyMatches(e, hk)) return true;
+return !hk.ctrl && !hk.alt && !hk.shift && e.shiftKey && hotkeyMatches(e, Object.assign({}, hk, { shift: true }));
+}
+function mossadToggleExpand() {
+const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+if (fsEl) {
+const ex = document.exitFullscreen || document.webkitExitFullscreen;
+try { const p = ex && ex.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+return 'exit';
+}
+if (rootDomain.includes('pinterest.') && typeof pinterestFindFullScaleButton === 'function') {
+const b = pinterestFindFullScaleButton();
+if (b) { clickElementFull(b); return 'pinterest'; }
+}
+if (rootDomain === 'grok.com') {
+const b = grokFindExpandButton();
+if (b) { clickElementFull(b); return 'grok'; }
+const c = grokFindCollapseButton();
+if (c) { clickElementFull(c); return 'grok-collapse'; }
+}
+const g = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+if (_mossadOwnUi(b)) return false;
+const t = _mossadBtnLabel(b);
+return /full\s*-?screen|во весь экран|полноэкранн/.test(t) && !/exit|выйти|выход/.test(t);
+});
+if (g) { clickElementFull(g); return 'button'; }
+const v = typeof getActiveVideo === 'function' ? getActiveVideo() : null;
+const rq = v && (v.requestFullscreen || v.webkitRequestFullscreen);
+if (rq) { try { const p = rq.call(v); if (p && p.catch) p.catch(() => {}); } catch (e) {} return 'video'; }
+showToast('⚠️ Нечего разворачивать: нет видео и кнопки полного экрана', true);
+return null;
+}
 function triggerUniversalFullScreen() {
 const isEnabled = config.autoFS !== undefined ? config.autoFS : (config.pinterestAutoFS !== undefined ? config.pinterestAutoFS : true);
 if (!isEnabled) return;
@@ -8245,7 +8299,7 @@ return true;
 }
 if (rootDomain === 'grok.com') {
 const fsKeywords = ['expand video', 'expand', 'во весь экран', 'полноэкран', 'full screen', 'fullscreen'];
-const btn = document.querySelector('button[aria-label="Expand video"], button[aria-label*="Expand" i]')
+const btn = grokFindExpandButton() || document.querySelector('button[aria-label*="Expand" i]')
 || (findGrokButton(fsKeywords))
 || Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
 const aria = (b.getAttribute('aria-label') || '').toLowerCase();
@@ -11370,7 +11424,7 @@ return out.filter(k => k != null);
 }
 const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
 const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'pinFullScale', 'generate'];
+const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'expand', 'pinFullScale', 'generate'];
 function readHotkeyDefaults() {
 let raw = null;
 try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -11948,7 +12002,8 @@ rewind: 'Мотать в начало (Alt+R)',
 snapWidget: 'Привязать к левому верхнему краю (F8)',
 openTodos: 'Открыть «📝 Тудушки» (по умолчанию не назначено)',
 grokCycle: 'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
-pinFullScale: 'Pinterest — ⛶ «Показать в полном масштабе» (не назначено)',
+expand: '⛶ Развернуть / полный экран (F; на Pinterest — «полный масштаб»)',
+pinFullScale: 'Pinterest — ⛶ «Показать в полном масштабе» (устарело: то же делает ⛶ Развернуть)',
 generate: 'Генерация Space / Отправка Grok (Ctrl+Enter)'
 };
 const renderHotkeyRow = (k) => {
@@ -12848,6 +12903,11 @@ if (rootDomain.includes('pinterest.') && config.hk.pinFullScale && config.hk.pin
 e.preventDefault();
 const fsBtn = pinterestFindFullScaleButton();
 if (fsBtn) clickElementFull(fsBtn); else showToast('⚠️ Кнопка «Показать в полном масштабе» не найдена', true);
+return;
+}
+if (mossadExpandHotkeyMatch(e)) {
+e.preventDefault();
+mossadToggleExpand();
 return;
 }
 if (hotkeyMatches(e, config.hk.playPause)) {

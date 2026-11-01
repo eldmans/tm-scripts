@@ -36,7 +36,7 @@
         pinterestMode: 'rand',             // 'rand' | '+1' | '1'..'30' (№ N — N-й похожий пин)
         promptHotkeysOn: true,             // v1.3.72: хоткеи из promptHotkeys работают даже в поле промпта (галочка в «Общих»)
         promptHotkeys: 'download',         // v1.3.72: действия через запятую (id хоткеев), выбор — окно «?»
-        grokNoPromptKeys: 'RWEZXGVC',      // v1.3.64: Grok — клавиши, которые не кидают в промт (символ = физ. клавиша, {Имя} — именованная); v1.3.67: + клавиши скорости
+        grokNoPromptKeys: 'RWEZXGVCF',     // v1.3.79: + F (⛶ развернуть); v1.3.64: Grok — клавиши, которые не кидают в промт (символ = физ. клавиша, {Имя} — именованная); v1.3.67: + клавиши скорости
         pinterestJumpKeys: 'off',          // v1.3.59: похожий пин по клавише: off | focus | keys | badges | shift
         pinterestDir: 'fwd',               // v1.3.51: малое слайдшоу на Pinterest: 'fwd' — новые пины, 'back' — назад по истории
         pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
@@ -64,6 +64,7 @@
             snapWidget:       { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
             openTodos:        { key: '',           ctrl: false, alt: false, shift: false }, // v1.3.49: «📝 Тудушки» — пусто по умолчанию
             pinFullScale:     { key: '',           ctrl: false, alt: false, shift: false }, // v1.3.63: Pinterest — ⛶ «Показать в полном масштабе» (не назначено)
+            expand:           { key: 'f',          ctrl: false, alt: false, shift: false }, // v1.3.79: ⛶ развернуть / полный экран (KeyF: f F а А; Shift не важен)
             grokCycle:        { key: '\\',         ctrl: false, alt: false, shift: false }, // v1.3.61: Grok — промт → фото/видео → длина/соотношение (e.code Backslash)
             nextSlide:        { key: 'ArrowRight', ctrl: false, alt: false, shift: false }, // v1.3.45: одна привязка (резервный Пробел убран)
             prevSlide:        { key: 'ArrowLeft',  ctrl: false, alt: false, shift: false },

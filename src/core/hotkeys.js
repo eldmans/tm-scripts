@@ -431,6 +431,13 @@
             return;
         }
 
+        // v1.3.79: ⛶ Развернуть / полный экран (F по умолчанию; Shift не важен) — все сайты
+        if (mossadExpandHotkeyMatch(e)) {
+            e.preventDefault();
+            mossadToggleExpand();
+            return;
+        }
+
         if (hotkeyMatches(e, config.hk.playPause)) {
             e.preventDefault();
             const video = getActiveVideo();

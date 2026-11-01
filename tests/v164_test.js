@@ -45,11 +45,11 @@ const press=(w,t,o)=>{ const e=new w.KeyboardEvent('keydown',Object.assign({bubb
    ok('3b same with Grok listener on the React root (focus guard)', d.activeElement!==ta); }
  // settings field + «?» popup
  { const {w,T}=load({items,url:'https://grok.com/imagine'}); await sleep(50); const d=w.document; w.__P.openSettingsWindow('general'); await sleep(20);
-   const inp=d.getElementById('mossad-gen-nokeys'); ok('4a field shown on Grok with default RWEZXGVC (v1.3.67)', inp && inp.value==='RWEZXGVC');
+   const inp=d.getElementById('mossad-gen-nokeys'); ok('4a field shown on Grok with default RWEZXGVCF (v1.3.67; v1.3.79: + F)', inp && inp.value==='RWEZXGVCF');
    d.getElementById('mossad-gen-nokeys-help').click(); const box=d.getElementById('mossad-key-help');
    ok('4b «?» popup lists named keys', box && /Backspace/.test(box.textContent) && /F12/.test(box.textContent) && /PageDown/.test(box.textContent));
    box.querySelector('[data-kh-ins="{Enter}"]').click();
-   ok('4c click appends token and saves', inp.value==='RWEZXGVC{Enter}' && T.config.grokNoPromptKeys==='RWEZXGVC{Enter}', inp.value+' / '+T.config.grokNoPromptKeys); }
+   ok('4c click appends token and saves', inp.value==='RWEZXGVCF{Enter}' && T.config.grokNoPromptKeys==='RWEZXGVCF{Enter}', inp.value+' / '+T.config.grokNoPromptKeys); }
  { const {w}=load({items,url:'https://ru.pinterest.com/pin/1/'}); await sleep(50); w.__P.openSettingsWindow('general'); await sleep(20);
    ok('4d field not shown on Pinterest', !w.document.getElementById('mossad-gen-nokeys')); }
  } catch(e){ console.log('FAIL exception', e.stack); res.push(false); }

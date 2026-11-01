@@ -52,12 +52,20 @@
         if (!needHandled && mossadSpeedMatch(e)) return true; // v1.3.67: клавиши скорости видео (лёгкий слой)
         if ((needHandled && !e.defaultPrevented) || !config.hk) return false;
         for (const k of Object.keys(config.hk)) { if (hotkeyMatches(e, config.hk[k])) return true; }
+        if (typeof mossadExpandHotkeyMatch === 'function' && mossadExpandHotkeyMatch(e)) return true; // v1.3.79: Shift+F
         return false;
     }
     function _kgArm() { _kg.until = Date.now() + GROK_KEYGUARD_MS; _kg.prev = document.activeElement; }
 
     // v1.3.67: старое умолчание 'R' → с клавишами скорости видео
     if (rootDomain === 'grok.com' && config.grokNoPromptKeys === 'R') { config.grokNoPromptKeys = 'RWEZXGVC'; try { persistLocalConfig(); } catch (e) {} }
+    // v1.3.79: F (⛶ развернуть) — в список «не кидают в промт», один раз (если владелец потом уберёт F — не возвращаем)
+    if (rootDomain === 'grok.com' && !config.npkExpandAdded) {
+        config.npkExpandAdded = true;
+        const cur = String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys);
+        // сохраняем только если F действительно дописали: свежий контейнер без конфига ничего не пишет
+        if (!mossadParseKeyList(cur).codes.has('KeyF')) { config.grokNoPromptKeys = cur + 'F'; try { persistLocalConfig(); } catch (e) {} }
+    }
     if (rootDomain === 'grok.com') {
         // Взвод страховки — window/capture (раньше обработчиков на document/элементах)
         window.addEventListener('keydown', (e) => {
