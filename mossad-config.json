@@ -172,10 +172,11 @@
       "shift": false
     },
     "pinFullScale": {
-      "key": "",
+      "key": "f",
       "ctrl": false,
       "alt": false,
-      "shift": false
+      "shift": false,
+      "code": "KeyF"
     },
     "grokCycle": {
       "key": "\\",
