@@ -141,6 +141,8 @@
         if (btn) {
             const video = (typeof getActiveVideo === 'function') ? getActiveVideo() : null;
             const labelBefore = (btn.getAttribute('aria-label') || btn.getAttribute('title') || btn.textContent || '').toLowerCase();
+            if (video && video.isConnected) grokSaveSoundPref({ muted: !video.muted, volume: video.volume }); // v1.3.80: ожидаемое состояние сразу
+            _soundGestureAt = Date.now(); // хоткей звука = выбор пользователя (и для синтетического нажатия)
             triggerClick(btn, 'Grok Sound Toggle');
             // Тост по фактическому состоянию <video> (после того как плеер применит клик);
             // если видео нет — по подписи кнопки до клика.
@@ -149,6 +151,7 @@
                 if (video && video.isConnected) nowMuted = video.muted;
                 else nowMuted = !(labelBefore.includes('включить') || labelBefore.includes('unmute'));
                 showSoundToast(nowMuted ? '🔇 Звук выключен' : '🔊 Звук включен');
+                if (video && video.isConnected) grokSaveSoundPref(video); // v1.3.80: запомнить для следующих слайдов
             }, 150);
             return;
         }
@@ -159,8 +162,85 @@
         const video = getActiveVideo();
         if (video) {
             video.muted = !video.muted;
+            grokSaveSoundPref(video);
             showSoundToast(video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
         } else {
             showToast('⚠️ Видео не найдено', true);
         }
+    }
+
+    // ── v1.3.80: BSH (слайдшоу галереи Grok) — звук не сбрасывается при смене слайда ──
+    // Каждый слайд Grok — новый <video>, который стартует в своём состоянии (обычно без звука).
+    // Запоминаем выбор пользователя {muted, volume} (sessionStorage — на эту вкладку) и применяем к
+    // каждому новому видео, пока идёт или стоит на паузе слайдшоу.
+    // Что считаем «выбором пользователя»: volumechange у видео, которое играет уже ≥ 700 мс, в течение
+    // 800 мс после настоящего (isTrusted) клика/нажатия клавиши, и не во время нашего же применения.
+    // Свежие видео (< 700 мс) игнорируются — так Grok, глушащий новый слайд, не перезапишет выбор.
+    const GROK_SOUND_PREF_KEY = 'mossad_grok_sound_pref';
+    const _soundVideoBorn = new WeakMap();
+    let _soundGestureAt = 0, _soundApplyingUntil = 0;
+
+    function grokReadSoundPref() {
+        try { const p = JSON.parse(sessionStorage.getItem(GROK_SOUND_PREF_KEY) || 'null'); return (p && typeof p.muted === 'boolean') ? p : null; } catch (e) { return null; }
+    }
+    function grokSaveSoundPref(v) {
+        if (!v) return;
+        try { sessionStorage.setItem(GROK_SOUND_PREF_KEY, JSON.stringify({ muted: !!v.muted, volume: (typeof v.volume === 'number' && isFinite(v.volume)) ? v.volume : 1, t: Date.now() })); } catch (e) {}
+    }
+    function _grokSoundPersistOn() {
+        return rootDomain === 'grok.com' && config.grokKeepSound !== false
+            && typeof isSlideshowActiveOrPaused === 'function' && isSlideshowActiveOrPaused();
+    }
+    /** Привести видео к запомненному звуку. Возвращает true, если что-то меняли. */
+    function grokApplySoundPref(v) {
+        const p = grokReadSoundPref();
+        if (!p || !v || !v.isConnected) return false;
+        let changed = false;
+        if (typeof p.volume === 'number' && p.volume >= 0 && p.volume <= 1 && Math.abs((v.volume || 0) - p.volume) > 0.01) { _soundApplyingUntil = Date.now() + 600; try { v.volume = p.volume; changed = true; } catch (e) {} }
+        if (!!v.muted !== p.muted) {
+            changed = true;
+            _soundApplyingUntil = Date.now() + 600;
+            // ANTI_PATTERNS §2: сначала кнопка плеера (иконка Grok остаётся в синхроне), затем — проверка.
+            const active = (typeof getActiveVideo === 'function') ? getActiveVideo() : null;
+            const btn = (active === v) ? findGrokSoundToggleButton({ includeHidden: true }) : null;
+            if (btn) triggerClick(btn);
+            setTimeout(() => {
+                if (v.isConnected && !!v.muted !== p.muted) { _soundApplyingUntil = Date.now() + 300; v.muted = p.muted; }
+            }, 150);
+        }
+        return changed;
+    }
+    /** Настоящий клик / клавиша пользователя (синтетические события скриптов — не считаются). */
+    function grokSoundMarkGesture(e) { if (!e || e.isTrusted !== false) _soundGestureAt = Date.now(); }
+    function _grokSoundOnVideoStart(e) {
+        const v = e.target;
+        if (!v || v.tagName !== 'VIDEO') return;
+        if (!_soundVideoBorn.has(v)) _soundVideoBorn.set(v, Date.now());
+        if (!_grokSoundPersistOn()) return;
+        if (v._mossadSoundApplied) return;
+        const at = Date.now();
+        v._mossadSoundApplied = at;
+        grokApplySoundPref(v);
+        // Grok может перезаписать звук после старта — повторная проверка. Если пользователь уже сам
+        // нажимал что-то после старта слайда — не вмешиваемся (его выбор запишется сам).
+        [350, 1000].forEach(ms => setTimeout(() => { if (_grokSoundPersistOn() && _soundGestureAt <= at) grokApplySoundPref(v); }, ms));
+    }
+    if (rootDomain === 'grok.com') {
+        document.addEventListener('pointerdown', grokSoundMarkGesture, true);
+        document.addEventListener('keydown', grokSoundMarkGesture, true);
+        // видео, которые уже были на странице до запуска скрипта, — «старые»
+        try { document.querySelectorAll('video').forEach(v => _soundVideoBorn.set(v, 0)); } catch (e) {}
+        document.addEventListener('play', _grokSoundOnVideoStart, true);
+        document.addEventListener('loadeddata', _grokSoundOnVideoStart, true);
+        document.addEventListener('volumechange', (e) => {
+            const v = e.target;
+            if (!v || v.tagName !== 'VIDEO') return;
+            const now = Date.now();
+            if (now < _soundApplyingUntil) return;
+            if (now - _soundGestureAt > 800) return;
+            const born = _soundVideoBorn.get(v);
+            if (born === undefined) { _soundVideoBorn.set(v, now); return; } // видео без play/loadeddata — считаем новым
+            if (now - born < 700) return;
+            grokSaveSoundPref(v);
+        }, true);
     }

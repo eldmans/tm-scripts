@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.79
+// @version      1.3.80
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.79';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.80';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -690,6 +690,7 @@ pinterestMode: 'rand',
 promptHotkeysOn: true,
 promptHotkeys: 'download',
 grokNoPromptKeys: 'RWEZXGVCF',
+grokKeepSound: true,
 pinterestJumpKeys: 'off',
 pinterestDir: 'fwd',
 pinterestFilterType: 'ratio',
@@ -3709,22 +3710,87 @@ const btn = findGrokSoundToggleButton();
 if (btn) {
 const video = (typeof getActiveVideo === 'function') ? getActiveVideo() : null;
 const labelBefore = (btn.getAttribute('aria-label') || btn.getAttribute('title') || btn.textContent || '').toLowerCase();
+if (video && video.isConnected) grokSaveSoundPref({ muted: !video.muted, volume: video.volume });
+_soundGestureAt = Date.now();
 triggerClick(btn, 'Grok Sound Toggle');
 setTimeout(() => {
 let nowMuted;
 if (video && video.isConnected) nowMuted = video.muted;
 else nowMuted = !(labelBefore.includes('включить') || labelBefore.includes('unmute'));
 showSoundToast(nowMuted ? '🔇 Звук выключен' : '🔊 Звук включен');
+if (video && video.isConnected) grokSaveSoundPref(video);
 }, 150);
 return;
 }
 const video = getActiveVideo();
 if (video) {
 video.muted = !video.muted;
+grokSaveSoundPref(video);
 showSoundToast(video.muted ? '🔇 Звук выключен' : '🔊 Звук включен');
 } else {
 showToast('⚠️ Видео не найдено', true);
 }
+}
+const GROK_SOUND_PREF_KEY = 'mossad_grok_sound_pref';
+const _soundVideoBorn = new WeakMap();
+let _soundGestureAt = 0, _soundApplyingUntil = 0;
+function grokReadSoundPref() {
+try { const p = JSON.parse(sessionStorage.getItem(GROK_SOUND_PREF_KEY) || 'null'); return (p && typeof p.muted === 'boolean') ? p : null; } catch (e) { return null; }
+}
+function grokSaveSoundPref(v) {
+if (!v) return;
+try { sessionStorage.setItem(GROK_SOUND_PREF_KEY, JSON.stringify({ muted: !!v.muted, volume: (typeof v.volume === 'number' && isFinite(v.volume)) ? v.volume : 1, t: Date.now() })); } catch (e) {}
+}
+function _grokSoundPersistOn() {
+return rootDomain === 'grok.com' && config.grokKeepSound !== false
+&& typeof isSlideshowActiveOrPaused === 'function' && isSlideshowActiveOrPaused();
+}
+function grokApplySoundPref(v) {
+const p = grokReadSoundPref();
+if (!p || !v || !v.isConnected) return false;
+let changed = false;
+if (typeof p.volume === 'number' && p.volume >= 0 && p.volume <= 1 && Math.abs((v.volume || 0) - p.volume) > 0.01) { _soundApplyingUntil = Date.now() + 600; try { v.volume = p.volume; changed = true; } catch (e) {} }
+if (!!v.muted !== p.muted) {
+changed = true;
+_soundApplyingUntil = Date.now() + 600;
+const active = (typeof getActiveVideo === 'function') ? getActiveVideo() : null;
+const btn = (active === v) ? findGrokSoundToggleButton({ includeHidden: true }) : null;
+if (btn) triggerClick(btn);
+setTimeout(() => {
+if (v.isConnected && !!v.muted !== p.muted) { _soundApplyingUntil = Date.now() + 300; v.muted = p.muted; }
+}, 150);
+}
+return changed;
+}
+function grokSoundMarkGesture(e) { if (!e || e.isTrusted !== false) _soundGestureAt = Date.now(); }
+function _grokSoundOnVideoStart(e) {
+const v = e.target;
+if (!v || v.tagName !== 'VIDEO') return;
+if (!_soundVideoBorn.has(v)) _soundVideoBorn.set(v, Date.now());
+if (!_grokSoundPersistOn()) return;
+if (v._mossadSoundApplied) return;
+const at = Date.now();
+v._mossadSoundApplied = at;
+grokApplySoundPref(v);
+[350, 1000].forEach(ms => setTimeout(() => { if (_grokSoundPersistOn() && _soundGestureAt <= at) grokApplySoundPref(v); }, ms));
+}
+if (rootDomain === 'grok.com') {
+document.addEventListener('pointerdown', grokSoundMarkGesture, true);
+document.addEventListener('keydown', grokSoundMarkGesture, true);
+try { document.querySelectorAll('video').forEach(v => _soundVideoBorn.set(v, 0)); } catch (e) {}
+document.addEventListener('play', _grokSoundOnVideoStart, true);
+document.addEventListener('loadeddata', _grokSoundOnVideoStart, true);
+document.addEventListener('volumechange', (e) => {
+const v = e.target;
+if (!v || v.tagName !== 'VIDEO') return;
+const now = Date.now();
+if (now < _soundApplyingUntil) return;
+if (now - _soundGestureAt > 800) return;
+const born = _soundVideoBorn.get(v);
+if (born === undefined) { _soundVideoBorn.set(v, now); return; }
+if (now - born < 700) return;
+grokSaveSoundPref(v);
+}, true);
 }
 
 // ── src/engines/grok/upscale.js ──
