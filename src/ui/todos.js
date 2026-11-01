@@ -11,6 +11,25 @@
     const TODO_IMG_JPEG_Q = 0.8;
     const TODO_PNG_KEEP_BYTES = 150 * 1024;
     const TODO_WARN_BYTES = 20 * 1024 * 1024;
+    // v1.3.81: черновик новой задачи (текст + id уже сохранённых фото) — переживает закрытие окна и перезагрузку
+    const TODO_DRAFT_KEY = 'mossad_todo_draft';
+    const TODO_SAVE_MS = 400;
+    function todoReadDraft() {
+        let raw = null;
+        try { if (typeof GM_getValue === 'function') raw = GM_getValue(TODO_DRAFT_KEY, null); } catch (e) {}
+        try {
+            const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (!d || typeof d !== 'object') return null;
+            return { text: typeof d.text === 'string' ? d.text : '', imgs: Array.isArray(d.imgs) ? d.imgs.filter(i => i && i.id).map(i => ({ id: String(i.id), bytes: Number(i.bytes) || 0, w: Number(i.w) || 0, h: Number(i.h) || 0 })) : [] };
+        } catch (e) { return null; }
+    }
+    function todoWriteDraft(d) {
+        try {
+            if (typeof GM_setValue !== 'function') return;
+            if (!d || (!d.text && !(d.imgs && d.imgs.length))) { if (typeof GM_deleteValue === 'function') GM_deleteValue(TODO_DRAFT_KEY); else GM_setValue(TODO_DRAFT_KEY, ''); return; }
+            GM_setValue(TODO_DRAFT_KEY, JSON.stringify({ text: d.text || '', imgs: (d.imgs || []).map(i => ({ id: i.id, bytes: i.bytes, w: i.w, h: i.h })), ts: Date.now() }));
+        } catch (e) {}
+    }
 
     function todoNewId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
     function todoReadList() {
@@ -299,6 +318,21 @@
         const sizeEl = pane.querySelector('#mossad-todo-size');
         let pendingImgs = []; // фото новой задачи (ещё не добавленной): [{id, bytes, w, h, dataUrl}]
         let attachTarget = null; // id задачи для 📎 или null (новая)
+        let editingId = null;    // v1.3.81: задача, у которой показаны превью фото (последняя, в которую зашли)
+        // v1.3.81: черновик новой задачи — восстановить (фото уже лежат в своих GM-ключах)
+        const draft0 = todoReadDraft();
+        if (draft0) {
+            newText.value = draft0.text;
+            draft0.imgs.forEach(i => { const u = todoReadImg(i.id); if (u) pendingImgs.push(Object.assign({}, i, { dataUrl: u })); });
+        }
+        let draftTimer = null;
+        const saveDraftNow = () => { if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; } todoWriteDraft({ text: newText.value, imgs: pendingImgs }); };
+        const saveDraftSoon = () => { if (draftTimer) clearTimeout(draftTimer); draftTimer = setTimeout(saveDraftNow, TODO_SAVE_MS); };
+        const rowTimers = {};
+        const saveRowNow = (todoId, value) => {
+            if (rowTimers[todoId]) { clearTimeout(rowTimers[todoId]); delete rowTimers[todoId]; }
+            mutate(list => { const it = list.find(x => x.id === todoId); if (it && it.text !== value) it.text = value; });
+        };
 
         const updateSize = (list) => {
             const b = todoTotalBytes(list) + pendingImgs.reduce((a, i) => a + i.bytes, 0);
@@ -343,15 +377,45 @@
                 <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;">
                   <textarea class="mossad-todo-text" rows="${Math.min(6, Math.max(1, (t.text.match(/\n/g) || []).length + 1))}" style="${inputCss}resize:vertical;${t.done ? 'text-decoration:line-through;' : ''}"></textarea>
                   <div class="mossad-todo-thumbs" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
+                  <button class="mossad-todo-imgs-badge" title="Фото этой задачи — показать" style="display:${t.imgs.length ? 'inline-block' : 'none'};align-self:flex-start;background:#111827;border:1px solid #374151;border-radius:4px;color:#9ca3af;font-size:10px;padding:1px 6px;cursor:pointer;">🖼 ${t.imgs.length}</button>
                   ${t.sent ? `<a class="mossad-todo-sent" href="${String(t.sent.url).replace(/"/g, '&quot;')}" target="_blank" rel="noopener" title="Отправлено на GitHub ${new Date(t.sent.ts).toLocaleString()}" style="align-self:flex-start;font-size:10px;color:#93c5fd;background:#1e3a8a;border-radius:4px;padding:1px 6px;text-decoration:none;">📤 #${t.sent.n}</a>` : ''}
                 </div>
                 <button class="mossad-todo-attach" title="Прикрепить фото" style="background:transparent;border:none;cursor:pointer;font-size:13px;padding:2px;" data-mossad-label="todoAttach">${LH('todoAttach')}</button>
                 <button class="mossad-todo-del" title="Удалить задачу" style="background:transparent;border:none;cursor:pointer;font-size:13px;padding:2px;color:#f87171;" data-mossad-label="todoDelete">${LH('todoDelete')}</button>`;
             row.querySelector('.mossad-todo-text').value = t.text;
-            const thumbs = row.querySelector('.mossad-todo-thumbs');
-            t.imgs.forEach(im => { const u = todoReadImg(im.id); if (u) thumbs.appendChild(mkThumb(im.id, u, true)); });
+            // v1.3.81: превью фото — только у редактируемой задачи; у остальных (и у выполненных) — значок «🖼 N»
+            if (t.id === editingId) fillThumbs(row, t);
             return row;
         };
+        /** Показать превью фото у строки (читаются из GM только сейчас). */
+        function fillThumbs(row, t) {
+            const thumbs = row.querySelector('.mossad-todo-thumbs');
+            thumbs.innerHTML = '';
+            const it = t || todoReadList().find(x => x.id === row.dataset.todo);
+            if (it) it.imgs.forEach(im => { const u = todoReadImg(im.id); if (u) thumbs.appendChild(mkThumb(im.id, u, true)); });
+            row.classList.add('mossad-todo-editing');
+            const b = row.querySelector('.mossad-todo-imgs-badge'); if (b) b.style.display = 'none';
+        }
+        function foldThumbs(row) {
+            const thumbs = row.querySelector('.mossad-todo-thumbs');
+            const n = thumbs.querySelectorAll('.mossad-todo-thumb').length;
+            thumbs.innerHTML = ''; // data URL отпускаем — меньше памяти
+            row.classList.remove('mossad-todo-editing');
+            const it = todoReadList().find(x => x.id === row.dataset.todo);
+            const cnt = it ? it.imgs.length : n;
+            const b = row.querySelector('.mossad-todo-imgs-badge');
+            if (b) { b.textContent = `🖼 ${cnt}`; b.style.display = cnt ? 'inline-block' : 'none'; }
+        }
+        /** Сделать задачу «редактируемой»: у неё превью, у прежней — свернуть. force — показать и у выполненной. */
+        function setEditing(todoId, force) {
+            const row = todoId ? listEl.querySelector(`[data-todo="${todoId}"]`) : null;
+            const isDone = row && row.querySelector('.mossad-todo-done') && row.querySelector('.mossad-todo-done').checked;
+            if (row && isDone && !force) todoId = null; // у выполненных превью не показываем
+            if (editingId && editingId !== todoId) { const prev = listEl.querySelector(`[data-todo="${editingId}"]`); if (prev) foldThumbs(prev); }
+            if (todoId && (editingId !== todoId || force)) fillThumbs(listEl.querySelector(`[data-todo="${todoId}"]`));
+            editingId = todoId || null;
+        }
+        modal._mossadTodoSetEditing = setEditing; // для тестов
         function renderTodos() {
             const list = todoReadList();
             listEl.innerHTML = '';
@@ -374,11 +438,13 @@
                 if (todoId) {
                     if (!todoWriteImg(id, r.dataUrl)) { showToast('❌ GM-хранилище недоступно', true); return n; }
                     mutate(list => { const t = list.find(x => x.id === todoId); if (t) t.imgs.push({ id, bytes: r.bytes, w: r.w, h: r.h }); });
-                    const row = listEl.querySelector(`[data-todo="${todoId}"] .mossad-todo-thumbs`);
-                    if (row) row.appendChild(mkThumb(id, r.dataUrl, true));
+                    setEditing(todoId, true); // фото добавили в эту задачу — показать её превью
                 } else {
+                    // v1.3.81: фото черновика сразу в свой GM-ключ — не пропадёт при закрытии окна
+                    todoWriteImg(id, r.dataUrl);
                     pendingImgs.push({ id, bytes: r.bytes, w: r.w, h: r.h, dataUrl: r.dataUrl });
                     renderPending();
+                    saveDraftNow();
                 }
                 n++;
             }
@@ -424,11 +490,15 @@
                     todoDeleteImg(imgId);
                 } else {
                     pendingImgs = pendingImgs.filter(p => p.id !== imgId);
+                    todoDeleteImg(imgId);
+                    saveDraftNow();
                 }
                 wrap.remove();
                 updateSize();
                 return;
             }
+            const badge = t.closest('.mossad-todo-imgs-badge');
+            if (badge) { setEditing(targetOf(badge), true); return; }
             const thumb = t.closest('.mossad-todo-thumb');
             if (thumb) { const img = thumb.querySelector('img'); mossadTodoOpenOverlay(img && img.src); return; }
             if (t.closest('.mossad-todo-attach')) { attachTarget = targetOf(t); fileIn.click(); return; }
@@ -447,6 +517,7 @@
                 for (const p of pendingImgs) { if (todoWriteImg(p.id, p.dataUrl)) imgs.push({ id: p.id, bytes: p.bytes, w: p.w, h: p.h }); }
                 mutate(list => { list.push({ id: todoNewId(), text, done: false, ts: Date.now(), imgs }); });
                 pendingImgs = []; newText.value = ''; renderPending();
+                saveDraftNow(); // черновик очищен
                 renderTodos();
                 return;
             }
@@ -507,11 +578,38 @@
                 const ta = row.querySelector('.mossad-todo-text');
                 if (ta) ta.style.textDecoration = t.checked ? 'line-through' : '';
             } else if (t.classList.contains('mossad-todo-text')) {
-                mutate(list => { const it = list.find(x => x.id === todoId); if (it) it.text = t.value; });
+                saveRowNow(todoId, t.value);
             }
+        });
+        // v1.3.81: автосохранение при наборе (с задержкой) — клик мимо / закрытие окна текст не теряет
+        pane.addEventListener('input', (e) => {
+            const t = e.target;
+            if (!t || !t.classList) return;
+            if (t === newText) { saveDraftSoon(); return; }
+            if (t.classList.contains('mossad-todo-text')) {
+                const todoId = targetOf(t);
+                if (!todoId) return;
+                if (rowTimers[todoId]) clearTimeout(rowTimers[todoId]);
+                rowTimers[todoId] = setTimeout(() => saveRowNow(todoId, t.value), TODO_SAVE_MS);
+            }
+        });
+        pane.addEventListener('focusout', (e) => {
+            const t = e.target;
+            if (t === newText) saveDraftNow();
+            else if (t && t.classList && t.classList.contains('mossad-todo-text')) { const id = targetOf(t); if (id) saveRowNow(id, t.value); }
+        });
+        // v1.3.81: превью — у той задачи, в которую зашли (у новой — всегда)
+        pane.addEventListener('focusin', (e) => {
+            const t = e.target;
+            if (!t || !t.closest) return;
+            if (t.closest('#mossad-todo-new')) { setEditing(null); return; }
+            const id = targetOf(t);
+            if (id && t.classList && t.classList.contains('mossad-todo-text')) setEditing(id);
         });
         // Текст сохраняется и при закрытии окна (change мог не прийти)
         modal._mossadTodosFlush = () => {
+            saveDraftNow();
+            Object.keys(rowTimers).forEach(id => { clearTimeout(rowTimers[id]); delete rowTimers[id]; });
             const list = todoReadList();
             let dirty = false;
             listEl.querySelectorAll('[data-todo]').forEach(row => {
@@ -528,6 +626,9 @@
             onDrop: (ids) => mutate(list => { const by = {}; list.forEach(x => { by[x.id] = x; }); const out = ids.map(id => by[id]).filter(Boolean); list.forEach(x => { if (!out.includes(x)) out.push(x); }); list.splice(0, list.length, ...out); }),
         });
         renderTodos();
+        renderPending();
+        // v1.3.81: уход со страницы — дописать черновик и тексты
+        window.addEventListener('pagehide', () => { if (!pane.isConnected) return; try { modal._mossadTodosFlush(); } catch (e) {} });
     }
 
     /**

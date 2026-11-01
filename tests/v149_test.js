@@ -18,7 +18,11 @@ const items=[0].map(i=>({uuid:U(i),convId:'c1'}));
  T.openSettingsWindow('general'); ok('1b images not read until tab opened', imgReads===0);
  b2.click(); let m=d.getElementById('mossad-hk-modal');
  ok('1c 2DO opens settings on todos tab', m && m.dataset.tab==='todos' && !!m.querySelector('#mossad-todo-list'));
- ok('1d images loaded lazily on tab open, thumb 64px', imgReads===1 && m.querySelector('[data-todo="old1"] .mossad-todo-thumb img').style.width==='64px');
+ // v1.3.81: превью только у редактируемой задачи — при открытии вкладки фото не читаются, у задачи значок «🖼 1»
+ const bdg=m.querySelector('[data-todo="old1"] .mossad-todo-imgs-badge');
+ ok('1d0 tab open: no photo read, badge «🖼 1»', imgReads===0 && bdg && bdg.textContent==='🖼 1' && !m.querySelector('[data-todo="old1"] .mossad-todo-thumb'), imgReads);
+ bdg.click();
+ ok('1d images loaded lazily (on badge click), thumb 64px', imgReads===1 && m.querySelector('[data-todo="old1"] .mossad-todo-thumb img').style.width==='64px');
  ok('1e labels', T.L('tabTodos')==='📝 Тудушки' && T.L('todoGitHub')==='📤 На GitHub' && T.L('todoBtn')==='2DO');
  // ---- add with downscaled image ----
  const n=await m._mossadTodoAddImages([file('big.jpg','image/jpeg',500000)], null);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.80
+// @version      1.3.81
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.80';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.81';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -10828,6 +10828,24 @@ const TODO_IMG_MAX_SIDE = 1280;
 const TODO_IMG_JPEG_Q = 0.8;
 const TODO_PNG_KEEP_BYTES = 150 * 1024;
 const TODO_WARN_BYTES = 20 * 1024 * 1024;
+const TODO_DRAFT_KEY = 'mossad_todo_draft';
+const TODO_SAVE_MS = 400;
+function todoReadDraft() {
+let raw = null;
+try { if (typeof GM_getValue === 'function') raw = GM_getValue(TODO_DRAFT_KEY, null); } catch (e) {}
+try {
+const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+if (!d || typeof d !== 'object') return null;
+return { text: typeof d.text === 'string' ? d.text : '', imgs: Array.isArray(d.imgs) ? d.imgs.filter(i => i && i.id).map(i => ({ id: String(i.id), bytes: Number(i.bytes) || 0, w: Number(i.w) || 0, h: Number(i.h) || 0 })) : [] };
+} catch (e) { return null; }
+}
+function todoWriteDraft(d) {
+try {
+if (typeof GM_setValue !== 'function') return;
+if (!d || (!d.text && !(d.imgs && d.imgs.length))) { if (typeof GM_deleteValue === 'function') GM_deleteValue(TODO_DRAFT_KEY); else GM_setValue(TODO_DRAFT_KEY, ''); return; }
+GM_setValue(TODO_DRAFT_KEY, JSON.stringify({ text: d.text || '', imgs: (d.imgs || []).map(i => ({ id: i.id, bytes: i.bytes, w: i.w, h: i.h })), ts: Date.now() }));
+} catch (e) {}
+}
 function todoNewId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function todoReadList() {
 let raw = null;
@@ -11078,6 +11096,20 @@ const fileIn = pane.querySelector('#mossad-todo-file');
 const sizeEl = pane.querySelector('#mossad-todo-size');
 let pendingImgs = [];
 let attachTarget = null;
+let editingId = null;
+const draft0 = todoReadDraft();
+if (draft0) {
+newText.value = draft0.text;
+draft0.imgs.forEach(i => { const u = todoReadImg(i.id); if (u) pendingImgs.push(Object.assign({}, i, { dataUrl: u })); });
+}
+let draftTimer = null;
+const saveDraftNow = () => { if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; } todoWriteDraft({ text: newText.value, imgs: pendingImgs }); };
+const saveDraftSoon = () => { if (draftTimer) clearTimeout(draftTimer); draftTimer = setTimeout(saveDraftNow, TODO_SAVE_MS); };
+const rowTimers = {};
+const saveRowNow = (todoId, value) => {
+if (rowTimers[todoId]) { clearTimeout(rowTimers[todoId]); delete rowTimers[todoId]; }
+mutate(list => { const it = list.find(x => x.id === todoId); if (it && it.text !== value) it.text = value; });
+};
 const updateSize = (list) => {
 const b = todoTotalBytes(list) + pendingImgs.reduce((a, i) => a + i.bytes, 0);
 sizeEl.textContent = `Хранилище: ${todoFmtMb(b)}` + (b > TODO_WARN_BYTES ? ' ⚠️ больше 20 МБ — удалите лишние фото' : '');
@@ -11121,15 +11153,42 @@ row.innerHTML = `
                 <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;">
                   <textarea class="mossad-todo-text" rows="${Math.min(6, Math.max(1, (t.text.match(/\n/g) || []).length + 1))}" style="${inputCss}resize:vertical;${t.done ? 'text-decoration:line-through;' : ''}"></textarea>
                   <div class="mossad-todo-thumbs" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
+                  <button class="mossad-todo-imgs-badge" title="Фото этой задачи — показать" style="display:${t.imgs.length ? 'inline-block' : 'none'};align-self:flex-start;background:#111827;border:1px solid #374151;border-radius:4px;color:#9ca3af;font-size:10px;padding:1px 6px;cursor:pointer;">🖼 ${t.imgs.length}</button>
                   ${t.sent ? `<a class="mossad-todo-sent" href="${String(t.sent.url).replace(/"/g, '&quot;')}" target="_blank" rel="noopener" title="Отправлено на GitHub ${new Date(t.sent.ts).toLocaleString()}" style="align-self:flex-start;font-size:10px;color:#93c5fd;background:#1e3a8a;border-radius:4px;padding:1px 6px;text-decoration:none;">📤 #${t.sent.n}</a>` : ''}
                 </div>
                 <button class="mossad-todo-attach" title="Прикрепить фото" style="background:transparent;border:none;cursor:pointer;font-size:13px;padding:2px;" data-mossad-label="todoAttach">${LH('todoAttach')}</button>
                 <button class="mossad-todo-del" title="Удалить задачу" style="background:transparent;border:none;cursor:pointer;font-size:13px;padding:2px;color:#f87171;" data-mossad-label="todoDelete">${LH('todoDelete')}</button>`;
 row.querySelector('.mossad-todo-text').value = t.text;
-const thumbs = row.querySelector('.mossad-todo-thumbs');
-t.imgs.forEach(im => { const u = todoReadImg(im.id); if (u) thumbs.appendChild(mkThumb(im.id, u, true)); });
+if (t.id === editingId) fillThumbs(row, t);
 return row;
 };
+function fillThumbs(row, t) {
+const thumbs = row.querySelector('.mossad-todo-thumbs');
+thumbs.innerHTML = '';
+const it = t || todoReadList().find(x => x.id === row.dataset.todo);
+if (it) it.imgs.forEach(im => { const u = todoReadImg(im.id); if (u) thumbs.appendChild(mkThumb(im.id, u, true)); });
+row.classList.add('mossad-todo-editing');
+const b = row.querySelector('.mossad-todo-imgs-badge'); if (b) b.style.display = 'none';
+}
+function foldThumbs(row) {
+const thumbs = row.querySelector('.mossad-todo-thumbs');
+const n = thumbs.querySelectorAll('.mossad-todo-thumb').length;
+thumbs.innerHTML = '';
+row.classList.remove('mossad-todo-editing');
+const it = todoReadList().find(x => x.id === row.dataset.todo);
+const cnt = it ? it.imgs.length : n;
+const b = row.querySelector('.mossad-todo-imgs-badge');
+if (b) { b.textContent = `🖼 ${cnt}`; b.style.display = cnt ? 'inline-block' : 'none'; }
+}
+function setEditing(todoId, force) {
+const row = todoId ? listEl.querySelector(`[data-todo="${todoId}"]`) : null;
+const isDone = row && row.querySelector('.mossad-todo-done') && row.querySelector('.mossad-todo-done').checked;
+if (row && isDone && !force) todoId = null;
+if (editingId && editingId !== todoId) { const prev = listEl.querySelector(`[data-todo="${editingId}"]`); if (prev) foldThumbs(prev); }
+if (todoId && (editingId !== todoId || force)) fillThumbs(listEl.querySelector(`[data-todo="${todoId}"]`));
+editingId = todoId || null;
+}
+modal._mossadTodoSetEditing = setEditing;
 function renderTodos() {
 const list = todoReadList();
 listEl.innerHTML = '';
@@ -11150,11 +11209,12 @@ const id = todoNewId();
 if (todoId) {
 if (!todoWriteImg(id, r.dataUrl)) { showToast('❌ GM-хранилище недоступно', true); return n; }
 mutate(list => { const t = list.find(x => x.id === todoId); if (t) t.imgs.push({ id, bytes: r.bytes, w: r.w, h: r.h }); });
-const row = listEl.querySelector(`[data-todo="${todoId}"] .mossad-todo-thumbs`);
-if (row) row.appendChild(mkThumb(id, r.dataUrl, true));
+setEditing(todoId, true);
 } else {
+todoWriteImg(id, r.dataUrl);
 pendingImgs.push({ id, bytes: r.bytes, w: r.w, h: r.h, dataUrl: r.dataUrl });
 renderPending();
+saveDraftNow();
 }
 n++;
 }
@@ -11198,11 +11258,15 @@ mutate(list => { const it = list.find(x => x.id === todoId); if (it) it.imgs = i
 todoDeleteImg(imgId);
 } else {
 pendingImgs = pendingImgs.filter(p => p.id !== imgId);
+todoDeleteImg(imgId);
+saveDraftNow();
 }
 wrap.remove();
 updateSize();
 return;
 }
+const badge = t.closest('.mossad-todo-imgs-badge');
+if (badge) { setEditing(targetOf(badge), true); return; }
 const thumb = t.closest('.mossad-todo-thumb');
 if (thumb) { const img = thumb.querySelector('img'); mossadTodoOpenOverlay(img && img.src); return; }
 if (t.closest('.mossad-todo-attach')) { attachTarget = targetOf(t); fileIn.click(); return; }
@@ -11221,6 +11285,7 @@ const imgs = [];
 for (const p of pendingImgs) { if (todoWriteImg(p.id, p.dataUrl)) imgs.push({ id: p.id, bytes: p.bytes, w: p.w, h: p.h }); }
 mutate(list => { list.push({ id: todoNewId(), text, done: false, ts: Date.now(), imgs }); });
 pendingImgs = []; newText.value = ''; renderPending();
+saveDraftNow();
 renderTodos();
 return;
 }
@@ -11281,10 +11346,35 @@ row.style.opacity = t.checked ? '0.55' : '';
 const ta = row.querySelector('.mossad-todo-text');
 if (ta) ta.style.textDecoration = t.checked ? 'line-through' : '';
 } else if (t.classList.contains('mossad-todo-text')) {
-mutate(list => { const it = list.find(x => x.id === todoId); if (it) it.text = t.value; });
+saveRowNow(todoId, t.value);
 }
 });
+pane.addEventListener('input', (e) => {
+const t = e.target;
+if (!t || !t.classList) return;
+if (t === newText) { saveDraftSoon(); return; }
+if (t.classList.contains('mossad-todo-text')) {
+const todoId = targetOf(t);
+if (!todoId) return;
+if (rowTimers[todoId]) clearTimeout(rowTimers[todoId]);
+rowTimers[todoId] = setTimeout(() => saveRowNow(todoId, t.value), TODO_SAVE_MS);
+}
+});
+pane.addEventListener('focusout', (e) => {
+const t = e.target;
+if (t === newText) saveDraftNow();
+else if (t && t.classList && t.classList.contains('mossad-todo-text')) { const id = targetOf(t); if (id) saveRowNow(id, t.value); }
+});
+pane.addEventListener('focusin', (e) => {
+const t = e.target;
+if (!t || !t.closest) return;
+if (t.closest('#mossad-todo-new')) { setEditing(null); return; }
+const id = targetOf(t);
+if (id && t.classList && t.classList.contains('mossad-todo-text')) setEditing(id);
+});
 modal._mossadTodosFlush = () => {
+saveDraftNow();
+Object.keys(rowTimers).forEach(id => { clearTimeout(rowTimers[id]); delete rowTimers[id]; });
 const list = todoReadList();
 let dirty = false;
 listEl.querySelectorAll('[data-todo]').forEach(row => {
@@ -11299,6 +11389,8 @@ rowSel: '[data-todo]', handleSel: '.mossad-todo-handle',
 onDrop: (ids) => mutate(list => { const by = {}; list.forEach(x => { by[x.id] = x; }); const out = ids.map(id => by[id]).filter(Boolean); list.forEach(x => { if (!out.includes(x)) out.push(x); }); list.splice(0, list.length, ...out); }),
 });
 renderTodos();
+renderPending();
+window.addEventListener('pagehide', () => { if (!pane.isConnected) return; try { modal._mossadTodosFlush(); } catch (e) {} });
 }
 function mossadMakeSortable(list, { rowSel, handleSel, onDrop }) {
 let d = null;
