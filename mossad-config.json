@@ -17,7 +17,7 @@
   "deleteHoldpost": true,
   "allowDuplicates": false,
   "githubConfigPath": "mossad-config.json",
-  "filenameTemplate": "{username}",
+  "filenameTemplate": "{domain}{username}",
   "filenameTemplateEnabled": true,
   "hfAutoSave": "off",
   "playlistRows": 30,
@@ -31,6 +31,7 @@
   "promptHotkeysOn": true,
   "promptHotkeys": "download",
   "grokNoPromptKeys": "RWEZXGVCf",
+  "grokKeepSound": true,
   "pinterestJumpKeys": "off",
   "pinterestDir": "fwd",
   "pinterestFilterType": "ratio",
@@ -191,6 +192,5 @@
       "shift": false
     }
   },
-  "grokKeepSound": true,
   "npkExpandAdded": true
 }
