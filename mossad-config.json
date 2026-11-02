@@ -19,7 +19,7 @@
   "githubConfigPath": "mossad-config.json",
   "filenameTemplate": "{username}~{domain}",
   "filenameTemplateEnabled": true,
-  "hfAutoSave": "off",
+  "hfAutoSave": "always",
   "playlistRows": 30,
   "playlistWidth": 257,
   "widgetZoom": 0.9,
@@ -188,6 +188,12 @@
     "generate": {
       "key": "Enter",
       "ctrl": true,
+      "alt": false,
+      "shift": false
+    },
+    "expand": {
+      "key": "f",
+      "ctrl": false,
       "alt": false,
       "shift": false
     }
