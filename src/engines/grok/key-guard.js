@@ -51,6 +51,8 @@
     function _kgMossadHotkey(e, needHandled) {
         if (!needHandled && mossadSpeedMatch(e)) return true; // v1.3.67: клавиши скорости видео (лёгкий слой)
         if ((needHandled && !e.defaultPrevented) || !config.hk) return false;
+        // v1.3.84: grokCycle намеренно фокусирует промт на шаге 1 — не взводить возврат фокуса
+        if (config.hk.grokCycle && hotkeyMatches(e, config.hk.grokCycle)) return false;
         for (const k of Object.keys(config.hk)) { if (hotkeyMatches(e, config.hk[k])) return true; }
         if (typeof mossadExpandHotkeyMatch === 'function' && mossadExpandHotkeyMatch(e)) return true; // v1.3.79: Shift+F
         return false;
@@ -70,6 +72,8 @@
         // Взвод страховки — window/capture (раньше обработчиков на document/элементах)
         window.addEventListener('keydown', (e) => {
             if (isEditableElement(document.activeElement)) return;
+            // v1.3.84: нажатие grokCycle не должно взводить возврат фокуса из промта
+            if (config.hk && config.hk.grokCycle && hotkeyMatches(e, config.hk.grokCycle)) return;
             if (grokNoPromptKeyMatch(e) || _kgMossadHotkey(e, false)) _kgArm();
         }, true);
         // 1) Отсечь Grok на document/window (bubble), расширения в capture клавишу уже увидели

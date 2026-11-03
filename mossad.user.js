@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.83
+// @version      1.3.84
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.83';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.84';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -6984,10 +6984,14 @@ if (ms && [ms.photo, ms.video, ms.trigger].some(x => x && (x === ae || x.contain
 if (ms && ms.photo && ms.video && ae.getAttribute && ae.getAttribute('role') === 'radiogroup' && ae.contains(ms.video)) return 'mode';
 const d = comp && grokFindDurationControl(comp), a = comp && grokFindAspectControl(comp);
 if ([d, a].some(x => x && (x === ae || x.contains(ae) || (x.parentElement && x.parentElement.getAttribute('role') === 'radiogroup' && x.parentElement.contains(ae))))) return 'param';
-if (ae.getAttribute && /^(radio|menuitemradio|option|menuitem)$/.test(ae.getAttribute('role') || '')) {
+const pop = _gcOpenPopover();
+if (pop && (pop === ae || pop.contains(ae))) return 'param';
+if (ae.getAttribute && /^(radio|menuitemradio|option|menuitem|menu|listbox)$/.test(ae.getAttribute('role') || '')) {
 const t = _gcText(ae) || _gcLabel(ae);
 if (GC_DUR_TEXT_RE.test(t) || GC_AR_TEXT_RE.test(t)) return 'param';
+if (pop && pop.contains(ae)) return 'param';
 }
+if (pop && _gc.step === 3) return 'param';
 return '';
 }
 function grokCycleNextStep() {
@@ -7004,21 +7008,27 @@ function _gcOpenPopover() {
 const prompt = grokFindPromptInput(true);
 return Array.from(document.querySelectorAll(GC_POPOVER_SEL)).find(el => el.isConnected && !_gcOwn(el) && !(prompt && el.contains(prompt)) && _gcShown(el)) || null;
 }
-function _gcEsc(t) { try { t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true })); } catch (e) {} }
+function _gcEsc(t) {
+const ev = () => new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true });
+if (t && t.dispatchEvent) { try { t.dispatchEvent(ev()); } catch (e) {} }
+try { document.dispatchEvent(ev()); } catch (e) {}
+try { window.dispatchEvent(ev()); } catch (e) {}
+}
 async function _gcEnsurePromptReachable() {
 if (grokFindPromptInput()) return true;
 const pop = _gcOpenPopover();
 const ae = document.activeElement;
 const inPop = !!(pop && ae && pop.contains(ae));
-if (!pop && !(ae && ae.getAttribute && /^(option|menuitem|menuitemradio)$/.test(ae.getAttribute('role') || ''))) return false;
+if (!pop && !(ae && ae.getAttribute && /^(option|menuitem|menuitemradio|menu|listbox)$/.test(ae.getAttribute('role') || ''))) return false;
 if (pop) _gcEsc(inPop ? ae : pop);
-if (ae && ae !== document.body && typeof ae.blur === 'function') { try { ae.blur(); } catch (e) {} }
+const p = grokFindPromptInput(true);
+if (p) _gcFocus(p);
 const ok = await waitForCondition(() => grokFindPromptInput(), 400, 40);
 mossadDebug('grokCycle', 'закрыто меню, промт ' + (ok ? 'найден' : 'не найден'), { popover: !!pop });
 return !!ok;
 }
 function _gcStepPrompt() {
-const p = grokFindPromptInput();
+const p = grokFindPromptInput() || grokFindPromptInput(true);
 if (!p) { mossadDebug('grokCycle', 'шаг 1: промт не найден — пропуск'); return false; }
 _gcCaretToEnd(p);
 mossadDebug('grokCycle', 'шаг 1: промт', { tag: p.tagName });
@@ -7191,6 +7201,7 @@ return (!!e.code && l.codes.has(e.code)) || (typeof e.key === 'string' && l.name
 function _kgMossadHotkey(e, needHandled) {
 if (!needHandled && mossadSpeedMatch(e)) return true;
 if ((needHandled && !e.defaultPrevented) || !config.hk) return false;
+if (config.hk.grokCycle && hotkeyMatches(e, config.hk.grokCycle)) return false;
 for (const k of Object.keys(config.hk)) { if (hotkeyMatches(e, config.hk[k])) return true; }
 if (typeof mossadExpandHotkeyMatch === 'function' && mossadExpandHotkeyMatch(e)) return true;
 return false;
@@ -7205,6 +7216,7 @@ if (!mossadParseKeyList(cur).codes.has('KeyF')) { config.grokNoPromptKeys = cur 
 if (rootDomain === 'grok.com') {
 window.addEventListener('keydown', (e) => {
 if (isEditableElement(document.activeElement)) return;
+if (config.hk && config.hk.grokCycle && hotkeyMatches(e, config.hk.grokCycle)) return;
 if (grokNoPromptKeyMatch(e) || _kgMossadHotkey(e, false)) _kgArm();
 }, true);
 const stopAtHtml = (e) => {
@@ -12220,7 +12232,7 @@ return `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-11-01</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-03</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -13097,6 +13109,7 @@ triggerGrokSubmit();
 return;
 }
 }
+if (config.hk && config.hk.grokCycle && hotkeyMatches(e, config.hk.grokCycle)) return;
 const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
 const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
 if (isHistoryHk && rootDomain === 'grok.com') {

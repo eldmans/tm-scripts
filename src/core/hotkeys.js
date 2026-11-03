@@ -282,6 +282,8 @@
         }
 
         // 1. Навигация Home / Saved Grok (срабатывает из любого места grok.com)
+        // v1.3.84: grokCycle ни при каких условиях не переходит в Saved
+        if (config.hk && config.hk.grokCycle && hotkeyMatches(e, config.hk.grokCycle)) return;
         const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
         const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
         if (isHistoryHk && rootDomain === 'grok.com') {

@@ -147,10 +147,14 @@
         if (ms && ms.photo && ms.video && ae.getAttribute && ae.getAttribute('role') === 'radiogroup' && ae.contains(ms.video)) return 'mode';
         const d = comp && grokFindDurationControl(comp), a = comp && grokFindAspectControl(comp);
         if ([d, a].some(x => x && (x === ae || x.contains(ae) || (x.parentElement && x.parentElement.getAttribute('role') === 'radiogroup' && x.parentElement.contains(ae))))) return 'param';
-        if (ae.getAttribute && /^(radio|menuitemradio|option|menuitem)$/.test(ae.getAttribute('role') || '')) {
+        const pop = _gcOpenPopover();
+        if (pop && (pop === ae || pop.contains(ae))) return 'param';
+        if (ae.getAttribute && /^(radio|menuitemradio|option|menuitem|menu|listbox)$/.test(ae.getAttribute('role') || '')) {
             const t = _gcText(ae) || _gcLabel(ae);
             if (GC_DUR_TEXT_RE.test(t) || GC_AR_TEXT_RE.test(t)) return 'param';
+            if (pop && pop.contains(ae)) return 'param';
         }
+        if (pop && _gc.step === 3) return 'param';
         return '';
     }
     /** Какой шаг (1..3) пробовать первым по этому нажатию. */
@@ -170,23 +174,30 @@
         const prompt = grokFindPromptInput(true);
         return Array.from(document.querySelectorAll(GC_POPOVER_SEL)).find(el => el.isConnected && !_gcOwn(el) && !(prompt && el.contains(prompt)) && _gcShown(el)) || null;
     }
-    function _gcEsc(t) { try { t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true })); } catch (e) {} }
-    /** v1.3.69: промт не виден из-за открытого меню/поповера — Escape по нему (или blur) и ждём промт. */
+    function _gcEsc(t) {
+        const ev = () => new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true });
+        if (t && t.dispatchEvent) { try { t.dispatchEvent(ev()); } catch (e) {} }
+        try { document.dispatchEvent(ev()); } catch (e) {}
+        try { window.dispatchEvent(ev()); } catch (e) {}
+    }
+    /** v1.3.69: промт не виден из-за открытого меню/поповера — Escape по нему и ждём промт. */
+    /** v1.3.84: не вызывать слепой ae.blur() (выбивает фокус в первую ссылку/Saved); адресно переводим фокус на промт. */
     async function _gcEnsurePromptReachable() {
         if (grokFindPromptInput()) return true;
         const pop = _gcOpenPopover();
         const ae = document.activeElement;
         const inPop = !!(pop && ae && pop.contains(ae));
-        if (!pop && !(ae && ae.getAttribute && /^(option|menuitem|menuitemradio)$/.test(ae.getAttribute('role') || ''))) return false;
+        if (!pop && !(ae && ae.getAttribute && /^(option|menuitem|menuitemradio|menu|listbox)$/.test(ae.getAttribute('role') || ''))) return false;
         if (pop) _gcEsc(inPop ? ae : pop);
-        if (ae && ae !== document.body && typeof ae.blur === 'function') { try { ae.blur(); } catch (e) {} }
+        const p = grokFindPromptInput(true);
+        if (p) _gcFocus(p);
         const ok = await waitForCondition(() => grokFindPromptInput(), 400, 40);
         mossadDebug('grokCycle', 'закрыто меню, промт ' + (ok ? 'найден' : 'не найден'), { popover: !!pop });
         return !!ok;
     }
 
     function _gcStepPrompt() {
-        const p = grokFindPromptInput();
+        const p = grokFindPromptInput() || grokFindPromptInput(true);
         if (!p) { mossadDebug('grokCycle', 'шаг 1: промт не найден — пропуск'); return false; }
         _gcCaretToEnd(p);
         mossadDebug('grokCycle', 'шаг 1: промт', { tag: p.tagName });
