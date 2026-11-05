@@ -122,6 +122,14 @@
             checkFileInHistory(null, lockedMediaUrl, currentPostUrl, currentMediaType).then(record => {
                 if (record) {
                     showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback), currentPostUrl, lockedMediaUrl);
+                    // v1.3.85: если файл уже скачивался и включено +1 («Не СШ +1» или «+1 всегда»),
+                    // всё равно перескакиваем на следующий элемент, не зависая на дубликате
+                    if (!config.allowDuplicates) {
+                        const act = mossadPdAction();
+                        if (act === 'upns' || act === 'always') {
+                            performPostDownloadAction();
+                        }
+                    }
                 } else {
                     triggerGrokDownload(true, null, onDoneCallback);
                 }
@@ -152,8 +160,24 @@
             grokFilename = renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2);
         }
 
+        let postActionTriggered = false;
+        // v1.3.85: для действия +1 переходим на следующий элемент сразу при старте скачивания,
+        // не дожидаясь окончания загрузки файла и записи метаданных.
+        // Действие 'del' (удаление) по-прежнему выполняется только после полного сохранения файла на диск.
+        const triggerImmediatePostAction = () => {
+            if (postActionTriggered) return;
+            const act = mossadPdAction();
+            if (act === 'upns' || act === 'always') {
+                postActionTriggered = true;
+                performPostDownloadAction();
+            }
+        };
+
         const onDownloadFinalized = () => {
-            performPostDownloadAction();
+            if (!postActionTriggered) {
+                postActionTriggered = true;
+                performPostDownloadAction();
+            }
             if (onDoneCallback) onDoneCallback();
         };
 
@@ -188,6 +212,7 @@
                     })
                     .then(handleBlobResponse)
                     .catch(finalizeFallback);
+                triggerImmediatePostAction();
                 return true;
             }
 
@@ -211,6 +236,7 @@
                     },
                     onerror: () => finalizeFallback()
                 });
+                triggerImmediatePostAction();
             } else {
                 fetch(media.url)
                     .then(res => {
@@ -219,6 +245,7 @@
                     })
                     .then(handleBlobResponse)
                     .catch(finalizeFallback);
+                triggerImmediatePostAction();
             }
             return true;
         }
@@ -226,6 +253,7 @@
         // Если медиа-URL не найден — стандартный клик кнопки
         try { mossadBeep('start'); } catch (e) {} // v1.3.82
         fallbackGrokNativeClick(onDownloadFinalized);
+        triggerImmediatePostAction();
         return true;
     }
 

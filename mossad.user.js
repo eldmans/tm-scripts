@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.84
+// @version      1.3.85
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -529,7 +529,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.84';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.85';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -4240,6 +4240,12 @@ if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl) && !isDuplica
 checkFileInHistory(null, lockedMediaUrl, currentPostUrl, currentMediaType).then(record => {
 if (record) {
 showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback), currentPostUrl, lockedMediaUrl);
+if (!config.allowDuplicates) {
+const act = mossadPdAction();
+if (act === 'upns' || act === 'always') {
+performPostDownloadAction();
+}
+}
 } else {
 triggerGrokDownload(true, null, onDoneCallback);
 }
@@ -4264,8 +4270,20 @@ if (config.filenameTemplateEnabled) {
 const vars = buildFilenameVars(Object.assign(grokFilenameContext(media), { dblSuffix, rootBase }));
 grokFilename = renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2);
 }
-const onDownloadFinalized = () => {
+let postActionTriggered = false;
+const triggerImmediatePostAction = () => {
+if (postActionTriggered) return;
+const act = mossadPdAction();
+if (act === 'upns' || act === 'always') {
+postActionTriggered = true;
 performPostDownloadAction();
+}
+};
+const onDownloadFinalized = () => {
+if (!postActionTriggered) {
+postActionTriggered = true;
+performPostDownloadAction();
+}
 if (onDoneCallback) onDoneCallback();
 };
 if (media && media.url) {
@@ -4296,6 +4314,7 @@ return res.blob();
 })
 .then(handleBlobResponse)
 .catch(finalizeFallback);
+triggerImmediatePostAction();
 return true;
 }
 if (typeof GM_xmlhttpRequest === 'function') {
@@ -4318,6 +4337,7 @@ finalizeFallback();
 },
 onerror: () => finalizeFallback()
 });
+triggerImmediatePostAction();
 } else {
 fetch(media.url)
 .then(res => {
@@ -4326,11 +4346,13 @@ return res.blob();
 })
 .then(handleBlobResponse)
 .catch(finalizeFallback);
+triggerImmediatePostAction();
 }
 return true;
 }
 try { mossadBeep('start'); } catch (e) {}
 fallbackGrokNativeClick(onDownloadFinalized);
+triggerImmediatePostAction();
 return true;
 }
 if (typeof document !== 'undefined') {
@@ -8227,6 +8249,12 @@ checkFileInHistory(null, primaryUrl, canonicalPostUrl, media.type).then(record =
 if (record) {
 _activeDuplicateRecord = record;
 showDuplicateDownloadNotice(record, () => triggerDownload(true, record, null, presetMedia), canonicalPostUrl, primaryUrl);
+if (!config.allowDuplicates) {
+const act = mossadPdAction();
+if (act === 'upns' || act === 'always') {
+performPostDownloadAction();
+}
+}
 } else {
 _activeDuplicateRecord = null;
 triggerDownload(true, null, onDoneCallback, presetMedia);
@@ -8239,6 +8267,10 @@ if (primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
 console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, пропущено.');
 try { mossadBeep('dup'); } catch (e) {}
 showToast(`⚠️ Только что скачано (${Math.max(1, Math.round((now - _lastDownloadTime) / 1000))} с назад)`, false, 2500);
+const act = mossadPdAction();
+if (act === 'upns' || act === 'always') {
+performPostDownloadAction();
+}
 return;
 }
 _lastDownloadUrl = primaryUrl;
@@ -12232,7 +12264,7 @@ return `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-11-03</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-05</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>

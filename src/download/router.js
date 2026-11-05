@@ -170,6 +170,13 @@
                 if (record) {
                     _activeDuplicateRecord = record;
                     showDuplicateDownloadNotice(record, () => triggerDownload(true, record, null, presetMedia), canonicalPostUrl, primaryUrl);
+                    // v1.3.85: если файл уже скачивался и включено +1, перескакиваем на следующий
+                    if (!config.allowDuplicates) {
+                        const act = mossadPdAction();
+                        if (act === 'upns' || act === 'always') {
+                            performPostDownloadAction();
+                        }
+                    }
                 } else {
                     _activeDuplicateRecord = null;
                     triggerDownload(true, null, onDoneCallback, presetMedia);
@@ -185,6 +192,10 @@
             // v1.3.82: раньше — молча; теперь сигнал «уже скачивали» и подсказка
             try { mossadBeep('dup'); } catch (e) {}
             showToast(`⚠️ Только что скачано (${Math.max(1, Math.round((now - _lastDownloadTime) / 1000))} с назад)`, false, 2500);
+            const act = mossadPdAction();
+            if (act === 'upns' || act === 'always') {
+                performPostDownloadAction();
+            }
             return;
         }
         _lastDownloadUrl = primaryUrl;
