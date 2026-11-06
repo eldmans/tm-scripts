@@ -10,6 +10,12 @@
             return window.MOSSAD_ENGINES.instagram.findMedia();
         }
 
+        // v1.3.86: XVideos / xv-ru.com / xnxx.com — извлечение прямого MP4 вместо hls.m3u8
+        if (window.MOSSAD_ENGINES?.xvideos?.isSupported()) {
+            const xvMedia = window.MOSSAD_ENGINES.xvideos.findMedia();
+            if (xvMedia) return xvMedia;
+        }
+
         // v1.3.52: Pinterest — асинхронно через pinterestResolveMedia() в triggerDownload (API пина).
         // Синхронный путь сюда больше не заходит; запасной ответ — только главный пин, без «первой картинки страницы».
         if (rootDomain.includes('pinterest.')) {

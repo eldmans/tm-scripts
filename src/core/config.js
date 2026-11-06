@@ -65,6 +65,7 @@
             snapWidget:       { key: 'F8',         ctrl: false, alt: false, shift: false }, // F8 — привязать к левому верхнему краю
             openTodos:        { key: '',           ctrl: false, alt: false, shift: false }, // v1.3.49: «📝 Тудушки» — пусто по умолчанию
             pinFullScale:     { key: '',           ctrl: false, alt: false, shift: false }, // v1.3.63: Pinterest — ⛶ «Показать в полном масштабе» (не назначено)
+            xvDoubleSize:     { key: 't',          ctrl: false, alt: false, shift: false }, // v1.3.86: XVideos / xv-ru — двойной размер плеера (T)
             expand:           { key: 'f',          ctrl: false, alt: false, shift: false }, // v1.3.79: ⛶ развернуть / полный экран (KeyF: f F а А; Shift не важен)
             grokCycle:        { key: '\\',         ctrl: false, alt: false, shift: false }, // v1.3.61: Grok — промт → фото/видео → длина/соотношение (e.code Backslash)
             nextSlide:        { key: 'ArrowRight', ctrl: false, alt: false, shift: false }, // v1.3.45: одна привязка (резервный Пробел убран)
@@ -403,7 +404,15 @@
     // и пишутся в mossad_hk_global вместо действующих (mossadHkGlobalTable). ANTI_PATTERNS §42.
     const HK_SITE_GM_KEY = 'mossad_hk_site';
     // Сразу «свои» при первом заходе на сайт (действие есть только на этом сайте)
-    const HK_SITE_SEED = { 'grok.com': ['grokCycle'], 'pinterest.com': ['pinFullScale'], 'pinterest.ru': ['pinFullScale'] };
+    const HK_SITE_SEED = {
+        'grok.com': ['grokCycle'],
+        'pinterest.com': ['pinFullScale'],
+        'pinterest.ru': ['pinFullScale'],
+        'xv-ru.com': ['xvDoubleSize'],
+        'xvideos.com': ['xvDoubleSize'],
+        'xvideos2.com': ['xvDoubleSize'],
+        'xnxx.com': ['xvDoubleSize']
+    };
     let _hkGlobalShadow = {};
     function _hkSiteReadAll() {
         let raw = null;

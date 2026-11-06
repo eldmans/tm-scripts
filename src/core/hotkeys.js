@@ -1,3 +1,10 @@
+    function mossadXvDoubleSizeMatch(e) {
+        const hk = config.hk && config.hk.xvDoubleSize;
+        if (!hk || !hk.key) return false;
+        if (hotkeyMatches(e, hk)) return true;
+        return !hk.ctrl && !hk.alt && !hk.shift && e.shiftKey && hotkeyMatches(e, Object.assign({}, hk, { shift: true }));
+    }
+
     // ============================================
     // GLOBAL HOTKEYS & LISTENERS
     // ============================================
@@ -430,6 +437,13 @@
             e.preventDefault();
             const fsBtn = pinterestFindFullScaleButton();
             if (fsBtn) clickElementFull(fsBtn); else showToast('⚠️ Кнопка «Показать в полном масштабе» не найдена', true);
+            return;
+        }
+
+        // v1.3.86: XVideos / xv-ru — 🔲 Двойной размер плеера (T по умолчанию)
+        if (window.MOSSAD_ENGINES?.xvideos?.isSupported() && config.hk.xvDoubleSize && mossadXvDoubleSizeMatch(e)) {
+            e.preventDefault();
+            window.MOSSAD_ENGINES.xvideos.toggleDoubleSize();
             return;
         }
 

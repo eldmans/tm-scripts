@@ -68,6 +68,18 @@
     function mossadMediaUrl(el) {
         if (!el) return '';
         if (el.tagName === 'VIDEO') {
+            // v1.3.86: если плеер сайта отдает прямой MP4 вместо HLS .m3u8
+            try {
+                if (window.MOSSAD_ENGINES?.xvideos?.findMedia) {
+                    const m = window.MOSSAD_ENGINES.xvideos.findMedia();
+                    if (m && m.urls && m.urls[0] && !/\.m3u8(\?|$)/i.test(m.urls[0])) return m.urls[0];
+                }
+                const u = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+                if (u.html5player && (u.html5player.sUrlHigh || u.html5player.sUrlLow)) {
+                    const uMp4 = u.html5player.sUrlHigh || u.html5player.sUrlLow;
+                    if (uMp4 && !/\.m3u8(\?|$)/i.test(uMp4)) return uMp4;
+                }
+            } catch (e) {}
             const s = el.currentSrc || el.src || (el.querySelector('source[src]') && el.querySelector('source[src]').src) || '';
             return s;
         }
@@ -104,6 +116,10 @@
             return true;
         }
         if (/^data:/.test(url)) { fetch(url).then(r => r.blob()).then(b => _dndSaveBlob(b, name)); mossadLightToast('⬇ ' + name); return true; }
+        if (/\.m3u8(\?|$)/i.test(url)) {
+            mossadLightToast('⚠️ HLS-поток (.m3u8) — используйте PageDown в MOSSAD или HLS-расширение', true);
+            return true;
+        }
         if (typeof GM_download !== 'function') { window.open(url, '_blank'); return true; }
         try {
             GM_download({

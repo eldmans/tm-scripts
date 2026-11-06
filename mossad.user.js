@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.85
+// @version      1.3.86
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -82,6 +82,17 @@ return null;
 function mossadMediaUrl(el) {
 if (!el) return '';
 if (el.tagName === 'VIDEO') {
+try {
+if (window.MOSSAD_ENGINES?.xvideos?.findMedia) {
+const m = window.MOSSAD_ENGINES.xvideos.findMedia();
+if (m && m.urls && m.urls[0] && !/\.m3u8(\?|$)/i.test(m.urls[0])) return m.urls[0];
+}
+const u = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+if (u.html5player && (u.html5player.sUrlHigh || u.html5player.sUrlLow)) {
+const uMp4 = u.html5player.sUrlHigh || u.html5player.sUrlLow;
+if (uMp4 && !/\.m3u8(\?|$)/i.test(uMp4)) return uMp4;
+}
+} catch (e) {}
 const s = el.currentSrc || el.src || (el.querySelector('source[src]') && el.querySelector('source[src]').src) || '';
 return s;
 }
@@ -117,6 +128,10 @@ fetch(url).then(r => r.blob()).then(b => { _dndSaveBlob(b, name); mossadLightToa
 return true;
 }
 if (/^data:/.test(url)) { fetch(url).then(r => r.blob()).then(b => _dndSaveBlob(b, name)); mossadLightToast('⬇ ' + name); return true; }
+if (/\.m3u8(\?|$)/i.test(url)) {
+mossadLightToast('⚠️ HLS-поток (.m3u8) — используйте PageDown в MOSSAD или HLS-расширение', true);
+return true;
+}
 if (typeof GM_download !== 'function') { window.open(url, '_blank'); return true; }
 try {
 GM_download({
@@ -529,7 +544,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.85';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.86';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -539,7 +554,7 @@ return parts.slice(-2).join('.');
 }
 const rootDomain = getRootDomain(hostname);
 const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
-const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space'];
+const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space', 'xv-ru.com', 'xvideos.com'];
 const MOSSAD_SITES_GM_KEY = 'mossad_sites';
 function mossadNormSite(s) {
 let d = String(s == null ? '' : s).trim().toLowerCase();
@@ -716,6 +731,7 @@ focusWidget: { key: 'F7', ctrl: false, alt: false, shift: false },
 snapWidget: { key: 'F8', ctrl: false, alt: false, shift: false },
 openTodos: { key: '', ctrl: false, alt: false, shift: false },
 pinFullScale: { key: '', ctrl: false, alt: false, shift: false },
+xvDoubleSize: { key: 't', ctrl: false, alt: false, shift: false },
 expand: { key: 'f', ctrl: false, alt: false, shift: false },
 grokCycle: { key: '\\', ctrl: false, alt: false, shift: false },
 nextSlide: { key: 'ArrowRight', ctrl: false, alt: false, shift: false },
@@ -982,7 +998,15 @@ try { persistLocalConfig(); } catch (e) {}
 if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', JSON.stringify(config.hk)); } catch (e) {} }
 }
 const HK_SITE_GM_KEY = 'mossad_hk_site';
-const HK_SITE_SEED = { 'grok.com': ['grokCycle'], 'pinterest.com': ['pinFullScale'], 'pinterest.ru': ['pinFullScale'] };
+const HK_SITE_SEED = {
+'grok.com': ['grokCycle'],
+'pinterest.com': ['pinFullScale'],
+'pinterest.ru': ['pinFullScale'],
+'xv-ru.com': ['xvDoubleSize'],
+'xvideos.com': ['xvDoubleSize'],
+'xvideos2.com': ['xvDoubleSize'],
+'xnxx.com': ['xvDoubleSize']
+};
 let _hkGlobalShadow = {};
 function _hkSiteReadAll() {
 let raw = null;
@@ -8108,6 +8132,99 @@ isAutoSaveEnabled
 };
 })();
 
+// ── src/engines/xvideos.js ──
+window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
+window.MOSSAD_ENGINES.xvideos = (() => {
+function isSupported() {
+return /(?:xv-ru\.com|xvideos\d*\.com|xnxx\d*\.com)/i.test(rootDomain);
+}
+function toggleDoubleSize() {
+let handled = false;
+try {
+const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+if (uWin.html5player && typeof uWin.html5player.toggleExpand === 'function') {
+uWin.html5player.toggleExpand();
+handled = true;
+} else if (uWin.xvideos && uWin.xvideos.player && typeof uWin.xvideos.player.toggleSize === 'function') {
+uWin.xvideos.player.toggleSize();
+handled = true;
+} else if (uWin.xv && uWin.xv.player && typeof uWin.xv.player.toggleSize === 'function') {
+uWin.xv.player.toggleSize();
+handled = true;
+}
+} catch (e) {}
+if (!handled) {
+const btn = document.querySelector('.icon-f.icf-full-width, .xv-icon-full-width, [title*="Double player size" i], [title*="player size" i], [title*="размер плеера" i]')?.closest('button, span, a, .has-clickable-effect');
+if (btn) {
+btn.click();
+handled = true;
+}
+}
+if (!handled) {
+const content = document.getElementById('content') || document.getElementById('video-player-bg');
+if (content) {
+content.classList.toggle('player-enlarged');
+handled = true;
+}
+}
+setTimeout(() => {
+const isEnlarged = !!document.querySelector('#content.player-enlarged, .player-enlarged');
+showToast(isEnlarged ? '🔲 Двойной размер плеера' : '▫️ Обычный размер плеера');
+}, 60);
+return handled;
+}
+function findMedia() {
+if (!isSupported()) return null;
+let highUrl = '';
+let lowUrl = '';
+let hlsUrl = '';
+let title = '';
+try {
+const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+const p = uWin.html5player;
+if (p) {
+highUrl = p.sUrlHigh || '';
+lowUrl = p.sUrlLow || '';
+hlsUrl = p.sUrlHls || '';
+title = p.video_title || '';
+}
+} catch (e) {}
+if (!highUrl && !lowUrl) {
+const scripts = document.getElementsByTagName('script');
+for (let i = 0; i < scripts.length; i++) {
+const text = scripts[i].textContent || '';
+if (text.includes('html5player.setVideoUrl') || text.includes('html5player.setVideoHLS')) {
+const mHigh = text.match(/html5player\.setVideoUrlHigh\('([^']+)'\)/);
+if (mHigh && mHigh[1]) highUrl = mHigh[1];
+const mLow = text.match(/html5player\.setVideoUrlLow\('([^']+)'\)/);
+if (mLow && mLow[1]) lowUrl = mLow[1];
+const mHls = text.match(/html5player\.setVideoHLS\('([^']+)'\)/);
+if (mHls && mHls[1]) hlsUrl = mHls[1];
+const mTitle = text.match(/html5player\.setVideoTitle\('([^']+)'\)/);
+if (mTitle && mTitle[1]) title = mTitle[1];
+break;
+}
+}
+}
+const urls = [highUrl, lowUrl, hlsUrl].filter(u => u && typeof u === 'string');
+if (urls.length === 0) return null;
+if (!title) {
+title = (document.querySelector('h2.page-title, .video-title, h1') || {}).textContent || document.title || '';
+}
+title = title.replace(/\s+/g, ' ').trim();
+return {
+urls,
+type: 'video',
+desc: title
+};
+}
+return {
+isSupported,
+toggleDoubleSize,
+findMedia
+};
+})();
+
 // ── src/download/router.js ──
 function findMediaForDownload() {
 if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
@@ -8116,6 +8233,10 @@ if (hfMedia) return hfMedia;
 }
 if (window.MOSSAD_ENGINES.instagram?.isSupported()) {
 return window.MOSSAD_ENGINES.instagram.findMedia();
+}
+if (window.MOSSAD_ENGINES?.xvideos?.isSupported()) {
+const xvMedia = window.MOSSAD_ENGINES.xvideos.findMedia();
+if (xvMedia) return xvMedia;
 }
 if (rootDomain.includes('pinterest.')) {
 const img = pinterestMainImage();
@@ -11733,7 +11854,7 @@ return out.filter(k => k != null);
 }
 const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
 const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'expand', 'pinFullScale', 'generate'];
+const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'expand', 'pinFullScale', 'xvDoubleSize', 'generate'];
 function readHotkeyDefaults() {
 let raw = null;
 try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -12264,7 +12385,7 @@ return `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-11-05</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-06</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -12334,6 +12455,7 @@ openTodos: 'Открыть «📝 Тудушки» (по умолчанию не
 grokCycle: 'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
 expand: '⛶ Развернуть / полный экран (F; на Pinterest — «полный масштаб»)',
 pinFullScale: 'Pinterest — ⛶ «Показать в полном масштабе» (устарело: то же делает ⛶ Развернуть)',
+xvDoubleSize: 'XVideos / xv-ru — 🔲 Двойной размер плеера (T)',
 generate: 'Генерация Space / Отправка Grok (Ctrl+Enter)'
 };
 const renderHotkeyRow = (k) => {
@@ -12923,6 +13045,12 @@ if (typeof showToast === 'function') showToast('🌐 Общие умолчани
 }
 
 // ── src/core/hotkeys.js ──
+function mossadXvDoubleSizeMatch(e) {
+const hk = config.hk && config.hk.xvDoubleSize;
+if (!hk || !hk.key) return false;
+if (hotkeyMatches(e, hk)) return true;
+return !hk.ctrl && !hk.alt && !hk.shift && e.shiftKey && hotkeyMatches(e, Object.assign({}, hk, { shift: true }));
+}
 window.capturingFor = null;
 const GROK_LAYOUT_BRIDGE_CODES = ['KeyB', 'Slash'];
 window.addEventListener('keydown', function grokLayoutBridge(e) {
@@ -13257,6 +13385,11 @@ if (rootDomain.includes('pinterest.') && config.hk.pinFullScale && config.hk.pin
 e.preventDefault();
 const fsBtn = pinterestFindFullScaleButton();
 if (fsBtn) clickElementFull(fsBtn); else showToast('⚠️ Кнопка «Показать в полном масштабе» не найдена', true);
+return;
+}
+if (window.MOSSAD_ENGINES?.xvideos?.isSupported() && config.hk.xvDoubleSize && mossadXvDoubleSizeMatch(e)) {
+e.preventDefault();
+window.MOSSAD_ENGINES.xvideos.toggleDoubleSize();
 return;
 }
 if (mossadExpandHotkeyMatch(e)) {
