@@ -141,6 +141,20 @@
             font-weight: 700; font-size: 13px; transition: all 0.2s ease;
             background: #1f2937; color: #e5e7eb; text-align: center;
         `;
+        btnStart.onclick = () => {
+            const isAnyActive = !!(slideshowActive || window._mossadGalleryActive);
+            if (isAnyActive) {
+                if (window._mossadGalleryActive && typeof toggleGalleryPause === 'function') {
+                    toggleGalleryPause();
+                } else if (typeof setSlideshowPaused === 'function') {
+                    setSlideshowPaused(!slideshowPaused);
+                } else {
+                    stopSlideshow();
+                }
+            } else {
+                startSlideshow();
+            }
+        };
 
         // Кнопка переключения настроек ▼ (по центру: справа от ракеты, слева от обновления)
         const btnTogglePanel = document.createElement('button');
@@ -152,46 +166,7 @@
         btnTogglePanel.onmouseleave = () => { btnTogglePanel.style.color = '#9ca3af'; };
         btnTogglePanel.onclick = () => {
             window.widgetState = window.widgetState === 'panel' ? 'bar' : 'panel';
-            
-        window.updateSlideshowHud = () => {
-            const isRunning = !!(slideshowActive || window._mossadGalleryActive || (sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true'));
-            if (!isRunning) {
-                hudRow.style.display = 'none';
-                return;
-            }
-            hudRow.style.display = 'inline-flex';
-
-            // 1. Скачивание
-            const isDLActive = config.downloadType && config.downloadType !== 'none';
-            btnHudDL.textContent = '⭳';
-            btnHudDL.style.color = isDLActive ? '#10b981' : '#6b7280';
-            btnHudDL.style.borderColor = isDLActive ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.1)';
-            btnHudDL.title = isDLActive ? `Скачивание: ${config.downloadType} (клик — выключить)` : 'Скачивание выключено (клик — включить)';
-
-            // 2. Стрелка направления
-            const dir = (config.slideshowDirections && config.slideshowDirections[0]) || 'down';
-            const arrows = { down: '↓', up: '↑', right: '→', left: '←' };
-            hudArrow.textContent = arrows[dir] || '↓';
-            hudArrow.title = `Направление слайд-шоу: ${dir}`;
-
-            // 4. Повтор R
-            btnHudLoop.style.color = config.loopFeed ? '#3b82f6' : '#6b7280';
-            btnHudLoop.style.borderColor = config.loopFeed ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)';
-
-            // 5. Видео
-            btnHudVideo.textContent = `📹 ${config.videoDuration || 15}s`;
-            btnHudVideo.style.borderColor = (config.videoDuration === 1) ? '#38bdf8' : 'rgba(255,255,255,0.1)';
-
-            // 6. Фото
-            btnHudPhoto.textContent = `🖼 ${config.photoDuration || 5}s`;
-            btnHudPhoto.style.borderColor = (config.photoDuration === 1) ? '#f472b6' : 'rgba(255,255,255,0.1)';
-
-            // 7. Пауза
-            btnHudPause.textContent = `⏸ ${config.pauseDuration || 2}s`;
-            btnHudPause.style.borderColor = (config.pauseDuration === 1) ? '#fbbf24' : 'rgba(255,255,255,0.1)';
-        };
-
-        window.updateWidgetUI();
+            window.updateWidgetUI();
         };
 
         const btnUpdate = document.createElement('button');
@@ -365,6 +340,44 @@
         };
 
         hudRow.append(btnHudDL, hudArrow, btnHudRewind, btnHudLoop, btnHudVideo, btnHudPhoto, btnHudPause);
+
+        window.updateSlideshowHud = () => {
+            const isRunning = !!(slideshowActive || window._mossadGalleryActive || (sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true'));
+            if (!isRunning) {
+                hudRow.style.display = 'none';
+                return;
+            }
+            hudRow.style.display = 'inline-flex';
+
+            // 1. Скачивание
+            const isDLActive = config.downloadType && config.downloadType !== 'none';
+            btnHudDL.textContent = '⭳';
+            btnHudDL.style.color = isDLActive ? '#10b981' : '#6b7280';
+            btnHudDL.style.borderColor = isDLActive ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.1)';
+            btnHudDL.title = isDLActive ? `Скачивание: ${config.downloadType} (клик — выключить)` : 'Скачивание выключено (клик — включить)';
+
+            // 2. Стрелка направления
+            const dir = (config.slideshowDirections && config.slideshowDirections[0]) || 'down';
+            const arrows = { down: '↓', up: '↑', right: '→', left: '←' };
+            hudArrow.textContent = arrows[dir] || '↓';
+            hudArrow.title = `Направление слайд-шоу: ${dir}`;
+
+            // 4. Повтор R
+            btnHudLoop.style.color = config.loopFeed ? '#3b82f6' : '#6b7280';
+            btnHudLoop.style.borderColor = config.loopFeed ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)';
+
+            // 5. Видео
+            btnHudVideo.textContent = `📹 ${config.videoDuration || 15}s`;
+            btnHudVideo.style.borderColor = (config.videoDuration === 1) ? '#38bdf8' : 'rgba(255,255,255,0.1)';
+
+            // 6. Фото
+            btnHudPhoto.textContent = `🖼 ${config.photoDuration || 5}s`;
+            btnHudPhoto.style.borderColor = (config.photoDuration === 1) ? '#f472b6' : 'rgba(255,255,255,0.1)';
+
+            // 7. Пауза
+            btnHudPause.textContent = `⏸ ${config.pauseDuration || 2}s`;
+            btnHudPause.style.borderColor = (config.pauseDuration === 1) ? '#fbbf24' : 'rgba(255,255,255,0.1)';
+        };
 
 
         // SETTINGS PANEL
@@ -785,13 +798,7 @@
         container.append(topBar, hudRow, panel);
         document.body.appendChild(container);
 
-        // Actions
-        btnStart.onclick = startSlideshow;
-        // Скачать и удалить: работает только на страницах постов grok.com
-        btnDL.onclick = () => {
-            if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
-            triggerDownload();
-        };
+        // Actions (btnStart.onclick handles start/pause toggle)
 
         window.cycleWidgetMenuState = () => {
             // 3-позиционная логика по Ctrl+Insert (циклическое переключение):
@@ -881,6 +888,9 @@
                 btnStart.style.background = '#1f2937'; // Gray
                 btnStart.style.color = '#e5e7eb';
                 btnStart.style.boxShadow = 'none';
+            }
+            if (typeof window.updateSlideshowHud === 'function') {
+                window.updateSlideshowHud();
             }
         };
 
