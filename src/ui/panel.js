@@ -171,11 +171,87 @@
 
         const btnUpdate = document.createElement('button');
         mossadLabelEl(btnUpdate, 'update');
-        btnUpdate.title = 'Обновить скрипт (Win+Alt+R)';
-        btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 13px; padding: 4px 10px; min-width: 32px; transition: transform 0.2s ease; text-align: center;`;
+        btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION})`;
+        btnUpdate.style.cssText = `background: #18202f; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; color: #64748b; opacity: 0.55; cursor: pointer; font-size: 13px; padding: 4px 10px; min-width: 32px; transition: all 0.3s ease; text-align: center;`;
         btnUpdate.onclick = () => {
-            window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
+            window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
         };
+
+        function setUpdateBtnState(hasUpdate, remoteVersion) {
+            if (!btnUpdate || !btnUpdate.isConnected) return;
+            if (hasUpdate) {
+                btnUpdate.style.background = '#1e3a8a';
+                btnUpdate.style.color = '#38bdf8';
+                btnUpdate.style.border = '1px solid #3b82f6';
+                btnUpdate.style.boxShadow = '0 0 10px rgba(56, 189, 248, 0.6)';
+                btnUpdate.style.opacity = '1';
+                btnUpdate.title = `Доступно обновление: v${remoteVersion}! Клик — обновить (Win+Alt+R)`;
+            } else {
+                btnUpdate.style.background = '#18202f';
+                btnUpdate.style.color = '#64748b';
+                btnUpdate.style.border = '1px solid rgba(255, 255, 255, 0.06)';
+                btnUpdate.style.boxShadow = 'none';
+                btnUpdate.style.opacity = '0.55';
+                btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION}). Клик — переустановить`;
+            }
+        }
+
+        function isNewerVersion(remote, local) {
+            if (!remote || !local) return false;
+            const r = String(remote).trim().split('.').map(n => parseInt(n, 10) || 0);
+            const l = String(local).trim().split('.').map(n => parseInt(n, 10) || 0);
+            for (let i = 0; i < Math.max(r.length, l.length); i++) {
+                const rv = r[i] || 0;
+                const lv = l[i] || 0;
+                if (rv > lv) return true;
+                if (rv < lv) return false;
+            }
+            return false;
+        }
+
+        let _lastUpdateCheckTime = 0;
+        let _updateCheckInProgress = false;
+        function checkRemoteVersion(force = false) {
+            const now = Date.now();
+            const minInterval = Math.max(5, (config.updateCheckIntervalSec || 20)) * 1000;
+            if (!force && (now - _lastUpdateCheckTime < minInterval)) return;
+            if (_updateCheckInProgress) return;
+            _updateCheckInProgress = true;
+            _lastUpdateCheckTime = now;
+
+            const url = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/src/banner.js?t=' + now;
+            const onText = (txt) => {
+                _updateCheckInProgress = false;
+                const m = txt && txt.match(/\/\/\s*@version\s+([0-9.]+)/i);
+                if (m && m[1]) {
+                    const remoteVer = m[1].trim();
+                    const hasUpdate = isNewerVersion(remoteVer, SCRIPT_VERSION);
+                    setUpdateBtnState(hasUpdate, remoteVer);
+                }
+            };
+
+            if (typeof GM_xmlhttpRequest === 'function') {
+                try {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: url,
+                        timeout: 5000,
+                        onload: (res) => onText(res.responseText),
+                        onerror: () => { _updateCheckInProgress = false; },
+                        ontimeout: () => { _updateCheckInProgress = false; }
+                    });
+                    return;
+                } catch(e) {}
+            }
+            fetch(url, { cache: 'no-store' })
+                .then(r => r.text())
+                .then(onText)
+                .catch(() => { _updateCheckInProgress = false; });
+        }
+
+        setTimeout(() => checkRemoteVersion(true), 1500);
+        setInterval(() => checkRemoteVersion(false), 10000);
+        window.addEventListener('focus', () => checkRemoteVersion(false));
 
         // «2DO» тудушки (шире на 30%)
         const btnTodo = document.createElement('button');
