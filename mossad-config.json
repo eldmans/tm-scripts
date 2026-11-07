@@ -34,12 +34,12 @@
   "grokKeepSound": true,
   "grokQuotaEnabled": true,
   "grokHistPillEnabled": true,
-  "grokPillsCompact": true,
+  "grokPillsCompact": false,
   "grokQuotaSep": " · ",
   "grokQuotaTimeMode": "auto",
   "grokQuotaPos": {
-    "left": 414,
-    "top": 67
+    "left": 516,
+    "top": 14
   },
   "grokCollapsePromptOnNav": true,
   "grokHistoryDwellSec": 5,
