@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.87
+// @version      1.3.88
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -544,7 +544,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.87';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.88';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -734,7 +734,6 @@ galleryStop: { key: '', ctrl: false, alt: false, shift: false },
 focusWidget: { key: 'F7', ctrl: false, alt: false, shift: false },
 snapWidget: { key: 'F8', ctrl: false, alt: false, shift: false },
 openTodos: { key: '', ctrl: false, alt: false, shift: false },
-pinFullScale: { key: '', ctrl: false, alt: false, shift: false },
 xvDoubleSize: { key: 't', ctrl: false, alt: false, shift: false },
 expand: { key: 'f', ctrl: false, alt: false, shift: false },
 grokCycle: { key: '\\', ctrl: false, alt: false, shift: false },
@@ -1005,8 +1004,6 @@ if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', J
 const HK_SITE_GM_KEY = 'mossad_hk_site';
 const HK_SITE_SEED = {
 'grok.com': ['grokCycle'],
-'pinterest.com': ['pinFullScale'],
-'pinterest.ru': ['pinFullScale'],
 'xv-ru.com': ['xvDoubleSize'],
 'xvideos.com': ['xvDoubleSize'],
 'xvideos2.com': ['xvDoubleSize'],
@@ -9141,13 +9138,13 @@ if (b) { clickElementFull(b); return 'grok'; }
 const c = grokFindCollapseButton();
 if (c) { clickElementFull(c); return 'grok-collapse'; }
 }
-const g = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+const g = Array.from(document.querySelectorAll('button, [role="button"], [class*="fullscreen"], [aria-label*="fullscreen" i], [aria-label*="полный экран" i]')).find(b => {
 if (_mossadOwnUi(b)) return false;
 const t = _mossadBtnLabel(b);
 return /full\s*-?screen|во весь экран|полноэкранн/.test(t) && !/exit|выйти|выход/.test(t);
 });
 if (g) { clickElementFull(g); return 'button'; }
-const v = typeof getActiveVideo === 'function' ? getActiveVideo() : null;
+const v = (typeof getActiveVideo === 'function' ? getActiveVideo() : null) || document.querySelector('video');
 const rq = v && (v.requestFullscreen || v.webkitRequestFullscreen);
 if (rq) { try { const p = rq.call(v); if (p && p.catch) p.catch(() => {}); } catch (e) {} return 'video'; }
 showToast('⚠️ Нечего разворачивать: нет видео и кнопки полного экрана', true);
@@ -12389,7 +12386,7 @@ return out.filter(k => k != null);
 }
 const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
 const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'expand', 'pinFullScale', 'xvDoubleSize', 'generate'];
+const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'expand', 'xvDoubleSize', 'generate'];
 function readHotkeyDefaults() {
 let raw = null;
 try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -13125,8 +13122,7 @@ rewind: 'Мотать в начало (Alt+R)',
 snapWidget: 'Привязать к левому верхнему краю (F8)',
 openTodos: 'Открыть «📝 Тудушки» (по умолчанию не назначено)',
 grokCycle: 'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
-expand: '⛶ Развернуть / полный экран (F; на Pinterest — «полный масштаб»)',
-pinFullScale: 'Pinterest — ⛶ «Показать в полном масштабе» (устарело: то же делает ⛶ Развернуть)',
+expand: '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
 xvDoubleSize: 'XVideos / xv-ru — 🔲 Двойной размер плеера (T)',
 generate: 'Генерация Space / Отправка Grok (Ctrl+Enter)'
 };

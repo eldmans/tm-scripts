@@ -195,13 +195,13 @@
             const c = grokFindCollapseButton();
             if (c) { clickElementFull(c); return 'grok-collapse'; }
         }
-        const g = Array.from(document.querySelectorAll('button, [role="button"]')).find(b => {
+        const g = Array.from(document.querySelectorAll('button, [role="button"], [class*="fullscreen"], [aria-label*="fullscreen" i], [aria-label*="полный экран" i]')).find(b => {
             if (_mossadOwnUi(b)) return false;
             const t = _mossadBtnLabel(b);
             return /full\s*-?screen|во весь экран|полноэкранн/.test(t) && !/exit|выйти|выход/.test(t);
         });
         if (g) { clickElementFull(g); return 'button'; }
-        const v = typeof getActiveVideo === 'function' ? getActiveVideo() : null;
+        const v = (typeof getActiveVideo === 'function' ? getActiveVideo() : null) || document.querySelector('video');
         const rq = v && (v.requestFullscreen || v.webkitRequestFullscreen);
         if (rq) { try { const p = rq.call(v); if (p && p.catch) p.catch(() => {}); } catch (e) {} return 'video'; }
         showToast('⚠️ Нечего разворачивать: нет видео и кнопки полного экрана', true);
