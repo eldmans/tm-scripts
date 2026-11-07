@@ -15,6 +15,7 @@
     }
 
     function initWidget() {
+        let hudRow, panel;
         const container = document.createElement('div');
         container.id = 'mossad-widget-container';
 
@@ -396,7 +397,7 @@
         topBar.append(btnTogglePills, timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
         // ── HUD СЛАЙД-ШОУ (v1.3.93): компактная плашка настроек активного показа ──
         // Появляется ТОЛЬКО когда слайд-шоу запущено. Исчезает при остановке.
-        const hudRow = document.createElement('div');
+        hudRow = document.createElement('div');
         hudRow.id = 'mossad-slideshow-hud';
         hudRow.style.cssText = `
             background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -561,7 +562,7 @@
 
 
         // SETTINGS PANEL
-        const panel = document.createElement('div');
+        panel = document.createElement('div');
         panel.id = 'mossad-panel';
         panel.style.cssText = `
             background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -976,7 +977,15 @@
         };
 
         container.append(topBar, hudRow, panel);
-        document.body.appendChild(container);
+        const targetParent = document.body || document.documentElement;
+        if (targetParent) {
+            targetParent.appendChild(container);
+        } else {
+            window.addEventListener('DOMContentLoaded', () => {
+                const b = document.body || document.documentElement;
+                if (b && !container.isConnected) b.appendChild(container);
+            });
+        }
 
         // Actions (btnStart.onclick handles start/pause toggle)
 
@@ -1125,10 +1134,26 @@
         }, 500);
     }
 
+    function safeInitWidget() {
+        try {
+            initWidget();
+        } catch (err) {
+            console.error('[MOSSAD] initWidget error:', err);
+        }
+        try {
+            initGrokGalleryBar();
+        } catch (err) {
+            console.error('[MOSSAD] initGrokGalleryBar error:', err);
+        }
+        try {
+            grokGallerySlideshowTick();
+        } catch (err) {
+            console.error('[MOSSAD] grokGallerySlideshowTick error:', err);
+        }
+    }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { initWidget(); initGrokGalleryBar(); grokGallerySlideshowTick(); });
+        document.addEventListener('DOMContentLoaded', safeInitWidget);
     } else {
-        initWidget();
-        initGrokGalleryBar();
-        grokGallerySlideshowTick();
+        safeInitWidget();
     }

@@ -199,11 +199,27 @@
         }
     }, true);
 
-    /** v1.3.69: стрелка ↑/↓ в контроле длительности/соотношения композера Grok — хоткеи MOSSAD её не трогают. */
+    let _grokHomeWarnActive = false;
+    let _grokHomeWarnTimer = null;
+    let _grokArrowUpWarnActive = false;
+    let _grokArrowUpWarnTimer = null;
+    let _grokArrowDownWarnActive = false;
+    let _grokArrowDownWarnTimer = null;
+
+    /** v1.3.69 / v1.4.2: стрелка ↑/↓ в контроле длительности/соотношения композера Grok — хоткеи MOSSAD её не трогают. */
     function _mossadGrokCtlArrow(e) {
         if (e.__mossadGrokCtlArrow) return true;
         if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return false;
-        try { return typeof grokComposerArrowCtl === 'function' && !!grokComposerArrowCtl(e); } catch (err) { return false; }
+        if (rootDomain === 'grok.com') {
+            if (typeof grokCycleWhere === 'function') {
+                const where = grokCycleWhere();
+                if (where === 'param' || where === 'mode') return true;
+            }
+            if (typeof grokComposerArrowCtl === 'function') {
+                try { return !!grokComposerArrowCtl(e); } catch (err) { return false; }
+            }
+        }
+        return false;
     }
     /** v1.3.72: хоткей из списка «работают даже в поле промпта» (config.promptHotkeys, через запятую). */
     function mossadPromptHotkeyPass(e) {
@@ -213,8 +229,76 @@
     // Ранний перехват клавиш слайдера (PageUp / PageDown, ArrowDown / ArrowUp) ДО сайта на window в фазе capture
     window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
         if (window.capturingFor !== null) return;
-        if (_mossadGrokCtlArrow(e)) return; // v1.3.69: ↑/↓ в длительности/соотношении композера Grok
-        if (isEditableElement(document.activeElement) && !mossadPromptHotkeyPass(e)) return;
+        if (_mossadGrokCtlArrow(e)) return; // v1.3.69 / v1.4.2: ↑/↓ в длительности/соотношении композера Grok
+
+        const activeEl = document.activeElement;
+        const isEditing = isEditableElement(activeEl);
+        const isPrompt = rootDomain === 'grok.com' && (isEditing || (typeof grokIsPromptInput === 'function' && grokIsPromptInput(activeEl)));
+
+        // v1.4.2: Стрелки ↑/↓ в текстовом поле промпта Grok:
+        // Если курсор в самом начале и нажали ↑ -> предупреждение -> повторное нажатие в течение 5 сек перелистывает слайд назад
+        // Если курсор в самом конце и нажали ↓ -> предупреждение -> повторное нажатие в течение 5 сек перелистывает слайд вперёд
+        if (isPrompt && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+            if (e.key === 'ArrowUp') {
+                if (isCaretAtStart(activeEl)) {
+                    if (!_grokArrowUpWarnActive) {
+                        _grokArrowUpWarnActive = true;
+                        showToast('⚠️ Повторное нажатие ↑ перелистнёт слайд назад', false, 5000);
+                        if (_grokArrowUpWarnTimer) clearTimeout(_grokArrowUpWarnTimer);
+                        _grokArrowUpWarnTimer = setTimeout(() => { _grokArrowUpWarnActive = false; }, 5000);
+                        return;
+                    } else {
+                        _grokArrowUpWarnActive = false;
+                        if (_grokArrowUpWarnTimer) { clearTimeout(_grokArrowUpWarnTimer); _grokArrowUpWarnTimer = null; }
+                        hideToast();
+                        if (activeEl && typeof activeEl.blur === 'function') activeEl.blur();
+                        e.preventDefault();
+                        e.stopImmediatePropagation();
+                        cancelSlideTimers();
+                        playerStepSlide('prev');
+                        return;
+                    }
+                } else {
+                    _grokArrowUpWarnActive = false;
+                    return;
+                }
+            } else if (e.key === 'ArrowDown') {
+                if (isCaretAtEnd(activeEl)) {
+                    if (!_grokArrowDownWarnActive) {
+                        _grokArrowDownWarnActive = true;
+                        showToast('⚠️ Повторное нажатие ↓ перелистнёт слайд вперёд', false, 5000);
+                        if (_grokArrowDownWarnTimer) clearTimeout(_grokArrowDownWarnTimer);
+                        _grokArrowDownWarnTimer = setTimeout(() => { _grokArrowDownWarnActive = false; }, 5000);
+                        return;
+                    } else {
+                        _grokArrowDownWarnActive = false;
+                        if (_grokArrowDownWarnTimer) { clearTimeout(_grokArrowDownWarnTimer); _grokArrowDownWarnTimer = null; }
+                        hideToast();
+                        if (activeEl && typeof activeEl.blur === 'function') activeEl.blur();
+                        e.preventDefault();
+                        e.stopImmediatePropagation();
+                        cancelSlideTimers();
+                        playerStepSlide('next');
+                        return;
+                    }
+                } else {
+                    _grokArrowDownWarnActive = false;
+                    return;
+                }
+            }
+        }
+
+        // Сброс предупреждений при нажатии любой другой клавиши
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Home') {
+            if (_grokArrowUpWarnActive || _grokArrowDownWarnActive || _grokHomeWarnActive) {
+                _grokArrowUpWarnActive = false;
+                _grokArrowDownWarnActive = false;
+                _grokHomeWarnActive = false;
+                hideToast();
+            }
+        }
+
+        if (isEditing && !mossadPromptHotkeyPass(e)) return;
 
         // v1.3.47: раньше стрелки и Alt+PageDown/Up перехватывались и без слайдшоу — достаточно было
         // коллекции в sessionStorage и страницы поста (hasGrokCollection). После «Стоп» коллекция остаётся,
@@ -294,10 +378,54 @@
         const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
         const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
         if (isHistoryHk && rootDomain === 'grok.com') {
-            if (isEditing || (typeof grokIsPromptInput === 'function' && grokIsPromptInput(activeEl))) {
-                // Если мы находимся в поле редактирования/промпте — Home НЕ ДОЛЖЕН выбрасывать из промпта и НЕ ДОЛЖЕН переходить в Saved!
-                return;
+            const isPrompt = (typeof grokIsPromptInput === 'function' && grokIsPromptInput(activeEl)) || isEditableElement(activeEl);
+            if (isPrompt) {
+                const textVal = ((activeEl.value !== undefined) ? String(activeEl.value) : (activeEl.textContent || '')).trim();
+                // Если промпт полностью пустой — Home сразу срабатывает и переходит в Saved!
+                if (textVal.length === 0) {
+                    hideToast();
+                    _grokHomeWarnActive = false;
+                    if (_grokHomeWarnTimer) { clearTimeout(_grokHomeWarnTimer); _grokHomeWarnTimer = null; }
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    if (typeof grokNavigateToSaved === 'function') grokNavigateToSaved();
+                    else window.location.href = 'https://grok.com/imagine/saved';
+                    return;
+                }
+
+                // Промпт НЕ пустой:
+                // Если мы ещё не в самом начале строки/текста — нативное нажатие Home перемещает каретку в начало строки
+                if (!isCaretAtStart(activeEl)) {
+                    _grokHomeWarnActive = false;
+                    return;
+                }
+
+                // Каретка УЖЕ в самом начале непустого промпта:
+                // Предупреждение о повторном нажатии в течение 5 секунд
+                if (!_grokHomeWarnActive) {
+                    _grokHomeWarnActive = true;
+                    showToast('⚠️ Повторное нажатие Home в течение 5 сек перейдёт в Saved', false, 5000);
+                    if (_grokHomeWarnTimer) clearTimeout(_grokHomeWarnTimer);
+                    _grokHomeWarnTimer = setTimeout(() => {
+                        _grokHomeWarnActive = false;
+                    }, 5000);
+                    // Первое нажатие НЕ переходит
+                    return;
+                } else {
+                    // Повторное нажатие произошло в течение 5 секунд!
+                    _grokHomeWarnActive = false;
+                    if (_grokHomeWarnTimer) { clearTimeout(_grokHomeWarnTimer); _grokHomeWarnTimer = null; }
+                    hideToast();
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    if (typeof grokNavigateToSaved === 'function') grokNavigateToSaved();
+                    else window.location.href = 'https://grok.com/imagine/saved';
+                    return;
+                }
             }
+
+            hideToast();
+            _grokHomeWarnActive = false;
             e.preventDefault();
             e.stopImmediatePropagation();
             if (typeof grokNavigateToSaved === 'function') {

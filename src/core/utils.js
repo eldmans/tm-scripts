@@ -32,7 +32,8 @@
     // ============================================
     // TOAST NOTIFICATIONS
     // ============================================
-    function showToast(message, isError = false) {
+    let _toastTimer = null;
+    function showToast(message, isError = false, durationMs = 3500) {
         let toast = document.getElementById('mossad-toast');
         if (!toast) {
             toast = document.createElement('div');
@@ -45,14 +46,64 @@
                 box-shadow: 0 10px 25px rgba(0,0,0,0.5); pointer-events: none;
                 transition: opacity 0.2s ease; opacity: 0;
             `;
-            document.body.appendChild(toast);
+            const b = document.body || document.documentElement;
+            if (b) b.appendChild(toast);
         }
+        if (_toastTimer) clearTimeout(_toastTimer);
         toast.textContent = message;
         toast.style.borderColor = isError ? '#ef4444' : '#10b981';
         toast.style.color = isError ? '#fca5a5' : '#6ee7b7';
         toast.style.opacity = '1';
-        setTimeout(() => toast.style.opacity = '0', 3500);
+        _toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, durationMs);
     }
+
+    function hideToast() {
+        if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+        const toast = document.getElementById('mossad-toast');
+        if (toast) toast.style.opacity = '0';
+    }
+    window.showToast = showToast;
+    window.hideToast = hideToast;
+
+    function isCaretAtStart(el) {
+        if (!el) return true;
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+            return (el.selectionStart === 0 && el.selectionEnd === 0);
+        }
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return true;
+        try {
+            const range = sel.getRangeAt(0);
+            if (range.startOffset !== 0) return false;
+            const preRange = range.cloneRange();
+            preRange.selectNodeContents(el);
+            preRange.setEnd(range.startContainer, range.startOffset);
+            return preRange.toString().length === 0;
+        } catch (e) {
+            return true;
+        }
+    }
+
+    function isCaretAtEnd(el) {
+        if (!el) return true;
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+            const len = (el.value || '').length;
+            return (el.selectionStart === len && el.selectionEnd === len);
+        }
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return true;
+        try {
+            const range = sel.getRangeAt(0);
+            const postRange = range.cloneRange();
+            postRange.selectNodeContents(el);
+            postRange.setStart(range.endContainer, range.endOffset);
+            return postRange.toString().length === 0;
+        } catch (e) {
+            return true;
+        }
+    }
+    window.isCaretAtStart = isCaretAtStart;
+    window.isCaretAtEnd = isCaretAtEnd;
 
     // ============================================
     // URL NORMALIZATION (общие ключи сравнения URL)

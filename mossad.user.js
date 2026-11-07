@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.1
+// @version      1.4.2
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.1';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.2';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1577,7 +1577,8 @@ o.disconnect = () => { _mossadActive.observers.delete(o); return dis(); };
 } catch (e) {}
 return o;
 }
-function showToast(message, isError = false) {
+let _toastTimer = null;
+function showToast(message, isError = false, durationMs = 3500) {
 let toast = document.getElementById('mossad-toast');
 if (!toast) {
 toast = document.createElement('div');
@@ -1590,14 +1591,61 @@ toast.style.cssText = `
                 box-shadow: 0 10px 25px rgba(0,0,0,0.5); pointer-events: none;
                 transition: opacity 0.2s ease; opacity: 0;
             `;
-document.body.appendChild(toast);
+const b = document.body || document.documentElement;
+if (b) b.appendChild(toast);
 }
+if (_toastTimer) clearTimeout(_toastTimer);
 toast.textContent = message;
 toast.style.borderColor = isError ? '#ef4444' : '#10b981';
 toast.style.color = isError ? '#fca5a5' : '#6ee7b7';
 toast.style.opacity = '1';
-setTimeout(() => toast.style.opacity = '0', 3500);
+_toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, durationMs);
 }
+function hideToast() {
+if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+const toast = document.getElementById('mossad-toast');
+if (toast) toast.style.opacity = '0';
+}
+window.showToast = showToast;
+window.hideToast = hideToast;
+function isCaretAtStart(el) {
+if (!el) return true;
+if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+return (el.selectionStart === 0 && el.selectionEnd === 0);
+}
+const sel = window.getSelection();
+if (!sel || !sel.rangeCount) return true;
+try {
+const range = sel.getRangeAt(0);
+if (range.startOffset !== 0) return false;
+const preRange = range.cloneRange();
+preRange.selectNodeContents(el);
+preRange.setEnd(range.startContainer, range.startOffset);
+return preRange.toString().length === 0;
+} catch (e) {
+return true;
+}
+}
+function isCaretAtEnd(el) {
+if (!el) return true;
+if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+const len = (el.value || '').length;
+return (el.selectionStart === len && el.selectionEnd === len);
+}
+const sel = window.getSelection();
+if (!sel || !sel.rangeCount) return true;
+try {
+const range = sel.getRangeAt(0);
+const postRange = range.cloneRange();
+postRange.selectNodeContents(el);
+postRange.setStart(range.endContainer, range.endOffset);
+return postRange.toString().length === 0;
+} catch (e) {
+return true;
+}
+}
+window.isCaretAtStart = isCaretAtStart;
+window.isCaretAtEnd = isCaretAtEnd;
 function stripUrlQuery(url) {
 return String(url || '').split('?')[0];
 }
@@ -7296,12 +7344,16 @@ function grokComposerArrowCtl(e) {
 if (rootDomain !== 'grok.com' || !e || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return null;
 if (e.ctrlKey || e.altKey || e.metaKey) return null;
 const ae = document.activeElement;
-if (!ae || ae === document.body || ae === document.documentElement || !ae.closest || _gcOwn(ae)) return null;
-const opt = ae.closest(GC_ITEM_SEL);
-const list = (opt || ae).closest('[role="listbox"], [role="menu"]');
-if (list && _gcIsParamList(list)) return { kind: 'list', list, cur: opt };
+if (!ae || ae === document.body || ae === document.documentElement || _gcOwn(ae)) return null;
+const pop = _gcOpenPopover();
+if (pop && (pop === ae || pop.contains(ae))) {
+return { kind: 'popover', pop, cur: ae };
+}
+const opt = ae.closest && ae.closest(GC_ITEM_SEL);
+const list = ae.closest && ae.closest('[role="listbox"], [role="menu"], [role="radiogroup"], [data-radix-menu-content], [data-radix-popper-content-wrapper]');
+if (list && _gcIsParamList(list)) return { kind: 'list', list, cur: opt || ae };
 const comp = grokFindComposer();
-if (!comp || !comp.contains(ae)) return null;
+if (comp && comp.contains(ae)) {
 for (const kind of ['duration', 'aspect']) {
 const c = _gcParamControl(kind, comp);
 if (!c) continue;
@@ -7311,6 +7363,10 @@ if (box !== ae && !box.contains(ae)) continue;
 if (/^(SELECT|INPUT)$/.test(ae.tagName)) return { kind: 'native', box, cur: ae };
 if (ae === c && c.getAttribute('aria-haspopup')) return { kind: 'trigger', box, cur: c };
 return { kind: 'group', box, cur: ae, re: kind === 'duration' ? GC_DUR_TEXT_RE : GC_AR_TEXT_RE };
+}
+}
+if (typeof grokCycleWhere === 'function' && grokCycleWhere() === 'param') {
+return { kind: 'param_fallback', cur: ae };
 }
 return null;
 }
@@ -7330,19 +7386,51 @@ const down = e.key === 'ArrowDown';
 if (t.kind === 'native') { e.stopImmediatePropagation(); return; }
 e.preventDefault();
 e.stopImmediatePropagation();
-if (t.kind === 'trigger') { mossadPressEl(t.cur); return; }
-if (t.kind === 'list') {
-const items = Array.from(t.list.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
-const nx = _gcArrowStep(items, t.cur, down);
-if (nx) { if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1'); _gcFocus(nx); }
+if (t.kind === 'trigger') {
+mossadPressEl(t.cur);
+setTimeout(() => {
+const pop = _gcOpenPopover();
+if (pop) {
+const items = Array.from(pop.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
+if (items.length) {
+const nx = down ? items[0] : items[items.length - 1];
+_gcFocus(nx);
+}
+}
+}, 60);
 return;
 }
+if (t.kind === 'popover' || t.kind === 'list') {
+const rootEl = t.pop || t.list;
+const items = Array.from(rootEl.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
+const nx = _gcArrowStep(items, t.cur, down);
+if (nx) {
+if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1');
+mossadPressEl(nx);
+_gcFocus(nx);
+}
+return;
+}
+if (t.kind === 'group') {
 let opts = Array.from(t.box.querySelectorAll('[role="radio"], [role="tab"], [role="option"], button')).filter(x => _gcShown(x) && _gcUsable(x));
-if (t.box === t.cur && t.cur.parentElement) opts = Array.from(t.cur.parentElement.querySelectorAll('button, [role="radio"], [role="tab"]')).filter(x => _gcShown(x) && _gcUsable(x) && (t.re.test(_gcText(x)) || t.re.test(_gcLabel(x))));
+if (t.box === t.cur && t.cur.parentElement) {
+opts = Array.from(t.cur.parentElement.querySelectorAll('button, [role="radio"], [role="tab"]')).filter(x => _gcShown(x) && _gcUsable(x) && (t.re.test(_gcText(x)) || t.re.test(_gcLabel(x))));
+}
 const curOpt = opts.find(x => x === t.cur || x.contains(t.cur)) || null;
 const nx = _gcArrowStep(opts, curOpt, down);
 if (nx && nx !== curOpt) { mossadPressEl(nx); _gcFocus(nx); }
-mossadDebug('grokCycle', 'стрелка в ' + t.kind + ': пост не листается', { to: nx && (_gcText(nx) || _gcLabel(nx)) });
+return;
+}
+if (t.kind === 'param_fallback') {
+const comp = grokFindComposer();
+const d = comp && grokFindDurationControl(comp);
+const a = comp && grokFindAspectControl(comp);
+const targetCtl = d || a;
+if (targetCtl) {
+mossadPressEl(targetCtl);
+}
+return;
+}
 }, true);
 window.addEventListener('keydown', function grokCycleKey(e) {
 if (rootDomain !== 'grok.com' || window.capturingFor !== null) return;
@@ -11684,6 +11772,7 @@ if (h > 0) return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '
 return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 function initWidget() {
+let hudRow, panel;
 const container = document.createElement('div');
 container.id = 'mossad-widget-container';
 let savedPos = null;
@@ -12015,7 +12104,7 @@ window.widgetState = 'hidden';
 window.updateWidgetUI();
 };
 topBar.append(btnTogglePills, timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
-const hudRow = document.createElement('div');
+hudRow = document.createElement('div');
 hudRow.id = 'mossad-slideshow-hud';
 hudRow.style.cssText = `
             background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -12149,7 +12238,7 @@ btnHudPhoto.style.borderColor = (config.photoDuration === 1) ? '#f472b6' : 'rgba
 btnHudPause.textContent = `⏸ ${config.pauseDuration || 2}s`;
 btnHudPause.style.borderColor = (config.pauseDuration === 1) ? '#fbbf24' : 'rgba(255,255,255,0.1)';
 };
-const panel = document.createElement('div');
+panel = document.createElement('div');
 panel.id = 'mossad-panel';
 panel.style.cssText = `
             background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -12546,7 +12635,15 @@ showToast(gd ? '✅ Настройки сайта сброшены к общим
 };
 };
 container.append(topBar, hudRow, panel);
-document.body.appendChild(container);
+const targetParent = document.body || document.documentElement;
+if (targetParent) {
+targetParent.appendChild(container);
+} else {
+window.addEventListener('DOMContentLoaded', () => {
+const b = document.body || document.documentElement;
+if (b && !container.isConnected) b.appendChild(container);
+});
+}
 window.cycleWidgetMenuState = () => {
 if (window.widgetState === 'hidden') {
 window.widgetState = 'panel';
@@ -12671,12 +12768,27 @@ timerEl.style.color = '#9ca3af';
 }
 }, 500);
 }
-if (document.readyState === 'loading') {
-document.addEventListener('DOMContentLoaded', () => { initWidget(); initGrokGalleryBar(); grokGallerySlideshowTick(); });
-} else {
+function safeInitWidget() {
+try {
 initWidget();
+} catch (err) {
+console.error('[MOSSAD] initWidget error:', err);
+}
+try {
 initGrokGalleryBar();
+} catch (err) {
+console.error('[MOSSAD] initGrokGalleryBar error:', err);
+}
+try {
 grokGallerySlideshowTick();
+} catch (err) {
+console.error('[MOSSAD] grokGallerySlideshowTick error:', err);
+}
+}
+if (document.readyState === 'loading') {
+document.addEventListener('DOMContentLoaded', safeInitWidget);
+} else {
+safeInitWidget();
 }
 
 // ── src/ui/todos.js ──
@@ -14128,7 +14240,7 @@ return `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-11-07</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-08</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -15088,10 +15200,25 @@ try { el.blur(); } catch (err) {}
 }
 }
 }, true);
+let _grokHomeWarnActive = false;
+let _grokHomeWarnTimer = null;
+let _grokArrowUpWarnActive = false;
+let _grokArrowUpWarnTimer = null;
+let _grokArrowDownWarnActive = false;
+let _grokArrowDownWarnTimer = null;
 function _mossadGrokCtlArrow(e) {
 if (e.__mossadGrokCtlArrow) return true;
 if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return false;
-try { return typeof grokComposerArrowCtl === 'function' && !!grokComposerArrowCtl(e); } catch (err) { return false; }
+if (rootDomain === 'grok.com') {
+if (typeof grokCycleWhere === 'function') {
+const where = grokCycleWhere();
+if (where === 'param' || where === 'mode') return true;
+}
+if (typeof grokComposerArrowCtl === 'function') {
+try { return !!grokComposerArrowCtl(e); } catch (err) { return false; }
+}
+}
+return false;
 }
 function mossadPromptHotkeyPass(e) {
 if (!config.promptHotkeysOn || !config.hk) return false;
@@ -15100,7 +15227,67 @@ return String(config.promptHotkeys || '').split(/[\s,;]+/).some(k => k && config
 window.addEventListener('keydown', function handlePlayerSlideKeys(e) {
 if (window.capturingFor !== null) return;
 if (_mossadGrokCtlArrow(e)) return;
-if (isEditableElement(document.activeElement) && !mossadPromptHotkeyPass(e)) return;
+const activeEl = document.activeElement;
+const isEditing = isEditableElement(activeEl);
+const isPrompt = rootDomain === 'grok.com' && (isEditing || (typeof grokIsPromptInput === 'function' && grokIsPromptInput(activeEl)));
+if (isPrompt && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+if (e.key === 'ArrowUp') {
+if (isCaretAtStart(activeEl)) {
+if (!_grokArrowUpWarnActive) {
+_grokArrowUpWarnActive = true;
+showToast('⚠️ Повторное нажатие ↑ перелистнёт слайд назад', false, 5000);
+if (_grokArrowUpWarnTimer) clearTimeout(_grokArrowUpWarnTimer);
+_grokArrowUpWarnTimer = setTimeout(() => { _grokArrowUpWarnActive = false; }, 5000);
+return;
+} else {
+_grokArrowUpWarnActive = false;
+if (_grokArrowUpWarnTimer) { clearTimeout(_grokArrowUpWarnTimer); _grokArrowUpWarnTimer = null; }
+hideToast();
+if (activeEl && typeof activeEl.blur === 'function') activeEl.blur();
+e.preventDefault();
+e.stopImmediatePropagation();
+cancelSlideTimers();
+playerStepSlide('prev');
+return;
+}
+} else {
+_grokArrowUpWarnActive = false;
+return;
+}
+} else if (e.key === 'ArrowDown') {
+if (isCaretAtEnd(activeEl)) {
+if (!_grokArrowDownWarnActive) {
+_grokArrowDownWarnActive = true;
+showToast('⚠️ Повторное нажатие ↓ перелистнёт слайд вперёд', false, 5000);
+if (_grokArrowDownWarnTimer) clearTimeout(_grokArrowDownWarnTimer);
+_grokArrowDownWarnTimer = setTimeout(() => { _grokArrowDownWarnActive = false; }, 5000);
+return;
+} else {
+_grokArrowDownWarnActive = false;
+if (_grokArrowDownWarnTimer) { clearTimeout(_grokArrowDownWarnTimer); _grokArrowDownWarnTimer = null; }
+hideToast();
+if (activeEl && typeof activeEl.blur === 'function') activeEl.blur();
+e.preventDefault();
+e.stopImmediatePropagation();
+cancelSlideTimers();
+playerStepSlide('next');
+return;
+}
+} else {
+_grokArrowDownWarnActive = false;
+return;
+}
+}
+}
+if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Home') {
+if (_grokArrowUpWarnActive || _grokArrowDownWarnActive || _grokHomeWarnActive) {
+_grokArrowUpWarnActive = false;
+_grokArrowDownWarnActive = false;
+_grokHomeWarnActive = false;
+hideToast();
+}
+}
+if (isEditing && !mossadPromptHotkeyPass(e)) return;
 if (!mossadSlideshowHotkeysEnabled()) return;
 const isGrokPost = (rootDomain === 'grok.com' && isGrokPostPage());
 const hasGrokCollection = isGrokPost && !!_gSS.getItem(GALLERY_COLLECTION_KEY);
@@ -15160,9 +15347,44 @@ if (config.hk && config.hk.grokCycle && hotkeyMatches(e, config.hk.grokCycle)) r
 const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
 const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
 if (isHistoryHk && rootDomain === 'grok.com') {
-if (isEditing || (typeof grokIsPromptInput === 'function' && grokIsPromptInput(activeEl))) {
+const isPrompt = (typeof grokIsPromptInput === 'function' && grokIsPromptInput(activeEl)) || isEditableElement(activeEl);
+if (isPrompt) {
+const textVal = ((activeEl.value !== undefined) ? String(activeEl.value) : (activeEl.textContent || '')).trim();
+if (textVal.length === 0) {
+hideToast();
+_grokHomeWarnActive = false;
+if (_grokHomeWarnTimer) { clearTimeout(_grokHomeWarnTimer); _grokHomeWarnTimer = null; }
+e.preventDefault();
+e.stopImmediatePropagation();
+if (typeof grokNavigateToSaved === 'function') grokNavigateToSaved();
+else window.location.href = 'https://grok.com/imagine/saved';
 return;
 }
+if (!isCaretAtStart(activeEl)) {
+_grokHomeWarnActive = false;
+return;
+}
+if (!_grokHomeWarnActive) {
+_grokHomeWarnActive = true;
+showToast('⚠️ Повторное нажатие Home в течение 5 сек перейдёт в Saved', false, 5000);
+if (_grokHomeWarnTimer) clearTimeout(_grokHomeWarnTimer);
+_grokHomeWarnTimer = setTimeout(() => {
+_grokHomeWarnActive = false;
+}, 5000);
+return;
+} else {
+_grokHomeWarnActive = false;
+if (_grokHomeWarnTimer) { clearTimeout(_grokHomeWarnTimer); _grokHomeWarnTimer = null; }
+hideToast();
+e.preventDefault();
+e.stopImmediatePropagation();
+if (typeof grokNavigateToSaved === 'function') grokNavigateToSaved();
+else window.location.href = 'https://grok.com/imagine/saved';
+return;
+}
+}
+hideToast();
+_grokHomeWarnActive = false;
 e.preventDefault();
 e.stopImmediatePropagation();
 if (typeof grokNavigateToSaved === 'function') {

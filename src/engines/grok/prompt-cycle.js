@@ -329,24 +329,42 @@
         if (rootDomain !== 'grok.com' || !e || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return null;
         if (e.ctrlKey || e.altKey || e.metaKey) return null;
         const ae = document.activeElement;
-        if (!ae || ae === document.body || ae === document.documentElement || !ae.closest || _gcOwn(ae)) return null;
-        const opt = ae.closest(GC_ITEM_SEL);
-        const list = (opt || ae).closest('[role="listbox"], [role="menu"]');
-        if (list && _gcIsParamList(list)) return { kind: 'list', list, cur: opt };
-        const comp = grokFindComposer();
-        if (!comp || !comp.contains(ae)) return null;
-        for (const kind of ['duration', 'aspect']) {
-            const c = _gcParamControl(kind, comp);
-            if (!c) continue;
-            const grp = c.closest('[role="radiogroup"], [role="group"], [role="tablist"], [role="toolbar"]');
-            const box = grp && comp.contains(grp) ? grp : c;
-            if (box !== ae && !box.contains(ae)) continue;
-            if (/^(SELECT|INPUT)$/.test(ae.tagName)) return { kind: 'native', box, cur: ae };
-            if (ae === c && c.getAttribute('aria-haspopup')) return { kind: 'trigger', box, cur: c };
-            return { kind: 'group', box, cur: ae, re: kind === 'duration' ? GC_DUR_TEXT_RE : GC_AR_TEXT_RE };
+        if (!ae || ae === document.body || ae === document.documentElement || _gcOwn(ae)) return null;
+
+        // 1. Открытый поповер параметров (Radix Popover / Menu / Portal)
+        const pop = _gcOpenPopover();
+        if (pop && (pop === ae || pop.contains(ae))) {
+            return { kind: 'popover', pop, cur: ae };
         }
+
+        // 2. Элемент списка опций (меню / список / радиогруппа)
+        const opt = ae.closest && ae.closest(GC_ITEM_SEL);
+        const list = ae.closest && ae.closest('[role="listbox"], [role="menu"], [role="radiogroup"], [data-radix-menu-content], [data-radix-popper-content-wrapper]');
+        if (list && _gcIsParamList(list)) return { kind: 'list', list, cur: opt || ae };
+
+        // 3. Контрол параметров внутри композера (длительность или соотношение сторон)
+        const comp = grokFindComposer();
+        if (comp && comp.contains(ae)) {
+            for (const kind of ['duration', 'aspect']) {
+                const c = _gcParamControl(kind, comp);
+                if (!c) continue;
+                const grp = c.closest('[role="radiogroup"], [role="group"], [role="tablist"], [role="toolbar"]');
+                const box = grp && comp.contains(grp) ? grp : c;
+                if (box !== ae && !box.contains(ae)) continue;
+                if (/^(SELECT|INPUT)$/.test(ae.tagName)) return { kind: 'native', box, cur: ae };
+                if (ae === c && c.getAttribute('aria-haspopup')) return { kind: 'trigger', box, cur: c };
+                return { kind: 'group', box, cur: ae, re: kind === 'duration' ? GC_DUR_TEXT_RE : GC_AR_TEXT_RE };
+            }
+        }
+
+        // 4. Если мы находимся на шаге 'param' цикла
+        if (typeof grokCycleWhere === 'function' && grokCycleWhere() === 'param') {
+            return { kind: 'param_fallback', cur: ae };
+        }
+
         return null;
     }
+
     function _gcArrowStep(list, cur, down) {
         if (!list.length) return null;
         let i = list.indexOf(cur);
@@ -354,6 +372,7 @@
         if (i < 0) return list[down ? 0 : list.length - 1];
         return list[(i + (down ? 1 : -1) + list.length) % list.length];
     }
+
     window.addEventListener('keydown', function grokComposerArrows(e) {
         if (rootDomain !== 'grok.com' || window.capturingFor !== null) return;
         const t = grokComposerArrowCtl(e);
@@ -363,19 +382,55 @@
         if (t.kind === 'native') { e.stopImmediatePropagation(); return; }
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (t.kind === 'trigger') { mossadPressEl(t.cur); return; }
-        if (t.kind === 'list') {
-            const items = Array.from(t.list.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
-            const nx = _gcArrowStep(items, t.cur, down);
-            if (nx) { if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1'); _gcFocus(nx); }
+
+        if (t.kind === 'trigger') {
+            mossadPressEl(t.cur);
+            setTimeout(() => {
+                const pop = _gcOpenPopover();
+                if (pop) {
+                    const items = Array.from(pop.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
+                    if (items.length) {
+                        const nx = down ? items[0] : items[items.length - 1];
+                        _gcFocus(nx);
+                    }
+                }
+            }, 60);
             return;
         }
-        let opts = Array.from(t.box.querySelectorAll('[role="radio"], [role="tab"], [role="option"], button')).filter(x => _gcShown(x) && _gcUsable(x));
-        if (t.box === t.cur && t.cur.parentElement) opts = Array.from(t.cur.parentElement.querySelectorAll('button, [role="radio"], [role="tab"]')).filter(x => _gcShown(x) && _gcUsable(x) && (t.re.test(_gcText(x)) || t.re.test(_gcLabel(x))));
-        const curOpt = opts.find(x => x === t.cur || x.contains(t.cur)) || null;
-        const nx = _gcArrowStep(opts, curOpt, down);
-        if (nx && nx !== curOpt) { mossadPressEl(nx); _gcFocus(nx); }
-        mossadDebug('grokCycle', 'стрелка в ' + t.kind + ': пост не листается', { to: nx && (_gcText(nx) || _gcLabel(nx)) });
+
+        if (t.kind === 'popover' || t.kind === 'list') {
+            const rootEl = t.pop || t.list;
+            const items = Array.from(rootEl.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
+            const nx = _gcArrowStep(items, t.cur, down);
+            if (nx) {
+                if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1');
+                mossadPressEl(nx);
+                _gcFocus(nx);
+            }
+            return;
+        }
+
+        if (t.kind === 'group') {
+            let opts = Array.from(t.box.querySelectorAll('[role="radio"], [role="tab"], [role="option"], button')).filter(x => _gcShown(x) && _gcUsable(x));
+            if (t.box === t.cur && t.cur.parentElement) {
+                opts = Array.from(t.cur.parentElement.querySelectorAll('button, [role="radio"], [role="tab"]')).filter(x => _gcShown(x) && _gcUsable(x) && (t.re.test(_gcText(x)) || t.re.test(_gcLabel(x))));
+            }
+            const curOpt = opts.find(x => x === t.cur || x.contains(t.cur)) || null;
+            const nx = _gcArrowStep(opts, curOpt, down);
+            if (nx && nx !== curOpt) { mossadPressEl(nx); _gcFocus(nx); }
+            return;
+        }
+
+        if (t.kind === 'param_fallback') {
+            const comp = grokFindComposer();
+            const d = comp && grokFindDurationControl(comp);
+            const a = comp && grokFindAspectControl(comp);
+            const targetCtl = d || a;
+            if (targetCtl) {
+                mossadPressEl(targetCtl);
+            }
+            return;
+        }
     }, true);
 
     // Перехват раньше сайта: window, capture; в т.ч. в поле промта (без символа «\»)
