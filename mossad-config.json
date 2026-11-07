@@ -33,11 +33,13 @@
   "grokNoPromptKeys": "RWEZXGVCf",
   "grokKeepSound": true,
   "grokQuotaEnabled": true,
+  "grokHistPillEnabled": true,
+  "grokPillsCompact": false,
   "grokQuotaSep": " · ",
   "grokQuotaTimeMode": "auto",
   "grokQuotaPos": {
-    "left": 494,
-    "top": 9
+    "left": 320,
+    "top": 10
   },
   "grokCollapsePromptOnNav": true,
   "grokHistoryDwellSec": 5,
@@ -204,6 +206,36 @@
       "key": "f",
       "ctrl": false,
       "alt": false,
+      "shift": false
+    },
+    "xvDoubleSize": {
+      "key": "t",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    },
+    "grokFirstSlide": {
+      "key": "1",
+      "ctrl": false,
+      "alt": true,
+      "shift": false
+    },
+    "grokHistBack": {
+      "key": "2",
+      "ctrl": false,
+      "alt": true,
+      "shift": false
+    },
+    "grokHistFwd": {
+      "key": "3",
+      "ctrl": false,
+      "alt": true,
+      "shift": false
+    },
+    "grokLastSlide": {
+      "key": "4",
+      "ctrl": false,
+      "alt": true,
       "shift": false
     }
   },
