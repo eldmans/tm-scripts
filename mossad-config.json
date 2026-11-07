@@ -25,6 +25,7 @@
   "widgetZoom": 0.9,
   "closePanelOnOutsideClick": true,
   "collectWatchSec": 30,
+  "updateCheckIntervalSec": 20,
   "showSoundToast": true,
   "debugSlideshow": false,
   "pinterestMode": "rand",
