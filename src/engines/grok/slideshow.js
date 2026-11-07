@@ -210,14 +210,23 @@
      * слайдшоу на /imagine/saved — устаревший: чистим его и идём в «собрать → старт».
      */
     function grokHandleGalleryPlayPause(source = 'hotkey') {
-        // v1.3.93: 4-шаговый цикл клавиши сбора/слайд-шоу:
-        // 1-е нажатие: показать плашку сбора (#mossad-gallery-row)
-        // 2-е нажатие: запустить сбор (Collect)
+        // v1.3.94: Цикл клавиши сбора/слайд-шоу:
+        // 1-е нажатие: показать плашку сбора (#mossad-gallery-row) если была скрыта
+        // 2-е нажатие: запустить сбор (если коллекция пуста)
         // 3-е нажатие: запустить слайд-шоу
-        // 4-е нажатие: скрыть плашку (не очищая плейлист)
+        // 4-е и далее: Пауза <-> Продолжить (кнопка НЕ скрывает плашку, скрывает только крестик)
+        // Нажатие кнопки Стоп сбрасывает цикл к началу
         const row = document.getElementById('mossad-gallery-row');
         const isRowVisible = row && row.style.display !== 'none';
         const isSsActive = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+
+        // Если слайд-шоу уже активно — переключаем Пауза / Пуск
+        if (isSsActive) {
+            toggleGalleryPause();
+            if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+            if (typeof updateGrokHistoryPill === 'function') updateGrokHistoryPill();
+            return 'toggle-pause';
+        }
 
         let savedCount = 0;
         try {
@@ -244,21 +253,11 @@
             return 'collect';
         }
 
-        // Шаг 3: ссылки есть / готовы, но слайдшоу не запущено — запускаем слайдшоу
-        if (!isSsActive) {
-            grokStartGallerySlideshow();
-            if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
-            return 'start';
-        }
-
-        // Шаг 4: слайдшоу уже активно и плашка открыта — скрываем плашку
-        if (row) {
-            row.style.display = 'none';
-            row.style.pointerEvents = 'none';
-            _gSS.removeItem('mossad_gallery_row_visible');
-        }
-        showToast('📋 Панель сбора скрыта');
-        return 'hide-bar';
+        // Шаг 3: ссылки есть / готовы — запускаем слайдшоу
+        grokStartGallerySlideshow();
+        if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+        if (typeof updateGrokHistoryPill === 'function') updateGrokHistoryPill();
+        return 'start';
     }
 
     function grokStartGallerySlideshow() {

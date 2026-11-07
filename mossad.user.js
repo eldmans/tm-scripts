@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.93
+// @version      1.3.94
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -544,7 +544,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.93';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.94';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -5818,6 +5818,12 @@ function grokHandleGalleryPlayPause(source = 'hotkey') {
 const row = document.getElementById('mossad-gallery-row');
 const isRowVisible = row && row.style.display !== 'none';
 const isSsActive = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+if (isSsActive) {
+toggleGalleryPause();
+if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+if (typeof updateGrokHistoryPill === 'function') updateGrokHistoryPill();
+return 'toggle-pause';
+}
 let savedCount = 0;
 try {
 const cRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
@@ -5838,18 +5844,10 @@ if (btnCollect) btnCollect.click();
 showToast('📋 Сбор ссылок запущен');
 return 'collect';
 }
-if (!isSsActive) {
 grokStartGallerySlideshow();
 if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+if (typeof updateGrokHistoryPill === 'function') updateGrokHistoryPill();
 return 'start';
-}
-if (row) {
-row.style.display = 'none';
-row.style.pointerEvents = 'none';
-_gSS.removeItem('mossad_gallery_row_visible');
-}
-showToast('📋 Панель сбора скрыта');
-return 'hide-bar';
 }
 function grokStartGallerySlideshow() {
 const struct = grokGetPlaylistStructure();
@@ -7898,6 +7896,10 @@ window.addEventListener('pointerup', onPointerUp, true);
 }
 function _checkGrokPillsWrapVisibility() {
 if (!_grokPillsWrapEl) return;
+if (sessionStorage.getItem('mossad_grok_pills_hidden') === 'true') {
+_grokPillsWrapEl.style.display = 'none';
+return;
+}
 const quotaVisible = config.grokQuotaEnabled !== false;
 const histVisible = config.grokHistPillEnabled !== false;
 _grokPillsWrapEl.style.display = (quotaVisible || histVisible) ? 'inline-flex' : 'none';
@@ -8212,19 +8214,43 @@ showToast(`🎞 Слайд в истории: ${cur || '-'} из ${total || '-'}
 wrap.appendChild(_grokHistoryPillEl);
 }
 _grokHistoryPillEl.style.display = 'inline-flex';
+const isSsRunning = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+const isCompact = !!config.grokPillsCompact;
+if (isSsRunning) {
+let cur = 1, total = 0;
+if (typeof grokGetPlaylistStructure === 'function' && window._mossadGalleryActive) {
+const struct = grokGetPlaylistStructure();
+if (struct && struct.items) {
+total = struct.items.length;
+const pos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
+cur = (pos && pos.totalIndex >= 0) ? pos.totalIndex + 1 : 1;
+}
+} else {
+const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+total = items.length;
+const curIdx = typeof grokGetActiveFilmstripIndex === 'function' ? grokGetActiveFilmstripIndex() : -1;
+cur = curIdx >= 0 ? curIdx + 1 : 1;
+}
+if (isCompact) {
+_grokHistoryPillEl.innerHTML = `<span style="color:#10b981;font-weight:700;">${cur || '-'}</span>`;
+} else {
+_grokHistoryPillEl.innerHTML = `<span style="color:#10b981;font-weight:700;">${cur || '-'}</span><span style="color:#6b7280;margin:0 2px;"> / </span><span style="color:#9ca3af;">${total || '-'}</span>`;
+}
+_grokHistoryPillEl.title = `Слайд-шоу:\nПозиция: ${cur || '-'} из ${total || '-'}\nAlt+1 — первый слайд плейлиста\nAlt+2 — шаг назад в показе\nAlt+3 — шаг вперёд в показе\nAlt+4 — последний слайд плейлиста\n(Двойной клик — компактный вид)`;
+} else {
 const history = _loadGrokSlideHistory();
 const total = history.length;
 let cur = 0;
 if (total > 0) {
 cur = _grokSlideHistIndex >= 0 ? _grokSlideHistIndex + 1 : total;
 }
-const isCompact = !!config.grokPillsCompact;
 if (isCompact) {
 _grokHistoryPillEl.innerHTML = `<span style="color:#60a5fa;font-weight:700;">${cur || '-'}</span>`;
 } else {
 _grokHistoryPillEl.innerHTML = `<span style="color:#60a5fa;font-weight:700;">${cur || '-'}</span><span style="color:#6b7280;margin:0 2px;"> / </span><span style="color:#9ca3af;">${total || '-'}</span>`;
 }
 _grokHistoryPillEl.title = `История слайдов диалога:\nПозиция: ${cur || '-'} из ${total || '-'}\nAlt+1 — первый слайд диалога\nAlt+2 — назад по истории\nAlt+3 — вперёд по истории\nAlt+4 — последний слайд диалога\n(Двойной клик — компактный вид)`;
+}
 if (typeof _checkGrokPillsWrapVisibility === 'function') {
 _checkGrokPillsWrapVisibility();
 }
@@ -8414,6 +8440,55 @@ e.preventDefault();
 e.stopImmediatePropagation();
 if (config.grokCollapsePromptOnNav !== false) {
 grokCollapsePrompt();
+}
+const isSsRunning = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+if (isSsRunning) {
+if (isFirstHk) {
+if (typeof grokGetPlaylistStructure === 'function' && window._mossadGalleryActive) {
+const struct = grokGetPlaylistStructure();
+if (struct && struct.items && struct.items[0]) {
+if (typeof grokSpaNavigate === 'function') grokSpaNavigate(struct.items[0].url);
+else window.location.href = struct.items[0].url;
+}
+} else {
+const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+if (items[0]) items[0].click();
+}
+showToast('⏮ Первый слайд плейлиста');
+} else if (isLastHk) {
+if (typeof grokGetPlaylistStructure === 'function' && window._mossadGalleryActive) {
+const struct = grokGetPlaylistStructure();
+if (struct && struct.items && struct.items.length) {
+const last = struct.items[struct.items.length - 1];
+if (typeof grokSpaNavigate === 'function') grokSpaNavigate(last.url);
+else window.location.href = last.url;
+}
+} else {
+const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+if (items.length) items[items.length - 1].click();
+}
+showToast('⏭ Последний слайд плейлиста');
+} else if (isBackHk) {
+if (rootDomain === 'grok.com' && typeof grokStepFilmstrip === 'function' && !window._mossadGalleryActive) {
+grokStepFilmstrip(false);
+} else if (typeof triggerRewind === 'function') {
+triggerRewind();
+} else if (typeof prevSlide === 'function') {
+prevSlide();
+}
+showToast('⏮ Предыдущий слайд показа');
+} else if (isFwdHk) {
+if (rootDomain === 'grok.com' && typeof grokStepFilmstrip === 'function' && !window._mossadGalleryActive) {
+grokStepFilmstrip(true);
+} else if (typeof triggerNextSlide === 'function') {
+triggerNextSlide();
+} else if (typeof nextSlide === 'function') {
+nextSlide();
+}
+showToast('⏭ Следующий слайд показа');
+}
+setTimeout(() => { if (typeof updateGrokHistoryPill === 'function') updateGrokHistoryPill(); }, 150);
+return;
 }
 if (isFirstHk) {
 grokJumpToFirstSlide();
@@ -11616,12 +11691,31 @@ topBar.style.cssText = `
             transition: all 0.3s ease; cursor: grab; pointer-events: auto; width: 100%; box-sizing: border-box;
         `;
 window.makeWidgetDraggable(topBar);
+let _pillsHidden = sessionStorage.getItem('mossad_grok_pills_hidden') === 'true';
+const btnTogglePills = document.createElement('button');
+btnTogglePills.id = 'mossad-btn-toggle-pills';
+btnTogglePills.textContent = _pillsHidden ? '▶' : '◀';
+btnTogglePills.title = 'Скрыть / показать плашки квоты и счётчика';
+btnTogglePills.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 10px; padding: 2px 4px; line-height: 1; transition: color 0.2s;`;
+btnTogglePills.onmouseenter = () => { btnTogglePills.style.color = '#38bdf8'; };
+btnTogglePills.onmouseleave = () => { btnTogglePills.style.color = '#6b7280'; };
+btnTogglePills.onclick = (e) => {
+e.stopPropagation();
+_pillsHidden = !_pillsHidden;
+sessionStorage.setItem('mossad_grok_pills_hidden', _pillsHidden ? 'true' : 'false');
+btnTogglePills.textContent = _pillsHidden ? '▶' : '◀';
+const wrap = document.getElementById('mossad-grok-pills-wrap');
+if (wrap) {
+wrap.style.display = _pillsHidden ? 'none' : 'inline-flex';
+}
+showToast(_pillsHidden ? 'Плашки квоты и счётчика скрыты' : 'Плашки квоты и счётчика показаны');
+};
 const timerEl = document.createElement('div');
 timerEl.id = 'mossad-timer';
 timerEl.style.cssText = `font-family: monospace; font-size: 12px; min-width: 80px; width: auto; white-space: nowrap; text-align: center; color: #9ca3af; padding: 0 2px;`;
 const btnStart = document.createElement('button');
 btnStart.id = 'mossad-btn-start';
-mossadLabelEl(btnStart, 'start');
+btnStart.textContent = '▶';
 btnStart.title = 'Старт слайдшоу (Insert)';
 btnStart.style.cssText = `
             cursor: pointer; border: none; border-radius: 6px; padding: 4px 11px; min-width: 36px;
@@ -11701,7 +11795,7 @@ return;
 window.widgetState = 'hidden';
 window.updateWidgetUI();
 };
-topBar.append(timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+topBar.append(btnTogglePills, timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
 const hudRow = document.createElement('div');
 hudRow.id = 'mossad-slideshow-hud';
 hudRow.style.cssText = `
@@ -12280,11 +12374,16 @@ panel.style.transform = 'translateY(0)';
 btnTogglePanel.style.transform = 'rotate(180deg)';
 btnTogglePanel.style.color = '#3b82f6';
 }
-if (slideshowActive) {
+const isAnyActive = !!(slideshowActive || window._mossadGalleryActive);
+if (isAnyActive) {
+btnStart.textContent = '❚❚';
+btnStart.title = 'Пауза слайдшоу (Insert)';
 btnStart.style.background = '#3b82f6';
 btnStart.style.color = '#ffffff';
 btnStart.style.boxShadow = '0 0 10px rgba(59,130,246,0.6)';
 } else {
+btnStart.textContent = '▶';
+btnStart.title = 'Старт слайдшоу (Insert)';
 btnStart.style.background = '#1f2937';
 btnStart.style.color = '#e5e7eb';
 btnStart.style.boxShadow = 'none';

@@ -106,13 +106,35 @@
         `;
         window.makeWidgetDraggable(topBar);
         
+        // Кнопка скрытия/показа овалов (квота и счётчик): ◀ / ▶
+        let _pillsHidden = sessionStorage.getItem('mossad_grok_pills_hidden') === 'true';
+        const btnTogglePills = document.createElement('button');
+        btnTogglePills.id = 'mossad-btn-toggle-pills';
+        btnTogglePills.textContent = _pillsHidden ? '▶' : '◀';
+        btnTogglePills.title = 'Скрыть / показать плашки квоты и счётчика';
+        btnTogglePills.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 10px; padding: 2px 4px; line-height: 1; transition: color 0.2s;`;
+        btnTogglePills.onmouseenter = () => { btnTogglePills.style.color = '#38bdf8'; };
+        btnTogglePills.onmouseleave = () => { btnTogglePills.style.color = '#6b7280'; };
+        btnTogglePills.onclick = (e) => {
+            e.stopPropagation();
+            _pillsHidden = !_pillsHidden;
+            sessionStorage.setItem('mossad_grok_pills_hidden', _pillsHidden ? 'true' : 'false');
+            btnTogglePills.textContent = _pillsHidden ? '▶' : '◀';
+            const wrap = document.getElementById('mossad-grok-pills-wrap');
+            if (wrap) {
+                wrap.style.display = _pillsHidden ? 'none' : 'inline-flex';
+            }
+            showToast(_pillsHidden ? 'Плашки квоты и счётчика скрыты' : 'Плашки квоты и счётчика показаны');
+        };
+
         const timerEl = document.createElement('div');
         timerEl.id = 'mossad-timer';
         timerEl.style.cssText = `font-family: monospace; font-size: 12px; min-width: 80px; width: auto; white-space: nowrap; text-align: center; color: #9ca3af; padding: 0 2px;`;
 
+        // Кнопка Пуск/Пауза (Play ▶ / Pause ❚❚)
         const btnStart = document.createElement('button');
         btnStart.id = 'mossad-btn-start';
-        mossadLabelEl(btnStart, 'start');
+        btnStart.textContent = '▶';
         btnStart.title = 'Старт слайдшоу (Insert)';
         btnStart.style.cssText = `
             cursor: pointer; border: none; border-radius: 6px; padding: 4px 11px; min-width: 36px;
@@ -216,7 +238,7 @@
         };
 
         // Новый порядок: таймер | 🚀 | ▼ | 🔄 | 📝 | ... [авто-отступ] ... | ✕
-        topBar.append(timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+        topBar.append(btnTogglePills, timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
         // ── HUD СЛАЙД-ШОУ (v1.3.93): компактная плашка настроек активного показа ──
         // Появляется ТОЛЬКО когда слайд-шоу запущено. Исчезает при остановке.
         const hudRow = document.createElement('div');
@@ -846,11 +868,16 @@
                 btnTogglePanel.style.color = '#3b82f6';
             }
             
-            if (slideshowActive) {
+            const isAnyActive = !!(slideshowActive || window._mossadGalleryActive);
+            if (isAnyActive) {
+                btnStart.textContent = '❚❚';
+                btnStart.title = 'Пауза слайдшоу (Insert)';
                 btnStart.style.background = '#3b82f6'; // Bright blue
                 btnStart.style.color = '#ffffff';
                 btnStart.style.boxShadow = '0 0 10px rgba(59,130,246,0.6)';
             } else {
+                btnStart.textContent = '▶';
+                btnStart.title = 'Старт слайдшоу (Insert)';
                 btnStart.style.background = '#1f2937'; // Gray
                 btnStart.style.color = '#e5e7eb';
                 btnStart.style.boxShadow = 'none';

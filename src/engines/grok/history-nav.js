@@ -241,22 +241,47 @@
 
         _grokHistoryPillEl.style.display = 'inline-flex';
 
-        const history = _loadGrokSlideHistory();
-        const total = history.length;
-        let cur = 0;
-        if (total > 0) {
-            cur = _grokSlideHistIndex >= 0 ? _grokSlideHistIndex + 1 : total;
-        }
-
+        const isSsRunning = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
         const isCompact = !!config.grokPillsCompact;
-        if (isCompact) {
-            _grokHistoryPillEl.innerHTML = `<span style="color:#60a5fa;font-weight:700;">${cur || '-'}</span>`;
+
+        if (isSsRunning) {
+            // v1.3.94: Во время слайд-шоу плашка показывает счётчик слайд-шоу!
+            let cur = 1, total = 0;
+            if (typeof grokGetPlaylistStructure === 'function' && window._mossadGalleryActive) {
+                const struct = grokGetPlaylistStructure();
+                if (struct && struct.items) {
+                    total = struct.items.length;
+                    const pos = (typeof grokFindCurrentPosition === 'function') ? grokFindCurrentPosition(struct) : null;
+                    cur = (pos && pos.totalIndex >= 0) ? pos.totalIndex + 1 : 1;
+                }
+            } else {
+                const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+                total = items.length;
+                const curIdx = typeof grokGetActiveFilmstripIndex === 'function' ? grokGetActiveFilmstripIndex() : -1;
+                cur = curIdx >= 0 ? curIdx + 1 : 1;
+            }
+
+            if (isCompact) {
+                _grokHistoryPillEl.innerHTML = `<span style="color:#10b981;font-weight:700;">${cur || '-'}</span>`;
+            } else {
+                _grokHistoryPillEl.innerHTML = `<span style="color:#10b981;font-weight:700;">${cur || '-'}</span><span style="color:#6b7280;margin:0 2px;"> / </span><span style="color:#9ca3af;">${total || '-'}</span>`;
+            }
+            _grokHistoryPillEl.title = `Слайд-шоу:\nПозиция: ${cur || '-'} из ${total || '-'}\nAlt+1 — первый слайд плейлиста\nAlt+2 — шаг назад в показе\nAlt+3 — шаг вперёд в показе\nAlt+4 — последний слайд плейлиста\n(Двойной клик — компактный вид)`;
         } else {
-            _grokHistoryPillEl.innerHTML = `<span style="color:#60a5fa;font-weight:700;">${cur || '-'}</span><span style="color:#6b7280;margin:0 2px;"> / </span><span style="color:#9ca3af;">${total || '-'}</span>`;
+            const history = _loadGrokSlideHistory();
+            const total = history.length;
+            let cur = 0;
+            if (total > 0) {
+                cur = _grokSlideHistIndex >= 0 ? _grokSlideHistIndex + 1 : total;
+            }
+
+            if (isCompact) {
+                _grokHistoryPillEl.innerHTML = `<span style="color:#60a5fa;font-weight:700;">${cur || '-'}</span>`;
+            } else {
+                _grokHistoryPillEl.innerHTML = `<span style="color:#60a5fa;font-weight:700;">${cur || '-'}</span><span style="color:#6b7280;margin:0 2px;"> / </span><span style="color:#9ca3af;">${total || '-'}</span>`;
+            }
+            _grokHistoryPillEl.title = `История слайдов диалога:\nПозиция: ${cur || '-'} из ${total || '-'}\nAlt+1 — первый слайд диалога\nAlt+2 — назад по истории\nAlt+3 — вперёд по истории\nAlt+4 — последний слайд диалога\n(Двойной клик — компактный вид)`;
         }
-
-        _grokHistoryPillEl.title = `История слайдов диалога:\nПозиция: ${cur || '-'} из ${total || '-'}\nAlt+1 — первый слайд диалога\nAlt+2 — назад по истории\nAlt+3 — вперёд по истории\nAlt+4 — последний слайд диалога\n(Двойной клик — компактный вид)`;
-
         if (typeof _checkGrokPillsWrapVisibility === 'function') {
             _checkGrokPillsWrapVisibility();
         }
@@ -492,6 +517,58 @@
 
         if (config.grokCollapsePromptOnNav !== false) {
             grokCollapsePrompt();
+        }
+
+        const isSsRunning = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+
+        if (isSsRunning) {
+            // v1.3.94: Во время слайд-шоу клавиши Alt+1..4 управляют показом слайд-шоу
+            if (isFirstHk) {
+                if (typeof grokGetPlaylistStructure === 'function' && window._mossadGalleryActive) {
+                    const struct = grokGetPlaylistStructure();
+                    if (struct && struct.items && struct.items[0]) {
+                        if (typeof grokSpaNavigate === 'function') grokSpaNavigate(struct.items[0].url);
+                        else window.location.href = struct.items[0].url;
+                    }
+                } else {
+                    const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+                    if (items[0]) items[0].click();
+                }
+                showToast('⏮ Первый слайд плейлиста');
+            } else if (isLastHk) {
+                if (typeof grokGetPlaylistStructure === 'function' && window._mossadGalleryActive) {
+                    const struct = grokGetPlaylistStructure();
+                    if (struct && struct.items && struct.items.length) {
+                        const last = struct.items[struct.items.length - 1];
+                        if (typeof grokSpaNavigate === 'function') grokSpaNavigate(last.url);
+                        else window.location.href = last.url;
+                    }
+                } else {
+                    const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+                    if (items.length) items[items.length - 1].click();
+                }
+                showToast('⏭ Последний слайд плейлиста');
+            } else if (isBackHk) {
+                if (rootDomain === 'grok.com' && typeof grokStepFilmstrip === 'function' && !window._mossadGalleryActive) {
+                    grokStepFilmstrip(false);
+                } else if (typeof triggerRewind === 'function') {
+                    triggerRewind();
+                } else if (typeof prevSlide === 'function') {
+                    prevSlide();
+                }
+                showToast('⏮ Предыдущий слайд показа');
+            } else if (isFwdHk) {
+                if (rootDomain === 'grok.com' && typeof grokStepFilmstrip === 'function' && !window._mossadGalleryActive) {
+                    grokStepFilmstrip(true);
+                } else if (typeof triggerNextSlide === 'function') {
+                    triggerNextSlide();
+                } else if (typeof nextSlide === 'function') {
+                    nextSlide();
+                }
+                showToast('⏭ Следующий слайд показа');
+            }
+            setTimeout(() => { if (typeof updateGrokHistoryPill === 'function') updateGrokHistoryPill(); }, 150);
+            return;
         }
 
         if (isFirstHk) {

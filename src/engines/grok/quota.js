@@ -523,6 +523,10 @@
 
     function _checkGrokPillsWrapVisibility() {
         if (!_grokPillsWrapEl) return;
+        if (sessionStorage.getItem('mossad_grok_pills_hidden') === 'true') {
+            _grokPillsWrapEl.style.display = 'none';
+            return;
+        }
         const quotaVisible = config.grokQuotaEnabled !== false;
         const histVisible = config.grokHistPillEnabled !== false;
         _grokPillsWrapEl.style.display = (quotaVisible || histVisible) ? 'inline-flex' : 'none';
