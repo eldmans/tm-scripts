@@ -389,11 +389,16 @@
     }
 
     function renderGrokQuotaHtml(cachedUsage, cfg) {
-        const sep = (cfg && cfg.grokQuotaSep != null) ? cfg.grokQuotaSep : ' · ';
-        const mode = (cfg && cfg.grokQuotaTimeMode) || 'auto';
-        
+        const isCompact = !!(cfg && cfg.grokPillsCompact);
         const pctStr = getGrokUsagePercentStr(cachedUsage);
         const pctColor = getGrokQuotaPctColor(cachedUsage);
+
+        if (isCompact) {
+            return `<span style="color:${pctColor};font-weight:700;">${_grokEsc(pctStr)}</span>`;
+        }
+
+        const sep = (cfg && cfg.grokQuotaSep != null) ? cfg.grokQuotaSep : ' · ';
+        const mode = (cfg && cfg.grokQuotaTimeMode) || 'auto';
         const tierId = detectGrokSubscription(cachedUsage);
         const tierLetter = getGrokTierLetter(tierId);
         const tierColor = getGrokTierColor(tierId);
@@ -408,8 +413,59 @@
         return html;
     }
 
-    // ── Перетаскивание плашки ──
-    function initGrokQuotaPillDrag(pill) {
+    // ── Общий контейнер для плашек Grok (квота + история слайдов) ──
+    let _grokPillsWrapEl = null;
+
+    function getOrCreateGrokPillsWrap() {
+        if (!_grokPillsWrapEl || !_grokPillsWrapEl.isConnected) {
+            let existing = document.getElementById('mossad-grok-pills-wrap');
+            if (existing) {
+                _grokPillsWrapEl = existing;
+            } else {
+                _grokPillsWrapEl = document.createElement('div');
+                _grokPillsWrapEl.id = 'mossad-grok-pills-wrap';
+                _grokPillsWrapEl.style.cssText = `
+                    position: fixed; z-index: 9999999;
+                    display: inline-flex; align-items: center; gap: 8px;
+                    pointer-events: auto;
+                    cursor: move;
+                    user-select: none;
+                `;
+                initGrokPillsWrapDrag(_grokPillsWrapEl);
+                _grokPillsWrapEl.addEventListener('dblclick', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleGrokPillsCompact();
+                });
+                document.body.appendChild(_grokPillsWrapEl);
+            }
+        }
+        // Положение контейнера (сохраняется в config.grokQuotaPos)
+        const pos = config.grokQuotaPos;
+        if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
+            _grokPillsWrapEl.style.left = pos.left + 'px';
+            _grokPillsWrapEl.style.top = pos.top + 'px';
+            _grokPillsWrapEl.style.transform = 'none';
+        } else {
+            _grokPillsWrapEl.style.left = '50%';
+            _grokPillsWrapEl.style.top = '10px';
+            _grokPillsWrapEl.style.transform = 'translateX(-50%)';
+        }
+        return _grokPillsWrapEl;
+    }
+
+    function toggleGrokPillsCompact() {
+        config.grokPillsCompact = !config.grokPillsCompact;
+        Settings.save();
+        updateGrokQuotaPill();
+        if (typeof updateGrokHistoryPill === 'function') {
+            updateGrokHistoryPill();
+        }
+        showToast(config.grokPillsCompact ? '▫ Компактный вид плашек' : '▪ Развёрнутый вид плашек');
+    }
+
+    // ── Перетаскивание общего контейнера плашек ──
+    function initGrokPillsWrapDrag(wrap) {
         let startX = 0, startY = 0;
         let initialLeft = 0, initialTop = 0;
         let isDragging = false;
@@ -429,13 +485,13 @@
 
             const vw = window.innerWidth || 1024;
             const vh = window.innerHeight || 768;
-            const rect = pill.getBoundingClientRect();
+            const rect = wrap.getBoundingClientRect();
             newLeft = Math.max(4, Math.min(newLeft, vw - rect.width - 4));
             newTop = Math.max(4, Math.min(newTop, vh - rect.height - 4));
 
-            pill.style.left = newLeft + 'px';
-            pill.style.top = newTop + 'px';
-            pill.style.transform = 'none';
+            wrap.style.left = newLeft + 'px';
+            wrap.style.top = newTop + 'px';
+            wrap.style.transform = 'none';
         };
 
         const onPointerUp = (e) => {
@@ -445,21 +501,15 @@
             window.removeEventListener('pointerup', onPointerUp, true);
 
             if (dragThresholdPassed) {
-                const rect = pill.getBoundingClientRect();
+                const rect = wrap.getBoundingClientRect();
                 config.grokQuotaPos = { left: Math.round(rect.left), top: Math.round(rect.top) };
                 Settings.save();
-            } else {
-                grokFetchQuota(true).then(() => {
-                    showToast('✓ Квота Grok обновлена');
-                }).catch(() => {
-                    showToast('Ошибка обновления квоты');
-                });
             }
         };
 
-        pill.addEventListener('pointerdown', (e) => {
+        wrap.addEventListener('pointerdown', (e) => {
             if (e.button !== 0) return;
-            const rect = pill.getBoundingClientRect();
+            const rect = wrap.getBoundingClientRect();
             startX = e.clientX;
             startY = e.clientY;
             initialLeft = rect.left;
@@ -468,23 +518,32 @@
             dragThresholdPassed = false;
             window.addEventListener('pointermove', onPointerMove, true);
             window.addEventListener('pointerup', onPointerUp, true);
-            e.preventDefault();
         });
     }
 
-    // ── Рендер плашки на странице ──
+    function _checkGrokPillsWrapVisibility() {
+        if (!_grokPillsWrapEl) return;
+        const quotaVisible = config.grokQuotaEnabled !== false;
+        const histVisible = config.grokHistPillEnabled !== false;
+        _grokPillsWrapEl.style.display = (quotaVisible || histVisible) ? 'inline-flex' : 'none';
+    }
+
+    // ── Рендер плашки квоты на странице ──
     function updateGrokQuotaPill() {
         if (rootDomain !== 'grok.com') return;
+        const wrap = getOrCreateGrokPillsWrap();
+        if (!wrap) return;
+
         if (config.grokQuotaEnabled === false) {
             if (_grokQuotaPillEl) _grokQuotaPillEl.style.display = 'none';
+            _checkGrokPillsWrapVisibility();
             return;
         }
 
-        if (!_grokQuotaPillEl) {
+        if (!_grokQuotaPillEl || !_grokQuotaPillEl.isConnected) {
             _grokQuotaPillEl = document.createElement('div');
             _grokQuotaPillEl.id = 'mossad-grok-quota-pill';
             _grokQuotaPillEl.style.cssText = `
-                position: fixed; z-index: 9999999;
                 display: inline-flex; align-items: center; gap: 4px;
                 padding: 4px 12px;
                 background: rgba(17, 24, 39, 0.88);
@@ -498,30 +557,28 @@
                 font-size: 12px;
                 font-weight: 600;
                 letter-spacing: 0.02em;
-                cursor: move;
+                cursor: pointer;
                 user-select: none;
                 transition: border-color 0.15s, box-shadow 0.15s;
             `;
-            initGrokQuotaPillDrag(_grokQuotaPillEl);
-            document.body.appendChild(_grokQuotaPillEl);
-        } else if (!_grokQuotaPillEl.parentNode) {
-            document.body.appendChild(_grokQuotaPillEl);
+            _grokQuotaPillEl.addEventListener('click', (e) => {
+                if (e.detail === 1) {
+                    grokFetchQuota(true).then(() => {
+                        showToast('✓ Квота Grok обновлена');
+                    }).catch(() => {
+                        showToast('Ошибка обновления квоты');
+                    });
+                }
+            });
+            // Вставляем плашку квоты первой в контейнере (слева)
+            if (wrap.firstChild) {
+                wrap.insertBefore(_grokQuotaPillEl, wrap.firstChild);
+            } else {
+                wrap.appendChild(_grokQuotaPillEl);
+            }
         }
 
         _grokQuotaPillEl.style.display = 'inline-flex';
-
-        // Положение
-        const pos = config.grokQuotaPos;
-        if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
-            _grokQuotaPillEl.style.left = pos.left + 'px';
-            _grokQuotaPillEl.style.top = pos.top + 'px';
-            _grokQuotaPillEl.style.transform = 'none';
-        } else {
-            _grokQuotaPillEl.style.left = '50%';
-            _grokQuotaPillEl.style.top = '10px';
-            _grokQuotaPillEl.style.transform = 'translateX(-50%)';
-        }
-
         _grokQuotaPillEl.innerHTML = renderGrokQuotaHtml(_cachedGrokQuota, config);
 
         // Tooltip
@@ -539,8 +596,10 @@
             tooltip += `\nСброс через: ${timeStr} (${new Date(resetIso).toLocaleString()})`;
         }
         tooltip += `\nТариф: ${tierId === 'super' ? 'SuperGrok' : tierId === 'premium' ? 'Premium' : 'Free'} (${tierLetter})`;
-        tooltip += `\n(Клик — обновить данные, зажатие — переместить)`;
+        tooltip += `\n(Клик — обновить, двойной клик — компактный вид, зажатие — переместить)`;
         _grokQuotaPillEl.title = tooltip;
+
+        _checkGrokPillsWrapVisibility();
     }
 
     // ── Перехват сетевых запросов fetch на странице ──

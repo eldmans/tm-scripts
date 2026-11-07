@@ -175,10 +175,9 @@
         return Array.from(document.querySelectorAll(GC_POPOVER_SEL)).find(el => el.isConnected && !_gcOwn(el) && !(prompt && el.contains(prompt)) && _gcShown(el)) || null;
     }
     function _gcEsc(t) {
+        // v1.3.92: СТРОГО запрещено отправлять Escape в document и window, так как роутер Grok закрывает оверлей поста и выбрасывает в Saved!
         const ev = () => new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true });
         if (t && t.dispatchEvent) { try { t.dispatchEvent(ev()); } catch (e) {} }
-        try { document.dispatchEvent(ev()); } catch (e) {}
-        try { window.dispatchEvent(ev()); } catch (e) {}
     }
     /** v1.3.69: промт не виден из-за открытого меню/поповера — Escape по нему и ждём промт. */
     /** v1.3.84: не вызывать слепой ae.blur() (выбивает фокус в первую ссылку/Saved); адресно переводим фокус на промт. */
@@ -197,7 +196,18 @@
     }
 
     function _gcStepPrompt() {
-        const p = grokFindPromptInput() || grokFindPromptInput(true);
+        // v1.3.92: Если открыт поповер/список длительности — подтверждаем текущий выбор и переходим в промпт
+        const pop = _gcOpenPopover();
+        if (pop) {
+            const ae = document.activeElement;
+            if (ae && pop.contains(ae)) {
+                if (ae.getAttribute && /^(option|menuitem|menuitemradio)$/.test(ae.getAttribute('role') || '')) {
+                    try { mossadPressEl(ae); } catch (e) {}
+                }
+            }
+            _gcEsc(pop);
+        }
+        const p = grokFindPromptInput(true); // lenient=true: aria-hidden модалок не мешает найти инпут
         if (!p) { mossadDebug('grokCycle', 'шаг 1: промт не найден — пропуск'); return false; }
         _gcCaretToEnd(p);
         mossadDebug('grokCycle', 'шаг 1: промт', { tag: p.tagName });

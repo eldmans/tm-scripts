@@ -40,3 +40,33 @@
         window.location.href = 'https://grok.com/imagine/saved';
     }
     window.grokNavigateToSaved = grokNavigateToSaved;
+
+    // ============================================================
+    // v1.3.92: Защита от зависания на голой странице grok.com/imagine
+    // Если URL ровно grok.com/imagine и больше ничего — немедленно редиректим в /imagine/saved
+    // ============================================================
+    let _lastBareImagineRedirectAt = 0;
+
+    function checkGrokBareImagineRedirect() {
+        if (rootDomain !== 'grok.com') return;
+        const path = location.pathname;
+        const isBare = (path === '/imagine' || path === '/imagine/') &&
+                       (!location.search || location.search === '' || location.search === '?') &&
+                       (!location.hash || location.hash === '' || location.hash === '#');
+        if (!isBare) return;
+
+        const now = Date.now();
+        if (now - _lastBareImagineRedirectAt < 3000) return; // Защита от зацикливания
+        _lastBareImagineRedirectAt = now;
+
+        console.log('[MOSSAD] grok.com/imagine без параметров -> редирект в /imagine/saved');
+        window.location.replace('https://grok.com/imagine/saved');
+    }
+
+    if (rootDomain === 'grok.com') {
+        checkGrokBareImagineRedirect();
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', checkGrokBareImagineRedirect);
+        }
+        setInterval(checkGrokBareImagineRedirect, 2000);
+    }

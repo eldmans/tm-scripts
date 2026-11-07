@@ -39,6 +39,8 @@
         grokNoPromptKeys: 'RWEZXGVCF',     // v1.3.79: + F (⛶ развернуть); v1.3.64: Grok — клавиши, которые не кидают в промт (символ = физ. клавиша, {Имя} — именованная); v1.3.67: + клавиши скорости
         grokKeepSound: true, // v1.3.80: BSH — звук/громкость не сбрасываются при смене слайда
         grokQuotaEnabled: true,            // v1.3.87: плашка расхода лимита на Grok
+        grokHistPillEnabled: true,         // v1.3.91: плашка позиции в истории на Grok
+        grokPillsCompact: false,           // v1.3.91: компактный вид плашек (по dblclick: только % и только номер)
         grokQuotaSep: ' · ',               // v1.3.87: разделитель между частями плашки
         grokQuotaTimeMode: 'auto',         // v1.3.87: время до сброса: 'auto' | 'both' | 'hours'
         grokQuotaPos: null,                // v1.3.87: позиция плашки { left, top } (null = по центру вверху)
@@ -80,8 +82,10 @@
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
             generate:         { key: 'Enter',      ctrl: true,  alt: false, shift: false }, // v1.3.70: Ctrl+Enter — запуск генерации Space / отправка Grok
-            grokHistBack:     { key: '=',          ctrl: false, alt: true,  shift: false }, // v1.3.89: Alt+= — Grok: назад по истории слайдов
-            grokHistFwd:      { key: '-',          ctrl: false, alt: true,  shift: false }, // v1.3.89: Alt+- — Grok: вперёд по истории слайдов
+            grokFirstSlide:   { key: '1',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+1 — Grok: первый слайд диалога
+            grokHistBack:     { key: '2',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+2 — Grok: назад по истории слайдов
+            grokHistFwd:      { key: '3',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+3 — Grok: вперёд по истории слайдов
+            grokLastSlide:    { key: '4',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+4 — Grok: последний слайд диалога
         }
     };
 
@@ -103,7 +107,7 @@
         'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates',
         'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
         'playlistRows', 'playlistWidth', 'collectWatchSec',
-        'grokQuotaEnabled', 'grokQuotaSep', 'grokQuotaTimeMode',
+        'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',
         'grokCollapsePromptOnNav', 'grokHistoryDwellSec',
         'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS', 'pinterestJumpKeys',
     ];
@@ -414,7 +418,7 @@
     const HK_SITE_GM_KEY = 'mossad_hk_site';
     // Сразу «свои» при первом заходе на сайт (действие есть только на этом сайте)
     const HK_SITE_SEED = {
-        'grok.com': ['grokCycle', 'grokHistBack', 'grokHistFwd'],
+        'grok.com': ['grokCycle', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide'],
         'xv-ru.com': ['xvDoubleSize'],
         'xvideos.com': ['xvDoubleSize'],
         'xvideos2.com': ['xvDoubleSize'],

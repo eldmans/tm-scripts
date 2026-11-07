@@ -75,7 +75,7 @@
     // Закреплённые (🔒) строки НЕ меняются ни сбросом, ни рассылкой: ни клавиша, ни место.
     const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
     const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'grokHistBack', 'grokHistFwd', 'expand', 'xvDoubleSize', 'generate'];
+    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide', 'expand', 'xvDoubleSize', 'generate'];
     function readHotkeyDefaults() {
         let raw = null;
         try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -577,9 +577,17 @@
                     Компактная плашка отображается по умолчанию сверху по центру экрана на сайте Grok. Показывает процент израсходованного лимита, время до сброса и букву тарифа (<b>S</b> — SuperGrok, <b>P</b> — Premium, <b>F</b> — Free).
                 </div>
                 
-                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#e5e7eb;cursor:pointer;margin-bottom:12px;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#e5e7eb;cursor:pointer;margin-bottom:8px;">
                     <input type="checkbox" id="mossad-grok-quota-enabled" ${config.grokQuotaEnabled !== false ? 'checked' : ''} style="accent-color:#10b981;">
                     Показывать плашку расхода лимита на Grok
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#e5e7eb;cursor:pointer;margin-bottom:8px;">
+                    <input type="checkbox" id="mossad-grok-hist-pill-enabled" ${config.grokHistPillEnabled !== false ? 'checked' : ''} style="accent-color:#3b82f6;">
+                    Показывать плашку позиции в истории диалога (рядом с квотой)
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#e5e7eb;cursor:pointer;margin-bottom:12px;" title="Также переключается двойным кликом (dblclick) по любой из плашек">
+                    <input type="checkbox" id="mossad-grok-pills-compact" ${config.grokPillsCompact ? 'checked' : ''} style="accent-color:#f59e0b;">
+                    Компактный вид плашек (только % и только номер позиции)
                 </label>
                 
                 <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#d1d5db;margin-bottom:12px;">
@@ -611,6 +619,8 @@
         `;
 
         const cbEnabled = pane.querySelector('#mossad-grok-quota-enabled');
+        const cbHistPill = pane.querySelector('#mossad-grok-hist-pill-enabled');
+        const cbCompact = pane.querySelector('#mossad-grok-pills-compact');
         const inputSep = pane.querySelector('#mossad-grok-quota-sep');
         const selectTime = pane.querySelector('#mossad-grok-quota-timemode');
         const btnResetPos = pane.querySelector('#mossad-grok-quota-resetpos');
@@ -647,6 +657,8 @@
 
         const saveChanges = () => {
             config.grokQuotaEnabled = cbEnabled ? cbEnabled.checked : true;
+            config.grokHistPillEnabled = cbHistPill ? cbHistPill.checked : true;
+            config.grokPillsCompact = cbCompact ? cbCompact.checked : false;
             config.grokQuotaSep = inputSep ? inputSep.value : ' · ';
             config.grokQuotaTimeMode = selectTime ? selectTime.value : 'auto';
             Settings.save();
@@ -655,6 +667,8 @@
         };
 
         if (cbEnabled) cbEnabled.onchange = saveChanges;
+        if (cbHistPill) cbHistPill.onchange = saveChanges;
+        if (cbCompact) cbCompact.onchange = saveChanges;
         if (inputSep) inputSep.oninput = saveChanges;
         if (selectTime) selectTime.onchange = saveChanges;
 
@@ -890,8 +904,10 @@
             snapWidget:       'Привязать к левому верхнему краю (F8)',
             openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)',
             grokCycle:        'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
-            grokHistBack:     'Grok — назад по истории слайдов (Alt+= / =)',
-            grokHistFwd:      'Grok — вперёд по истории слайдов (Alt+- / -)',
+            grokFirstSlide:   'Grok — первый слайд диалога (Alt+1)',
+            grokHistBack:     'Grok — назад по истории слайдов (Alt+2)',
+            grokHistFwd:      'Grok — вперёд по истории слайдов (Alt+3)',
+            grokLastSlide:    'Grok — последний слайд диалога (Alt+4)',
             expand:           '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
             xvDoubleSize:     'XVideos / xv-ru — 🔲 Двойной размер плеера (T)',
             generate:         'Генерация Space / Отправка Grok (Ctrl+Enter)'

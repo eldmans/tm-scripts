@@ -1,14 +1,144 @@
     // ============================================================
-    // GROK: История просмотров слайдов (Alt+= / Alt+-) и умное сворачивание промпта (v1.3.89)
+    // GROK: История просмотров слайдов (Alt+1..4) и умное сворачивание промпта (v1.3.92)
+    // - Срабатывает ТОЛЬКО когда мы находимся внутри диалога (conversation)
+    // - Вне диалога (в чате, в Saved, в Image) проверка кнопок выключена, плашка скрыта
+    // - Генерации в процессе (спиннер / in-progress) в историю НЕ попадают
+    // - Если генерация сорвалась/недействительна: удаляется из истории и перебрасывает в Grok Image
+    // - Alt+1: первый слайд диалога (items[0])
+    // - Alt+4: последний слайд диалога (items[last])
+    // - Alt+2: назад по истории слайдов диалога (задержка >= 5с)
+    // - Alt+3: вперёд по истории слайдов диалога
+    // - Без перезагрузки страницы (window.location.href запрещён)
+    // - Раздельное хранение истории для каждого отдельного conversation
+    // - Плашка позиции в истории рядом с квотой (двойной клик — компактный вид)
     // ============================================================
 
-    const GROK_SLIDE_HIST_KEY = 'mossad_grok_slide_hist_v1';
     const GROK_HIST_MAX_AGE_MS = 60 * 60 * 1000; // 1 час — записи старше автоматически удаляются
 
     let _grokSlideHistIndex = -1;
     let _grokCandidateSlide = null;
     let _grokHistTickTimer = null;
     let _grokIsNavigatingHistory = false;
+    let _grokHistoryPillEl = null;
+
+    // ── Проверка: находимся ли мы строго внутри диалога (conversation) ──
+    function isGrokInsideConversation() {
+        if (rootDomain !== 'grok.com') return false;
+        // Не диалог генераций, если мы в Saved или на главной imagine
+        if (typeof isGrokSavedPage === 'function' && isGrokSavedPage()) return false;
+        if (location.pathname === '/imagine' || location.pathname === '/imagine/') return false;
+        // Текстовый чат без генераций
+        if (location.pathname.startsWith('/chat') || location.pathname.startsWith('/c/')) {
+            if (!document.querySelector('[data-filmstrip-item="true"], button[aria-label*="Thumbnail"], button[aria-label*="thumbnail"]')) {
+                return false;
+            }
+        }
+        // На странице поста Imagine
+        if (typeof isGrokPostPage === 'function' && isGrokPostPage()) {
+            return true;
+        }
+        // Наличие параметра беседы в URL
+        try {
+            const u = new URL(location.href);
+            if (u.searchParams.get('conversation') || u.searchParams.get('conv')) return true;
+        } catch (e) {}
+        return false;
+    }
+
+    // ── Проверка: идёт ли генерация прямо сейчас (in-progress) ──
+    function isGrokGeneratingNow() {
+        if (!isGrokInsideConversation()) return false;
+        // Спиннеры, прогрессбары, анимации загрузки
+        const progress = document.querySelector('[role="progressbar"], [data-testid*="progress"], [aria-label*="Generating"], [aria-label*="generating"], .animate-spin');
+        if (progress) {
+            const main = document.querySelector('main, [role="main"], div[role="dialog"]');
+            if (main && (main.contains(progress) || progress.closest('main, [role="dialog"]'))) {
+                return true;
+            }
+        }
+        // Текстовые лоадеры в теле поста
+        const candidateTexts = Array.from(document.querySelectorAll('main span, main p, div[role="dialog"] span, div[role="dialog"] p'));
+        for (const el of candidateTexts) {
+            const txt = (el.textContent || '').trim().toLowerCase();
+            if (/^(generating|creating|rendering|preparing|генерация|создание|подготовка)/i.test(txt)) {
+                return true;
+            }
+        }
+        // Видео-тег без источника (ещё не сгенерирован)
+        const vid = document.querySelector('main video, div[role="dialog"] video');
+        if (vid && !vid.src && !vid.querySelector('source') && !vid.currentSrc) {
+            return true;
+        }
+        return false;
+    }
+
+    // ── Проверка: сорвалась ли генерация (failed / invalid) ──
+    function isGrokGenerationFailed() {
+        if (rootDomain !== 'grok.com' || !isGrokInsideConversation()) return false;
+        const alerts = Array.from(document.querySelectorAll('[role="alert"], [data-testid*="error"], div[class*="error"]'));
+        for (const el of alerts) {
+            const txt = (el.textContent || '').trim().toLowerCase();
+            if (/fail|error|not found|could not|не удалось|ошибка/i.test(txt)) {
+                return true;
+            }
+        }
+        const texts = Array.from(document.querySelectorAll('main p, main h2, main h3, div[role="dialog"] p, div[role="dialog"] h2, div[role="dialog"] h3'));
+        for (const el of texts) {
+            const txt = (el.textContent || '').trim().toLowerCase();
+            if (txt.includes('generation failed') || txt.includes('failed to generate') || txt.includes('post not found') || txt.includes('something went wrong') || txt.includes('не удалось сгенерировать') || txt.includes('ошибка генерации')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Удаление сбойной/недействительной генерации из истории и редирект в Grok Image
+    function _handleFailedGenerationIfAny() {
+        if (!isGrokGenerationFailed()) return;
+        const curUrl = location.href;
+        const curUuid = typeof grokExtractUuid === 'function' ? grokExtractUuid(location.pathname) : '';
+        const convId = _getGrokConvKey();
+        let history = _loadGrokSlideHistory(convId);
+        const initialLen = history.length;
+        history = history.filter(item => {
+            if (curUrl && item.url === curUrl) return false;
+            if (curUuid && item.uuid && item.uuid.toLowerCase() === curUuid.toLowerCase()) return false;
+            return true;
+        });
+        if (history.length !== initialLen) {
+            _saveGrokSlideHistory(history, convId);
+            if (_grokSlideHistIndex >= history.length) {
+                _grokSlideHistIndex = history.length - 1;
+            }
+            updateGrokHistoryPill();
+        }
+        showToast('⚠️ Генерация не удалась — переход в Grok Image');
+        window.location.replace('https://grok.com/imagine');
+    }
+
+    // ── Определение активного диалога / conversation ──
+    function _getGrokConvKey() {
+        let convId = '';
+        try {
+            const u = new URL(location.href);
+            convId = u.searchParams.get('conversation') || u.searchParams.get('conv') || '';
+            if (!convId) {
+                const m = location.pathname.match(/\/(?:c|chat)\/([a-f0-9-]{8,})/i);
+                if (m) convId = m[1];
+            }
+        } catch (e) {}
+        if (!convId) {
+            const curUuid = typeof grokExtractUuid === 'function' ? grokExtractUuid(location.pathname) : '';
+            if (typeof grokCurrentConvId === 'function') {
+                convId = grokCurrentConvId(curUuid);
+            }
+        }
+        return (convId ? convId.toLowerCase() : 'default');
+    }
+
+    function _getGrokHistStorageKey(convId) {
+        return 'mossad_grok_hist_' + (convId || _getGrokConvKey());
+    }
 
     // ── Сворачивание поля ввода промпта ──
     function isGrokPromptActive() {
@@ -32,7 +162,6 @@
         if (typeof blurActiveInput === 'function') {
             blurActiveInput();
         }
-        // Эмуляция клика вне композера для сворачивания развёрнутого инпута Grok
         const neutral = document.querySelector('main, [role="main"], #root, body');
         if (neutral) {
             try {
@@ -42,43 +171,122 @@
         }
     }
 
-    // ── Хранилище истории ──
-    function _loadGrokSlideHistory() {
+    // ── Хранилище истории (изолировано по conversation) ──
+    function _loadGrokSlideHistory(convId) {
+        const key = _getGrokHistStorageKey(convId);
         let list = [];
         try {
-            const raw = sessionStorage.getItem(GROK_SLIDE_HIST_KEY);
+            const raw = sessionStorage.getItem(key);
             if (raw) list = JSON.parse(raw);
         } catch (e) { list = []; }
 
         const now = Date.now();
-        // Автоматическая очистка записей старше 1 часа
         const fresh = list.filter(item => item && item.url && (now - item.ts < GROK_HIST_MAX_AGE_MS));
         if (fresh.length !== list.length) {
-            _saveGrokSlideHistory(fresh);
+            _saveGrokSlideHistory(fresh, convId);
         }
         return fresh;
     }
 
-    function _saveGrokSlideHistory(list) {
+    function _saveGrokSlideHistory(list, convId) {
         try {
-            sessionStorage.setItem(GROK_SLIDE_HIST_KEY, JSON.stringify(list));
+            const key = _getGrokHistStorageKey(convId);
+            sessionStorage.setItem(key, JSON.stringify(list));
         } catch (e) {}
+    }
+
+    // ── Рендер плашки истории рядом с квотой ──
+    function updateGrokHistoryPill() {
+        if (rootDomain !== 'grok.com') return;
+
+        // Вне диалога плашка истории скрыта
+        if (!isGrokInsideConversation() || config.grokHistPillEnabled === false) {
+            if (_grokHistoryPillEl) _grokHistoryPillEl.style.display = 'none';
+            if (typeof _checkGrokPillsWrapVisibility === 'function') _checkGrokPillsWrapVisibility();
+            return;
+        }
+
+        const wrap = (typeof getOrCreateGrokPillsWrap === 'function') ? getOrCreateGrokPillsWrap() : null;
+        if (!wrap) return;
+
+        if (!_grokHistoryPillEl || !_grokHistoryPillEl.isConnected) {
+            _grokHistoryPillEl = document.createElement('div');
+            _grokHistoryPillEl.id = 'mossad-grok-history-pill';
+            _grokHistoryPillEl.style.cssText = `
+                display: inline-flex; align-items: center; gap: 4px;
+                padding: 4px 12px;
+                background: rgba(17, 24, 39, 0.88);
+                backdrop-filter: blur(12px);
+                -webkit-backdrop-filter: blur(12px);
+                border: 1px solid rgba(75, 85, 99, 0.65);
+                border-radius: 9999px;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+                color: #e5e7eb;
+                font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-size: 12px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+                cursor: pointer;
+                user-select: none;
+                transition: border-color 0.15s, box-shadow 0.15s;
+            `;
+            _grokHistoryPillEl.addEventListener('click', (e) => {
+                const hist = _loadGrokSlideHistory();
+                const total = hist.length;
+                const cur = total > 0 ? (_grokSlideHistIndex >= 0 ? _grokSlideHistIndex + 1 : total) : 0;
+                showToast(`🎞 Слайд в истории: ${cur || '-'} из ${total || '-'}`);
+            });
+            wrap.appendChild(_grokHistoryPillEl);
+        }
+
+        _grokHistoryPillEl.style.display = 'inline-flex';
+
+        const history = _loadGrokSlideHistory();
+        const total = history.length;
+        let cur = 0;
+        if (total > 0) {
+            cur = _grokSlideHistIndex >= 0 ? _grokSlideHistIndex + 1 : total;
+        }
+
+        const isCompact = !!config.grokPillsCompact;
+        if (isCompact) {
+            _grokHistoryPillEl.innerHTML = `<span style="color:#60a5fa;font-weight:700;">${cur || '-'}</span>`;
+        } else {
+            _grokHistoryPillEl.innerHTML = `<span style="color:#60a5fa;font-weight:700;">${cur || '-'}</span><span style="color:#6b7280;margin:0 2px;"> / </span><span style="color:#9ca3af;">${total || '-'}</span>`;
+        }
+
+        _grokHistoryPillEl.title = `История слайдов диалога:\nПозиция: ${cur || '-'} из ${total || '-'}\nAlt+1 — первый слайд диалога\nAlt+2 — назад по истории\nAlt+3 — вперёд по истории\nAlt+4 — последний слайд диалога\n(Двойной клик — компактный вид)`;
+
+        if (typeof _checkGrokPillsWrapVisibility === 'function') {
+            _checkGrokPillsWrapVisibility();
+        }
     }
 
     // ── Запись слайда при задержке >= N сек ──
     function _checkCandidateCommit() {
+        if (!isGrokInsideConversation()) return;
+        _handleFailedGenerationIfAny();
+
         if (!_grokCandidateSlide || _grokCandidateSlide.committed) return;
+
+        // Если генерация ещё крутится / в процессе — в историю НЕ заносим!
+        if (isGrokGeneratingNow()) {
+            _grokCandidateSlide.startTime = Date.now();
+            return;
+        }
+
         const dwellSec = Math.max(1, Math.min(60, Number(config.grokHistoryDwellSec) || 5));
         const elapsed = Date.now() - _grokCandidateSlide.startTime;
         if (elapsed < dwellSec * 1000) return;
 
         _grokCandidateSlide.committed = true;
-        const history = _loadGrokSlideHistory();
+        const convId = _getGrokConvKey();
+        const history = _loadGrokSlideHistory(convId);
         const currentUrl = _grokCandidateSlide.url;
 
-        // Если последний элемент истории уже этот URL — не дублируем
         if (history.length > 0 && history[history.length - 1].url === currentUrl) {
             _grokSlideHistIndex = history.length - 1;
+            updateGrokHistoryPill();
             return;
         }
 
@@ -89,18 +297,21 @@
             ts: Date.now()
         };
 
-        // Если листали назад в истории и задержались на новом кадре — отрезаем хвост вперёд
         if (_grokSlideHistIndex >= 0 && _grokSlideHistIndex < history.length - 1) {
             history.splice(_grokSlideHistIndex + 1);
         }
 
         history.push(newEntry);
         _grokSlideHistIndex = history.length - 1;
-        _saveGrokSlideHistory(history);
+        _saveGrokSlideHistory(history, convId);
+        updateGrokHistoryPill();
     }
 
     function _onGrokSlideChanged() {
-        if (rootDomain !== 'grok.com' || !isGrokPostPage()) return;
+        if (rootDomain !== 'grok.com' || !isGrokInsideConversation()) {
+            updateGrokHistoryPill();
+            return;
+        }
         const url = location.href;
         const path = location.pathname;
         const uuid = typeof grokExtractUuid === 'function' ? grokExtractUuid(path) : '';
@@ -114,32 +325,88 @@
             startTime: Date.now(),
             committed: false
         };
+
+        updateGrokHistoryPill();
     }
 
-    // ── Навигация по истории ──
+    // ── Навигация по истории слайдов (ИСКЛЮЧИТЕЛЬНО через DOM без перезагрузки страницы) ──
     function grokNavigateToSlide(target) {
-        if (!target || !target.url) return;
+        if (!target) return;
         _grokIsNavigatingHistory = true;
         setTimeout(() => { _grokIsNavigatingHistory = false; }, 800);
 
-        // 1. Попытка нативного переключения через киноплёнку filmstrip
-        if (target.uuid && typeof grokFindFilmstripItemByUuid === 'function') {
-            const btn = grokFindFilmstripItemByUuid(target.uuid);
+        const targetUuid = (target.uuid || (target.url ? (typeof grokExtractUuid === 'function' ? grokExtractUuid(target.url) : '') : '')).toLowerCase();
+
+        // 1. Попытка нативного переключения через киноплёнку filmstrip по UUID
+        if (targetUuid && typeof grokFindFilmstripItemByUuid === 'function') {
+            const btn = grokFindFilmstripItemByUuid(targetUuid);
             if (btn) {
                 btn.click();
                 try { history.replaceState(null, '', target.path || target.url); } catch (e) {}
+                updateGrokHistoryPill();
                 return;
             }
         }
 
-        // 2. Если кадра нет в текущей киноплёнке — плавный переход по ссылке или SPA
-        if (typeof grokSpaNavigate === 'function') {
-            grokSpaNavigate(target.url);
-        } else {
-            window.location.href = target.url;
+        // 2. Поиск по всем элементам киноплёнки
+        const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+        if (items.length > 0 && targetUuid) {
+            for (const btn of items) {
+                const img = btn.querySelector('img, video, source');
+                if (img && img.src && img.src.toLowerCase().includes(targetUuid)) {
+                    btn.click();
+                    try { history.replaceState(null, '', target.path || target.url); } catch (e) {}
+                    updateGrokHistoryPill();
+                    return;
+                }
+            }
         }
+
+        showToast('⚠️ Кадр не найден на полосе кадров', true);
+        updateGrokHistoryPill();
     }
 
+    // Alt+1: Первый слайд диалога (items[0]), если нет — первый в истории
+    function grokJumpToFirstSlide() {
+        const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+        if (items.length > 0) {
+            items[0].click();
+            showToast(`⏮ Первый слайд диалога (1/${items.length})`);
+            updateGrokHistoryPill();
+            return;
+        }
+        const history = _loadGrokSlideHistory();
+        if (history.length > 0) {
+            _grokSlideHistIndex = 0;
+            grokNavigateToSlide(history[0]);
+            showToast(`⏮ Первый слайд в истории (1/${history.length})`);
+            updateGrokHistoryPill();
+            return;
+        }
+        showToast('⏮ Слайды не найдены', true);
+    }
+
+    // Alt+4: Последний слайд диалога (items[last]), если нет — последний в истории
+    function grokJumpToLastSlide() {
+        const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+        if (items.length > 0) {
+            items[items.length - 1].click();
+            showToast(`⏭ Последний слайд диалога (${items.length}/${items.length})`);
+            updateGrokHistoryPill();
+            return;
+        }
+        const history = _loadGrokSlideHistory();
+        if (history.length > 0) {
+            _grokSlideHistIndex = history.length - 1;
+            grokNavigateToSlide(history[history.length - 1]);
+            showToast(`⏭ Последний слайд в истории (${history.length}/${history.length})`);
+            updateGrokHistoryPill();
+            return;
+        }
+        showToast('⏭ Слайды не найдены', true);
+    }
+
+    // Alt+2: Назад в истории
     function grokHistoryBack() {
         const history = _loadGrokSlideHistory();
         if (history.length === 0) {
@@ -147,12 +414,10 @@
             return;
         }
 
-        // Если индекс не инициализирован — начинаем с текущего
         if (_grokSlideHistIndex < 0 || _grokSlideHistIndex >= history.length) {
             _grokSlideHistIndex = history.length - 1;
         }
 
-        // Если мы стоим на самом последнем и он совпадает с текущим URL — шагаем на 1 назад
         if (history[_grokSlideHistIndex] && history[_grokSlideHistIndex].url === location.href && _grokSlideHistIndex > 0) {
             _grokSlideHistIndex--;
         } else if (_grokSlideHistIndex <= 0) {
@@ -165,8 +430,10 @@
         const target = history[_grokSlideHistIndex];
         showToast(`⏮ Слайд: ${_grokSlideHistIndex + 1}/${history.length}`);
         grokNavigateToSlide(target);
+        updateGrokHistoryPill();
     }
 
+    // Alt+3: Вперёд в истории
     function grokHistoryForward() {
         const history = _loadGrokSlideHistory();
         if (history.length === 0) {
@@ -183,30 +450,35 @@
         const target = history[_grokSlideHistIndex];
         showToast(`⏭ Слайд: ${_grokSlideHistIndex + 1}/${history.length}`);
         grokNavigateToSlide(target);
+        updateGrokHistoryPill();
     }
 
-    // ── Перехват хоткеев Alt+= и Alt+- (с поддержкой первого нажатия в промпте) ──
+    // ── Перехват хоткеев Alt+1..Alt+4 (ТОЛЬКО внутри диалога) ──
     window.addEventListener('keydown', function handleGrokHistoryNavKeys(e) {
         if (rootDomain !== 'grok.com') return;
 
-        // При Alt+1..Alt+9 сворачиваем промпт, если включено в настройках
-        if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code || '')) {
-            if (config.grokCollapsePromptOnNav !== false) {
-                grokCollapsePrompt();
+        // ТРЕБОВАНИЕ: хоткеи Alt+1..4 активны ТОЛЬКО внутри диалога (conversation)
+        if (!isGrokInsideConversation()) return;
+
+        const isFirstHk = (config.hk && config.hk.grokFirstSlide && hotkeyMatches(e, config.hk.grokFirstSlide)) ||
+                          (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === 'Digit1' || e.key === '1'));
+        const isBackHk  = (config.hk && config.hk.grokHistBack && hotkeyMatches(e, config.hk.grokHistBack)) ||
+                          (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === 'Digit2' || e.key === '2'));
+        const isFwdHk   = (config.hk && config.hk.grokHistFwd && hotkeyMatches(e, config.hk.grokHistFwd)) ||
+                          (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === 'Digit3' || e.key === '3'));
+        const isLastHk  = (config.hk && config.hk.grokLastSlide && hotkeyMatches(e, config.hk.grokLastSlide)) ||
+                          (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === 'Digit4' || e.key === '4'));
+
+        if (!isFirstHk && !isBackHk && !isFwdHk && !isLastHk) {
+            if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[5-9]$/.test(e.code || '')) {
+                if (config.grokCollapsePromptOnNav !== false && isGrokPromptActive()) {
+                    grokCollapsePrompt();
+                }
             }
             return;
         }
 
-        const isBackHk = (config.hk && config.hk.grokHistBack && hotkeyMatches(e, config.hk.grokHistBack)) ||
-                         (e.altKey && (e.key === '=' || e.code === 'Equal')) ||
-                         (!e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && (e.key === '=' || e.code === 'Equal') && !isEditableElement(document.activeElement));
-        const isFwdHk = (config.hk && config.hk.grokHistFwd && hotkeyMatches(e, config.hk.grokHistFwd)) ||
-                        (e.altKey && (e.key === '-' || e.code === 'Minus')) ||
-                        (!e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && (e.key === '-' || e.code === 'Minus') && !isEditableElement(document.activeElement));
-
-        if (!isBackHk && !isFwdHk) return;
-
-        // Требование пользователя: первое нажатие, когда мы внутри промпта — СВОРАЧИВАЕТ промпт и не переходит
+        // ТРЕБОВАНИЕ: первое нажатие, когда мы внутри промпта — СВОРАЧИВАЕТ промпт и не переходит
         if (isGrokPromptActive()) {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -218,14 +490,17 @@
         e.preventDefault();
         e.stopImmediatePropagation();
 
-        // Если включена опция сворачивания промпта при листании
         if (config.grokCollapsePromptOnNav !== false) {
             grokCollapsePrompt();
         }
 
-        if (isBackHk) {
+        if (isFirstHk) {
+            grokJumpToFirstSlide();
+        } else if (isLastHk) {
+            grokJumpToLastSlide();
+        } else if (isBackHk) {
             grokHistoryBack();
-        } else {
+        } else if (isFwdHk) {
             grokHistoryForward();
         }
     }, true);
@@ -233,6 +508,7 @@
     // ── Авто-сворачивание промпта при навигации стрелками / PageUp / PageDown ──
     window.addEventListener('keydown', function handleGrokNavPromptCollapse(e) {
         if (rootDomain !== 'grok.com' || config.grokCollapsePromptOnNav === false) return;
+        if (!isGrokInsideConversation()) return;
         if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'PageDown' || e.key === 'PageUp') {
             if (isGrokPromptActive()) {
                 grokCollapsePrompt();
@@ -244,6 +520,7 @@
     function initGrokSlideHistory() {
         if (rootDomain !== 'grok.com') return;
         _onGrokSlideChanged();
+        updateGrokHistoryPill();
 
         if (!_grokHistTickTimer) {
             _grokHistTickTimer = setInterval(() => {
