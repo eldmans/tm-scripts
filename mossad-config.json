@@ -7,7 +7,7 @@
     "up"
   ],
   "videoLoops": 1,
-  "slideshowDelay": 7,
+  "slideshowDelay": 1,
   "delayAfterVideo": 1,
   "downloadType": "video",
   "pdAction": "upns",
