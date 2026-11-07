@@ -32,6 +32,15 @@
   "promptHotkeys": "download",
   "grokNoPromptKeys": "RWEZXGVCf",
   "grokKeepSound": true,
+  "grokQuotaEnabled": true,
+  "grokQuotaSep": " · ",
+  "grokQuotaTimeMode": "auto",
+  "grokQuotaPos": {
+    "left": 494,
+    "top": 9
+  },
+  "grokCollapsePromptOnNav": true,
+  "grokHistoryDwellSec": 5,
   "pinterestJumpKeys": "off",
   "pinterestDir": "fwd",
   "pinterestFilterType": "ratio",
@@ -198,5 +207,6 @@
       "shift": false
     }
   },
-  "npkExpandAdded": true
+  "npkExpandAdded": true,
+  "npkHistNavAdded": true
 }
