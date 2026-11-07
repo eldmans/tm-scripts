@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.99
+// @version      1.4.0
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -304,10 +304,23 @@ const best = (list) => { let b = null, mx = 0; for (const m of list) { const a =
 return best(all.filter(m => !m.paused && !m.ended)) || best(all) || (audio ? all.find(m => m.tagName === 'AUDIO') : null);
 }
 function _spFmt(r) { return (Math.round(r * 100) / 100).toString(); }
+function _spGetBadgeMode() {
+try {
+const v = localStorage.getItem('mossad_speed_badge_mode');
+if (v === 'always' || v === 'off' || v === 'boosted') return v;
+if (v === 'ne1') return 'boosted';
+} catch (e) {}
+return 'boosted';
+}
+function _spSetBadgeMode(mode) {
+try { localStorage.setItem('mossad_speed_badge_mode', mode); } catch (e) {}
+}
 function _spBadgeWanted(m) {
-const mode = mossadSpeedCfg().badge;
-if (mode === 'off' || _sp.hidden || !m || m.tagName !== 'VIDEO') return false;
-return mode === 'always' || Math.abs(m.playbackRate - 1) > 1e-6;
+if (!m || m.tagName !== 'VIDEO') return false;
+const mode = _spGetBadgeMode();
+if (mode === 'off') return false;
+if (mode === 'always') return true;
+return (m.playbackRate || 1) > 1.0001;
 }
 function _spPlaceBadge() {
 const b = _sp.badge, m = _sp.badgeFor;
@@ -341,13 +354,32 @@ _sp.badgeFor = m;
 _spPlaceBadge();
 }
 function _spRememberKey() { return 'mossad_speed_rate'; }
+function _spGetLastRate() {
+let r = null;
+if (_sp.last && typeof _sp.last === 'number' && Math.abs(_sp.last - 1) > 1e-6) {
+r = _sp.last;
+} else {
+try {
+const s = localStorage.getItem('mossad_speed_last_rate');
+const n = parseFloat(s);
+if (isFinite(n) && Math.abs(n - 1) > 1e-6) r = n;
+} catch (e) {}
+}
+return r;
+}
+function _spSaveLastRate(r) {
+if (!r || !isFinite(r) || Math.abs(r - 1) <= 1e-6) return;
+_sp.last = r;
+try { localStorage.setItem('mossad_speed_last_rate', String(r)); } catch (e) {}
+}
 function mossadSetRate(m, r) {
 r = Math.max(0.0625, Math.round(r * 1000) / 1000);
 m._mossadRate = r;
 m._mossadGuardUntil = Date.now() + 2000;
 try { m.playbackRate = r; } catch (e) { r = Math.min(r, 16); m._mossadRate = r; try { m.playbackRate = r; } catch (e2) {} }
 if (mossadSpeedCfg().remember) { try { localStorage.setItem(_spRememberKey(), String(r)); } catch (e) {} }
-mossadSpeedShowBadge(m);
+if (Math.abs(r - 1) > 1e-6) _spSaveLastRate(r);
+if (_spBadgeWanted(m)) mossadSpeedShowBadge(m); else _spHideBadge();
 if (!_sp.badge || _sp.badgeFor !== m) mossadLightToast('⏩ ' + _spFmt(r) + '×');
 return r;
 }
@@ -356,16 +388,31 @@ const list = mossadSpeedList();
 const cur = m.playbackRate || 1;
 const num = parseFloat(row.v);
 switch (row.a) {
-case 'badge':
-_sp.hidden = !_sp.hidden;
-if (_sp.hidden) _spHideBadge(); else { mossadSpeedShowBadge(m); if (!_sp.badge) mossadLightToast('⏩ ' + _spFmt(cur) + '×'); }
+case 'badge': {
+const curMode = _spGetBadgeMode();
+let nextMode = 'boosted';
+if (curMode === 'boosted') nextMode = 'always';
+else if (curMode === 'always') nextMode = 'off';
+else nextMode = 'boosted';
+_spSetBadgeMode(nextMode);
+if (nextMode === 'off') {
+_spHideBadge();
+mossadLightToast('⚡ Значок скорости: НЕ показывать');
+} else if (nextMode === 'always') {
+mossadSpeedShowBadge(m);
+mossadLightToast('⚡ Значок скорости: ВСЕГДА');
+} else {
+if (_spBadgeWanted(m)) mossadSpeedShowBadge(m); else _spHideBadge();
+mossadLightToast('⚡ Значок скорости: когда > 1×');
+}
 return;
+}
 case 'faster': case 'slower': {
 const up = row.a === 'faster';
 let next;
 if (isFinite(num) && num > 0) next = up ? cur + num : cur - num;
 else next = up ? (list.find(x => x > cur + 1e-6) || list[list.length - 1] || cur) : (list.slice().reverse().find(x => x < cur - 1e-6) || list[0] || cur);
-if (Math.abs(cur - 1) > 1e-6) _sp.last = cur;
+if (Math.abs(cur - 1) > 1e-6) _spSaveLastRate(cur);
 mossadSetRate(m, next);
 return;
 }
@@ -374,14 +421,31 @@ const s = isFinite(num) ? num : 5;
 try { m.currentTime = Math.max(0, (m.currentTime || 0) + (row.a === 'advance' ? s : -s)); } catch (e) {}
 return;
 }
-case 'reset':
-if (Math.abs(cur - 1) > 1e-6) { _sp.last = cur; mossadSetRate(m, 1); }
-else mossadSetRate(m, _sp.last && Math.abs(_sp.last - 1) > 1e-6 ? _sp.last : 1);
+case 'reset': {
+if (Math.abs(cur - 1) > 1e-6) {
+_spSaveLastRate(cur);
+mossadSetRate(m, 1);
+mossadLightToast('⏪ Скорость: 1×');
+} else {
+let target = _spGetLastRate();
+if (!target) {
+const favRow = (mossadSpeedCfg().rows || []).find(r => r && r.a === 'fav');
+const favVal = favRow ? parseFloat(favRow.v) : NaN;
+target = (isFinite(favVal) && favVal > 0) ? favVal : 2.0;
+}
+_spSaveLastRate(target);
+mossadSetRate(m, target);
+mossadLightToast('⏩ Скорость: ' + _spFmt(target) + '×');
+}
 return;
-case 'fav':
-if (Math.abs(cur - 1) > 1e-6) _sp.last = cur;
-mossadSetRate(m, isFinite(num) && num > 0 ? num : 2);
+}
+case 'fav': {
+if (Math.abs(cur - 1) > 1e-6) _spSaveLastRate(cur);
+const favRate = (isFinite(num) && num > 0) ? num : 2.0;
+_spSaveLastRate(favRate);
+mossadSetRate(m, favRate);
 return;
+}
 }
 }
 function _spOnKey(e) {
@@ -413,7 +477,7 @@ let r = NaN;
 try { r = parseFloat(localStorage.getItem(_spRememberKey())); } catch (err) {}
 if (isFinite(r) && r > 0 && Math.abs(r - (m.playbackRate || 1)) > 1e-6) { m._mossadRate = r; m._mossadGuardUntil = Date.now() + 2000; try { m.playbackRate = r; } catch (err) {} }
 }
-if (c.badge === 'always' || (m._mossadRate != null && Math.abs(m.playbackRate - 1) > 1e-6)) mossadSpeedShowBadge(m);
+if (_spBadgeWanted(m)) mossadSpeedShowBadge(m); else _spHideBadge();
 }, true);
 function mossadSpeedOwners(binding, comboId, exceptIdx) {
 const id = comboId(binding);
@@ -463,13 +527,13 @@ sec.innerHTML = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">⏩
             <button data-sp-add style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#e5e7eb;padding:2px 10px;cursor:pointer;font-size:12px;margin-bottom:8px;">+ Добавить</button>
             ${cb('enabled', 'Включено')}${cb('remember', 'Запоминать скорость')}${cb('hold', 'Удерживать скорость (если сайт её сбрасывает)')}${cb('audio', 'Работать на аудио')}
             <label style="display:flex;align-items:center;gap:6px;margin:4px 0;">Значок скорости:
-              <select data-sp-cfg="badge" style="${inCss}"><option value="off">не показывать</option><option value="ne1">показывать, когда ≠ 1</option><option value="always">всегда</option></select></label>
+              <select data-sp-cfg="badge" style="${inCss}"><option value="boosted">показывать, когда > 1×</option><option value="always">всегда</option><option value="off">не показывать</option></select></label>
             <label style="display:flex;align-items:center;gap:6px;">Скорости:
               <input data-sp-cfg="list" type="text" value="${esc(c.list)}" style="flex:1;min-width:0;${inCss}"></label>
             <div style="color:#9ca3af;line-height:1.35;margin-top:4px;">Медленнее/Быстрее: значение пусто — соседняя скорость из списка, число — шаг. Назад/Вперёд — секунды. Сброс: ≠1 → 1, при 1 — прошлая. Клавиши работают на всех сайтах, кроме полей ввода.</div>`;
-sec.querySelector('[data-sp-cfg="badge"]').value = c.badge;
+sec.querySelector('[data-sp-cfg="badge"]').value = (typeof _spGetBadgeMode === "function" ? _spGetBadgeMode() : c.badge);
 ['enabled', 'remember', 'hold', 'audio'].forEach(k => { sec.querySelector(`[data-sp-cfg="${k}"]`).onchange = (e) => mossadSpeedSave({ [k]: e.target.checked }); });
-sec.querySelector('[data-sp-cfg="badge"]').onchange = (e) => { mossadSpeedSave({ badge: e.target.value }); };
+sec.querySelector('[data-sp-cfg="badge"]').onchange = (e) => { if (typeof _spSetBadgeMode === 'function') _spSetBadgeMode(e.target.value); mossadSpeedSave({ badge: e.target.value }); const m = mossadSpeedTarget(); if (m) { if (_spBadgeWanted(m)) mossadSpeedShowBadge(m); else _spHideBadge(); } };
 const listIn = sec.querySelector('[data-sp-cfg="list"]');
 listIn.onchange = () => { const v = listIn.value.trim() || MOSSAD_SPEED_LIST_DEFAULT; mossadSpeedSave({ list: v }); listIn.value = v; };
 const rowsBox = sec.querySelector('[data-sp-rows]');
@@ -544,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.99';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.0';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {

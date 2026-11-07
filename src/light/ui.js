@@ -37,13 +37,13 @@
             <button data-sp-add style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#e5e7eb;padding:2px 10px;cursor:pointer;font-size:12px;margin-bottom:8px;">+ Добавить</button>
             ${cb('enabled', 'Включено')}${cb('remember', 'Запоминать скорость')}${cb('hold', 'Удерживать скорость (если сайт её сбрасывает)')}${cb('audio', 'Работать на аудио')}
             <label style="display:flex;align-items:center;gap:6px;margin:4px 0;">Значок скорости:
-              <select data-sp-cfg="badge" style="${inCss}"><option value="off">не показывать</option><option value="ne1">показывать, когда ≠ 1</option><option value="always">всегда</option></select></label>
+              <select data-sp-cfg="badge" style="${inCss}"><option value="boosted">показывать, когда > 1×</option><option value="always">всегда</option><option value="off">не показывать</option></select></label>
             <label style="display:flex;align-items:center;gap:6px;">Скорости:
               <input data-sp-cfg="list" type="text" value="${esc(c.list)}" style="flex:1;min-width:0;${inCss}"></label>
             <div style="color:#9ca3af;line-height:1.35;margin-top:4px;">Медленнее/Быстрее: значение пусто — соседняя скорость из списка, число — шаг. Назад/Вперёд — секунды. Сброс: ≠1 → 1, при 1 — прошлая. Клавиши работают на всех сайтах, кроме полей ввода.</div>`;
-        sec.querySelector('[data-sp-cfg="badge"]').value = c.badge;
+        sec.querySelector('[data-sp-cfg="badge"]').value = (typeof _spGetBadgeMode === "function" ? _spGetBadgeMode() : c.badge);
         ['enabled', 'remember', 'hold', 'audio'].forEach(k => { sec.querySelector(`[data-sp-cfg="${k}"]`).onchange = (e) => mossadSpeedSave({ [k]: e.target.checked }); });
-        sec.querySelector('[data-sp-cfg="badge"]').onchange = (e) => { mossadSpeedSave({ badge: e.target.value }); };
+        sec.querySelector('[data-sp-cfg="badge"]').onchange = (e) => { if (typeof _spSetBadgeMode === 'function') _spSetBadgeMode(e.target.value); mossadSpeedSave({ badge: e.target.value }); const m = mossadSpeedTarget(); if (m) { if (_spBadgeWanted(m)) mossadSpeedShowBadge(m); else _spHideBadge(); } };
         const listIn = sec.querySelector('[data-sp-cfg="list"]');
         listIn.onchange = () => { const v = listIn.value.trim() || MOSSAD_SPEED_LIST_DEFAULT; mossadSpeedSave({ list: v }); listIn.value = v; };
         const rowsBox = sec.querySelector('[data-sp-rows]');

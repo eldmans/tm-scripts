@@ -85,10 +85,25 @@
         return best(all.filter(m => !m.paused && !m.ended)) || best(all) || (audio ? all.find(m => m.tagName === 'AUDIO') : null);
     }
     function _spFmt(r) { return (Math.round(r * 100) / 100).toString(); }
+    function _spGetBadgeMode() {
+        try {
+            const v = localStorage.getItem('mossad_speed_badge_mode');
+            if (v === 'always' || v === 'off' || v === 'boosted') return v;
+            if (v === 'ne1') return 'boosted';
+        } catch (e) {}
+        // По умолчанию для сайта: показывать, когда больше единицы
+        return 'boosted';
+    }
+    function _spSetBadgeMode(mode) {
+        try { localStorage.setItem('mossad_speed_badge_mode', mode); } catch (e) {}
+    }
     function _spBadgeWanted(m) {
-        const mode = mossadSpeedCfg().badge;
-        if (mode === 'off' || _sp.hidden || !m || m.tagName !== 'VIDEO') return false;
-        return mode === 'always' || Math.abs(m.playbackRate - 1) > 1e-6;
+        if (!m || m.tagName !== 'VIDEO') return false;
+        const mode = _spGetBadgeMode();
+        if (mode === 'off') return false;
+        if (mode === 'always') return true;
+        // Режим boosted: показывать только когда скорость > 1
+        return (m.playbackRate || 1) > 1.0001;
     }
     function _spPlaceBadge() {
         const b = _sp.badge, m = _sp.badgeFor;
@@ -122,6 +137,24 @@
         _spPlaceBadge();
     }
     function _spRememberKey() { return 'mossad_speed_rate'; }
+    function _spGetLastRate() {
+        let r = null;
+        if (_sp.last && typeof _sp.last === 'number' && Math.abs(_sp.last - 1) > 1e-6) {
+            r = _sp.last;
+        } else {
+            try {
+                const s = localStorage.getItem('mossad_speed_last_rate');
+                const n = parseFloat(s);
+                if (isFinite(n) && Math.abs(n - 1) > 1e-6) r = n;
+            } catch (e) {}
+        }
+        return r;
+    }
+    function _spSaveLastRate(r) {
+        if (!r || !isFinite(r) || Math.abs(r - 1) <= 1e-6) return;
+        _sp.last = r;
+        try { localStorage.setItem('mossad_speed_last_rate', String(r)); } catch (e) {}
+    }
     /** Поставить скорость (с охраной от сброса сайтом). */
     function mossadSetRate(m, r) {
         r = Math.max(0.0625, Math.round(r * 1000) / 1000);
@@ -130,7 +163,8 @@
         m._mossadGuardUntil = Date.now() + 2000;
         try { m.playbackRate = r; } catch (e) { r = Math.min(r, 16); m._mossadRate = r; try { m.playbackRate = r; } catch (e2) {} }
         if (mossadSpeedCfg().remember) { try { localStorage.setItem(_spRememberKey(), String(r)); } catch (e) {} }
-        mossadSpeedShowBadge(m);
+        if (Math.abs(r - 1) > 1e-6) _spSaveLastRate(r);
+        if (_spBadgeWanted(m)) mossadSpeedShowBadge(m); else _spHideBadge();
         if (!_sp.badge || _sp.badgeFor !== m) mossadLightToast('⏩ ' + _spFmt(r) + '×');
         return r;
     }
@@ -139,16 +173,33 @@
         const cur = m.playbackRate || 1;
         const num = parseFloat(row.v);
         switch (row.a) {
-            case 'badge':
-                _sp.hidden = !_sp.hidden;
-                if (_sp.hidden) _spHideBadge(); else { mossadSpeedShowBadge(m); if (!_sp.badge) mossadLightToast('⏩ ' + _spFmt(cur) + '×'); }
+            case 'badge': {
+                // v1.4.0: F2 переключает режимы: "при > 1×" -> "всегда" -> "не показывать"
+                const curMode = _spGetBadgeMode();
+                let nextMode = 'boosted';
+                if (curMode === 'boosted') nextMode = 'always';
+                else if (curMode === 'always') nextMode = 'off';
+                else nextMode = 'boosted';
+                _spSetBadgeMode(nextMode);
+
+                if (nextMode === 'off') {
+                    _spHideBadge();
+                    mossadLightToast('⚡ Значок скорости: НЕ показывать');
+                } else if (nextMode === 'always') {
+                    mossadSpeedShowBadge(m);
+                    mossadLightToast('⚡ Значок скорости: ВСЕГДА');
+                } else {
+                    if (_spBadgeWanted(m)) mossadSpeedShowBadge(m); else _spHideBadge();
+                    mossadLightToast('⚡ Значок скорости: когда > 1×');
+                }
                 return;
+            }
             case 'faster': case 'slower': {
                 const up = row.a === 'faster';
                 let next;
                 if (isFinite(num) && num > 0) next = up ? cur + num : cur - num;
                 else next = up ? (list.find(x => x > cur + 1e-6) || list[list.length - 1] || cur) : (list.slice().reverse().find(x => x < cur - 1e-6) || list[0] || cur);
-                if (Math.abs(cur - 1) > 1e-6) _sp.last = cur;
+                if (Math.abs(cur - 1) > 1e-6) _spSaveLastRate(cur);
                 mossadSetRate(m, next);
                 return;
             }
@@ -157,14 +208,33 @@
                 try { m.currentTime = Math.max(0, (m.currentTime || 0) + (row.a === 'advance' ? s : -s)); } catch (e) {}
                 return;
             }
-            case 'reset':
-                if (Math.abs(cur - 1) > 1e-6) { _sp.last = cur; mossadSetRate(m, 1); }
-                else mossadSetRate(m, _sp.last && Math.abs(_sp.last - 1) > 1e-6 ? _sp.last : 1);
+            case 'reset': {
+                // v1.4.0: R переключает скорость на последнюю сохранённую для сайта между сеансами.
+                // Если скорость != 1 — сбрасываем в 1. Если 1 — включаем сохранённую (или любимую = 2.0).
+                if (Math.abs(cur - 1) > 1e-6) {
+                    _spSaveLastRate(cur);
+                    mossadSetRate(m, 1);
+                    mossadLightToast('⏪ Скорость: 1×');
+                } else {
+                    let target = _spGetLastRate();
+                    if (!target) {
+                        const favRow = (mossadSpeedCfg().rows || []).find(r => r && r.a === 'fav');
+                        const favVal = favRow ? parseFloat(favRow.v) : NaN;
+                        target = (isFinite(favVal) && favVal > 0) ? favVal : 2.0;
+                    }
+                    _spSaveLastRate(target);
+                    mossadSetRate(m, target);
+                    mossadLightToast('⏩ Скорость: ' + _spFmt(target) + '×');
+                }
                 return;
-            case 'fav':
-                if (Math.abs(cur - 1) > 1e-6) _sp.last = cur;
-                mossadSetRate(m, isFinite(num) && num > 0 ? num : 2);
+            }
+            case 'fav': {
+                if (Math.abs(cur - 1) > 1e-6) _spSaveLastRate(cur);
+                const favRate = (isFinite(num) && num > 0) ? num : 2.0;
+                _spSaveLastRate(favRate);
+                mossadSetRate(m, favRate);
                 return;
+            }
         }
     }
 
@@ -199,7 +269,7 @@
             try { r = parseFloat(localStorage.getItem(_spRememberKey())); } catch (err) {}
             if (isFinite(r) && r > 0 && Math.abs(r - (m.playbackRate || 1)) > 1e-6) { m._mossadRate = r; m._mossadGuardUntil = Date.now() + 2000; try { m.playbackRate = r; } catch (err) {} }
         }
-        if (c.badge === 'always' || (m._mossadRate != null && Math.abs(m.playbackRate - 1) > 1e-6)) mossadSpeedShowBadge(m);
+        if (_spBadgeWanted(m)) mossadSpeedShowBadge(m); else _spHideBadge();
     }, true);
 
     /** Строки скорости с тем же сочетанием, что binding: [{ label, clear() }]. comboId — функция сравнения (из MOSSAD или своя). */
