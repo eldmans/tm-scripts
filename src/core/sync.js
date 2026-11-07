@@ -158,6 +158,7 @@
     function formatHotkey(hk) {
         if (!hk || !hk.key) return '—';
         const parts = [];
+        if (hk.meta)  parts.push('Win');
         if (hk.ctrl)  parts.push('Ctrl');
         if (hk.alt)   parts.push('Alt');
         if (hk.shift) parts.push('Shift');

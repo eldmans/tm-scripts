@@ -87,6 +87,7 @@
             grokHistBack:     { key: '2',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+2 — Grok: назад по истории слайдов
             grokHistFwd:      { key: '3',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+3 — Grok: вперёд по истории слайдов
             grokLastSlide:    { key: '4',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+4 — Grok: последний слайд диалога
+            updateScript:     { key: 'r',          ctrl: false, alt: true,  shift: false, meta: true }, // v1.3.99: Win+Alt+R — обновить скрипт с GitHub
         }
     };
 

@@ -882,34 +882,49 @@
         `;
         
         const list = modal.querySelector('#mossad-hk-list');
+        const HOTKEY_CATEGORIES = [
+            { id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize'] },
+            { id: 'cat-nav', title: '🎞 Листание и навигация по кадрам', keys: ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'rewind', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide'] },
+            { id: 'cat-dl', title: '💾 Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate'] },
+            { id: 'cat-ui', title: '🛠 Меню, окна и утилиты', keys: ['updateScript', 'slideshowPanel', 'help', 'history', 'snapWidget', 'openTodos', 'grokCycle'] }
+        ];
+
         const keysMap = {
+            // Слайд-шоу и медиаплеер
+            galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert; без ссылок — 1-е нажатие собирает)',
+            slideshowStart:   'Малое слайдшоу / ракета (Shift+Insert)',
+            galleryStop:      'Стоп большого слайдшоу',
+            playPause:        'Пауза/Плей видео (Pause)',
+            sound:            'Звук вкл/выкл (ScrollLock)',
+            expand:           '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
+            xvDoubleSize:     'XVideos / xv-ru — 🔲 Двойной размер плеера (T)',
+
+            // Листание и навигация по кадрам
             nextSlide:        'Следующий слайд (ArrowRight)',
             prevSlide:        'Предыдущий слайд (ArrowLeft)',
             nextGroup:        'Следующая группа (Alt+PageDown)',
             prevGroup:        'Предыдущая группа (Alt+PageUp)',
-            download:         'Скачать (PageDown)',
-            upscale:          'Улучшить (Shift+«+» / Shift+Num+)',
-            deleteVid:        'Удалить видео (Delete)',
-            sound:            'Звук вкл/выкл (ScrollLock)',
-            playPause:        'Пауза/Плей видео (Pause)',
-            help:             'Настройки клавиш (Ctrl+F1)',
-            history:          'Переход в Saved Grok (Home)', 
-            slideshowPanel:   'Меню: полное / краткое / скрыть (Ctrl+Insert)',
-            slideshowStart:   'Малое слайдшоу / ракета (Shift+Insert)',
-            galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert; без ссылок — 1-е нажатие собирает)',
-            galleryStop:      'Стоп большого слайдшоу',
-            duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
-            rewind:           'Мотать в начало (Alt+R)',
-            snapWidget:       'Привязать к левому верхнему краю (F8)',
-            openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)',
-            grokCycle:        'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
-            grokFirstSlide:   'Grok — первый слайд диалога (Alt+1)',
+            rewind:           'Мотать в начало / шаг назад (Alt+R)',
+            grokFirstSlide:   'Grok — первый кадр/слайд диалога (Alt+1)',
             grokHistBack:     'Grok — назад по истории слайдов (Alt+2)',
             grokHistFwd:      'Grok — вперёд по истории слайдов (Alt+3)',
-            grokLastSlide:    'Grok — последний слайд диалога (Alt+4)',
-            expand:           '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
-            xvDoubleSize:     'XVideos / xv-ru — 🔲 Двойной размер плеера (T)',
-            generate:         'Генерация Space / Отправка Grok (Ctrl+Enter)'
+            grokLastSlide:    'Grok — последний кадр/слайд диалога (Alt+4)',
+
+            // Скачивание, апскейл и удаление
+            download:         'Скачать медиа (PageDown)',
+            upscale:          'Улучшить (Shift+«+» / Shift+Num+)',
+            deleteVid:        'Удалить видео/пост (Delete)',
+            duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
+            generate:         'Генерация Space / Отправка Grok (Ctrl+Enter)',
+
+            // Меню, окна и утилиты
+            updateScript:     'Обновить скрипт с GitHub (Win+Alt+R / клик 🔄)',
+            slideshowPanel:   'Меню: полное / краткое / скрыть (Ctrl+Insert)',
+            help:             'Настройки клавиш (Ctrl+F1)',
+            history:          'Переход в Saved Grok (Home)', 
+            snapWidget:       'Привязать к левому верхнему краю (F8)',
+            openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)',
+            grokCycle:        'Grok — цикл: промт → фото/видео → длина/соотношение (\\)'
         };
         
         const renderHotkeyRow = (k) => {
@@ -1114,11 +1129,39 @@
             const siteSet = new Set(mossadHkSiteKeys().filter(k => keysMap[k]));
             const siteKeys = orderedHotkeyKeys(all.filter(k => siteSet.has(k)), mossadHkSiteEntry().order);
             const globalKeys = orderedHotkeyKeys(all, getHotkeyOrder()).filter(k => !siteSet.has(k));
+
             list.append(mkSecHead('mossad-hk-sec-site', `${L('hkSecSite')} (${rootDomain})`, siteKeys.length ? '' : L('hkSecSiteEmpty')));
-            const addRow = (k, site) => { const row = renderHotkeyRow(k); row.dataset.site = site ? '1' : ''; paintPinned(row, pinned.has(k)); list.append(row); };
+            const addRow = (k, site, catId) => {
+                const row = renderHotkeyRow(k);
+                row.dataset.site = site ? '1' : '';
+                if (catId) row.dataset.cat = catId;
+                paintPinned(row, pinned.has(k));
+                list.append(row);
+            };
             siteKeys.forEach(k => addRow(k, true));
+
             list.append(mkSecHead('mossad-hk-sep', L('hkSecGlobal')));
-            globalKeys.forEach(k => addRow(k, false));
+
+            // v1.3.99: Группировка глобальных клавиш по 4 логическим блокам
+            HOTKEY_CATEGORIES.forEach(cat => {
+                const catKeys = cat.keys.filter(k => globalKeys.includes(k));
+                if (catKeys.length) {
+                    const head = document.createElement('div');
+                    head.className = 'mossad-hk-cat-head';
+                    head.dataset.cat = cat.id;
+                    head.style.cssText = 'font-size:11px; font-weight:bold; color:#60a5fa; text-transform:uppercase; letter-spacing:0.04em; padding:6px 2px 2px; margin-top:8px; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center;';
+                    head.innerHTML = `<span>${cat.title}</span><span style="font-size:10px; color:#9ca3af; font-weight:normal;">(${catKeys.length})</span>`;
+                    list.append(head);
+                    catKeys.forEach(k => addRow(k, false, cat.id));
+                }
+            });
+            // Непопавшие в категории клавиши (если есть сторонние)
+            const categorized = new Set(HOTKEY_CATEGORIES.flatMap(c => c.keys));
+            const uncategorized = globalKeys.filter(k => !categorized.has(k));
+            if (uncategorized.length) {
+                uncategorized.forEach(k => addRow(k, false, 'cat-other'));
+            }
+
             paintDupes();
         };
         /** Строки секций в DOM: { site: [...], global: [...] } */
@@ -1311,10 +1354,130 @@
             });
         };
         modal._mossadSetTab = setTab;
+        // v1.3.99: Поиск по всем вкладкам и клавишам
+        const searchInput = modal.querySelector('#mossad-settings-search');
+        const searchClear = modal.querySelector('#mossad-settings-search-clear');
+        const otherTabsWrap = modal.querySelector('#mossad-search-other-tabs');
+        const otherTabsChips = modal.querySelector('#mossad-search-other-chips');
+
+        const tabNames = {
+            general: '⚙️ Общие',
+            hotkeys: '⌨️ Хоткеи',
+            video: '🎥 Видео',
+            quota: '📊 Лимит',
+            defaults: '🌐 Дефолты',
+            labels: '🏷️ Подписи',
+            todos: '📝 Тудушки',
+            sites: '🌍 Сайты'
+        };
+
+        function applySearchFilter() {
+            const q = (searchInput ? searchInput.value : '').trim().toLowerCase();
+            if (searchClear) searchClear.style.display = q ? 'block' : 'none';
+
+            // Находим активную вкладку
+            let activeTab = 'hotkeys';
+            modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
+                if (b.style.background === 'rgb(31, 41, 55)' || b.style.color === 'rgb(255, 255, 255)') activeTab = b.dataset.tab;
+            });
+
+            // 1. Фильтруем текущую активную панель
+            const activePane = modal.querySelector(`[data-pane="${activeTab}"]`);
+            if (activePane) {
+                if (activeTab === 'hotkeys') {
+                    const rows = activePane.querySelectorAll('[data-hk]');
+                    const catHasVisible = {};
+                    rows.forEach(r => {
+                        const hkKey = r.dataset.hk;
+                        const labelText = (keysMap[hkKey] || '').toLowerCase();
+                        const keyBinding = (r.querySelector('.mossad-hk-key')?.textContent || '').toLowerCase();
+                        const matches = !q || labelText.includes(q) || keyBinding.includes(q) || hkKey.toLowerCase().includes(q);
+                        r.style.display = matches ? 'flex' : 'none';
+                        const catId = r.dataset.cat;
+                        if (catId && matches) catHasVisible[catId] = true;
+                    });
+                    activePane.querySelectorAll('.mossad-hk-cat-head').forEach(ch => {
+                        const cid = ch.dataset.cat;
+                        ch.style.display = (!q || catHasVisible[cid]) ? 'flex' : 'none';
+                    });
+                } else {
+                    const directChildren = Array.from(activePane.children);
+                    directChildren.forEach(el => {
+                        const text = (el.textContent || '').toLowerCase() + ' ' + (el.title || '').toLowerCase();
+                        const matches = !q || text.includes(q);
+                        el.style.display = matches ? '' : 'none';
+                    });
+                }
+            }
+
+            // 2. Ищем совпадения в других вкладках
+            if (!q) {
+                if (otherTabsWrap) otherTabsWrap.style.display = 'none';
+                return;
+            }
+
+            const otherCounts = {};
+            if (activeTab !== 'hotkeys') {
+                let hkCount = 0;
+                Object.keys(keysMap).forEach(k => {
+                    const txt = (keysMap[k] + ' ' + k + ' ' + formatHotkey(config.hk[k])).toLowerCase();
+                    if (txt.includes(q)) hkCount++;
+                });
+                if (hkCount > 0) otherCounts['hotkeys'] = hkCount;
+            }
+
+            modal.querySelectorAll('[data-pane]').forEach(p => {
+                const paneName = p.dataset.pane;
+                if (paneName === activeTab || paneName === 'hotkeys') return;
+                const fullText = (p.textContent || '').toLowerCase();
+                if (fullText.includes(q)) {
+                    const count = (fullText.match(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+                    if (count > 0) otherCounts[paneName] = count;
+                }
+            });
+
+            const foundTabs = Object.keys(otherCounts);
+            if (foundTabs.length > 0 && otherTabsWrap && otherTabsChips) {
+                otherTabsWrap.style.display = 'flex';
+                otherTabsChips.innerHTML = foundTabs.map(t => {
+                    return `<button type="button" class="mossad-search-chip" data-goto="${t}" style="background:#1f2937;border:1px solid #3b82f6;border-radius:12px;color:#60a5fa;padding:2px 8px;cursor:pointer;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px;transition:all 0.2s;">` +
+                           `${tabNames[t] || t} (${otherCounts[t]})</button>`;
+                }).join('');
+
+                otherTabsChips.querySelectorAll('.mossad-search-chip').forEach(btn => {
+                    btn.onclick = (e) => {
+                        e.preventDefault();
+                        const targetTab = btn.dataset.goto;
+                        if (typeof setTab === 'function') {
+                            setTab(targetTab);
+                            applySearchFilter();
+                        }
+                    };
+                });
+            } else if (otherTabsWrap) {
+                otherTabsWrap.style.display = 'none';
+            }
+        }
+
+        if (searchInput) {
+            searchInput.oninput = () => applySearchFilter();
+        }
+        if (searchClear) {
+            searchClear.onclick = () => {
+                if (searchInput) { searchInput.value = ''; searchInput.focus(); }
+                applySearchFilter();
+            };
+        }
+
         modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
-            b.onclick = (e) => { e.preventDefault(); setTab(b.dataset.tab); };
+            b.onclick = (e) => {
+                e.preventDefault();
+                setTab(b.dataset.tab);
+                applySearchFilter();
+            };
         });
         setTab(tab);
+        applySearchFilter();
         modal.querySelector('#mossad-settings-x').onclick = () => closeSettingsWindow(true);
         initGlobalDefaultsTab(modal);
         modal.querySelector('#mossad-playlist-rows').onchange = (e) => {
