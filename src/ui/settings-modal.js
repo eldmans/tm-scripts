@@ -75,7 +75,7 @@
     // Закреплённые (🔒) строки НЕ меняются ни сбросом, ни рассылкой: ни клавиша, ни место.
     const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
     const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'expand', 'xvDoubleSize', 'generate'];
+    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'grokHistBack', 'grokHistFwd', 'expand', 'xvDoubleSize', 'generate'];
     function readHotkeyDefaults() {
         let raw = null;
         try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -749,7 +749,15 @@
               <input id="mossad-gen-nokeys" type="text" value="${String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
                 style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
               <button id="mossad-gen-nokeys-help" title="Именованные клавиши" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
-            </div>` : ''}
+            </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Сворачивать активное поле ввода промпта при любом листании слайдов (стрелки, Alt+1..4, история и т.д.)">
+              <input id="mossad-grok-collapse-prompt" type="checkbox" style="accent-color:#10b981;" ${config.grokCollapsePromptOnNav !== false ? 'checked' : ''}>
+              Сворачивать промпт при листании слайдов
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Сохранять слайд в историю просмотров conversation, если просмотр длился дольше этого числа секунд (история старше 1 часа очищается автоматически)">
+              История слайдов: пауза для записи, сек:
+              <input id="mossad-grok-hist-dwell" type="number" min="1" max="60" step="1" value="${Number(config.grokHistoryDwellSec) || 5}" style="width:52px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
+            </label>` : ''}
             <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Выбранные хоткеи MOSSAD срабатывают, даже когда фокус в поле промпта (ввода). Список — id действий через запятую; выбор — кнопкой «?»">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input id="mossad-gen-prompthk-on" type="checkbox" style="accent-color:#3b82f6;" ${config.promptHotkeysOn ? 'checked' : ''}><span data-mossad-label="promptHkLabel">${LH('promptHkLabel')}</span></label>
               <div style="display:flex;align-items:center;gap:6px;margin-top:3px;padding-left:22px;">
@@ -882,6 +890,8 @@
             snapWidget:       'Привязать к левому верхнему краю (F8)',
             openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)',
             grokCycle:        'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
+            grokHistBack:     'Grok — назад по истории слайдов (Alt+= / =)',
+            grokHistFwd:      'Grok — вперёд по истории слайдов (Alt+- / -)',
             expand:           '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
             xvDoubleSize:     'XVideos / xv-ru — 🔲 Двойной размер плеера (T)',
             generate:         'Генерация Space / Отправка Grok (Ctrl+Enter)'
@@ -1316,6 +1326,10 @@
         if (genNoKeys) {
             genNoKeys.oninput = genNoKeys.onchange = (e) => Settings.setQuiet('grokNoPromptKeys', e.target.value);
             modal.querySelector('#mossad-gen-nokeys-help').onclick = (e) => { e.preventDefault(); e.stopPropagation(); mossadToggleKeyHelp(e.currentTarget, genNoKeys); };
+            const cbCollapse = modal.querySelector('#mossad-grok-collapse-prompt');
+            if (cbCollapse) cbCollapse.onchange = (e) => Settings.setQuiet('grokCollapsePromptOnNav', e.target.checked);
+            const inDwell = modal.querySelector('#mossad-grok-hist-dwell');
+            if (inDwell) inDwell.onchange = (e) => Settings.setQuiet('grokHistoryDwellSec', Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 5)));
         }
         // v1.3.72: хоткеи, работающие даже в поле промпта — галочка + список через запятую, «?» — выбор кликами
         const genPHk = modal.querySelector('#mossad-gen-prompthk');

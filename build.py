@@ -47,6 +47,7 @@ MODULES = [
     "src/engines/grok/prompt-cycle.js",
     "src/engines/grok/key-guard.js",
     "src/engines/grok/quota.js",
+    "src/engines/grok/history-nav.js",
     "src/engines/instagram.js",
     "src/engines/redgifs.js",
     "src/engines/huggingface.js",

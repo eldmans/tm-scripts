@@ -42,6 +42,8 @@
         grokQuotaSep: ' · ',               // v1.3.87: разделитель между частями плашки
         grokQuotaTimeMode: 'auto',         // v1.3.87: время до сброса: 'auto' | 'both' | 'hours'
         grokQuotaPos: null,                // v1.3.87: позиция плашки { left, top } (null = по центру вверху)
+        grokCollapsePromptOnNav: true,     // v1.3.89: сворачивать поле промпта при любом листании слайдов
+        grokHistoryDwellSec: 5,            // v1.3.89: секунд на слайде для сохранения в историю
         pinterestJumpKeys: 'off',          // v1.3.59: похожий пин по клавише: off | focus | keys | badges | shift
         pinterestDir: 'fwd',               // v1.3.51: малое слайдшоу на Pinterest: 'fwd' — новые пины, 'back' — назад по истории
         pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
@@ -78,6 +80,8 @@
             duplicateNext:    { key: ' ',          ctrl: true,  alt: false, shift: false }, // Ctrl+Пробел — открыть в фоне + сдвинуть
             rewind:           { key: 'r',          ctrl: false, alt: true,  shift: false }, // Alt+R — перемотка
             generate:         { key: 'Enter',      ctrl: true,  alt: false, shift: false }, // v1.3.70: Ctrl+Enter — запуск генерации Space / отправка Grok
+            grokHistBack:     { key: '=',          ctrl: false, alt: true,  shift: false }, // v1.3.89: Alt+= — Grok: назад по истории слайдов
+            grokHistFwd:      { key: '-',          ctrl: false, alt: true,  shift: false }, // v1.3.89: Alt+- — Grok: вперёд по истории слайдов
         }
     };
 
@@ -100,6 +104,7 @@
         'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
         'playlistRows', 'playlistWidth', 'collectWatchSec',
         'grokQuotaEnabled', 'grokQuotaSep', 'grokQuotaTimeMode',
+        'grokCollapsePromptOnNav', 'grokHistoryDwellSec',
         'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS', 'pinterestJumpKeys',
     ];
     const GlobalDefaults = {
@@ -409,7 +414,7 @@
     const HK_SITE_GM_KEY = 'mossad_hk_site';
     // Сразу «свои» при первом заходе на сайт (действие есть только на этом сайте)
     const HK_SITE_SEED = {
-        'grok.com': ['grokCycle'],
+        'grok.com': ['grokCycle', 'grokHistBack', 'grokHistFwd'],
         'xv-ru.com': ['xvDoubleSize'],
         'xvideos.com': ['xvDoubleSize'],
         'xvideos2.com': ['xvDoubleSize'],

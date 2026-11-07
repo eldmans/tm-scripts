@@ -68,6 +68,15 @@
         // сохраняем только если F действительно дописали: свежий контейнер без конфига ничего не пишет
         if (!mossadParseKeyList(cur).codes.has('KeyF')) { config.grokNoPromptKeys = cur + 'F'; try { persistLocalConfig(); } catch (e) {} }
     }
+    // v1.3.89: = и - (история слайдов) — в список «не кидают в промт», один раз
+    if (rootDomain === 'grok.com' && !config.npkHistNavAdded) {
+        config.npkHistNavAdded = true;
+        const cur = String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys);
+        let updated = cur;
+        if (!cur.includes('=')) updated += '=';
+        if (!cur.includes('-')) updated += '-';
+        if (updated !== cur) { config.grokNoPromptKeys = updated; try { persistLocalConfig(); } catch (e) {} }
+    }
     if (rootDomain === 'grok.com') {
         // Взвод страховки — window/capture (раньше обработчиков на document/элементах)
         window.addEventListener('keydown', (e) => {

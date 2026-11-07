@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.88
+// @version      1.3.89
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -544,7 +544,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.88';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.89';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -710,6 +710,8 @@ grokQuotaEnabled: true,
 grokQuotaSep: ' · ',
 grokQuotaTimeMode: 'auto',
 grokQuotaPos: null,
+grokCollapsePromptOnNav: true,
+grokHistoryDwellSec: 5,
 pinterestJumpKeys: 'off',
 pinterestDir: 'fwd',
 pinterestFilterType: 'ratio',
@@ -744,6 +746,8 @@ prevGroup: { key: 'PageUp', ctrl: false, alt: true, shift: false },
 duplicateNext: { key: ' ', ctrl: true, alt: false, shift: false },
 rewind: { key: 'r', ctrl: false, alt: true, shift: false },
 generate: { key: 'Enter', ctrl: true, alt: false, shift: false },
+grokHistBack: { key: '=', ctrl: false, alt: true, shift: false },
+grokHistFwd: { key: '-', ctrl: false, alt: true, shift: false },
 }
 };
 let config = {};
@@ -761,6 +765,7 @@ const GLOBAL_DEFAULT_KEYS = [
 'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
 'playlistRows', 'playlistWidth', 'collectWatchSec',
 'grokQuotaEnabled', 'grokQuotaSep', 'grokQuotaTimeMode',
+'grokCollapsePromptOnNav', 'grokHistoryDwellSec',
 'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS', 'pinterestJumpKeys',
 ];
 const GlobalDefaults = {
@@ -1003,7 +1008,7 @@ if (typeof GM_setValue === 'function') { try { GM_setValue('mossad_hk_global', J
 }
 const HK_SITE_GM_KEY = 'mossad_hk_site';
 const HK_SITE_SEED = {
-'grok.com': ['grokCycle'],
+'grok.com': ['grokCycle', 'grokHistBack', 'grokHistFwd'],
 'xv-ru.com': ['xvDoubleSize'],
 'xvideos.com': ['xvDoubleSize'],
 'xvideos2.com': ['xvDoubleSize'],
@@ -7262,6 +7267,14 @@ config.npkExpandAdded = true;
 const cur = String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys);
 if (!mossadParseKeyList(cur).codes.has('KeyF')) { config.grokNoPromptKeys = cur + 'F'; try { persistLocalConfig(); } catch (e) {} }
 }
+if (rootDomain === 'grok.com' && !config.npkHistNavAdded) {
+config.npkHistNavAdded = true;
+const cur = String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys);
+let updated = cur;
+if (!cur.includes('=')) updated += '=';
+if (!cur.includes('-')) updated += '-';
+if (updated !== cur) { config.grokNoPromptKeys = updated; try { persistLocalConfig(); } catch (e) {} }
+}
 if (rootDomain === 'grok.com') {
 window.addEventListener('keydown', (e) => {
 if (isEditableElement(document.activeElement)) return;
@@ -7883,6 +7896,212 @@ if (document.readyState === 'loading') {
 document.addEventListener('DOMContentLoaded', initGrokQuota);
 } else {
 initGrokQuota();
+}
+}
+
+// ── src/engines/grok/history-nav.js ──
+const GROK_SLIDE_HIST_KEY = 'mossad_grok_slide_hist_v1';
+const GROK_HIST_MAX_AGE_MS = 60 * 60 * 1000;
+let _grokSlideHistIndex = -1;
+let _grokCandidateSlide = null;
+let _grokHistTickTimer = null;
+let _grokIsNavigatingHistory = false;
+function isGrokPromptActive() {
+const el = document.activeElement;
+if (!el) return false;
+if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable || el.getAttribute('role') === 'textbox') {
+return true;
+}
+return !!el.closest('form, div.query-bar, [data-testid*="composer"]');
+}
+function grokCollapsePrompt() {
+const prompt = typeof grokFindPromptInput === 'function' ? grokFindPromptInput(true) : document.querySelector('textarea, [contenteditable="true"]');
+if (prompt) {
+try { prompt.blur(); } catch (e) {}
+}
+const ae = document.activeElement;
+if (ae && typeof ae.blur === 'function') {
+try { ae.blur(); } catch (e) {}
+}
+if (typeof blurActiveInput === 'function') {
+blurActiveInput();
+}
+const neutral = document.querySelector('main, [role="main"], #root, body');
+if (neutral) {
+try {
+neutral.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, view: window }));
+neutral.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+} catch (e) {}
+}
+}
+function _loadGrokSlideHistory() {
+let list = [];
+try {
+const raw = sessionStorage.getItem(GROK_SLIDE_HIST_KEY);
+if (raw) list = JSON.parse(raw);
+} catch (e) { list = []; }
+const now = Date.now();
+const fresh = list.filter(item => item && item.url && (now - item.ts < GROK_HIST_MAX_AGE_MS));
+if (fresh.length !== list.length) {
+_saveGrokSlideHistory(fresh);
+}
+return fresh;
+}
+function _saveGrokSlideHistory(list) {
+try {
+sessionStorage.setItem(GROK_SLIDE_HIST_KEY, JSON.stringify(list));
+} catch (e) {}
+}
+function _checkCandidateCommit() {
+if (!_grokCandidateSlide || _grokCandidateSlide.committed) return;
+const dwellSec = Math.max(1, Math.min(60, Number(config.grokHistoryDwellSec) || 5));
+const elapsed = Date.now() - _grokCandidateSlide.startTime;
+if (elapsed < dwellSec * 1000) return;
+_grokCandidateSlide.committed = true;
+const history = _loadGrokSlideHistory();
+const currentUrl = _grokCandidateSlide.url;
+if (history.length > 0 && history[history.length - 1].url === currentUrl) {
+_grokSlideHistIndex = history.length - 1;
+return;
+}
+const newEntry = {
+url: currentUrl,
+path: _grokCandidateSlide.path,
+uuid: _grokCandidateSlide.uuid,
+ts: Date.now()
+};
+if (_grokSlideHistIndex >= 0 && _grokSlideHistIndex < history.length - 1) {
+history.splice(_grokSlideHistIndex + 1);
+}
+history.push(newEntry);
+_grokSlideHistIndex = history.length - 1;
+_saveGrokSlideHistory(history);
+}
+function _onGrokSlideChanged() {
+if (rootDomain !== 'grok.com' || !isGrokPostPage()) return;
+const url = location.href;
+const path = location.pathname;
+const uuid = typeof grokExtractUuid === 'function' ? grokExtractUuid(path) : '';
+if (_grokCandidateSlide && _grokCandidateSlide.url === url) return;
+_grokCandidateSlide = {
+url,
+path,
+uuid,
+startTime: Date.now(),
+committed: false
+};
+}
+function grokNavigateToSlide(target) {
+if (!target || !target.url) return;
+_grokIsNavigatingHistory = true;
+setTimeout(() => { _grokIsNavigatingHistory = false; }, 800);
+if (target.uuid && typeof grokFindFilmstripItemByUuid === 'function') {
+const btn = grokFindFilmstripItemByUuid(target.uuid);
+if (btn) {
+btn.click();
+try { history.replaceState(null, '', target.path || target.url); } catch (e) {}
+return;
+}
+}
+if (typeof grokSpaNavigate === 'function') {
+grokSpaNavigate(target.url);
+} else {
+window.location.href = target.url;
+}
+}
+function grokHistoryBack() {
+const history = _loadGrokSlideHistory();
+if (history.length === 0) {
+showToast('⏮ История слайдов пуста', true);
+return;
+}
+if (_grokSlideHistIndex < 0 || _grokSlideHistIndex >= history.length) {
+_grokSlideHistIndex = history.length - 1;
+}
+if (history[_grokSlideHistIndex] && history[_grokSlideHistIndex].url === location.href && _grokSlideHistIndex > 0) {
+_grokSlideHistIndex--;
+} else if (_grokSlideHistIndex <= 0) {
+showToast('⏮ Начало истории слайдов', true);
+return;
+} else {
+_grokSlideHistIndex--;
+}
+const target = history[_grokSlideHistIndex];
+showToast(`⏮ Слайд: ${_grokSlideHistIndex + 1}/${history.length}`);
+grokNavigateToSlide(target);
+}
+function grokHistoryForward() {
+const history = _loadGrokSlideHistory();
+if (history.length === 0) {
+showToast('⏭ История слайдов пуста', true);
+return;
+}
+if (_grokSlideHistIndex >= history.length - 1) {
+showToast('⏭ Конец истории слайдов', true);
+return;
+}
+_grokSlideHistIndex++;
+const target = history[_grokSlideHistIndex];
+showToast(`⏭ Слайд: ${_grokSlideHistIndex + 1}/${history.length}`);
+grokNavigateToSlide(target);
+}
+window.addEventListener('keydown', function handleGrokHistoryNavKeys(e) {
+if (rootDomain !== 'grok.com') return;
+if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code || '')) {
+if (config.grokCollapsePromptOnNav !== false) {
+grokCollapsePrompt();
+}
+return;
+}
+const isBackHk = (config.hk && config.hk.grokHistBack && hotkeyMatches(e, config.hk.grokHistBack)) ||
+(e.altKey && (e.key === '=' || e.code === 'Equal')) ||
+(!e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && (e.key === '=' || e.code === 'Equal') && !isEditableElement(document.activeElement));
+const isFwdHk = (config.hk && config.hk.grokHistFwd && hotkeyMatches(e, config.hk.grokHistFwd)) ||
+(e.altKey && (e.key === '-' || e.code === 'Minus')) ||
+(!e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && (e.key === '-' || e.code === 'Minus') && !isEditableElement(document.activeElement));
+if (!isBackHk && !isFwdHk) return;
+if (isGrokPromptActive()) {
+e.preventDefault();
+e.stopImmediatePropagation();
+grokCollapsePrompt();
+showToast('🔽 Промпт свёрнут');
+return;
+}
+e.preventDefault();
+e.stopImmediatePropagation();
+if (config.grokCollapsePromptOnNav !== false) {
+grokCollapsePrompt();
+}
+if (isBackHk) {
+grokHistoryBack();
+} else {
+grokHistoryForward();
+}
+}, true);
+window.addEventListener('keydown', function handleGrokNavPromptCollapse(e) {
+if (rootDomain !== 'grok.com' || config.grokCollapsePromptOnNav === false) return;
+if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'PageDown' || e.key === 'PageUp') {
+if (isGrokPromptActive()) {
+grokCollapsePrompt();
+}
+}
+}, false);
+function initGrokSlideHistory() {
+if (rootDomain !== 'grok.com') return;
+_onGrokSlideChanged();
+if (!_grokHistTickTimer) {
+_grokHistTickTimer = setInterval(() => {
+if (rootDomain !== 'grok.com') return;
+_onGrokSlideChanged();
+_checkCandidateCommit();
+}, 1000);
+}
+}
+if (rootDomain === 'grok.com') {
+if (document.readyState === 'loading') {
+document.addEventListener('DOMContentLoaded', initGrokSlideHistory);
+} else {
+initGrokSlideHistory();
 }
 }
 
@@ -12386,7 +12605,7 @@ return out.filter(k => k != null);
 }
 const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
 const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'expand', 'xvDoubleSize', 'generate'];
+const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'grokHistBack', 'grokHistFwd', 'expand', 'xvDoubleSize', 'generate'];
 function readHotkeyDefaults() {
 let raw = null;
 try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -12990,7 +13209,15 @@ modal.innerHTML = `
               <input id="mossad-gen-nokeys" type="text" value="${String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
                 style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
               <button id="mossad-gen-nokeys-help" title="Именованные клавиши" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
-            </div>` : ''}
+            </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Сворачивать активное поле ввода промпта при любом листании слайдов (стрелки, Alt+1..4, история и т.д.)">
+              <input id="mossad-grok-collapse-prompt" type="checkbox" style="accent-color:#10b981;" ${config.grokCollapsePromptOnNav !== false ? 'checked' : ''}>
+              Сворачивать промпт при листании слайдов
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Сохранять слайд в историю просмотров conversation, если просмотр длился дольше этого числа секунд (история старше 1 часа очищается автоматически)">
+              История слайдов: пауза для записи, сек:
+              <input id="mossad-grok-hist-dwell" type="number" min="1" max="60" step="1" value="${Number(config.grokHistoryDwellSec) || 5}" style="width:52px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
+            </label>` : ''}
             <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Выбранные хоткеи MOSSAD срабатывают, даже когда фокус в поле промпта (ввода). Список — id действий через запятую; выбор — кнопкой «?»">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input id="mossad-gen-prompthk-on" type="checkbox" style="accent-color:#3b82f6;" ${config.promptHotkeysOn ? 'checked' : ''}><span data-mossad-label="promptHkLabel">${LH('promptHkLabel')}</span></label>
               <div style="display:flex;align-items:center;gap:6px;margin-top:3px;padding-left:22px;">
@@ -13122,6 +13349,8 @@ rewind: 'Мотать в начало (Alt+R)',
 snapWidget: 'Привязать к левому верхнему краю (F8)',
 openTodos: 'Открыть «📝 Тудушки» (по умолчанию не назначено)',
 grokCycle: 'Grok — цикл: промт → фото/видео → длина/соотношение (\\)',
+grokHistBack: 'Grok — назад по истории слайдов (Alt+= / =)',
+grokHistFwd: 'Grok — вперёд по истории слайдов (Alt+- / -)',
 expand: '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
 xvDoubleSize: 'XVideos / xv-ru — 🔲 Двойной размер плеера (T)',
 generate: 'Генерация Space / Отправка Grok (Ctrl+Enter)'
@@ -13504,6 +13733,10 @@ const genNoKeys = modal.querySelector('#mossad-gen-nokeys');
 if (genNoKeys) {
 genNoKeys.oninput = genNoKeys.onchange = (e) => Settings.setQuiet('grokNoPromptKeys', e.target.value);
 modal.querySelector('#mossad-gen-nokeys-help').onclick = (e) => { e.preventDefault(); e.stopPropagation(); mossadToggleKeyHelp(e.currentTarget, genNoKeys); };
+const cbCollapse = modal.querySelector('#mossad-grok-collapse-prompt');
+if (cbCollapse) cbCollapse.onchange = (e) => Settings.setQuiet('grokCollapsePromptOnNav', e.target.checked);
+const inDwell = modal.querySelector('#mossad-grok-hist-dwell');
+if (inDwell) inDwell.onchange = (e) => Settings.setQuiet('grokHistoryDwellSec', Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 5)));
 }
 const genPHk = modal.querySelector('#mossad-gen-prompthk');
 modal.querySelector('#mossad-gen-prompthk-on').onchange = (e) => Settings.setQuiet('promptHotkeysOn', e.target.checked);
