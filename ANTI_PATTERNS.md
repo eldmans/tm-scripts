@@ -17,6 +17,9 @@
 ---
 
 ## 2. Grok (`grok.com`)
+* ❌ **Опрос квоты Grok только через JSON и window.fetch без unsafeWindow:**
+  * *Что произошло:* Grok отправляет запросы к `GetGrokCreditsConfig` и `GetGrokUsageInfo` в бинарном формате `application/grpc-web+proto`. Обычный `JSON.parse` падает с ошибкой, а вызовы `window.fetch` из изолированного контекста Tampermonkey не перехватывают трафик самой страницы.
+  * *Как надо:* Использовать `unsafeWindow.fetch` для прозрачного перехвата ответов страницы, а при собственном запросе поддерживать fallback (gRPC-Web proto с парсингом varint/float32 + Connect JSON). Защищать от повторного оборачивания флагом `_mossadQuotaFetchHooked`.
 * ❌ **Включение звука через ScrollLock в обход DOM плеера:**
   * *Что произошло:* Включение звука на `<video>` элементе напрямую рассинхронизирует UI плеера Grok (в интерфейсе остаётся значок Muted).
   * *Как надо:* Искать в DOM плеера кнопку звука и программно кликать по ней.

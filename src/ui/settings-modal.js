@@ -10,7 +10,7 @@
 
     // ── v1.3.45: память последней вкладки (UI-состояние — localStorage, как размеры списка/позиция виджета) ──
     const SETTINGS_TAB_LS_KEY = 'mossad_settings_tab';
-    const SETTINGS_TABS = ['general', 'hotkeys', 'video', 'defaults', 'labels', 'todos', 'sites'];
+    const SETTINGS_TABS = ['general', 'hotkeys', 'video', 'quota', 'defaults', 'labels', 'todos', 'sites'];
     function getLastSettingsTab(fallback = 'hotkeys') {
         try {
             const t = localStorage.getItem(SETTINGS_TAB_LS_KEY);
@@ -541,7 +541,156 @@
         };
         // При закрытии окна: сохраняем, только если текст менялся
         modal._mossadLabelsFlush = () => { if (ta.value !== saved) apply(true); };
+        modal._mossadQuotaFlush = () => {
+            const pane = modal.querySelector('[data-pane="quota"]');
+            if (pane && pane._inited) {
+                const cbEnabled = pane.querySelector('#mossad-grok-quota-enabled');
+                const inputSep = pane.querySelector('#mossad-grok-quota-sep');
+                const selectTime = pane.querySelector('#mossad-grok-quota-timemode');
+                if (cbEnabled) config.grokQuotaEnabled = cbEnabled.checked;
+                if (inputSep) config.grokQuotaSep = inputSep.value;
+                if (selectTime) config.grokQuotaTimeMode = selectTime.value;
+                Settings.save();
+                if (typeof updateGrokQuotaPill === 'function') updateGrokQuotaPill();
+            }
+        };
         status.textContent = `Своих подписей: ${Object.keys(mossadGetLabelOverrides()).length}`;
+    }
+
+    // ── v1.3.87: вкладка лимита Grok ──
+    function initQuotaTab(modal) {
+        const pane = modal.querySelector('[data-pane="quota"]');
+        if (!pane) return;
+        if (pane._inited) {
+            if (typeof pane._updatePreview === 'function') pane._updatePreview();
+            return;
+        }
+        pane._inited = true;
+
+        pane.innerHTML = `
+            <div style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <h4 style="margin:0;font-size:14px;color:#f3f4f6;">📊 Расход квоты Grok (Лимит)</h4>
+                    <span style="font-size:11px;color:#10b981;background:rgba(16,185,129,0.15);padding:2px 6px;border-radius:4px;">grok.com</span>
+                </div>
+                <div style="font-size:12px;color:#9ca3af;margin-bottom:12px;line-height:1.4;">
+                    Компактная плашка отображается по умолчанию сверху по центру экрана на сайте Grok. Показывает процент израсходованного лимита, время до сброса и букву тарифа (<b>S</b> — SuperGrok, <b>P</b> — Premium, <b>F</b> — Free).
+                </div>
+                
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#e5e7eb;cursor:pointer;margin-bottom:12px;">
+                    <input type="checkbox" id="mossad-grok-quota-enabled" ${config.grokQuotaEnabled !== false ? 'checked' : ''} style="accent-color:#10b981;">
+                    Показывать плашку расхода лимита на Grok
+                </label>
+                
+                <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#d1d5db;margin-bottom:12px;">
+                    <span style="white-space:nowrap;">Символ-разделитель:</span>
+                    <input id="mossad-grok-quota-sep" type="text" value="${String(config.grokQuotaSep != null ? config.grokQuotaSep : ' · ').replace(/"/g, '&quot;')}" style="width:70px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:3px 6px;text-align:center;font-size:12px;">
+                    <span style="font-size:11px;color:#9ca3af;">(например: &quot; · &quot;, &quot; | &quot;, &quot; / &quot;)</span>
+                </div>
+
+                <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#d1d5db;margin-bottom:14px;">
+                    <span style="white-space:nowrap;">Время до сброса:</span>
+                    <select id="mossad-grok-quota-timemode" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:3px 8px;font-size:12px;">
+                        <option value="auto" ${(config.grokQuotaTimeMode || 'auto') === 'auto' ? 'selected' : ''}>Авто: дни (если &gt;1 дня) или только часы (3д / 14ч)</option>
+                        <option value="both" ${(config.grokQuotaTimeMode || 'auto') === 'both' ? 'selected' : ''}>Дни и часы одновременно (3д 14ч)</option>
+                        <option value="hours" ${(config.grokQuotaTimeMode || 'auto') === 'hours' ? 'selected' : ''}>Всегда только в часах (72ч)</option>
+                    </select>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-bottom:14px;">
+                    <button id="mossad-grok-quota-resetpos" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#e5e7eb;padding:4px 10px;cursor:pointer;font-size:12px;">↺ По центру вверху</button>
+                    <button id="mossad-grok-quota-refresh" style="background:#10b981;border:none;border-radius:4px;color:#fff;padding:4px 10px;cursor:pointer;font-size:12px;">🔄 Обновить данные</button>
+                </div>
+
+                <div style="border-top:1px solid #374151;padding-top:10px;">
+                    <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">Предпросмотр плашки:</div>
+                    <div id="mossad-grok-quota-preview" style="display:flex;align-items:center;justify-content:center;padding:12px;background:#111827;border-radius:6px;min-height:36px;">
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const cbEnabled = pane.querySelector('#mossad-grok-quota-enabled');
+        const inputSep = pane.querySelector('#mossad-grok-quota-sep');
+        const selectTime = pane.querySelector('#mossad-grok-quota-timemode');
+        const btnResetPos = pane.querySelector('#mossad-grok-quota-resetpos');
+        const btnRefresh = pane.querySelector('#mossad-grok-quota-refresh');
+        const previewEl = pane.querySelector('#mossad-grok-quota-preview');
+
+        const updatePreview = () => {
+            if (!previewEl) return;
+            const enabled = cbEnabled ? cbEnabled.checked : true;
+            const sep = inputSep ? inputSep.value : ' · ';
+            const mode = selectTime ? selectTime.value : 'auto';
+
+            if (!enabled) {
+                previewEl.innerHTML = '<span style="color:#9ca3af;font-size:12px;font-style:italic;">Плашка выключена в настройках</span>';
+                return;
+            }
+
+            const cached = (typeof grokGetCachedQuota === 'function' && grokGetCachedQuota());
+            const sample = cached || {
+                usagePercent: 24,
+                currentPeriod: { end: new Date(Date.now() + 3 * 86400 * 1000 + 14 * 3600 * 1000).toISOString() }
+            };
+
+            if (typeof renderGrokQuotaHtml === 'function') {
+                previewEl.innerHTML = `<div style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;background:rgba(17,24,39,0.9);border:1px solid rgba(75,85,99,0.65);border-radius:9999px;box-shadow:0 4px 12px rgba(0,0,0,0.5);color:#e5e7eb;font-size:12px;font-weight:600;">` +
+                    renderGrokQuotaHtml(sample, { grokQuotaSep: sep, grokQuotaTimeMode: mode }) +
+                    `</div>`;
+            } else {
+                previewEl.innerHTML = `<span style="color:#10b981;font-weight:bold;">24%${sep}3д${sep}S</span>`;
+            }
+        };
+
+        pane._updatePreview = updatePreview;
+
+        const saveChanges = () => {
+            config.grokQuotaEnabled = cbEnabled ? cbEnabled.checked : true;
+            config.grokQuotaSep = inputSep ? inputSep.value : ' · ';
+            config.grokQuotaTimeMode = selectTime ? selectTime.value : 'auto';
+            Settings.save();
+            updatePreview();
+            if (typeof updateGrokQuotaPill === 'function') updateGrokQuotaPill();
+        };
+
+        if (cbEnabled) cbEnabled.onchange = saveChanges;
+        if (inputSep) inputSep.oninput = saveChanges;
+        if (selectTime) selectTime.onchange = saveChanges;
+
+        if (btnResetPos) {
+            btnResetPos.onclick = (e) => {
+                e.preventDefault();
+                config.grokQuotaPos = null;
+                Settings.save();
+                if (typeof updateGrokQuotaPill === 'function') updateGrokQuotaPill();
+                showToast('↺ Позиция сброшена (по центру вверху)');
+            };
+        }
+
+        if (btnRefresh) {
+            btnRefresh.onclick = async (e) => {
+                e.preventDefault();
+                btnRefresh.disabled = true;
+                btnRefresh.textContent = '⏳ ...';
+                try {
+                    if (typeof grokFetchQuota === 'function') {
+                        await grokFetchQuota(true);
+                        updatePreview();
+                        showToast('✓ Квота Grok обновлена');
+                    } else {
+                        showToast('Доступно на grok.com');
+                    }
+                } catch (err) {
+                    showToast('Ошибка обновления квоты');
+                } finally {
+                    btnRefresh.disabled = false;
+                    btnRefresh.textContent = '🔄 Обновить данные';
+                }
+            };
+        }
+
+        updatePreview();
     }
 
     /** tab: 'general' | 'hotkeys' | 'defaults' | 'labels' | 'todos' | 'sites'; не задан / 'last' — последняя открытая вкладка (v1.3.45). */
@@ -571,6 +720,7 @@
               <button data-tab="general" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabGeneral')}" data-mossad-label="tabGeneral" data-mossad-icon="1">${mossadLabelIcon(LH('tabGeneral'))}</button>
               <button data-tab="hotkeys" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabHotkeys')}" data-mossad-label="tabHotkeys" data-mossad-icon="1">${mossadLabelIcon(LH('tabHotkeys'))}</button>
               <button data-tab="video" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabVideo')} — Лёгкий слой на всех сайтах: DND-скачивание, скорость видео" data-mossad-label="tabVideo" data-mossad-icon="1" data-mossad-tip="Лёгкий слой на всех сайтах: DND-скачивание, скорость видео">${mossadLabelIcon(LH('tabVideo'))}</button>
+              <button data-tab="quota" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabQuota')} — Расход квоты, время сброса и тариф Grok" data-mossad-label="tabQuota" data-mossad-icon="1" data-mossad-tip="Расход квоты, время сброса и тариф Grok">${mossadLabelIcon(LH('tabQuota'))}</button>
               <button data-tab="defaults" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabDefaults')} — Общие умолчания для всех сайтов без своих сохранённых настроек" data-mossad-label="tabDefaults" data-mossad-icon="1" data-mossad-tip="Общие умолчания для всех сайтов без своих сохранённых настроек">${mossadLabelIcon(LH('tabDefaults'))}</button>
               <button data-tab="labels" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabLabels')} — Свои подписи кнопок MOSSAD (для всех сайтов)" data-mossad-label="tabLabels" data-mossad-icon="1" data-mossad-tip="Свои подписи кнопок MOSSAD (для всех сайтов)">${mossadLabelIcon(LH('tabLabels'))}</button>
               <button data-tab="todos" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabTodos')} — Задачи для ассистента (текст + фото)" data-mossad-label="tabTodos" data-mossad-icon="1" data-mossad-tip="Задачи для ассистента (текст + фото)">${mossadLabelIcon(LH('tabTodos'))}</button>
@@ -662,7 +812,7 @@
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-11-06</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-07</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -698,6 +848,7 @@
               </div>
             </div>
             <div data-pane="video" style="display:none; flex-direction:column; gap:6px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;"></div>
+            <div data-pane="quota" style="display:none; flex-direction:column; gap:6px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;"></div>
             <div data-pane="labels" style="display:none; flex-direction:column; gap:6px;"></div>
             <div data-pane="todos" style="display:none; flex-direction:column; gap:6px;"></div>
             <div data-pane="sites" style="display:none; flex-direction:column; gap:6px;"></div>
@@ -1126,6 +1277,7 @@
                 if (want === 'todos') initTodosTab(modal);   // v1.3.49: тоже лениво (фото читаются только здесь)
                 if (want === 'sites') initSitesTab(modal);   // v1.3.50: тоже лениво
                 if (want === 'video') mossadLightRenderSettings(modal.querySelector('[data-pane="video"]')); // v1.3.66: лёгкий слой
+                if (want === 'quota') initQuotaTab(modal); // v1.3.87: лимит Grok
             } catch (err) { console.warn('[MOSSAD] вкладка ' + want + ':', err); }
             modal.querySelectorAll('[data-pane]').forEach(p => { p.style.display = p.dataset.pane === want ? 'flex' : 'none'; });
             modal.querySelectorAll('#mossad-settings-tabs [data-tab]').forEach(b => {
@@ -1271,6 +1423,7 @@
             if (typeof modal._mossadLabelsFlush === 'function') modal._mossadLabelsFlush(); // v1.3.46
             if (typeof modal._mossadTodosFlush === 'function') modal._mossadTodosFlush();   // v1.3.49
             if (typeof modal._mossadBeepsSave === 'function') modal._mossadBeepsSave();     // v1.3.82
+            if (typeof modal._mossadQuotaFlush === 'function') modal._mossadQuotaFlush(); // v1.3.87
             const tokEl = modal.querySelector('#mossad-gh-token');
             if (tokEl && tokEl.value !== (config.githubToken || '')) setGithubToken(tokEl.value);
         };
