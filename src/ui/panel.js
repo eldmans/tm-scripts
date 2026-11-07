@@ -169,32 +169,79 @@
             window.updateWidgetUI();
         };
 
+        // Кнопка обновления скрипта (v1.3.97):
+        // Серый = актуально (опрос раз в минуту)
+        // Зелёный = турбо-опрос (каждые 7 с, вкл/выкл по ПКМ). При релизе авто-открывает вкладку установки!
+        // Синий = доступно обновление (клик — обновить)
         const btnUpdate = document.createElement('button');
         mossadLabelEl(btnUpdate, 'update');
-        btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION})`;
         btnUpdate.style.cssText = `background: #18202f; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; color: #64748b; opacity: 0.55; cursor: pointer; font-size: 13px; padding: 4px 10px; min-width: 32px; transition: all 0.3s ease; text-align: center;`;
+
+        let _turboUpdateCheck = false;
+        let _hasUpdateFound = false;
+        let _remoteFoundVer = null;
+
+        function openUpdateTab() {
+            const updateUrl = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
+            if (typeof GM_openInTab === 'function') {
+                try {
+                    GM_openInTab(updateUrl, { active: true, insert: true });
+                    return;
+                } catch (e) {}
+            }
+            window.open(updateUrl, '_blank');
+        }
+
         btnUpdate.onclick = () => {
-            window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
+            openUpdateTab();
         };
 
-        function setUpdateBtnState(hasUpdate, remoteVersion) {
+        btnUpdate.oncontextmenu = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (_hasUpdateFound) {
+                openUpdateTab();
+                return;
+            }
+            _turboUpdateCheck = !_turboUpdateCheck;
+            if (_turboUpdateCheck) {
+                setUpdateBtnState('turbo');
+                showToast('🟢 Турбо-опрос включен (каждые 7 с). При релизе окно обновления откроется автоматически.');
+                checkRemoteVersion(true);
+            } else {
+                setUpdateBtnState('idle');
+                showToast('⚪ Турбо-опрос выключен (обычный опрос раз в 60 с).');
+            }
+        };
+
+        function setUpdateBtnState(state, remoteVersion) {
             if (!btnUpdate || !btnUpdate.isConnected) return;
-            if (hasUpdate) {
+            if (state === 'available') {
+                _hasUpdateFound = true;
+                _remoteFoundVer = remoteVersion;
                 btnUpdate.style.background = '#1e3a8a';
                 btnUpdate.style.color = '#38bdf8';
                 btnUpdate.style.border = '1px solid #3b82f6';
-                btnUpdate.style.boxShadow = '0 0 10px rgba(56, 189, 248, 0.6)';
+                btnUpdate.style.boxShadow = '0 0 12px rgba(56, 189, 248, 0.7)';
                 btnUpdate.style.opacity = '1';
-                btnUpdate.title = `Доступно обновление: v${remoteVersion}! Клик — обновить (Win+Alt+R)`;
+                btnUpdate.title = `🚀 Доступно обновление: v${remoteVersion}! Клик — обновить (Win+Alt+R)`;
+            } else if (state === 'turbo') {
+                btnUpdate.style.background = 'rgba(16, 185, 129, 0.2)';
+                btnUpdate.style.color = '#10b981';
+                btnUpdate.style.border = '1px solid #10b981';
+                btnUpdate.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.4)';
+                btnUpdate.style.opacity = '1';
+                btnUpdate.title = '🟢 Турбо-опрос активен (каждые 7 с). ПКМ — выключить';
             } else {
                 btnUpdate.style.background = '#18202f';
                 btnUpdate.style.color = '#64748b';
                 btnUpdate.style.border = '1px solid rgba(255, 255, 255, 0.06)';
                 btnUpdate.style.boxShadow = 'none';
                 btnUpdate.style.opacity = '0.55';
-                btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION}). Клик — переустановить`;
+                btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION}). ПКМ — турбо-опрос, ЛКМ — переустановить`;
             }
         }
+        setUpdateBtnState('idle');
 
         function isNewerVersion(remote, local) {
             if (!remote || !local) return false;
@@ -213,7 +260,7 @@
         let _updateCheckInProgress = false;
         function checkRemoteVersion(force = false) {
             const now = Date.now();
-            const minInterval = Math.max(5, (config.updateCheckIntervalSec || 20)) * 1000;
+            const minInterval = _turboUpdateCheck ? 7000 : (Math.max(10, (config.updateCheckIntervalSec || 60)) * 1000);
             if (!force && (now - _lastUpdateCheckTime < minInterval)) return;
             if (_updateCheckInProgress) return;
             _updateCheckInProgress = true;
@@ -226,7 +273,19 @@
                 if (m && m[1]) {
                     const remoteVer = m[1].trim();
                     const hasUpdate = isNewerVersion(remoteVer, SCRIPT_VERSION);
-                    setUpdateBtnState(hasUpdate, remoteVer);
+                    if (hasUpdate) {
+                        const wasTurbo = _turboUpdateCheck;
+                        _turboUpdateCheck = false;
+                        setUpdateBtnState('available', remoteVer);
+                        if (wasTurbo) {
+                            showToast(`🎉 Найдена v${remoteVer}! Окно обновления открыто.`);
+                            openUpdateTab();
+                        }
+                    } else if (_turboUpdateCheck) {
+                        setUpdateBtnState('turbo');
+                    } else {
+                        setUpdateBtnState('idle');
+                    }
                 }
             };
 
@@ -249,8 +308,8 @@
                 .catch(() => { _updateCheckInProgress = false; });
         }
 
-        setTimeout(() => checkRemoteVersion(true), 1500);
-        setInterval(() => checkRemoteVersion(false), 10000);
+        setTimeout(() => checkRemoteVersion(true), 2000);
+        setInterval(() => checkRemoteVersion(false), 5000);
         window.addEventListener('focus', () => checkRemoteVersion(false));
 
         // «2DO» тудушки (шире на 30%)
@@ -566,7 +625,7 @@
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
-                        <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> <span data-mossad-label=\"tplLabel\">${LH('tplLabel')}</span>
+                        <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> <span data-mossad-label=\"tplLabel\">${LH('tplLabel')}</span> <span style="font-size:10px;color:#38bdf8;font-weight:700;" title="Шаблон сохраняется строго для ${rootDomain}">[${rootDomain}]</span>
                     </label>
                     <input id="mossad-in-fn-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
                         title="Шаблон: {id8} {conv4} {domain} {domainfull} {account} {username} {desc} {title} {date} {time} {ext} {n} {dbl} {oldname} — «?» справа: все теги и итоговое имя"

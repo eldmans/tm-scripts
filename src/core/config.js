@@ -29,7 +29,7 @@
         widgetZoom: 0.9,                 // масштаб виджета (0.9 = 90%)
         closePanelOnOutsideClick: true,  // v1.3.37: сворачивать панель настроек виджета кликом вне MOSSAD
         collectWatchSec: 30,            // v1.3.39: окно досбора ссылок после клика «Собрать» (сек)
-        updateCheckIntervalSec: 20,     // v1.3.96: периодичность фоновой проверки обновлений на GitHub (сек)
+        updateCheckIntervalSec: 60,     // v1.3.97: периодичность фоновой проверки обновлений по умолчанию (сек)
         showSoundToast: true,           // v1.3.39: показывать тост «Звук вкл/выкл» (~5 с, × закрывает только текущий)
         debugSlideshow: false,          // v1.3.38: debug-лог источников шагов слайдшоу и шагов удаления (консоль)
         
@@ -104,7 +104,7 @@
     const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
     const GLOBAL_DEFAULT_KEYS = [
         'slideshowDelay', 'videoLoops', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
-        'downloadType', 'pdAction', 'filenameTemplate', 'filenameTemplateEnabled',
+        'downloadType', 'pdAction', 'filenameTemplateEnabled',
         'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates',
         'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
         'playlistRows', 'playlistWidth', 'collectWatchSec', 'updateCheckIntervalSec',

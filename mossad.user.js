@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.96
+// @version      1.3.97
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -544,7 +544,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.96';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.3.97';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -699,7 +699,7 @@ playlistWidth: 0,
 widgetZoom: 0.9,
 closePanelOnOutsideClick: true,
 collectWatchSec: 30,
-updateCheckIntervalSec: 20,
+updateCheckIntervalSec: 60,
 showSoundToast: true,
 debugSlideshow: false,
 pinterestMode: 'rand',
@@ -765,7 +765,7 @@ config = stored ? JSON.parse(stored) : {};
 const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
 const GLOBAL_DEFAULT_KEYS = [
 'slideshowDelay', 'videoLoops', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
-'downloadType', 'pdAction', 'filenameTemplate', 'filenameTemplateEnabled',
+'downloadType', 'pdAction', 'filenameTemplateEnabled',
 'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates',
 'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
 'playlistRows', 'playlistWidth', 'collectWatchSec', 'updateCheckIntervalSec',
@@ -11750,29 +11750,68 @@ window.updateWidgetUI();
 };
 const btnUpdate = document.createElement('button');
 mossadLabelEl(btnUpdate, 'update');
-btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION})`;
 btnUpdate.style.cssText = `background: #18202f; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; color: #64748b; opacity: 0.55; cursor: pointer; font-size: 13px; padding: 4px 10px; min-width: 32px; transition: all 0.3s ease; text-align: center;`;
+let _turboUpdateCheck = false;
+let _hasUpdateFound = false;
+let _remoteFoundVer = null;
+function openUpdateTab() {
+const updateUrl = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
+if (typeof GM_openInTab === 'function') {
+try {
+GM_openInTab(updateUrl, { active: true, insert: true });
+return;
+} catch (e) {}
+}
+window.open(updateUrl, '_blank');
+}
 btnUpdate.onclick = () => {
-window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
+openUpdateTab();
 };
-function setUpdateBtnState(hasUpdate, remoteVersion) {
+btnUpdate.oncontextmenu = (e) => {
+e.preventDefault();
+e.stopPropagation();
+if (_hasUpdateFound) {
+openUpdateTab();
+return;
+}
+_turboUpdateCheck = !_turboUpdateCheck;
+if (_turboUpdateCheck) {
+setUpdateBtnState('turbo');
+showToast('🟢 Турбо-опрос включен (каждые 7 с). При релизе окно обновления откроется автоматически.');
+checkRemoteVersion(true);
+} else {
+setUpdateBtnState('idle');
+showToast('⚪ Турбо-опрос выключен (обычный опрос раз в 60 с).');
+}
+};
+function setUpdateBtnState(state, remoteVersion) {
 if (!btnUpdate || !btnUpdate.isConnected) return;
-if (hasUpdate) {
+if (state === 'available') {
+_hasUpdateFound = true;
+_remoteFoundVer = remoteVersion;
 btnUpdate.style.background = '#1e3a8a';
 btnUpdate.style.color = '#38bdf8';
 btnUpdate.style.border = '1px solid #3b82f6';
-btnUpdate.style.boxShadow = '0 0 10px rgba(56, 189, 248, 0.6)';
+btnUpdate.style.boxShadow = '0 0 12px rgba(56, 189, 248, 0.7)';
 btnUpdate.style.opacity = '1';
-btnUpdate.title = `Доступно обновление: v${remoteVersion}! Клик — обновить (Win+Alt+R)`;
+btnUpdate.title = `🚀 Доступно обновление: v${remoteVersion}! Клик — обновить (Win+Alt+R)`;
+} else if (state === 'turbo') {
+btnUpdate.style.background = 'rgba(16, 185, 129, 0.2)';
+btnUpdate.style.color = '#10b981';
+btnUpdate.style.border = '1px solid #10b981';
+btnUpdate.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.4)';
+btnUpdate.style.opacity = '1';
+btnUpdate.title = '🟢 Турбо-опрос активен (каждые 7 с). ПКМ — выключить';
 } else {
 btnUpdate.style.background = '#18202f';
 btnUpdate.style.color = '#64748b';
 btnUpdate.style.border = '1px solid rgba(255, 255, 255, 0.06)';
 btnUpdate.style.boxShadow = 'none';
 btnUpdate.style.opacity = '0.55';
-btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION}). Клик — переустановить`;
+btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION}). ПКМ — турбо-опрос, ЛКМ — переустановить`;
 }
 }
+setUpdateBtnState('idle');
 function isNewerVersion(remote, local) {
 if (!remote || !local) return false;
 const r = String(remote).trim().split('.').map(n => parseInt(n, 10) || 0);
@@ -11789,7 +11828,7 @@ let _lastUpdateCheckTime = 0;
 let _updateCheckInProgress = false;
 function checkRemoteVersion(force = false) {
 const now = Date.now();
-const minInterval = Math.max(5, (config.updateCheckIntervalSec || 20)) * 1000;
+const minInterval = _turboUpdateCheck ? 7000 : (Math.max(10, (config.updateCheckIntervalSec || 60)) * 1000);
 if (!force && (now - _lastUpdateCheckTime < minInterval)) return;
 if (_updateCheckInProgress) return;
 _updateCheckInProgress = true;
@@ -11801,7 +11840,19 @@ const m = txt && txt.match(/\/\/\s*@version\s+([0-9.]+)/i);
 if (m && m[1]) {
 const remoteVer = m[1].trim();
 const hasUpdate = isNewerVersion(remoteVer, SCRIPT_VERSION);
-setUpdateBtnState(hasUpdate, remoteVer);
+if (hasUpdate) {
+const wasTurbo = _turboUpdateCheck;
+_turboUpdateCheck = false;
+setUpdateBtnState('available', remoteVer);
+if (wasTurbo) {
+showToast(`🎉 Найдена v${remoteVer}! Окно обновления открыто.`);
+openUpdateTab();
+}
+} else if (_turboUpdateCheck) {
+setUpdateBtnState('turbo');
+} else {
+setUpdateBtnState('idle');
+}
 }
 };
 if (typeof GM_xmlhttpRequest === 'function') {
@@ -11822,8 +11873,8 @@ fetch(url, { cache: 'no-store' })
 .then(onText)
 .catch(() => { _updateCheckInProgress = false; });
 }
-setTimeout(() => checkRemoteVersion(true), 1500);
-setInterval(() => checkRemoteVersion(false), 10000);
+setTimeout(() => checkRemoteVersion(true), 2000);
+setInterval(() => checkRemoteVersion(false), 5000);
 window.addEventListener('focus', () => checkRemoteVersion(false));
 const btnTodo = document.createElement('button');
 btnTodo.id = 'mossad-btn-todo';
@@ -12095,7 +12146,7 @@ panel.innerHTML = `
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
-                        <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> <span data-mossad-label=\"tplLabel\">${LH('tplLabel')}</span>
+                        <input id="mossad-cb-fn-tpl" type="checkbox" style="accent-color:#3b82f6;" ${config.filenameTemplateEnabled ? 'checked' : ''}> <span data-mossad-label=\"tplLabel\">${LH('tplLabel')}</span> <span style="font-size:10px;color:#38bdf8;font-weight:700;" title="Шаблон сохраняется строго для ${rootDomain}">[${rootDomain}]</span>
                     </label>
                     <input id="mossad-in-fn-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/"/g, '&quot;')}"
                         title="Шаблон: {id8} {conv4} {domain} {domainfull} {account} {username} {desc} {title} {date} {time} {ext} {n} {dbl} {oldname} — «?» справа: все теги и итоговое имя"
@@ -13527,7 +13578,6 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'loopFeed', t: 'bool', label: 'R: повторять ленту' },
 { k: 'downloadType', t: 'sel', label: 'Скачивание', opts: [['none', 'Не скачивать'], ['all', 'Качать всё'], ['photo', 'Качать фото'], ['video', 'Качать видео']] },
 { k: 'pdAction', t: 'sel', label: 'После скачивания', opts: [['none', '—'], ['upns', 'Не СШ +1'], ['always', '+1 всегда'], ['del', 'Delete (Grok)']] },
-{ k: 'filenameTemplate', t: 'text', label: 'Шаблон имени файла' },
 { k: 'filenameTemplateEnabled', t: 'bool', label: 'Использовать шаблон' },
 { k: 'allowDuplicates', t: 'bool', label: 'Дубли: качать без вопроса' },
 { k: 'deleteHoldpost', t: 'hold', label: 'hold post (удаление)' },
