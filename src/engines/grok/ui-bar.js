@@ -12,11 +12,12 @@
 
         const row = document.createElement('div');
         row.id = 'mossad-gallery-row';
+        const _isBarSavedOpen = _gSS.getItem('mossad_gallery_row_visible') === 'true';
         row.style.cssText = `
             background: rgba(20,20,20,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 5px 8px;
-            display: flex; align-items: center; gap: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            font-family: system-ui,-apple-system,sans-serif; cursor: grab; flex-wrap: nowrap; pointer-events: auto;
+            display: ${_isBarSavedOpen ? 'flex' : 'none'}; align-items: center; gap: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            font-family: system-ui,-apple-system,sans-serif; cursor: grab; flex-wrap: nowrap; pointer-events: ${_isBarSavedOpen ? 'auto' : 'none'};
             width: 100%; box-sizing: border-box;
         `;
 
@@ -243,12 +244,20 @@
         btnHk.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('hotkeys'); };
         row.append(btnHk);
 
-        // Переносим крестик закрытия на самый верхний ряд (на Grok это mossad-gallery-row)
-        const closeBtn = document.getElementById('mossad-btn-close');
-        if (closeBtn) {
-            closeBtn.style.marginLeft = '4px';
-            row.append(closeBtn);
-        }
+        // Кнопка скрытия панели сбора (не трогает основной крестик виджета)
+        const closeRowBtn = document.createElement('button');
+        closeRowBtn.id = 'mossad-gallery-row-close';
+        closeRowBtn.textContent = '✕';
+        closeRowBtn.title = 'Скрыть панель сбора';
+        closeRowBtn.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: color 0.2s; margin-left: 4px;`;
+        closeRowBtn.onmouseenter = () => { closeRowBtn.style.color = '#f87171'; };
+        closeRowBtn.onmouseleave = () => { closeRowBtn.style.color = '#6b7280'; };
+        closeRowBtn.onclick = () => {
+            row.style.display = 'none';
+            _gSS.removeItem('mossad_gallery_row_visible');
+            showToast('📋 Панель сбора скрыта');
+        };
+        row.append(closeRowBtn);
 
         container.insertBefore(row, container.firstChild);
 

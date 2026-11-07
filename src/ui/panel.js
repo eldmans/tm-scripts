@@ -115,57 +115,235 @@
         mossadLabelEl(btnStart, 'start');
         btnStart.title = 'Старт слайдшоу (Insert)';
         btnStart.style.cssText = `
-            cursor: pointer; border: none; border-radius: 6px; padding: 4px 8px;
+            cursor: pointer; border: none; border-radius: 6px; padding: 4px 11px; min-width: 36px;
             font-weight: 700; font-size: 13px; transition: all 0.2s ease;
-            background: #1f2937; color: #e5e7eb;
+            background: #1f2937; color: #e5e7eb; text-align: center;
         `;
 
-        const btnDL = document.createElement('button');
-        mossadLabelEl(btnDL, 'download');
-        btnDL.title = 'Скачать';
-        btnDL.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #10b981; cursor: pointer; font-size: 13px; padding: 4px 7px;`;
-
-        const btnUpdate = document.createElement('button');
-        mossadLabelEl(btnUpdate, 'update');
-        btnUpdate.title = 'Обновить скрипт (Win+Alt+R)';
-        btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 13px; padding: 4px 7px; transition: transform 0.2s ease;`;
-        btnUpdate.onclick = () => {
-            window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
-        };
-
+        // Кнопка переключения настроек ▼ (по центру: справа от ракеты, слева от обновления)
         const btnTogglePanel = document.createElement('button');
         btnTogglePanel.id = 'mossad-btn-toggle-panel';
         mossadLabelEl(btnTogglePanel, 'togglePanel');
         btnTogglePanel.title = 'Меню настроек';
-        btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; padding: 2px 6px; line-height: 1; transition: transform 0.2s, color 0.2s; margin-left: auto;`;
+        btnTogglePanel.style.cssText = `background: transparent; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; padding: 2px 6px; line-height: 1; transition: transform 0.2s, color 0.2s; margin: 0;`;
         btnTogglePanel.onmouseenter = () => { btnTogglePanel.style.color = '#fff'; };
         btnTogglePanel.onmouseleave = () => { btnTogglePanel.style.color = '#9ca3af'; };
         btnTogglePanel.onclick = () => {
             window.widgetState = window.widgetState === 'panel' ? 'bar' : 'panel';
-            window.updateWidgetUI();
+            
+        window.updateSlideshowHud = () => {
+            const isRunning = !!(slideshowActive || window._mossadGalleryActive || (sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true'));
+            if (!isRunning) {
+                hudRow.style.display = 'none';
+                return;
+            }
+            hudRow.style.display = 'inline-flex';
+
+            // 1. Скачивание
+            const isDLActive = config.downloadType && config.downloadType !== 'none';
+            btnHudDL.textContent = '⭳';
+            btnHudDL.style.color = isDLActive ? '#10b981' : '#6b7280';
+            btnHudDL.style.borderColor = isDLActive ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.1)';
+            btnHudDL.title = isDLActive ? `Скачивание: ${config.downloadType} (клик — выключить)` : 'Скачивание выключено (клик — включить)';
+
+            // 2. Стрелка направления
+            const dir = (config.slideshowDirections && config.slideshowDirections[0]) || 'down';
+            const arrows = { down: '↓', up: '↑', right: '→', left: '←' };
+            hudArrow.textContent = arrows[dir] || '↓';
+            hudArrow.title = `Направление слайд-шоу: ${dir}`;
+
+            // 4. Повтор R
+            btnHudLoop.style.color = config.loopFeed ? '#3b82f6' : '#6b7280';
+            btnHudLoop.style.borderColor = config.loopFeed ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)';
+
+            // 5. Видео
+            btnHudVideo.textContent = `📹 ${config.videoDuration || 15}s`;
+            btnHudVideo.style.borderColor = (config.videoDuration === 1) ? '#38bdf8' : 'rgba(255,255,255,0.1)';
+
+            // 6. Фото
+            btnHudPhoto.textContent = `🖼 ${config.photoDuration || 5}s`;
+            btnHudPhoto.style.borderColor = (config.photoDuration === 1) ? '#f472b6' : 'rgba(255,255,255,0.1)';
+
+            // 7. Пауза
+            btnHudPause.textContent = `⏸ ${config.pauseDuration || 2}s`;
+            btnHudPause.style.borderColor = (config.pauseDuration === 1) ? '#fbbf24' : 'rgba(255,255,255,0.1)';
         };
 
-        const btnClose = document.createElement('button');
-        btnClose.id = 'mossad-btn-close';
-        mossadLabelEl(btnClose, 'hideWidget');
-        btnClose.title = 'Скрыть виджет (Ctrl+Insert)';
-        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: color 0.2s; margin-left: 4px;`;
-        btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
-        btnClose.onmouseleave = () => { btnClose.style.color = '#6b7280'; };
-        btnClose.onclick = () => {
-            window.widgetState = 'hidden';
-            window.updateWidgetUI();
+        window.updateWidgetUI();
         };
 
-        // Порядок: …таймер… | 🚀 | 💾 | 🔄 | ▼ | ✕ (на Grok ⌨ и ✕ — в верхнем ряду, см. ui-bar.js)
-        // v1.3.49: «2DO» — справа от 🔄: окно настроек сразу на вкладке «📝 Тудушки»
+        const btnUpdate = document.createElement('button');
+        mossadLabelEl(btnUpdate, 'update');
+        btnUpdate.title = 'Обновить скрипт (Win+Alt+R)';
+        btnUpdate.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #60a5fa; cursor: pointer; font-size: 13px; padding: 4px 10px; min-width: 32px; transition: transform 0.2s ease; text-align: center;`;
+        btnUpdate.onclick = () => {
+            window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js';
+        };
+
+        // «2DO» тудушки (шире на 30%)
         const btnTodo = document.createElement('button');
         btnTodo.id = 'mossad-btn-todo';
         mossadLabelEl(btnTodo, 'todoBtn');
         btnTodo.title = 'Тудушки — задачи для ассистента (текст + фото)';
-        btnTodo.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #fbbf24; cursor: pointer; font-size: 11px; font-weight: 700; padding: 4px 6px;`;
+        btnTodo.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #fbbf24; cursor: pointer; font-size: 11px; font-weight: 700; padding: 4px 9px; min-width: 32px; text-align: center;`;
         btnTodo.onclick = (e) => { e.stopPropagation(); toggleSettingsWindow('todos'); };
-        topBar.append(timerEl, btnStart, btnDL, btnUpdate, btnTodo, btnTogglePanel, btnClose);
+
+        // Универсальный крестик в самом правом краю (закрывает всё открытое: настройки, плейлист, виджет)
+        // ВАЖНО: на плашки квоты и истории не распространяется!
+        const btnClose = document.createElement('button');
+        btnClose.id = 'mossad-btn-close';
+        mossadLabelEl(btnClose, 'hideWidget');
+        btnClose.title = 'Закрыть всё / скрыть виджет';
+        btnClose.style.cssText = `background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; transition: color 0.2s; margin-left: auto;`;
+        btnClose.onmouseenter = () => { btnClose.style.color = '#f87171'; };
+        btnClose.onmouseleave = () => { btnClose.style.color = '#6b7280'; };
+        btnClose.onclick = () => {
+            if (typeof closeSettingsWindow === 'function') {
+                try { closeSettingsWindow(true); } catch(e) {}
+            }
+            const pl = document.getElementById('mossad-playlist-panel');
+            if (pl && pl.style.display !== 'none') {
+                pl.style.display = 'none';
+                sessionStorage.removeItem('mossad_playlist_open');
+            }
+            if (window.widgetState === 'panel') {
+                window.widgetState = 'bar';
+                window.updateWidgetUI();
+                return;
+            }
+            window.widgetState = 'hidden';
+            window.updateWidgetUI();
+        };
+
+        // Новый порядок: таймер | 🚀 | ▼ | 🔄 | 📝 | ... [авто-отступ] ... | ✕
+        topBar.append(timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+        // ── HUD СЛАЙД-ШОУ (v1.3.93): компактная плашка настроек активного показа ──
+        // Появляется ТОЛЬКО когда слайд-шоу запущено. Исчезает при остановке.
+        const hudRow = document.createElement('div');
+        hudRow.id = 'mossad-slideshow-hud';
+        hudRow.style.cssText = `
+            background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 4px 8px;
+            display: none; align-items: center; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 700;
+            pointer-events: auto; width: 100%; box-sizing: border-box; color: #e5e7eb; user-select: none;
+        `;
+
+        // 1. Кнопка скачивания: яркая/тусклая, переключение на лету
+        let _lastActiveDownloadType = (config.downloadType && config.downloadType !== 'none') ? config.downloadType : 'video';
+        const btnHudDL = document.createElement('button');
+        btnHudDL.id = 'mossad-hud-dl';
+        btnHudDL.style.cssText = `background: #1f2937; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; cursor: pointer; padding: 3px 6px; font-size: 12px; font-weight: 700; transition: all 0.2s;`;
+        btnHudDL.onclick = (e) => {
+            e.stopPropagation();
+            if (config.downloadType !== 'none') {
+                _lastActiveDownloadType = config.downloadType;
+                config.downloadType = 'none';
+                showToast('⭳ Скачивание: ВЫКЛ');
+            } else {
+                config.downloadType = _lastActiveDownloadType || 'video';
+                showToast(`⭳ Скачивание: ${config.downloadType}`);
+            }
+            Settings.save();
+            window.updateSlideshowHud();
+        };
+
+        // 2. Стрелка направления
+        const hudArrow = document.createElement('span');
+        hudArrow.id = 'mossad-hud-arrow';
+        hudArrow.style.cssText = `font-size: 12px; color: #60a5fa; padding: 0 2px;`;
+
+        // 3. Зацикленная стрелка перемотки (Alt+R) сразу за стрелкой направления
+        const btnHudRewind = document.createElement('button');
+        btnHudRewind.id = 'mossad-hud-rewind';
+        btnHudRewind.textContent = '⟲';
+        btnHudRewind.title = 'Перемотка в обратную сторону (Alt+R)';
+        btnHudRewind.style.cssText = `background: #1f2937; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #a78bfa; cursor: pointer; padding: 3px 6px; font-size: 12px; font-weight: 700; transition: all 0.2s;`;
+        btnHudRewind.onclick = (e) => {
+            e.stopPropagation();
+            if (rootDomain === 'grok.com' && typeof grokStepFilmstrip === 'function') {
+                grokStepFilmstrip(false);
+            } else if (typeof triggerRewind === 'function') {
+                triggerRewind();
+            } else if (typeof prevSlide === 'function') {
+                prevSlide();
+            }
+            showToast('⟲ Шаг назад (Alt+R)');
+        };
+
+        // 4. Повтор (Loop / R)
+        const btnHudLoop = document.createElement('button');
+        btnHudLoop.id = 'mossad-hud-loop';
+        btnHudLoop.textContent = 'R';
+        btnHudLoop.title = 'Повтор ленты (Loop, R)';
+        btnHudLoop.style.cssText = `background: #1f2937; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; cursor: pointer; padding: 3px 6px; font-size: 11px; font-weight: 700; transition: all 0.2s;`;
+        btnHudLoop.onclick = (e) => {
+            e.stopPropagation();
+            config.loopFeed = !config.loopFeed;
+            Settings.save();
+            showToast(config.loopFeed ? '🔁 Повтор (Loop): ВКЛ' : '➡️ Повтор (Loop): ВЫКЛ');
+            window.updateSlideshowHud();
+        };
+
+        // 5. Видео (секунды): клик сбрасывает в 1, повторный — возвращает прежнее
+        let _savedVideoSec = config.videoDuration || 15;
+        const btnHudVideo = document.createElement('button');
+        btnHudVideo.id = 'mossad-hud-video';
+        btnHudVideo.style.cssText = `background: #1f2937; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #38bdf8; cursor: pointer; padding: 3px 6px; font-size: 11px; font-weight: 700; transition: all 0.2s;`;
+        btnHudVideo.onclick = (e) => {
+            e.stopPropagation();
+            if (config.videoDuration !== 1) {
+                _savedVideoSec = config.videoDuration || 15;
+                config.videoDuration = 1;
+                showToast('📹 Видео: 1 с');
+            } else {
+                config.videoDuration = _savedVideoSec || 15;
+                showToast(`📹 Видео: ${config.videoDuration} с`);
+            }
+            Settings.save();
+            window.updateSlideshowHud();
+        };
+
+        // 6. Фото (секунды): клик сбрасывает в 1, повторный — возвращает прежнее
+        let _savedPhotoSec = config.photoDuration || 5;
+        const btnHudPhoto = document.createElement('button');
+        btnHudPhoto.id = 'mossad-hud-photo';
+        btnHudPhoto.style.cssText = `background: #1f2937; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #f472b6; cursor: pointer; padding: 3px 6px; font-size: 11px; font-weight: 700; transition: all 0.2s;`;
+        btnHudPhoto.onclick = (e) => {
+            e.stopPropagation();
+            if (config.photoDuration !== 1) {
+                _savedPhotoSec = config.photoDuration || 5;
+                config.photoDuration = 1;
+                showToast('🖼 Фото: 1 с');
+            } else {
+                config.photoDuration = _savedPhotoSec || 5;
+                showToast(`🖼 Фото: ${config.photoDuration} с`);
+            }
+            Settings.save();
+            window.updateSlideshowHud();
+        };
+
+        // 7. Пауза (секунды): клик сбрасывает в 1, повторный — возвращает прежнее
+        let _savedPauseSec = config.pauseDuration || 2;
+        const btnHudPause = document.createElement('button');
+        btnHudPause.id = 'mossad-hud-pause';
+        btnHudPause.style.cssText = `background: #1f2937; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fbbf24; cursor: pointer; padding: 3px 6px; font-size: 11px; font-weight: 700; transition: all 0.2s;`;
+        btnHudPause.onclick = (e) => {
+            e.stopPropagation();
+            if (config.pauseDuration !== 1) {
+                _savedPauseSec = config.pauseDuration || 2;
+                config.pauseDuration = 1;
+                showToast('⏸ Пауза: 1 с');
+            } else {
+                config.pauseDuration = _savedPauseSec || 2;
+                showToast(`⏸ Пауза: ${config.pauseDuration} с`);
+            }
+            Settings.save();
+            window.updateSlideshowHud();
+        };
+
+        hudRow.append(btnHudDL, hudArrow, btnHudRewind, btnHudLoop, btnHudVideo, btnHudPhoto, btnHudPause);
+
 
         // SETTINGS PANEL
         const panel = document.createElement('div');
@@ -582,7 +760,7 @@
             };
         };
 
-        container.append(topBar, panel);
+        container.append(topBar, hudRow, panel);
         document.body.appendChild(container);
 
         // Actions
@@ -633,8 +811,9 @@
                 panel.style.pointerEvents = 'none';
                 panel.style.opacity = '0';
                 if (galleryRow) {
-                    galleryRow.style.display = 'flex';
-                    galleryRow.style.pointerEvents = 'auto';
+                    const isRowOpen = sessionStorage.getItem('mossad_gallery_row_visible') === 'true';
+                    galleryRow.style.display = isRowOpen ? 'flex' : 'none';
+                    galleryRow.style.pointerEvents = isRowOpen ? 'auto' : 'none';
                 }
                 if (playlistPanel) {
                     playlistPanel.style.display = 'flex'; // v1.3.77: было 'block' — тело списка теряло предел и прокрутку
@@ -649,8 +828,9 @@
                 topBar.style.display = 'flex';
                 topBar.style.pointerEvents = 'auto';
                 if (galleryRow) {
-                    galleryRow.style.display = 'flex';
-                    galleryRow.style.pointerEvents = 'auto';
+                    const isRowOpen = sessionStorage.getItem('mossad_gallery_row_visible') === 'true';
+                    galleryRow.style.display = isRowOpen ? 'flex' : 'none';
+                    galleryRow.style.pointerEvents = isRowOpen ? 'auto' : 'none';
                 }
                 if (playlistPanel) {
                     playlistPanel.style.display = 'flex'; // v1.3.77: было 'block' — тело списка теряло предел и прокрутку

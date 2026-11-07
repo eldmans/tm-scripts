@@ -210,19 +210,55 @@
      * слайдшоу на /imagine/saved — устаревший: чистим его и идём в «собрать → старт».
      */
     function grokHandleGalleryPlayPause(source = 'hotkey') {
-        if (window._mossadGalleryActive) {
-            mossadDebug('insert', 'пауза/продолжение', { source });
-            toggleGalleryPause();
-            return 'toggle';
+        // v1.3.93: 4-шаговый цикл клавиши сбора/слайд-шоу:
+        // 1-е нажатие: показать плашку сбора (#mossad-gallery-row)
+        // 2-е нажатие: запустить сбор (Collect)
+        // 3-е нажатие: запустить слайд-шоу
+        // 4-е нажатие: скрыть плашку (не очищая плейлист)
+        const row = document.getElementById('mossad-gallery-row');
+        const isRowVisible = row && row.style.display !== 'none';
+        const isSsActive = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+
+        let savedCount = 0;
+        try {
+            const cRaw = _gSS.getItem(GALLERY_COLLECTION_KEY);
+            if (cRaw) savedCount = (JSON.parse(cRaw).items || []).length;
+        } catch(e) {}
+
+        // Шаг 1: если плашка скрыта — показываем её
+        if (!isRowVisible) {
+            if (row) {
+                row.style.display = 'flex';
+                row.style.pointerEvents = 'auto';
+                _gSS.setItem('mossad_gallery_row_visible', 'true');
+            }
+            showToast('📋 Панель сбора открыта');
+            return 'show-bar';
         }
-        let ssActive = false;
-        try { ssActive = !!JSON.parse(_gSS.getItem(GALLERY_SS_KEY) || '{}').active; } catch (e) {}
-        if (ssActive && isGrokSavedPage()) {
-            mossadDebug('insert', 'устаревший флаг active на Saved — сброшен', { source });
-            _gSS.removeItem(GALLERY_SS_KEY);
-            sessionStorage.removeItem('mossad_gallery_paused');
+
+        // Шаг 2: если плашка видна, но сбор не начат и элементов 0 — запускаем сбор
+        if (savedCount === 0 && !grokIsCollectWatching()) {
+            const btnCollect = document.getElementById('mossad-gallery-collect');
+            if (btnCollect) btnCollect.click();
+            showToast('📋 Сбор ссылок запущен');
+            return 'collect';
         }
-        return grokInsertCollectOrStart();
+
+        // Шаг 3: ссылки есть / готовы, но слайдшоу не запущено — запускаем слайдшоу
+        if (!isSsActive) {
+            grokStartGallerySlideshow();
+            if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+            return 'start';
+        }
+
+        // Шаг 4: слайдшоу уже активно и плашка открыта — скрываем плашку
+        if (row) {
+            row.style.display = 'none';
+            row.style.pointerEvents = 'none';
+            _gSS.removeItem('mossad_gallery_row_visible');
+        }
+        showToast('📋 Панель сбора скрыта');
+        return 'hide-bar';
     }
 
     function grokStartGallerySlideshow() {
@@ -352,6 +388,7 @@
         _gSS.removeItem(GALLERY_SS_KEY);
         sessionStorage.removeItem('mossad_gallery_paused');
         window._mossadGalleryActive = false;
+        if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
         window._mossadGalleryNextFn = null;
         window._mossadGalleryPaused = false;
         const ind = document.getElementById('mossad-gallery-indicator');
@@ -539,6 +576,7 @@
 
         // Устанавливаем функцию перехода: её вызовет triggerNextSlide
         window._mossadGalleryActive = true;
+        if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
         window._mossadGalleryNextFn = (stepSource) => {
             const statusEl = document.getElementById('mgi-status');
             if (statusEl) statusEl.textContent = '⏳ Переход...';
