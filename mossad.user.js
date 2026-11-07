@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.0
+// @version      1.4.1
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.0';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.1';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -4597,27 +4597,6 @@ return;
 window.location.href = 'https://grok.com/imagine/saved';
 }
 window.grokNavigateToSaved = grokNavigateToSaved;
-let _lastBareImagineRedirectAt = 0;
-function checkGrokBareImagineRedirect() {
-if (rootDomain !== 'grok.com') return;
-const path = location.pathname;
-const isBare = (path === '/imagine' || path === '/imagine/') &&
-(!location.search || location.search === '' || location.search === '?') &&
-(!location.hash || location.hash === '' || location.hash === '#');
-if (!isBare) return;
-const now = Date.now();
-if (now - _lastBareImagineRedirectAt < 3000) return;
-_lastBareImagineRedirectAt = now;
-console.log('[MOSSAD] grok.com/imagine без параметров -> редирект в /imagine/saved');
-window.location.replace('https://grok.com/imagine/saved');
-}
-if (rootDomain === 'grok.com') {
-checkGrokBareImagineRedirect();
-if (document.readyState === 'loading') {
-document.addEventListener('DOMContentLoaded', checkGrokBareImagineRedirect);
-}
-setInterval(checkGrokBareImagineRedirect, 2000);
-}
 
 // ── src/engines/grok/delete.js ──
 function getGrokNeighborPostUrl(dirOverride = null, isDelete = false) {
@@ -7075,6 +7054,19 @@ const all = Array.from(document.querySelectorAll('textarea, [contenteditable="tr
 const re = /imagine|prompt|промт|промпт|опиши|describe|ask|спрос|type|введите/;
 return all.find(el => re.test(String(el.getAttribute('placeholder') || el.getAttribute('aria-label') || el.getAttribute('data-placeholder') || '').toLowerCase())) || all[0] || null;
 }
+function grokIsPromptInput(el) {
+if (!el || el === document.body || el === document.documentElement) return false;
+const prompt = grokFindPromptInput(true);
+if (prompt && (prompt === el || prompt.contains(el))) return true;
+if (el.tagName === 'TEXTAREA' || el.isContentEditable || (el.getAttribute && el.getAttribute('role') === 'textbox')) {
+const re = /imagine|prompt|промт|промпт|опиши|describe|ask|спрос|type|введите/;
+if (re.test(String(el.getAttribute('placeholder') || el.getAttribute('aria-label') || el.getAttribute('data-placeholder') || '').toLowerCase())) {
+return true;
+}
+}
+return false;
+}
+window.grokIsPromptInput = grokIsPromptInput;
 function _gcRect(el) { try { const r = el.getBoundingClientRect(); return r && (r.width > 0 || r.height > 0) ? r : null; } catch (e) { return null; } }
 function _gcHasPanel(el, prompt) { return Array.from(el.querySelectorAll(GC_PANEL_SEL)).some(p => !p.contains(prompt)); }
 function grokFindComposer(prompt) {
@@ -7150,17 +7142,25 @@ const sel = window.getSelection && window.getSelection();
 if (sel) { const rg = document.createRange(); rg.selectNodeContents(el); rg.collapse(false); sel.removeAllRanges(); sel.addRange(rg); }
 } catch (e) {}
 }
+function grokCycleAvailableSteps() {
+const comp = grokFindComposer(grokFindPromptInput(true));
+const ms = comp ? grokFindModeSwitch(comp) : null;
+if (!ms) {
+return ['prompt', 'param'];
+}
+return ['prompt', 'mode', 'param'];
+}
 function grokCycleWhere() {
 const ae = document.activeElement;
-if (!ae || ae === document.body || ae === document.documentElement) return '';
-const prompt = grokFindPromptInput(true);
-if (prompt && (prompt === ae || prompt.contains(ae))) return 'prompt';
-const comp = grokFindComposer(prompt);
-const ms = comp && grokFindModeSwitch(comp);
-if (ms && [ms.photo, ms.video, ms.trigger].some(x => x && (x === ae || x.contains(ae)))) return 'mode';
-if (ms && ms.photo && ms.video && ae.getAttribute && ae.getAttribute('role') === 'radiogroup' && ae.contains(ms.video)) return 'mode';
-const d = comp && grokFindDurationControl(comp), a = comp && grokFindAspectControl(comp);
-if ([d, a].some(x => x && (x === ae || x.contains(ae) || (x.parentElement && x.parentElement.getAttribute('role') === 'radiogroup' && x.parentElement.contains(ae))))) return 'param';
+if (!ae) return '';
+if (grokIsPromptInput(ae)) return 'prompt';
+const comp = grokFindComposer(grokFindPromptInput(true));
+if (comp) {
+const ms = grokFindModeSwitch(comp);
+if (ms && (ms.trigger === ae || ms.photo === ae || ms.video === ae || (ae && ms.trigger && ms.trigger.contains(ae)))) return 'mode';
+const d = grokFindDurationControl(comp), a = grokFindAspectControl(comp);
+if ((d && (d === ae || d.contains(ae))) || (a && (a === ae || a.contains(ae)))) return 'param';
+}
 const pop = _gcOpenPopover();
 if (pop && (pop === ae || pop.contains(ae))) return 'param';
 if (ae.getAttribute && /^(radio|menuitemradio|option|menuitem|menu|listbox)$/.test(ae.getAttribute('role') || '')) {
@@ -7168,39 +7168,29 @@ const t = _gcText(ae) || _gcLabel(ae);
 if (GC_DUR_TEXT_RE.test(t) || GC_AR_TEXT_RE.test(t)) return 'param';
 if (pop && pop.contains(ae)) return 'param';
 }
-if (pop && _gc.step === 3) return 'param';
+if (pop && _gc.lastStepName === 'param') return 'param';
 return '';
 }
 function grokCycleNextStep() {
+const steps = grokCycleAvailableSteps();
 const where = grokCycleWhere();
-if (where === 'prompt') return 2;
-if (where === 'mode') return 3;
-if (where === 'param') return 1;
-const ae = document.activeElement;
-const idle = !ae || ae === document.body || ae === document.documentElement;
-if (idle && _gc.step && Date.now() - _gc.ts < 15000) return (_gc.step % 3) + 1;
-return 1;
+if (where) {
+const idx = steps.indexOf(where);
+if (idx !== -1) {
+return steps[(idx + 1) % steps.length];
+}
+}
+if (_gc.lastStepName) {
+const idx = steps.indexOf(_gc.lastStepName);
+if (idx !== -1) {
+return steps[(idx + 1) % steps.length];
+}
+}
+return steps[0];
 }
 function _gcOpenPopover() {
 const prompt = grokFindPromptInput(true);
 return Array.from(document.querySelectorAll(GC_POPOVER_SEL)).find(el => el.isConnected && !_gcOwn(el) && !(prompt && el.contains(prompt)) && _gcShown(el)) || null;
-}
-function _gcEsc(t) {
-const ev = () => new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true });
-if (t && t.dispatchEvent) { try { t.dispatchEvent(ev()); } catch (e) {} }
-}
-async function _gcEnsurePromptReachable() {
-if (grokFindPromptInput()) return true;
-const pop = _gcOpenPopover();
-const ae = document.activeElement;
-const inPop = !!(pop && ae && pop.contains(ae));
-if (!pop && !(ae && ae.getAttribute && /^(option|menuitem|menuitemradio|menu|listbox)$/.test(ae.getAttribute('role') || ''))) return false;
-if (pop) _gcEsc(inPop ? ae : pop);
-const p = grokFindPromptInput(true);
-if (p) _gcFocus(p);
-const ok = await waitForCondition(() => grokFindPromptInput(), 400, 40);
-mossadDebug('grokCycle', 'закрыто меню, промт ' + (ok ? 'найден' : 'не найден'), { popover: !!pop });
-return !!ok;
 }
 function _gcStepPrompt() {
 const pop = _gcOpenPopover();
@@ -7211,19 +7201,23 @@ if (ae.getAttribute && /^(option|menuitem|menuitemradio)$/.test(ae.getAttribute(
 try { mossadPressEl(ae); } catch (e) {}
 }
 }
-_gcEsc(pop);
 }
 const p = grokFindPromptInput(true);
-if (!p) { mossadDebug('grokCycle', 'шаг 1: промт не найден — пропуск'); return false; }
+if (!p) {
+mossadDebug('grokCycle', 'шаг prompt: инпут не найден');
+return false;
+}
 _gcCaretToEnd(p);
-mossadDebug('grokCycle', 'шаг 1: промт', { tag: p.tagName });
+mossadDebug('grokCycle', 'шаг prompt: фокус в инпуте');
 return true;
 }
 async function _gcStepMode() {
-const comp = grokFindComposer(grokFindPromptInput());
+const comp = grokFindComposer(grokFindPromptInput(true));
 const ms = comp && grokFindModeSwitch(comp);
-if (!ms) { mossadDebug('grokCycle', 'шаг 2: переключателя фото/видео нет — пропуск', { composer: !!comp }); return false; }
-if (ms.trigger && _gc.modeNA === location.pathname) { mossadDebug('grokCycle', 'шаг 2: в меню режима здесь нет второго режима — пропуск'); return false; }
+if (!ms) {
+mossadDebug('grokCycle', 'шаг mode: переключателя нет');
+return false;
+}
 const cur = ms.mode || _gc.lastMode || 'photo';
 const want = cur === 'video' ? 'photo' : 'video';
 if (ms.trigger) {
@@ -7232,16 +7226,13 @@ const re = want === 'video' ? GC_VIDEO_RE : GC_PHOTO_RE;
 const item = await waitForCondition(() => Array.from(document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="option"], [data-radix-collection-item]'))
 .find(el => _gcVisible(el) && _gcUsable(el) && (re.test(_gcText(el)) || re.test(_gcLabel(el)))), 800, 40);
 if (!item) {
-const pop = _gcOpenPopover();
-if (pop) _gcEsc(document.activeElement && pop.contains(document.activeElement) ? document.activeElement : pop);
-_gc.modeNA = location.pathname;
-mossadDebug('grokCycle', 'шаг 2: в меню нет режима «' + want + '» — пропуск', {});
 return false;
 }
 mossadPressEl(item);
 setTimeout(() => { const t = grokFindModeSwitch(); _gcFocus((t && (t.trigger || t[want])) || ms.trigger); }, 60);
 } else {
 const target = ms[want];
+if (target) {
 mossadPressEl(target);
 _gcFocus(target);
 setTimeout(() => {
@@ -7250,36 +7241,50 @@ const t = grokFindModeSwitch();
 if (t && t[want]) _gcFocus(t[want]);
 }, 60);
 }
+}
 _gc.lastMode = want;
 showToast(want === 'video' ? '🎬 Видео' : '🖼 Фото');
-mossadDebug('grokCycle', 'шаг 2: режим', { from: ms.mode || '?', to: want, menu: !!ms.trigger });
+mossadDebug('grokCycle', 'шаг mode: переключено на ' + want);
 return true;
 }
 function _gcStepParam() {
-const comp = grokFindComposer(grokFindPromptInput());
-if (!comp) { mossadDebug('grokCycle', 'шаг 3: композер не найден — пропуск'); return false; }
+const comp = grokFindComposer(grokFindPromptInput(true));
+if (!comp) {
+mossadDebug('grokCycle', 'шаг param: композер не найден');
+return false;
+}
 const ms = grokFindModeSwitch(comp);
 const d = grokFindDurationControl(comp), a = grokFindAspectControl(comp);
 const mode = (ms && ms.mode) || _gc.lastMode || (d ? 'video' : 'photo');
 const el = mode === 'video' ? (d || a) : (a || d);
-if (!el) { mossadDebug('grokCycle', 'шаг 3: длительности/соотношения в композере нет — пропуск'); return false; }
+if (!el) {
+mossadDebug('grokCycle', 'шаг param: контрол не найден');
+return false;
+}
 _gcFocus(el);
-mossadDebug('grokCycle', 'шаг 3: ' + (el === d ? 'длительность' : 'соотношение'), { tag: el.tagName, label: _gcLabel(el) || _gcText(el) });
+mossadDebug('grokCycle', 'шаг param: ' + (el === d ? 'секунды/длительность' : 'соотношение сторон'));
 return true;
 }
-function grokCycleFocus() {
-const first = grokCycleNextStep();
-if (grokFindPromptInput()) return _gcRun(first);
-return _gcEnsurePromptReachable().then(() => _gcRun(first));
+async function grokCycleFocus() {
+const steps = grokCycleAvailableSteps();
+const nextTarget = grokCycleNextStep();
+const startIdx = steps.indexOf(nextTarget);
+for (let i = 0; i < steps.length; i++) {
+const stepName = steps[(startIdx + i) % steps.length];
+let ok = false;
+if (stepName === 'prompt') {
+ok = _gcStepPrompt();
+} else if (stepName === 'mode') {
+ok = await _gcStepMode();
+} else if (stepName === 'param') {
+ok = _gcStepParam();
 }
-async function _gcRun(first) {
-for (let i = 0; i < 3; i++) {
-const step = ((first - 1 + i) % 3) + 1;
-const ok = step === 1 ? _gcStepPrompt() : step === 2 ? await _gcStepMode() : _gcStepParam();
-if (ok) { _gc.step = step; _gc.ts = Date.now(); return true; }
+if (ok) {
+_gc.lastStepName = stepName;
+_gc.ts = Date.now();
+return true;
 }
-showToast('⚠️ Grok: не нашёл ни промт, ни фото/видео, ни длительность/соотношение', true);
-console.warn('[MOSSAD] grokCycle: ничего не найдено. Композер:', grokFindComposer(), 'кандидаты:', _gcControls(grokFindComposer()).slice(0, 40).map(el => `${el.tagName}[${el.getAttribute('role') || ''}] «${_gcLabel(el) || _gcText(el)}»`));
+}
 return false;
 }
 function _gcIsParamList(list) {
@@ -15155,11 +15160,8 @@ if (config.hk && config.hk.grokCycle && hotkeyMatches(e, config.hk.grokCycle)) r
 const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
 const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
 if (isHistoryHk && rootDomain === 'grok.com') {
-if (isEditing) {
-const textVal = (activeEl.value !== undefined) ? String(activeEl.value) : (activeEl.textContent || '');
-if (isHomeKey && textVal.trim().length > 0) {
+if (isEditing || (typeof grokIsPromptInput === 'function' && grokIsPromptInput(activeEl))) {
 return;
-}
 }
 e.preventDefault();
 e.stopImmediatePropagation();

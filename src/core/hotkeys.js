@@ -294,12 +294,9 @@
         const isHomeKey = (e.key === 'Home' || e.code === 'Home') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
         const isHistoryHk = hotkeyMatches(e, config.hk.history) || isHomeKey;
         if (isHistoryHk && rootDomain === 'grok.com') {
-            if (isEditing) {
-                const textVal = (activeEl.value !== undefined) ? String(activeEl.value) : (activeEl.textContent || '');
-                // Если это штатный Home (без модификаторов) и в поле есть введенный текст — сохраняем нативное поведение перемещения курсора в начало строки
-                if (isHomeKey && textVal.trim().length > 0) {
-                    return;
-                }
+            if (isEditing || (typeof grokIsPromptInput === 'function' && grokIsPromptInput(activeEl))) {
+                // Если мы находимся в поле редактирования/промпте — Home НЕ ДОЛЖЕН выбрасывать из промпта и НЕ ДОЛЖЕН переходить в Saved!
+                return;
             }
             e.preventDefault();
             e.stopImmediatePropagation();
