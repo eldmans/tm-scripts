@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.2
+// @version      1.4.3
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.2';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.3';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -7190,18 +7190,44 @@ const sel = window.getSelection && window.getSelection();
 if (sel) { const rg = document.createRange(); rg.selectNodeContents(el); rg.collapse(false); sel.removeAllRanges(); sel.addRange(rg); }
 } catch (e) {}
 }
+function grokResetCycleState() {
+_gc.step = 0;
+_gc.ts = 0;
+_gc.lastStepName = null;
+}
+window.grokResetCycleState = grokResetCycleState;
+function grokFindUseButton(comp) {
+comp = comp || grokFindComposer(grokFindPromptInput(true)) || document.querySelector('main, [role="main"], div[role="dialog"]') || document.body;
+if (!comp) return null;
+const candidates = Array.from(document.querySelectorAll('button, [role="button"], a[role="button"]'))
+.filter(el => _gcShown(el) && _gcUsable(el) && !_gcOwn(el));
+const re = /^(use|use prompt|use image|use as input|использовать|исп\. промпт)$/i;
+return candidates.find(el => {
+const t = _gcText(el);
+const l = _gcLabel(el);
+return re.test(t) || re.test(l) || /^(use|использовать)\b/i.test(t);
+}) || null;
+}
 function grokCycleAvailableSteps() {
 const comp = grokFindComposer(grokFindPromptInput(true));
 const ms = comp ? grokFindModeSwitch(comp) : null;
-if (!ms) {
-return ['prompt', 'param'];
+const useBtn = grokFindUseButton(comp);
+const steps = ['prompt'];
+if (useBtn) {
+steps.push('use');
 }
-return ['prompt', 'mode', 'param'];
+if (ms) {
+steps.push('mode');
+}
+steps.push('param');
+return steps;
 }
 function grokCycleWhere() {
 const ae = document.activeElement;
 if (!ae) return '';
 if (grokIsPromptInput(ae)) return 'prompt';
+const useBtn = grokFindUseButton();
+if (useBtn && (useBtn === ae || useBtn.contains(ae))) return 'use';
 const comp = grokFindComposer(grokFindPromptInput(true));
 if (comp) {
 const ms = grokFindModeSwitch(comp);
@@ -7322,6 +7348,13 @@ const stepName = steps[(startIdx + i) % steps.length];
 let ok = false;
 if (stepName === 'prompt') {
 ok = _gcStepPrompt();
+} else if (stepName === 'use') {
+const uBtn = grokFindUseButton();
+if (uBtn) {
+_gcFocus(uBtn);
+mossadDebug('grokCycle', 'шаг use: фокус на кнопке use');
+ok = true;
+}
 } else if (stepName === 'mode') {
 ok = await _gcStepMode();
 } else if (stepName === 'param') {
@@ -8450,6 +8483,7 @@ _saveGrokSlideHistory(history, convId);
 updateGrokHistoryPill();
 }
 function _onGrokSlideChanged() {
+if (typeof grokResetCycleState === 'function') grokResetCycleState();
 if (rootDomain !== 'grok.com' || !isGrokInsideConversation()) {
 updateGrokHistoryPill();
 return;
@@ -8660,15 +8694,6 @@ grokHistoryBack();
 grokHistoryForward();
 }
 }, true);
-window.addEventListener('keydown', function handleGrokNavPromptCollapse(e) {
-if (rootDomain !== 'grok.com' || config.grokCollapsePromptOnNav === false) return;
-if (!isGrokInsideConversation()) return;
-if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'PageDown' || e.key === 'PageUp') {
-if (isGrokPromptActive()) {
-grokCollapsePrompt();
-}
-}
-}, false);
 function initGrokSlideHistory() {
 if (rootDomain !== 'grok.com') return;
 _onGrokSlideChanged();
@@ -15117,6 +15142,7 @@ requestSlideCycle(300, 'manual-step');
 }
 function playerStepSlide(dir) {
 cancelSlideTimers();
+if (typeof grokResetCycleState === 'function') grokResetCycleState();
 const isFwd = (dir === 'next');
 const wasPaused = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
 sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true' ||
@@ -15279,7 +15305,8 @@ return;
 }
 }
 }
-if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Home') {
+const isModKey = ['Shift', 'Control', 'Alt', 'Meta'].includes(e.key);
+if (!isModKey && e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Home') {
 if (_grokArrowUpWarnActive || _grokArrowDownWarnActive || _grokHomeWarnActive) {
 _grokArrowUpWarnActive = false;
 _grokArrowDownWarnActive = false;

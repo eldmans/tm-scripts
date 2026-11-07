@@ -149,25 +149,56 @@
         } catch (e) {}
     }
 
-    /** v1.4.1: Определение доступных шагов цикла:
-     * Если есть переключатель фото/видео — 3 шага: ['prompt', 'mode', 'param'].
-     * Если переключателя нет (сгенерированное видео) — строго 2 шага: ['prompt', 'param'].
-     * ПОСЛЕ ПОСЛЕДНЕГО ШАГА ВСЕГДА ВОЗВРАЩАЕМСЯ НА ШАГ 1 (в промпт)! Никаких Escape и редиректов!
+    /** v1.4.3: Сброс состояния цикла при перелистывании кадров */
+    function grokResetCycleState() {
+        _gc.step = 0;
+        _gc.ts = 0;
+        _gc.lastStepName = null;
+    }
+    window.grokResetCycleState = grokResetCycleState;
+
+    /** v1.4.3: Поиск кнопки "Use" (использовать текущий промпт / изображение при генерации) */
+    function grokFindUseButton(comp) {
+        comp = comp || grokFindComposer(grokFindPromptInput(true)) || document.querySelector('main, [role="main"], div[role="dialog"]') || document.body;
+        if (!comp) return null;
+        const candidates = Array.from(document.querySelectorAll('button, [role="button"], a[role="button"]'))
+            .filter(el => _gcShown(el) && _gcUsable(el) && !_gcOwn(el));
+        const re = /^(use|use prompt|use image|use as input|использовать|исп\. промпт)$/i;
+        return candidates.find(el => {
+            const t = _gcText(el);
+            const l = _gcLabel(el);
+            return re.test(t) || re.test(l) || /^(use|использовать)\b/i.test(t);
+        }) || null;
+    }
+
+    /** v1.4.3: Определение доступных шагов цикла:
+     * Базовый: 'prompt' -> 'mode' (если есть) -> 'param' -> 'prompt'.
+     * Если доступна кнопка 'use' (в процессе генерации/image-to-image) — добавляем шаг 'use'!
+     * При смене кадра цикл ВСЕГДА сбрасывается на шаг 1 ('prompt').
      */
     function grokCycleAvailableSteps() {
         const comp = grokFindComposer(grokFindPromptInput(true));
         const ms = comp ? grokFindModeSwitch(comp) : null;
-        if (!ms) {
-            return ['prompt', 'param'];
+        const useBtn = grokFindUseButton(comp);
+        const steps = ['prompt'];
+        if (useBtn) {
+            steps.push('use');
         }
-        return ['prompt', 'mode', 'param'];
+        if (ms) {
+            steps.push('mode');
+        }
+        steps.push('param');
+        return steps;
     }
 
-    /** Где сейчас фокус: 'prompt' | 'mode' | 'param' | ''. */
+    /** Где сейчас фокус: 'prompt' | 'use' | 'mode' | 'param' | ''. */
     function grokCycleWhere() {
         const ae = document.activeElement;
         if (!ae) return '';
         if (grokIsPromptInput(ae)) return 'prompt';
+
+        const useBtn = grokFindUseButton();
+        if (useBtn && (useBtn === ae || useBtn.contains(ae))) return 'use';
 
         const comp = grokFindComposer(grokFindPromptInput(true));
         if (comp) {
@@ -305,6 +336,13 @@
             let ok = false;
             if (stepName === 'prompt') {
                 ok = _gcStepPrompt();
+            } else if (stepName === 'use') {
+                const uBtn = grokFindUseButton();
+                if (uBtn) {
+                    _gcFocus(uBtn);
+                    mossadDebug('grokCycle', 'шаг use: фокус на кнопке use');
+                    ok = true;
+                }
             } else if (stepName === 'mode') {
                 ok = await _gcStepMode();
             } else if (stepName === 'param') {

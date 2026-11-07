@@ -333,6 +333,7 @@
     }
 
     function _onGrokSlideChanged() {
+        if (typeof grokResetCycleState === 'function') grokResetCycleState();
         if (rootDomain !== 'grok.com' || !isGrokInsideConversation()) {
             updateGrokHistoryPill();
             return;
@@ -582,16 +583,8 @@
         }
     }, true);
 
-    // ── Авто-сворачивание промпта при навигации стрелками / PageUp / PageDown ──
-    window.addEventListener('keydown', function handleGrokNavPromptCollapse(e) {
-        if (rootDomain !== 'grok.com' || config.grokCollapsePromptOnNav === false) return;
-        if (!isGrokInsideConversation()) return;
-        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'PageDown' || e.key === 'PageUp') {
-            if (isGrokPromptActive()) {
-                grokCollapsePrompt();
-            }
-        }
-    }, false);
+    // v1.4.3: Стрелки ←/→ внутри поля ввода промпта КАТЕГОРИЧЕСКИ НЕ ДОЛЖНЫ сворачивать/размывать промпт!
+    // Обработчик handleGrokNavPromptCollapse полностью удалён.
 
     // ── Инициализация трекера истории ──
     function initGrokSlideHistory() {

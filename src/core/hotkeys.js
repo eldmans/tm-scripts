@@ -97,6 +97,7 @@
 
     function playerStepSlide(dir) {
         cancelSlideTimers();
+        if (typeof grokResetCycleState === 'function') grokResetCycleState();
         const isFwd = (dir === 'next');
         const wasPaused = (typeof slideshowPaused !== 'undefined' && slideshowPaused) ||
                           sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true' ||
@@ -288,8 +289,9 @@
             }
         }
 
-        // Сброс предупреждений при нажатии любой другой клавиши
-        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Home') {
+        // Сброс предупреждений при нажатии любой другой клавиши (игнорируя Shift, Control, Alt, Meta)
+        const isModKey = ['Shift', 'Control', 'Alt', 'Meta'].includes(e.key);
+        if (!isModKey && e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Home') {
             if (_grokArrowUpWarnActive || _grokArrowDownWarnActive || _grokHomeWarnActive) {
                 _grokArrowUpWarnActive = false;
                 _grokArrowDownWarnActive = false;
