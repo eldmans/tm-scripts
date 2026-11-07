@@ -9,7 +9,7 @@
   "videoLoops": 1,
   "slideshowDelay": 7,
   "delayAfterVideo": 1,
-  "downloadType": "none",
+  "downloadType": "video",
   "pdAction": "upns",
   "stopOnTabSwitch": false,
   "stopOnBrsrSwitch": false,
@@ -238,5 +238,6 @@
     }
   },
   "npkExpandAdded": true,
-  "npkHistNavAdded": true
+  "npkHistNavAdded": true,
+  "photoDuration": 1
 }
