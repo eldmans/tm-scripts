@@ -241,7 +241,7 @@
 
         _grokHistoryPillEl.style.display = 'inline-flex';
 
-        const isSsRunning = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+        const isSsRunning = !!(window._mossadGalleryActive || slideshowActive);
         const isCompact = !!config.grokPillsCompact;
 
         if (isSsRunning) {
@@ -520,7 +520,7 @@
             grokCollapsePrompt();
         }
 
-        const isSsRunning = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+        const isSsRunning = !!(window._mossadGalleryActive || slideshowActive);
 
         if (isSsRunning) {
             // v1.3.94: Во время слайд-шоу клавиши Alt+1..4 управляют показом слайд-шоу
@@ -601,10 +601,18 @@
         }
     }
 
+    function safeInitGrokSlideHistory() {
+        try {
+            initGrokSlideHistory();
+        } catch (err) {
+            console.error('[MOSSAD] initGrokSlideHistory error:', err);
+        }
+    }
+
     if (rootDomain === 'grok.com') {
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initGrokSlideHistory);
+            document.addEventListener('DOMContentLoaded', safeInitGrokSlideHistory);
         } else {
-            initGrokSlideHistory();
+            safeInitGrokSlideHistory();
         }
     }

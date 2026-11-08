@@ -656,10 +656,18 @@
         }
     }
 
+    function safeInitGrokQuota() {
+        try {
+            initGrokQuota();
+        } catch (err) {
+            console.error('[MOSSAD] initGrokQuota error:', err);
+        }
+    }
+
     if (rootDomain === 'grok.com') {
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initGrokQuota);
+            document.addEventListener('DOMContentLoaded', safeInitGrokQuota);
         } else {
-            initGrokQuota();
+            safeInitGrokQuota();
         }
     }

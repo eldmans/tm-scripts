@@ -755,3 +755,10 @@
 * ❌ **Сброс таймера предупреждения клавишами-модификаторами (Shift/Ctrl/Alt):**
   * *Что произошло:* При попытке нажать стрелку или Home нажатие клавиши `Shift` или `Ctrl` расценивалось как «нажатие другой клавиши», сбрасывая статус `_grokArrowUpWarnActive` и вынуждая делать лишние нажатия.
   * *Как надо:* Клавиши-модификаторы (`Shift`, `Control`, `Alt`, `Meta`) игнорируются при сбросе предупреждений.
+
+
+## 54. Temporal Dead Zone (TDZ) с `typeof letVariable` в бандле модулей (v1.4.4)
+
+* ❌ **Обращение к переменным слайд-шоу (`typeof slideshowActive`) до их объявления в бандле:**
+  * *Что произошло:* Бандл MOSSAD собирается внутри единой функции `mossadMain()`. В `src/engines/grok/history-nav.js` (модуль #30) при входе в беседу вызывалась `updateGrokHistoryPill()`, проверявшая `const isSsRunning = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));`. Переменная `slideshowActive` была объявлена через `let` только в `src/slideshow/engine.js` (модуль #35). В стандарте ES6 оператор `typeof` **НЕ защищает** от Temporal Dead Zone: обращение к `let`-переменной до её инициализации в той же области видимости выбрасывает фатальный `ReferenceError: Cannot access 'slideshowActive' before initialization`. Выполнение `mossadMain()` наглухо падало: создавался только овал квоты (модуль #29), а весь UI (панель, настройки) и слушатели клавиш (`hotkeys.js` в самом конце) не загружались вообще («Работает только овал с % лимита»).
+  * *Как надо:* Ключи сессий (`SESSION_ACTIVE_KEY`, `SESSION_PAUSED_KEY`, `SESSION_STATE_KEY`, `SESSION_NAV_KEY`) и базовые флаги слайд-шоу (`slideshowActive`, `slideshowPaused`) объявлять через `var` в самом первом модуле `src/core/boot.js` и инициализировать из `sessionStorage` сразу при старте. Функции инициализации плашек Grok (`initGrokQuota`, `initGrokSlideHistory`) оборачивать в `try ... catch` (`safeInitGrokQuota`, `safeInitGrokSlideHistory`), аналогично `safeInitWidget()`.

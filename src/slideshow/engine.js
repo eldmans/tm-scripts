@@ -1,10 +1,8 @@
     // ============================================
     // SLIDESHOW LOGIC (AUTO) & SESSION PERSISTENCE
     // ============================================
-    const SESSION_ACTIVE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`;
-    const SESSION_STATE_KEY  = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_wstate`;
-    const SESSION_PAUSED_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_paused`;
-    const SESSION_NAV_KEY    = 'mossad_navigating';
+    // v1.4.4: SESSION_ACTIVE_KEY, SESSION_STATE_KEY, SESSION_PAUSED_KEY, SESSION_NAV_KEY
+    // и флаги slideshowActive / slideshowPaused объявлены в src/core/boot.js для защиты от TDZ.
 
     // Если был автоматический переход на следующий слайд, гарантируем очистку флагов навигации и паузы
     if (sessionStorage.getItem(SESSION_NAV_KEY) === 'true') {
@@ -12,8 +10,8 @@
         sessionStorage.removeItem(SESSION_PAUSED_KEY);
     }
 
-    let slideshowActive = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true';
-    let slideshowPaused = sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
+    slideshowActive = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true';
+    slideshowPaused = sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
     let slideshowTimeoutId = null;
     let downloadTimeoutId = null;
     let countdownSeconds = 0;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.3
+// @version      1.4.4
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.3';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.4';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -715,6 +715,12 @@ mossadMain();
 function mossadMain() {
 
 // ── src/core/boot.js ──
+var SESSION_ACTIVE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`;
+var SESSION_STATE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_wstate`;
+var SESSION_PAUSED_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_paused`;
+var SESSION_NAV_KEY = 'mossad_navigating';
+var slideshowActive = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true';
+var slideshowPaused = sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
 mossadOpenSettingsHook = openSettingsWindow;
 mossadLightHkHook = {
 comboId: (b) => hotkeyComboId(b),
@@ -8204,11 +8210,18 @@ grokFetchQuota(true, 1).catch(() => {});
 }, 300000);
 }
 }
+function safeInitGrokQuota() {
+try {
+initGrokQuota();
+} catch (err) {
+console.error('[MOSSAD] initGrokQuota error:', err);
+}
+}
 if (rootDomain === 'grok.com') {
 if (document.readyState === 'loading') {
-document.addEventListener('DOMContentLoaded', initGrokQuota);
+document.addEventListener('DOMContentLoaded', safeInitGrokQuota);
 } else {
-initGrokQuota();
+safeInitGrokQuota();
 }
 }
 
@@ -8407,7 +8420,7 @@ showToast(`🎞 Слайд в истории: ${cur || '-'} из ${total || '-'}
 wrap.appendChild(_grokHistoryPillEl);
 }
 _grokHistoryPillEl.style.display = 'inline-flex';
-const isSsRunning = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+const isSsRunning = !!(window._mossadGalleryActive || slideshowActive);
 const isCompact = !!config.grokPillsCompact;
 if (isSsRunning) {
 let cur = 1, total = 0;
@@ -8635,7 +8648,7 @@ e.stopImmediatePropagation();
 if (config.grokCollapsePromptOnNav !== false) {
 grokCollapsePrompt();
 }
-const isSsRunning = !!(window._mossadGalleryActive || (typeof slideshowActive !== 'undefined' && slideshowActive));
+const isSsRunning = !!(window._mossadGalleryActive || slideshowActive);
 if (isSsRunning) {
 if (isFirstHk) {
 if (typeof grokGetPlaylistStructure === 'function' && window._mossadGalleryActive) {
@@ -8706,11 +8719,18 @@ _checkCandidateCommit();
 }, 1000);
 }
 }
+function safeInitGrokSlideHistory() {
+try {
+initGrokSlideHistory();
+} catch (err) {
+console.error('[MOSSAD] initGrokSlideHistory error:', err);
+}
+}
 if (rootDomain === 'grok.com') {
 if (document.readyState === 'loading') {
-document.addEventListener('DOMContentLoaded', initGrokSlideHistory);
+document.addEventListener('DOMContentLoaded', safeInitGrokSlideHistory);
 } else {
-initGrokSlideHistory();
+safeInitGrokSlideHistory();
 }
 }
 
@@ -9809,16 +9829,12 @@ tryNext();
 }
 
 // ── src/slideshow/engine.js ──
-const SESSION_ACTIVE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_active`;
-const SESSION_STATE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_wstate`;
-const SESSION_PAUSED_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_paused`;
-const SESSION_NAV_KEY = 'mossad_navigating';
 if (sessionStorage.getItem(SESSION_NAV_KEY) === 'true') {
 sessionStorage.removeItem(SESSION_NAV_KEY);
 sessionStorage.removeItem(SESSION_PAUSED_KEY);
 }
-let slideshowActive = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true';
-let slideshowPaused = sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
+slideshowActive = sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true';
+slideshowPaused = sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
 let slideshowTimeoutId = null;
 let downloadTimeoutId = null;
 let countdownSeconds = 0;
