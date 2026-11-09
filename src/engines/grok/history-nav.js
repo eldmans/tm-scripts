@@ -333,7 +333,6 @@
     }
 
     function _onGrokSlideChanged() {
-        if (typeof grokResetCycleState === 'function') grokResetCycleState();
         if (rootDomain !== 'grok.com' || !isGrokInsideConversation()) {
             updateGrokHistoryPill();
             return;
@@ -343,6 +342,9 @@
         const uuid = typeof grokExtractUuid === 'function' ? grokExtractUuid(path) : '';
 
         if (_grokCandidateSlide && _grokCandidateSlide.url === url) return;
+
+        // v1.4.5: URL кадра реально изменился — сбрасываем цикл бэкслеша!
+        if (typeof grokResetCycleState === 'function') grokResetCycleState();
 
         _grokCandidateSlide = {
             url,

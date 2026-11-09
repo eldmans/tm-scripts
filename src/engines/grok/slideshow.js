@@ -60,6 +60,7 @@
 
     function grokSpaNavigate(url) {
         if (!url) return;
+        if (typeof grokResetCycleState === 'function') grokResetCycleState();
 
         // Сохраняем состояние паузы перед переходом
         const wasPaused = window._mossadGalleryPaused ||

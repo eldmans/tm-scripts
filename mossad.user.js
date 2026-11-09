@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.4
+// @version      1.4.5
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.4';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.5';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -5802,6 +5802,7 @@ _galleryNav.arrivedAt = Date.now();
 }
 function grokSpaNavigate(url) {
 if (!url) return;
+if (typeof grokResetCycleState === 'function') grokResetCycleState();
 const wasPaused = window._mossadGalleryPaused ||
 sessionStorage.getItem('mossad_gallery_paused') === 'true' ||
 (typeof SESSION_PAUSED_KEY !== 'undefined' && sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true');
@@ -7077,7 +7078,7 @@ grokHighlightActivePlaylistItem();
 }
 
 // ── src/engines/grok/prompt-cycle.js ──
-const _gc = { step: 0, ts: 0, lastMode: '', modeNA: '' };
+const _gc = { step: 0, ts: 0, lastMode: '', modeNA: '', useClicked: false };
 const GC_PHOTO_RE = /^(image|images|photo|photos|picture|изображени[ея]|фото|картинк[аи])$/;
 const GC_VIDEO_RE = /^(video|videos|видео)$/;
 const GC_DUR_LABEL_RE = /duration|length|длительн|длина/;
@@ -7200,40 +7201,67 @@ function grokResetCycleState() {
 _gc.step = 0;
 _gc.ts = 0;
 _gc.lastStepName = null;
+_gc.useClicked = false;
 }
 window.grokResetCycleState = grokResetCycleState;
-function grokFindUseButton(comp) {
-comp = comp || grokFindComposer(grokFindPromptInput(true)) || document.querySelector('main, [role="main"], div[role="dialog"]') || document.body;
-if (!comp) return null;
-const candidates = Array.from(document.querySelectorAll('button, [role="button"], a[role="button"]'))
-.filter(el => _gcShown(el) && _gcUsable(el) && !_gcOwn(el));
-const re = /^(use|use prompt|use image|use as input|использовать|исп\. промпт)$/i;
-return candidates.find(el => {
-const t = _gcText(el);
-const l = _gcLabel(el);
-return re.test(t) || re.test(l) || /^(use|использовать)\b/i.test(t);
-}) || null;
+function grokFindUseButton() {
+const candidates = Array.from(document.querySelectorAll('span, button, [role="button"], div'))
+.filter(el => {
+if (!_gcShown(el) || _gcOwn(el)) return false;
+if (el.children.length > 2) return false;
+const t = (el.textContent || '').trim();
+return /^(use|использовать)$/i.test(t);
+});
+for (const el of candidates) {
+const pill = el.closest('.absolute, [class*="bottom-full"], div[class*="ring-1"], div[class*="border-border"], div[class*="surface"]');
+if (pill && _gcShown(pill)) {
+pill._mossadUseTarget = el;
+return pill;
+}
+if (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || (el.classList && el.classList.contains('cursor-pointer'))) {
+return el;
+}
+if (el.parentElement && _gcShown(el.parentElement)) {
+el.parentElement._mossadUseTarget = el;
+return el.parentElement;
+}
+}
+const bottomPills = Array.from(document.querySelectorAll('.absolute.bottom-full, [class*="bottom-full"]'))
+.filter(el => _gcShown(el) && !_gcOwn(el));
+for (const bp of bottomPills) {
+const uSpan = Array.from(bp.querySelectorAll('span, button, div')).find(x => /^(use|использовать)$/i.test((x.textContent || '').trim()));
+if (uSpan) {
+bp._mossadUseTarget = uSpan;
+return bp;
+}
+}
+return null;
+}
+function grokClickUseButton(btn) {
+if (!btn) return false;
+const target = btn._mossadUseTarget || btn;
+mossadPressEl(target);
+if (target !== btn) {
+mossadPressEl(btn);
+}
+try {
+if (typeof target.click === 'function') target.click();
+if (typeof btn.click === 'function') btn.click();
+} catch (e) {}
+return true;
 }
 function grokCycleAvailableSteps() {
 const comp = grokFindComposer(grokFindPromptInput(true));
 const ms = comp ? grokFindModeSwitch(comp) : null;
-const useBtn = grokFindUseButton(comp);
-const steps = ['prompt'];
-if (useBtn) {
-steps.push('use');
+if (!ms) {
+return ['prompt', 'param'];
 }
-if (ms) {
-steps.push('mode');
-}
-steps.push('param');
-return steps;
+return ['prompt', 'mode', 'param'];
 }
 function grokCycleWhere() {
 const ae = document.activeElement;
 if (!ae) return '';
 if (grokIsPromptInput(ae)) return 'prompt';
-const useBtn = grokFindUseButton();
-if (useBtn && (useBtn === ae || useBtn.contains(ae))) return 'use';
 const comp = grokFindComposer(grokFindPromptInput(true));
 if (comp) {
 const ms = grokFindModeSwitch(comp);
@@ -7280,6 +7308,20 @@ if (ae && pop.contains(ae)) {
 if (ae.getAttribute && /^(option|menuitem|menuitemradio)$/.test(ae.getAttribute('role') || '')) {
 try { mossadPressEl(ae); } catch (e) {}
 }
+}
+}
+if (!_gc.useClicked) {
+const useBtn = grokFindUseButton();
+if (useBtn) {
+mossadDebug('grokCycle', 'шаг prompt: нажатие на кнопку Use');
+_gc.useClicked = true;
+grokClickUseButton(useBtn);
+showToast('✨ Use: промпт загружен');
+setTimeout(() => {
+const p = grokFindPromptInput(true);
+if (p) _gcCaretToEnd(p);
+}, 100);
+return true;
 }
 }
 const p = grokFindPromptInput(true);
@@ -7354,13 +7396,6 @@ const stepName = steps[(startIdx + i) % steps.length];
 let ok = false;
 if (stepName === 'prompt') {
 ok = _gcStepPrompt();
-} else if (stepName === 'use') {
-const uBtn = grokFindUseButton();
-if (uBtn) {
-_gcFocus(uBtn);
-mossadDebug('grokCycle', 'шаг use: фокус на кнопке use');
-ok = true;
-}
 } else if (stepName === 'mode') {
 ok = await _gcStepMode();
 } else if (stepName === 'param') {
@@ -7480,6 +7515,18 @@ e.stopImmediatePropagation();
 if (e.repeat) return;
 grokCycleFocus();
 }, true);
+document.addEventListener('pointerdown', (e) => {
+if (rootDomain !== 'grok.com' || !e.target) return;
+const t = e.target;
+if (t.closest && t.closest('[data-filmstrip-item], button[aria-label*="Thumbnail"], button[aria-label*="thumbnail"], a[href*="/imagine/post/"], [data-sidebar-item], #mossad-playlist-panel')) {
+grokResetCycleState();
+}
+}, true);
+window.addEventListener('popstate', () => {
+if (rootDomain === 'grok.com' && typeof grokResetCycleState === 'function') {
+grokResetCycleState();
+}
+});
 
 // ── src/engines/grok/key-guard.js ──
 const GROK_KEYGUARD_MS = 300;
@@ -8496,7 +8543,6 @@ _saveGrokSlideHistory(history, convId);
 updateGrokHistoryPill();
 }
 function _onGrokSlideChanged() {
-if (typeof grokResetCycleState === 'function') grokResetCycleState();
 if (rootDomain !== 'grok.com' || !isGrokInsideConversation()) {
 updateGrokHistoryPill();
 return;
@@ -8505,6 +8551,7 @@ const url = location.href;
 const path = location.pathname;
 const uuid = typeof grokExtractUuid === 'function' ? grokExtractUuid(path) : '';
 if (_grokCandidateSlide && _grokCandidateSlide.url === url) return;
+if (typeof grokResetCycleState === 'function') grokResetCycleState();
 _grokCandidateSlide = {
 url,
 path,
@@ -14281,7 +14328,7 @@ return `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-11-08</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-09</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
