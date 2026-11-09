@@ -132,13 +132,13 @@
       "shift": false
     },
     "nextSlide": {
-      "key": "ArrowRight",
+      "key": "",
       "ctrl": false,
       "alt": false,
       "shift": false
     },
     "prevSlide": {
-      "key": "ArrowLeft",
+      "key": "",
       "ctrl": false,
       "alt": false,
       "shift": false
