@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.5
+// @version      1.4.6
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.5';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.6';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -7087,8 +7087,8 @@ const GC_AR_LABEL_RE = /aspect|ratio|соотнош|пропорц/;
 const GC_AR_TEXT_RE = /^\d{1,2}\s?:\s?\d{1,2}$/;
 const GC_CTRL_SEL = 'button, [role="button"], [role="radio"], [role="tab"], [role="option"], [role="menuitemradio"], [role="combobox"], [aria-pressed], [aria-haspopup], select';
 const GC_PANEL_SEL = '[role="dialog"], [role="alertdialog"], [role="complementary"], aside';
-const GC_POPOVER_SEL = '[data-radix-popper-content-wrapper], [role="menu"], [role="listbox"], [role="dialog"][data-state="open"]';
-const GC_ITEM_SEL = '[role="option"], [role="menuitemradio"], [role="menuitem"]';
+const GC_POPOVER_SEL = '[data-radix-popper-content-wrapper], [data-radix-menu-content], [role="menu"], [role="listbox"], div[role="dialog"][data-state="open"], [data-state="open"][class*="popover"], [data-state="open"][class*="content"]';
+const GC_ITEM_SEL = '[role="option"], [role="menuitemradio"], [role="menuitem"], [data-radix-collection-item], button[role="radio"]';
 function _gcOwn(el) { return !!(el && el.closest && el.closest('[id^="mossad"]')); }
 function _gcShown(el) { return !!(el && el.isConnected && !_gcOwn(el) && (el.offsetWidth > 0 || el.offsetHeight > 0 || (el.getClientRects && el.getClientRects().length > 0))); }
 function _gcVisible(el) {
@@ -7205,9 +7205,10 @@ _gc.useClicked = false;
 }
 window.grokResetCycleState = grokResetCycleState;
 function grokFindUseButton() {
+const isFresh = (el) => !el._mossadUseClicked || (Date.now() - el._mossadUseClicked > 800);
 const candidates = Array.from(document.querySelectorAll('span, button, [role="button"], div'))
 .filter(el => {
-if (!_gcShown(el) || _gcOwn(el)) return false;
+if (!_gcShown(el) || _gcOwn(el) || !isFresh(el)) return false;
 if (el.children.length > 2) return false;
 const t = (el.textContent || '').trim();
 return /^(use|использовать)$/i.test(t);
@@ -7239,6 +7240,8 @@ return null;
 }
 function grokClickUseButton(btn) {
 if (!btn) return false;
+btn._mossadUseClicked = Date.now();
+if (btn._mossadUseTarget) btn._mossadUseTarget._mossadUseClicked = Date.now();
 const target = btn._mossadUseTarget || btn;
 mossadPressEl(target);
 if (target !== btn) {
@@ -7259,6 +7262,8 @@ return ['prompt', 'param'];
 return ['prompt', 'mode', 'param'];
 }
 function grokCycleWhere() {
+const pop = _gcOpenPopover();
+if (pop) return 'param';
 const ae = document.activeElement;
 if (!ae) return '';
 if (grokIsPromptInput(ae)) return 'prompt';
@@ -7269,14 +7274,11 @@ if (ms && (ms.trigger === ae || ms.photo === ae || ms.video === ae || (ae && ms.
 const d = grokFindDurationControl(comp), a = grokFindAspectControl(comp);
 if ((d && (d === ae || d.contains(ae))) || (a && (a === ae || a.contains(ae)))) return 'param';
 }
-const pop = _gcOpenPopover();
-if (pop && (pop === ae || pop.contains(ae))) return 'param';
 if (ae.getAttribute && /^(radio|menuitemradio|option|menuitem|menu|listbox)$/.test(ae.getAttribute('role') || '')) {
 const t = _gcText(ae) || _gcLabel(ae);
 if (GC_DUR_TEXT_RE.test(t) || GC_AR_TEXT_RE.test(t)) return 'param';
-if (pop && pop.contains(ae)) return 'param';
 }
-if (pop && _gc.lastStepName === 'param') return 'param';
+if (_gc.lastStepName === 'param') return 'param';
 return '';
 }
 function grokCycleNextStep() {
@@ -7304,13 +7306,12 @@ function _gcStepPrompt() {
 const pop = _gcOpenPopover();
 if (pop) {
 const ae = document.activeElement;
-if (ae && pop.contains(ae)) {
-if (ae.getAttribute && /^(option|menuitem|menuitemradio)$/.test(ae.getAttribute('role') || '')) {
-try { mossadPressEl(ae); } catch (e) {}
+const item = (ae && pop.contains(ae)) ? ((ae.closest && ae.closest(GC_ITEM_SEL)) || ae) : null;
+if (item && item.isConnected) {
+try { mossadPressEl(item); } catch (e) {}
 }
 }
-}
-if (!_gc.useClicked) {
+if (!_gc.useClicked && _gc.lastStepName !== 'param') {
 const useBtn = grokFindUseButton();
 if (useBtn) {
 mossadDebug('grokCycle', 'шаг prompt: нажатие на кнопку Use');
@@ -7330,6 +7331,8 @@ mossadDebug('grokCycle', 'шаг prompt: инпут не найден');
 return false;
 }
 _gcCaretToEnd(p);
+setTimeout(() => { const p2 = grokFindPromptInput(true); if (p2) _gcCaretToEnd(p2); }, 60);
+setTimeout(() => { const p3 = grokFindPromptInput(true); if (p3) _gcCaretToEnd(p3); }, 150);
 mossadDebug('grokCycle', 'шаг prompt: фокус в инпуте');
 return true;
 }
@@ -7388,6 +7391,20 @@ mossadDebug('grokCycle', 'шаг param: ' + (el === d ? 'секунды/длит
 return true;
 }
 async function grokCycleFocus() {
+const useBtn = grokFindUseButton();
+if (useBtn) {
+mossadDebug('grokCycle', 'всегда при наличии Use: нажатие на кнопку Use');
+_gc.useClicked = true;
+grokClickUseButton(useBtn);
+showToast('✨ Use: промпт загружен');
+setTimeout(() => {
+const p = grokFindPromptInput(true);
+if (p) _gcCaretToEnd(p);
+}, 100);
+_gc.lastStepName = 'prompt';
+_gc.ts = Date.now();
+return true;
+}
 const steps = grokCycleAvailableSteps();
 const nextTarget = grokCycleNextStep();
 const startIdx = steps.indexOf(nextTarget);
@@ -7418,11 +7435,11 @@ function grokComposerArrowCtl(e) {
 if (rootDomain !== 'grok.com' || !e || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return null;
 if (e.ctrlKey || e.altKey || e.metaKey) return null;
 const ae = document.activeElement;
-if (!ae || ae === document.body || ae === document.documentElement || _gcOwn(ae)) return null;
 const pop = _gcOpenPopover();
-if (pop && (pop === ae || pop.contains(ae))) {
-return { kind: 'popover', pop, cur: ae };
+if (pop) {
+return { kind: 'popover', pop, cur: (ae && pop.contains(ae)) ? ae : null };
 }
+if (!ae || ae === document.body || ae === document.documentElement || _gcOwn(ae)) return null;
 const opt = ae.closest && ae.closest(GC_ITEM_SEL);
 const list = ae.closest && ae.closest('[role="listbox"], [role="menu"], [role="radiogroup"], [data-radix-menu-content], [data-radix-popper-content-wrapper]');
 if (list && _gcIsParamList(list)) return { kind: 'list', list, cur: opt || ae };
@@ -7446,7 +7463,13 @@ return null;
 }
 function _gcArrowStep(list, cur, down) {
 if (!list.length) return null;
-let i = list.indexOf(cur);
+let i = -1;
+if (cur) {
+i = list.indexOf(cur);
+if (i < 0) {
+i = list.findIndex(item => item === cur || item.contains(cur));
+}
+}
 if (i < 0) i = list.findIndex(_gcIsOn);
 if (i < 0) return list[down ? 0 : list.length - 1];
 return list[(i + (down ? 1 : -1) + list.length) % list.length];
@@ -7468,7 +7491,12 @@ if (pop) {
 const items = Array.from(pop.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
 if (items.length) {
 const nx = down ? items[0] : items[items.length - 1];
+if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1');
 _gcFocus(nx);
+try {
+nx.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, cancelable: true }));
+nx.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+} catch (_) {}
 }
 }
 }, 60);
@@ -7477,11 +7505,16 @@ return;
 if (t.kind === 'popover' || t.kind === 'list') {
 const rootEl = t.pop || t.list;
 const items = Array.from(rootEl.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
-const nx = _gcArrowStep(items, t.cur, down);
+if (!items.length) return;
+const curItem = (t.cur && (t.cur.closest(GC_ITEM_SEL) || t.cur)) || null;
+const nx = _gcArrowStep(items, curItem, down);
 if (nx) {
 if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1');
-mossadPressEl(nx);
 _gcFocus(nx);
+try {
+nx.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, cancelable: true }));
+nx.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+} catch (_) {}
 }
 return;
 }
@@ -7502,8 +7535,37 @@ const a = comp && grokFindAspectControl(comp);
 const targetCtl = d || a;
 if (targetCtl) {
 mossadPressEl(targetCtl);
+setTimeout(() => {
+const pop = _gcOpenPopover();
+if (pop) {
+const items = Array.from(pop.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
+if (items.length) {
+const nx = down ? items[0] : items[items.length - 1];
+if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1');
+_gcFocus(nx);
+try {
+nx.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, cancelable: true }));
+nx.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+} catch (_) {}
+}
+}
+}, 60);
 }
 return;
+}
+}, true);
+window.addEventListener('keydown', function grokComposerEnterKey(e) {
+if (rootDomain !== 'grok.com' || window.capturingFor !== null) return;
+if (e.key !== 'Enter') return;
+if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+const pop = _gcOpenPopover();
+if (!pop) return;
+const ae = document.activeElement;
+const item = (ae && pop.contains(ae)) ? ((ae.closest && ae.closest(GC_ITEM_SEL)) || ae) : null;
+if (item && item.isConnected) {
+e.preventDefault();
+e.stopImmediatePropagation();
+mossadPressEl(item);
 }
 }, true);
 window.addEventListener('keydown', function grokCycleKey(e) {

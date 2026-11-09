@@ -21,8 +21,8 @@
     const GC_CTRL_SEL = 'button, [role="button"], [role="radio"], [role="tab"], [role="option"], [role="menuitemradio"], [role="combobox"], [aria-pressed], [aria-haspopup], select';
     // Боковые панели / выезжающие ящики / модальные окна — не композер
     const GC_PANEL_SEL = '[role="dialog"], [role="alertdialog"], [role="complementary"], aside';
-    const GC_POPOVER_SEL = '[data-radix-popper-content-wrapper], [role="menu"], [role="listbox"], [role="dialog"][data-state="open"]';
-    const GC_ITEM_SEL = '[role="option"], [role="menuitemradio"], [role="menuitem"]';
+    const GC_POPOVER_SEL = '[data-radix-popper-content-wrapper], [data-radix-menu-content], [role="menu"], [role="listbox"], div[role="dialog"][data-state="open"], [data-state="open"][class*="popover"], [data-state="open"][class*="content"]';
+    const GC_ITEM_SEL = '[role="option"], [role="menuitemradio"], [role="menuitem"], [data-radix-collection-item], button[role="radio"]';
 
     function _gcOwn(el) { return !!(el && el.closest && el.closest('[id^="mossad"]')); }
     function _gcShown(el) { return !!(el && el.isConnected && !_gcOwn(el) && (el.offsetWidth > 0 || el.offsetHeight > 0 || (el.getClientRects && el.getClientRects().length > 0))); }
@@ -160,10 +160,11 @@
 
     /** v1.4.5: Поиск кнопки/плашки "Use" (использовать текущий промпт и фото при генерации) */
     function grokFindUseButton() {
+        const isFresh = (el) => !el._mossadUseClicked || (Date.now() - el._mossadUseClicked > 800);
         // 1. Поиск элементов со словом "Use" или "Использовать"
         const candidates = Array.from(document.querySelectorAll('span, button, [role="button"], div'))
             .filter(el => {
-                if (!_gcShown(el) || _gcOwn(el)) return false;
+                if (!_gcShown(el) || _gcOwn(el) || !isFresh(el)) return false;
                 if (el.children.length > 2) return false;
                 const t = (el.textContent || '').trim();
                 return /^(use|использовать)$/i.test(t);
@@ -202,6 +203,8 @@
     /** v1.4.5: Программный клик по кнопке Use */
     function grokClickUseButton(btn) {
         if (!btn) return false;
+        btn._mossadUseClicked = Date.now();
+        if (btn._mossadUseTarget) btn._mossadUseTarget._mossadUseClicked = Date.now();
         const target = btn._mossadUseTarget || btn;
         mossadPressEl(target);
         if (target !== btn) {
@@ -229,6 +232,9 @@
 
     /** Где сейчас фокус: 'prompt' | 'mode' | 'param' | ''. */
     function grokCycleWhere() {
+        const pop = _gcOpenPopover();
+        if (pop) return 'param';
+
         const ae = document.activeElement;
         if (!ae) return '';
         if (grokIsPromptInput(ae)) return 'prompt';
@@ -241,14 +247,11 @@
             if ((d && (d === ae || d.contains(ae))) || (a && (a === ae || a.contains(ae)))) return 'param';
         }
 
-        const pop = _gcOpenPopover();
-        if (pop && (pop === ae || pop.contains(ae))) return 'param';
         if (ae.getAttribute && /^(radio|menuitemradio|option|menuitem|menu|listbox)$/.test(ae.getAttribute('role') || '')) {
             const t = _gcText(ae) || _gcLabel(ae);
             if (GC_DUR_TEXT_RE.test(t) || GC_AR_TEXT_RE.test(t)) return 'param';
-            if (pop && pop.contains(ae)) return 'param';
         }
-        if (pop && _gc.lastStepName === 'param') return 'param';
+        if (_gc.lastStepName === 'param') return 'param';
         return '';
     }
 
@@ -278,20 +281,19 @@
 
     // ШАГ 1: Промпт (или нажатие кнопки Use, если она присутствует на фото)
     function _gcStepPrompt() {
-        // Если был открыт выпадающий список длительности — если пункт выбран, подтверждаем
+        // Если был открыт выпадающий список параметров — подтверждаем текущий активный пункт
         const pop = _gcOpenPopover();
         if (pop) {
             const ae = document.activeElement;
-            if (ae && pop.contains(ae)) {
-                if (ae.getAttribute && /^(option|menuitem|menuitemradio)$/.test(ae.getAttribute('role') || '')) {
-                    try { mossadPressEl(ae); } catch (e) {}
-                }
+            const item = (ae && pop.contains(ae)) ? ((ae.closest && ae.closest(GC_ITEM_SEL)) || ae) : null;
+            if (item && item.isConnected) {
+                try { mossadPressEl(item); } catch (e) {}
             }
-            // КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО слать Escape: он всплывает на window и закрывает пост в Saved!
         }
 
         // v1.4.5: Если на экране есть плашка "Use" и мы её ещё не нажимали на этом кадре — нажимаем её!
-        if (!_gc.useClicked) {
+        // (но только если мы не завершаем цикл с шага param)
+        if (!_gc.useClicked && _gc.lastStepName !== 'param') {
             const useBtn = grokFindUseButton();
             if (useBtn) {
                 mossadDebug('grokCycle', 'шаг prompt: нажатие на кнопку Use');
@@ -312,6 +314,9 @@
             return false;
         }
         _gcCaretToEnd(p);
+        // Страховка от автофокуса Radix при закрытии поповера
+        setTimeout(() => { const p2 = grokFindPromptInput(true); if (p2) _gcCaretToEnd(p2); }, 60);
+        setTimeout(() => { const p3 = grokFindPromptInput(true); if (p3) _gcCaretToEnd(p3); }, 150);
         mossadDebug('grokCycle', 'шаг prompt: фокус в инпуте');
         return true;
     }
@@ -377,6 +382,23 @@
 
     /** Одно нажатие цикла по бэкслешу: строго по кругу 1->2->3->1 или 1->2->1! */
     async function grokCycleFocus() {
+        // v1.4.6: Всегда, когда на экране есть кнопка Use — нажатие `\` кликает по ней!
+        const useBtn = grokFindUseButton();
+        if (useBtn) {
+            mossadDebug('grokCycle', 'всегда при наличии Use: нажатие на кнопку Use');
+            _gc.useClicked = true;
+            grokClickUseButton(useBtn);
+            showToast('✨ Use: промпт загружен');
+            // В этом же заходе, в самом конце — переход в поле ввода промпта
+            setTimeout(() => {
+                const p = grokFindPromptInput(true);
+                if (p) _gcCaretToEnd(p);
+            }, 100);
+            _gc.lastStepName = 'prompt';
+            _gc.ts = Date.now();
+            return true;
+        }
+
         const steps = grokCycleAvailableSteps();
         const nextTarget = grokCycleNextStep();
         const startIdx = steps.indexOf(nextTarget);
@@ -410,13 +432,15 @@
         if (rootDomain !== 'grok.com' || !e || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return null;
         if (e.ctrlKey || e.altKey || e.metaKey) return null;
         const ae = document.activeElement;
-        if (!ae || ae === document.body || ae === document.documentElement || _gcOwn(ae)) return null;
 
-        // 1. Открытый поповер параметров (Radix Popover / Menu / Portal)
+        // 1. Открытый поповер параметров (Radix Popover / Menu / Portal) — наивысший приоритет!
+        // Перехватываем стрелки ВСЕГДА, когда поповер открыт, даже если ae === body, чтобы Grok не листал слайд!
         const pop = _gcOpenPopover();
-        if (pop && (pop === ae || pop.contains(ae))) {
-            return { kind: 'popover', pop, cur: ae };
+        if (pop) {
+            return { kind: 'popover', pop, cur: (ae && pop.contains(ae)) ? ae : null };
         }
+
+        if (!ae || ae === document.body || ae === document.documentElement || _gcOwn(ae)) return null;
 
         // 2. Элемент списка опций (меню / список / радиогруппа)
         const opt = ae.closest && ae.closest(GC_ITEM_SEL);
@@ -448,7 +472,13 @@
 
     function _gcArrowStep(list, cur, down) {
         if (!list.length) return null;
-        let i = list.indexOf(cur);
+        let i = -1;
+        if (cur) {
+            i = list.indexOf(cur);
+            if (i < 0) {
+                i = list.findIndex(item => item === cur || item.contains(cur));
+            }
+        }
         if (i < 0) i = list.findIndex(_gcIsOn);
         if (i < 0) return list[down ? 0 : list.length - 1];
         return list[(i + (down ? 1 : -1) + list.length) % list.length];
@@ -472,21 +502,33 @@
                     const items = Array.from(pop.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
                     if (items.length) {
                         const nx = down ? items[0] : items[items.length - 1];
+                        if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1');
                         _gcFocus(nx);
+                        try {
+                            nx.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, cancelable: true }));
+                            nx.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+                        } catch (_) {}
                     }
                 }
             }, 60);
             return;
         }
 
+        // v1.4.6: В выпадающем списке параметров стрелки ТОЛЬКО перемещают подсветку/фокус,
+        // КАТЕГОРИЧЕСКИ НЕ нажимая (mossadPressEl) пункт автоматически, чтобы дать пользователю свободно листать!
         if (t.kind === 'popover' || t.kind === 'list') {
             const rootEl = t.pop || t.list;
             const items = Array.from(rootEl.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
-            const nx = _gcArrowStep(items, t.cur, down);
+            if (!items.length) return;
+            const curItem = (t.cur && (t.cur.closest(GC_ITEM_SEL) || t.cur)) || null;
+            const nx = _gcArrowStep(items, curItem, down);
             if (nx) {
                 if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1');
-                mossadPressEl(nx);
                 _gcFocus(nx);
+                try {
+                    nx.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, cancelable: true }));
+                    nx.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+                } catch (_) {}
             }
             return;
         }
@@ -509,8 +551,39 @@
             const targetCtl = d || a;
             if (targetCtl) {
                 mossadPressEl(targetCtl);
+                setTimeout(() => {
+                    const pop = _gcOpenPopover();
+                    if (pop) {
+                        const items = Array.from(pop.querySelectorAll(GC_ITEM_SEL)).filter(x => _gcShown(x) && _gcUsable(x));
+                        if (items.length) {
+                            const nx = down ? items[0] : items[items.length - 1];
+                            if (!nx.hasAttribute('tabindex')) nx.setAttribute('tabindex', '-1');
+                            _gcFocus(nx);
+                            try {
+                                nx.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, cancelable: true }));
+                                nx.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+                            } catch (_) {}
+                        }
+                    }
+                }, 60);
             }
             return;
+        }
+    }, true);
+
+    // v1.4.6: Выбор подсвеченного пункта в открытом поповере параметров по Enter
+    window.addEventListener('keydown', function grokComposerEnterKey(e) {
+        if (rootDomain !== 'grok.com' || window.capturingFor !== null) return;
+        if (e.key !== 'Enter') return;
+        if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+        const pop = _gcOpenPopover();
+        if (!pop) return;
+        const ae = document.activeElement;
+        const item = (ae && pop.contains(ae)) ? ((ae.closest && ae.closest(GC_ITEM_SEL)) || ae) : null;
+        if (item && item.isConnected) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            mossadPressEl(item);
         }
     }, true);
 
