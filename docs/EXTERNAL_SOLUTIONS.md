@@ -12,6 +12,7 @@
 | **Grok Quota Display Pro** | GreasyFork 578827 (BExhei) | Декодирование Protobuf/gRPC-Web `/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` и `/prod_mc_billing.ConsumerUiSvc/GetGrokUsageInfo`, расчет остатка квоты и сброса, тарифы SuperGrok/Premium/Free | Интегрировано в `src/engines/grok/quota.js` (v1.3.87) |
 | **Grok Rate Limit Display** | GreasyFork (Blankspeaker / KHROTU) | Перехват `/rest/rate-limits`, отображение ограничений по моделям в query-bar | Альтернативный эндпоинт, учтён в архитектуре |
 | **Grok Enhancer** | GreasyFork / Web Store | Отображение кулдаунов и кастомные таймеры | Изучено |
+| **Grok Auto-Regenerate / Batch Helpers** | GreasyFork (Bigel elya, Geordie Greep Remphan) | Паттерн сохранения отправленного промпта перед очисткой формы и ре-инъекция в ProseMirror/Lexical `contenteditable` через `execCommand('insertText')` или React textarea setter для серийной генерации и повторов | Интегрировано в `src/engines/grok/prompt-cycle.js` (v1.4.8) |
 | **MOSSAD Native Slide History** | Собственная реализация MOSSAD | Запоминание кадра при просмотре $\ge 5$ сек, навигация `Alt+=` / `Alt+-`, двухшаговое сворачивание промпта без потери фокуса | Реализовано в `src/engines/grok/history-nav.js` (v1.3.89) |
 
 ---

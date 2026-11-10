@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.7
+// @version      1.4.8
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.7';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.8';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -770,6 +770,7 @@ playlistWidth: 0,
 widgetZoom: 0.9,
 closePanelOnOutsideClick: true,
 collectWatchSec: 30,
+autoUpdateCheck: false,
 updateCheckIntervalSec: 60,
 showSoundToast: true,
 debugSlideshow: false,
@@ -840,7 +841,7 @@ const GLOBAL_DEFAULT_KEYS = [
 'downloadType', 'pdAction', 'filenameTemplateEnabled',
 'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'dblPosition',
 'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
-'playlistRows', 'playlistWidth', 'collectWatchSec', 'updateCheckIntervalSec',
+'playlistRows', 'playlistWidth', 'collectWatchSec', 'autoUpdateCheck', 'updateCheckIntervalSec',
 'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',
 'grokCollapsePromptOnNav', 'grokHistoryDwellSec',
 'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS', 'pinterestJumpKeys',
@@ -3983,12 +3984,23 @@ return (aria === 'submit' || aria === 'make video' || aria === 'edit' || aria.in
 if (!submitBtn) {
 submitBtn = document.querySelector('div.query-bar button[type="submit"], div.query-bar div.relative.z-10 button');
 }
+if (!submitBtn && typeof window.grokFindPromptInput === 'function') {
+const ta = window.grokFindPromptInput(true);
+const comp = ta && ta.closest ? (ta.closest('form') || ta.parentElement?.parentElement?.parentElement) : null;
+if (comp) {
+const cands = Array.from(comp.querySelectorAll('button, [role="button"]')).filter(b => b.offsetWidth > 0 || b.offsetHeight > 0);
+submitBtn = cands.find(b => b.getAttribute('type') === 'submit' || (b.className && /rounded-full/.test(b.className) && b.querySelector('svg'))) || null;
+}
+}
 if (submitBtn) {
 if (submitBtn.disabled || submitBtn.getAttribute('aria-disabled') === 'true') {
 showToast('⚠️ Кнопка отправки Grok неактивна (введите промпт)', true);
 return true;
 }
-triggerClick(submitBtn, 'Grok Universal Submit (Ctrl+Enter)');
+if (typeof window.grokCaptureCurrentPrompt === 'function') {
+window.grokCaptureCurrentPrompt();
+}
+triggerClick(submitBtn, 'Grok Universal Submit (Enter / Ctrl+Enter)');
 showToast('🚀 Запрос Grok отправлен!');
 return true;
 }
@@ -7257,6 +7269,25 @@ function _gcVisible(el) {
 if (!_gcShown(el)) return false;
 return !el.closest('[hidden], [aria-hidden="true"]');
 }
+function _gcRealVisible(el) {
+if (!_gcVisible(el)) return false;
+try {
+const stEl = window.getComputedStyle(el);
+if (!stEl || stEl.display === 'none' || stEl.visibility === 'hidden' || stEl.visibility === 'collapse') return false;
+if (parseFloat(stEl.opacity) <= 0.05 || stEl.pointerEvents === 'none') return false;
+const rect = el.getBoundingClientRect();
+if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+let cur = el.parentElement;
+while (cur && cur.nodeType === 1 && cur !== document.documentElement) {
+if (cur.hasAttribute('hidden') || cur.getAttribute('aria-hidden') === 'true') return false;
+const st = window.getComputedStyle(cur);
+if (!st || st.display === 'none' || st.visibility === 'hidden' || st.visibility === 'collapse') return false;
+if (parseFloat(st.opacity) <= 0.05) return false;
+cur = cur.parentElement;
+}
+} catch (e) { return false; }
+return true;
+}
 function _gcUsable(el) { return !!el && !el.disabled && el.getAttribute('aria-disabled') !== 'true' && !el.hasAttribute('data-disabled'); }
 function _gcLabel(el) { return String((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title'))) || '').trim().toLowerCase(); }
 function _gcText(el) { const t = String(el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase(); return t.length <= 24 ? t : ''; }
@@ -7271,6 +7302,7 @@ const all = Array.from(document.querySelectorAll('textarea, [contenteditable="tr
 const re = /imagine|prompt|промт|промпт|опиши|describe|ask|спрос|type|введите/;
 return all.find(el => re.test(String(el.getAttribute('placeholder') || el.getAttribute('aria-label') || el.getAttribute('data-placeholder') || '').toLowerCase())) || all[0] || null;
 }
+window.grokFindPromptInput = grokFindPromptInput;
 function grokIsPromptInput(el) {
 if (!el || el === document.body || el === document.documentElement) return false;
 const prompt = grokFindPromptInput(true);
@@ -7366,33 +7398,192 @@ _gc.lastStepName = null;
 _gc.useClicked = false;
 }
 window.grokResetCycleState = grokResetCycleState;
+const GC_LAST_PROMPT_SS_KEY = 'mossad_grok_last_prompt';
+const GC_LAST_PROMPT_TS_SS_KEY = 'mossad_grok_last_prompt_ts';
+let _gcLastSubmittedPrompt = '';
+let _gcLastSubmitTs = 0;
+try {
+_gcLastSubmittedPrompt = sessionStorage.getItem(GC_LAST_PROMPT_SS_KEY) || '';
+_gcLastSubmitTs = Number(sessionStorage.getItem(GC_LAST_PROMPT_TS_SS_KEY) || 0) || 0;
+} catch (e) {}
+let _gcRestoredForEmpty = false;
+function grokReadPromptText(el) {
+const p = el || grokFindPromptInput(true);
+if (!p) return '';
+const raw = typeof p.value === 'string' ? p.value : (p.innerText || p.textContent || '');
+return String(raw || '').replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ').trim();
+}
+function grokCaptureCurrentPrompt() {
+if (rootDomain !== 'grok.com') return '';
+const txt = grokReadPromptText();
+if (txt) {
+_gcLastSubmittedPrompt = txt;
+_gcLastSubmitTs = Date.now();
+_gcRestoredForEmpty = false;
+try {
+sessionStorage.setItem(GC_LAST_PROMPT_SS_KEY, txt);
+sessionStorage.setItem(GC_LAST_PROMPT_TS_SS_KEY, String(_gcLastSubmitTs));
+} catch (e) {}
+mossadDebug('grokCycle', 'промт сохранён для быстрого повтора', { len: txt.length });
+}
+return txt;
+}
+window.grokCaptureCurrentPrompt = grokCaptureCurrentPrompt;
+function grokInsertPromptText(el, text) {
+if (!el || !text) return false;
+_gcFocus(el);
+try {
+if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+if (desc && desc.set) desc.set.call(el, text);
+else el.value = text;
+el.dispatchEvent(new Event('input', { bubbles: true }));
+el.dispatchEvent(new Event('change', { bubbles: true }));
+_gcCaretToEnd(el);
+return true;
+}
+if (el.isContentEditable) {
+const sel = window.getSelection && window.getSelection();
+if (sel) {
+const rg = document.createRange();
+rg.selectNodeContents(el);
+sel.removeAllRanges();
+sel.addRange(rg);
+}
+let ok = false;
+try { ok = document.execCommand('insertText', false, text); } catch (e) {}
+if (!ok) {
+el.textContent = text;
+try {
+el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: text }));
+} catch (e) {
+el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+}
+_gcCaretToEnd(el);
+return true;
+}
+} catch (e) {}
+return false;
+}
+function grokComposerHasContent(comp) {
+const p = grokFindPromptInput(true);
+if (p) {
+if (grokReadPromptText(p).length > 0) return true;
+if (p.querySelector && p.querySelector('img, [contenteditable="false"], [data-chip], [data-mention]')) return true;
+}
+const box = comp || grokFindComposer(p);
+if (box) {
+const imgs = Array.from(box.querySelectorAll('img'));
+for (const im of imgs) {
+if (!_gcShown(im) || im.closest(GC_CTRL_SEL)) continue;
+const s = (im.src || '').toLowerCase();
+if (s.includes('avatar') || s.includes('pfp') || s.includes('logo')) continue;
+return true;
+}
+const rmBtn = box.querySelector('button[aria-label*="Remove" i], button[aria-label*="Detach" i], button[aria-label*="Delete" i], button[aria-label*="Удал" i], button[aria-label*="Clear" i]');
+if (rmBtn && _gcShown(rmBtn) && !rmBtn.closest('[role="menu"]')) return true;
+}
+return false;
+}
+window.grokComposerHasContent = grokComposerHasContent;
+function grokDetectActiveItemState() {
+const items = typeof grokGetFilmstripItems === 'function' ? grokGetFilmstripItems() : [];
+const activeIdx = typeof grokGetActiveFilmstripIndex === 'function' ? grokGetActiveFilmstripIndex() : -1;
+const thumb = (activeIdx >= 0 && items[activeIdx]) ? items[activeIdx] : null;
+const main = document.querySelector('main, [role="main"], div[role="dialog"]');
+const activeVid = (typeof getActiveVideo === 'function' ? getActiveVideo() : null) ||
+(main ? main.querySelector('video') : document.querySelector('video'));
+const hasProgressEl = (root, excludeFilmstrip) => {
+if (!root) return false;
+const sels = '.animate-spin, .animate-pulse, [role="progressbar"], [aria-busy="true"], [data-testid*="progress"], [data-state="generating"], svg circle[stroke-dashoffset], img[class*="blur-"]';
+const found = Array.from(root.querySelectorAll(sels)).some(el => {
+if (!_gcShown(el)) return false;
+if (excludeFilmstrip && el.closest('[data-filmstrip-item="true"], button[aria-label*="Thumbnail"], button[aria-label*="thumbnail"]')) return false;
+return true;
+});
+if (found) return true;
+if (!excludeFilmstrip) {
+const txt = (root.textContent || '').trim();
+if (/\b\d{1,3}%/.test(txt)) return true;
+if (/\b(generating|creating|rendering|preparing|queued|генерация|создание|подготовка|в очереди)\b/i.test(txt)) return true;
+}
+return false;
+};
+const genGlobal = (typeof isGrokGeneratingNow === 'function') ? isGrokGeneratingNow() : false;
+const genThumb = hasProgressEl(thumb, false);
+const genMain = hasProgressEl(main, !!thumb);
+const isGenerating = !!(genGlobal || genThumb || genMain);
+const comp = grokFindComposer(grokFindPromptInput(true));
+const ms = comp ? grokFindModeSwitch(comp) : null;
+const thumbHasVideo = !!(thumb && (
+thumb.querySelector('video') ||
+/\b\d{1,2}\s?(?:s|sec|с|сек)\b/i.test(thumb.textContent || '') ||
+/video|видео/i.test(thumb.getAttribute('aria-label') || '')
+));
+const hasLoadedVideo = !!(activeVid && (activeVid.currentSrc || activeVid.src || activeVid.querySelector('source')));
+const hasEmptyVideoTag = !!(activeVid && !activeVid.currentSrc && !activeVid.src && !activeVid.querySelector('source'));
+let isVideo = !!(hasLoadedVideo || hasEmptyVideoTag || thumbHasVideo);
+if (isGenerating && !isVideo && ms && ms.mode === 'video') {
+isVideo = true;
+}
+const state = isGenerating
+? (isVideo ? 'generating-video' : 'generating-image')
+: (isVideo ? 'video' : 'photo');
+const labels = {
+'generating-video': '⏳ Генерация видео',
+'generating-image': '⏳ Генерация фото',
+'video': '🎬 Видео',
+'photo': '🖼 Фото',
+};
+return { state, isGenerating, isVideo, isPhoto: !isVideo, hasActiveThumb: !!thumb, label: labels[state] };
+}
+window.grokDetectActiveItemState = grokDetectActiveItemState;
+const USE_WORD_RE = /(?:^|[^a-zA-Zа-яА-ЯёЁ0-9])(use|использовать)(?:$|[^a-zA-Zа-яА-ЯёЁ0-9])/i;
 function grokFindUseButton() {
 const isFresh = (el) => !el._mossadUseClicked || (Date.now() - el._mossadUseClicked > 800);
+const comp = grokFindComposer(grokFindPromptInput(true));
+const compRect = comp ? _gcRect(comp) : null;
+const isNearComposer = (el) => {
+if (grokIsPromptInput(el)) return false;
+if (el.closest('nav, header, [role="menu"], [role="listbox"]')) return false;
+if (!compRect) return true;
+const r = _gcRect(el);
+if (!r) return false;
+return r.bottom <= compRect.top + 48 && r.top >= compRect.top - 160;
+};
+const isUseText = (el) => {
+const raw = (el.textContent || '').replace(/\s+/g, ' ').trim();
+if (!raw || raw.length > 20) return false;
+return USE_WORD_RE.test(raw);
+};
 const candidates = Array.from(document.querySelectorAll('span, button, [role="button"], div'))
 .filter(el => {
-if (!_gcShown(el) || _gcOwn(el) || !isFresh(el)) return false;
+if (_gcOwn(el) || !isFresh(el)) return false;
 if (el.children.length > 2) return false;
-const t = (el.textContent || '').trim();
-return /^(use|использовать)$/i.test(t);
+if (!isUseText(el)) return false;
+if (!_gcRealVisible(el)) return false;
+return isNearComposer(el);
 });
 for (const el of candidates) {
 const pill = el.closest('.absolute, [class*="bottom-full"], div[class*="ring-1"], div[class*="border-border"], div[class*="surface"]');
-if (pill && _gcShown(pill)) {
+if (pill && pill !== comp && !pill.contains(comp) && _gcRealVisible(pill) && isFresh(pill)) {
 pill._mossadUseTarget = el;
 return pill;
 }
 if (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || (el.classList && el.classList.contains('cursor-pointer'))) {
 return el;
 }
-if (el.parentElement && _gcShown(el.parentElement)) {
+if (el.parentElement && el.parentElement !== comp && _gcRealVisible(el.parentElement) && isFresh(el.parentElement)) {
 el.parentElement._mossadUseTarget = el;
 return el.parentElement;
 }
 }
 const bottomPills = Array.from(document.querySelectorAll('.absolute.bottom-full, [class*="bottom-full"]'))
-.filter(el => _gcShown(el) && !_gcOwn(el));
+.filter(el => _gcRealVisible(el) && isFresh(el) && isNearComposer(el));
 for (const bp of bottomPills) {
-const uSpan = Array.from(bp.querySelectorAll('span, button, div')).find(x => /^(use|использовать)$/i.test((x.textContent || '').trim()));
+const uSpan = Array.from(bp.querySelectorAll('span, button, div')).find(x => isUseText(x) && _gcRealVisible(x));
 if (uSpan) {
 bp._mossadUseTarget = uSpan;
 return bp;
@@ -7473,10 +7664,11 @@ if (item && item.isConnected) {
 try { mossadPressEl(item); } catch (e) {}
 }
 }
-if (!_gc.useClicked && _gc.lastStepName !== 'param') {
+const comp = grokFindComposer(grokFindPromptInput(true));
+if (!grokComposerHasContent(comp) && !_gc.useClicked && _gc.lastStepName !== 'param') {
 const useBtn = grokFindUseButton();
 if (useBtn) {
-mossadDebug('grokCycle', 'шаг prompt: нажатие на кнопку Use');
+mossadDebug('grokCycle', 'шаг prompt: нажатие на видимую кнопку Use');
 _gc.useClicked = true;
 grokClickUseButton(useBtn);
 showToast('✨ Use: промпт загружен');
@@ -7553,9 +7745,12 @@ mossadDebug('grokCycle', 'шаг param: ' + (el === d ? 'секунды/длит
 return true;
 }
 async function grokCycleFocus() {
+const comp = grokFindComposer(grokFindPromptInput(true));
+const hasContent = grokComposerHasContent(comp);
+if (!hasContent) {
 const useBtn = grokFindUseButton();
 if (useBtn) {
-mossadDebug('grokCycle', 'всегда при наличии Use: нажатие на кнопку Use');
+mossadDebug('grokCycle', 'композер пуст: клик по видимой кнопке Use');
 _gc.useClicked = true;
 grokClickUseButton(useBtn);
 showToast('✨ Use: промпт загружен');
@@ -7566,6 +7761,25 @@ if (p) _gcCaretToEnd(p);
 _gc.lastStepName = 'prompt';
 _gc.ts = Date.now();
 return true;
+}
+if (!_gcRestoredForEmpty) {
+const pEl = grokFindPromptInput(true);
+const stateInfo = grokDetectActiveItemState();
+const isRecentSubmit = _gcLastSubmittedPrompt && (Date.now() - _gcLastSubmitTs < 180000);
+let restoreText = '';
+if (isRecentSubmit) restoreText = _gcLastSubmittedPrompt;
+else if (stateInfo.isGenerating && typeof getGrokCurrentPrompt === 'function') {
+restoreText = String(getGrokCurrentPrompt() || '').trim();
+}
+if (pEl && restoreText) {
+_gcRestoredForEmpty = true;
+grokInsertPromptText(pEl, restoreText);
+showToast(`📋 Промпт восстановлен (${stateInfo.label}) — Enter для запуска`);
+_gc.lastStepName = 'prompt';
+_gc.ts = Date.now();
+return true;
+}
+}
 }
 const steps = grokCycleAvailableSteps();
 const nextTarget = grokCycleNextStep();
@@ -7721,13 +7935,26 @@ if (rootDomain !== 'grok.com' || window.capturingFor !== null) return;
 if (e.key !== 'Enter') return;
 if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
 const pop = _gcOpenPopover();
-if (!pop) return;
+if (pop) {
 const ae = document.activeElement;
 const item = (ae && pop.contains(ae)) ? ((ae.closest && ae.closest(GC_ITEM_SEL)) || ae) : null;
 if (item && item.isConnected) {
 e.preventDefault();
 e.stopImmediatePropagation();
 mossadPressEl(item);
+}
+return;
+}
+const ae = document.activeElement;
+if (grokIsPromptInput(e.target || ae)) {
+grokCaptureCurrentPrompt();
+return;
+}
+if (grokCycleWhere() === 'mode' && typeof window.triggerGrokSubmit === 'function') {
+e.preventDefault();
+e.stopImmediatePropagation();
+grokCaptureCurrentPrompt();
+window.triggerGrokSubmit();
 }
 }, true);
 window.addEventListener('keydown', function grokCycleKey(e) {
@@ -7744,6 +7971,17 @@ if (rootDomain !== 'grok.com' || !e.target) return;
 const t = e.target;
 if (t.closest && t.closest('[data-filmstrip-item], button[aria-label*="Thumbnail"], button[aria-label*="thumbnail"], a[href*="/imagine/post/"], [data-sidebar-item], #mossad-playlist-panel')) {
 grokResetCycleState();
+}
+const btn = t.closest && t.closest('button, [role="button"]');
+if (btn && !_gcOwn(btn)) {
+const comp = grokFindComposer(grokFindPromptInput(true));
+if (comp && comp.contains(btn)) {
+const isSubmit = btn.getAttribute('type') === 'submit' ||
+btn.querySelector('g[id*="arrow-up"]') ||
+(/rounded-full/.test(btn.className || '') && btn.querySelector('svg')) ||
+/(send|submit|make video|generate|отправить|создать)/i.test(btn.getAttribute('aria-label') || '');
+if (isSubmit) grokCaptureCurrentPrompt();
+}
 }
 }, true);
 window.addEventListener('popstate', () => {
@@ -12429,6 +12667,7 @@ return false;
 let _lastUpdateCheckTime = 0;
 let _updateCheckInProgress = false;
 function checkRemoteVersion(force = false) {
+if (!force && !_turboUpdateCheck && !config.autoUpdateCheck) return;
 if (!isMossadBarOrUiVisible()) {
 if (_turboUpdateCheck) stopTurboMode(false);
 return;
@@ -12479,9 +12718,9 @@ fetch(url, { cache: 'no-store' })
 .then(onText)
 .catch(() => { _updateCheckInProgress = false; });
 }
-setTimeout(() => checkRemoteVersion(true), 2000);
-setInterval(() => checkRemoteVersion(false), 5000);
-window.addEventListener('focus', () => checkRemoteVersion(false));
+setTimeout(() => { if (config.autoUpdateCheck) checkRemoteVersion(true); }, 2000);
+setInterval(() => { if (config.autoUpdateCheck || _turboUpdateCheck) checkRemoteVersion(false); }, 5000);
+window.addEventListener('focus', () => { if (config.autoUpdateCheck) checkRemoteVersion(false); });
 const btnTodo = document.createElement('button');
 btnTodo.id = 'mossad-btn-todo';
 mossadLabelEl(btnTodo, 'todoBtn');
@@ -14235,6 +14474,7 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'playlistRows', t: 'num', label: 'Список: видимых строк', step: 1, min: 5 },
 { k: 'playlistWidth', t: 'num', label: 'Список: ширина, px (0 = авто)', step: 10, min: 0 },
 { k: 'collectWatchSec', t: 'num', label: 'Досбор после «Собрать», сек', step: 5, min: 5 },
+{ k: 'autoUpdateCheck', t: 'bool', label: 'Автопроверка обновлений (GitHub)' },
 { k: 'pinterestMode', t: 'text', label: 'Pinterest: режим (rand / +1 / 1–30)' },
 { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
 { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото (балансировка серий)', step: 5, min: 0 },
@@ -14672,11 +14912,15 @@ return `
               Debug-лог слайдшоу/удаления
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
-            <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+            <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
               <span>v${SCRIPT_VERSION} · 2026-11-10</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
+              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#d1d5db;cursor:pointer;margin-left:auto;" title="Автоматическая фоновая проверка обновлений на GitHub. Если выключено — обновление проверяется только вручную (кнопка 🔄 или Win+Alt+R)">
+                <input id="mossad-cb-auto-update" type="checkbox" style="accent-color:#3b82f6;" ${config.autoUpdateCheck ? 'checked' : ''}>
+                Автообновление
+              </label>
             </div>
             </div>
             <div data-pane="hotkeys" style="display:none; flex-direction:column; gap:8px;">
@@ -15323,6 +15567,13 @@ e.preventDefault(); e.stopPropagation();
 mossadBeep(k, { test: true, cfg: beepsFromForm() });
 };
 });
+const cbAutoUpdate = modal.querySelector('#mossad-cb-auto-update');
+if (cbAutoUpdate) {
+cbAutoUpdate.onchange = (e) => {
+Settings.set('autoUpdateCheck', e.target.checked);
+showToast(e.target.checked ? '🔔 Автообновление: проверка включена' : '🔕 Автообновление: автопроверка выключена');
+};
+}
 modal.querySelector('#mossad-cb-debug').onchange = (e) => {
 Settings.setQuiet('debugSlideshow', e.target.checked);
 if (e.target.checked) mossadDebug('settings', 'debug-лог включён');

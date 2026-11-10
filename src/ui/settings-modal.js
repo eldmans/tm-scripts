@@ -374,6 +374,7 @@
         { k: 'playlistRows',      t: 'num', label: 'Список: видимых строк', step: 1, min: 5 },
         { k: 'playlistWidth',     t: 'num', label: 'Список: ширина, px (0 = авто)', step: 10, min: 0 },
         { k: 'collectWatchSec',   t: 'num', label: 'Досбор после «Собрать», сек', step: 5, min: 5 },
+        { k: 'autoUpdateCheck',   t: 'bool', label: 'Автопроверка обновлений (GitHub)' },
         { k: 'pinterestMode',     t: 'text', label: 'Pinterest: режим (rand / +1 / 1–30)' },
         { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
         { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото (балансировка серий)', step: 5, min: 0 },
@@ -841,11 +842,15 @@
               Debug-лог слайдшоу/удаления
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
-            <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+            <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
               <span>v${SCRIPT_VERSION} · 2026-11-10</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
+              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#d1d5db;cursor:pointer;margin-left:auto;" title="Автоматическая фоновая проверка обновлений на GitHub. Если выключено — обновление проверяется только вручную (кнопка 🔄 или Win+Alt+R)">
+                <input id="mossad-cb-auto-update" type="checkbox" style="accent-color:#3b82f6;" ${config.autoUpdateCheck ? 'checked' : ''}>
+                Автообновление
+              </label>
             </div>
             </div>
             <div data-pane="hotkeys" style="display:none; flex-direction:column; gap:8px;">
@@ -1578,6 +1583,13 @@
                 mossadBeep(k, { test: true, cfg: beepsFromForm() });
             };
         });
+        const cbAutoUpdate = modal.querySelector('#mossad-cb-auto-update');
+        if (cbAutoUpdate) {
+            cbAutoUpdate.onchange = (e) => {
+                Settings.set('autoUpdateCheck', e.target.checked);
+                showToast(e.target.checked ? '🔔 Автообновление: проверка включена' : '🔕 Автообновление: автопроверка выключена');
+            };
+        }
         modal.querySelector('#mossad-cb-debug').onchange = (e) => {
             Settings.setQuiet('debugSlideshow', e.target.checked);
             if (e.target.checked) mossadDebug('settings', 'debug-лог включён');

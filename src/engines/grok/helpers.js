@@ -76,13 +76,24 @@
         if (!submitBtn) {
             submitBtn = document.querySelector('div.query-bar button[type="submit"], div.query-bar div.relative.z-10 button');
         }
+        if (!submitBtn && typeof window.grokFindPromptInput === 'function') {
+            const ta = window.grokFindPromptInput(true);
+            const comp = ta && ta.closest ? (ta.closest('form') || ta.parentElement?.parentElement?.parentElement) : null;
+            if (comp) {
+                const cands = Array.from(comp.querySelectorAll('button, [role="button"]')).filter(b => b.offsetWidth > 0 || b.offsetHeight > 0);
+                submitBtn = cands.find(b => b.getAttribute('type') === 'submit' || (b.className && /rounded-full/.test(b.className) && b.querySelector('svg'))) || null;
+            }
+        }
 
         if (submitBtn) {
             if (submitBtn.disabled || submitBtn.getAttribute('aria-disabled') === 'true') {
                 showToast('⚠️ Кнопка отправки Grok неактивна (введите промпт)', true);
                 return true;
             }
-            triggerClick(submitBtn, 'Grok Universal Submit (Ctrl+Enter)');
+            if (typeof window.grokCaptureCurrentPrompt === 'function') {
+                window.grokCaptureCurrentPrompt();
+            }
+            triggerClick(submitBtn, 'Grok Universal Submit (Enter / Ctrl+Enter)');
             showToast('🚀 Запрос Grok отправлен!');
             return true;
         }

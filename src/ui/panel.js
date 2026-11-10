@@ -299,6 +299,8 @@
         let _lastUpdateCheckTime = 0;
         let _updateCheckInProgress = false;
         function checkRemoteVersion(force = false) {
+            // v1.4.8: Если автопроверка выключена — фоновые проверки не выполняются (кроме ручного клика/турбо)
+            if (!force && !_turboUpdateCheck && !config.autoUpdateCheck) return;
             // v1.3.98: Проверка строго только при видимом интерфейсе MOSSAD (помимо овалов)
             if (!isMossadBarOrUiVisible()) {
                 if (_turboUpdateCheck) stopTurboMode(false);
@@ -354,9 +356,9 @@
                 .catch(() => { _updateCheckInProgress = false; });
         }
 
-        setTimeout(() => checkRemoteVersion(true), 2000);
-        setInterval(() => checkRemoteVersion(false), 5000);
-        window.addEventListener('focus', () => checkRemoteVersion(false));
+        setTimeout(() => { if (config.autoUpdateCheck) checkRemoteVersion(true); }, 2000);
+        setInterval(() => { if (config.autoUpdateCheck || _turboUpdateCheck) checkRemoteVersion(false); }, 5000);
+        window.addEventListener('focus', () => { if (config.autoUpdateCheck) checkRemoteVersion(false); });
 
         // «2DO» тудушки (шире на 30%)
         const btnTodo = document.createElement('button');
