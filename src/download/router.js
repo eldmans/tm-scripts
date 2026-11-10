@@ -79,9 +79,15 @@
             return { urls: [fullImg], type: 'image' };
         }
         
-        const allImgs = Array.from(document.querySelectorAll('img')).filter(i => i.width > 200 && i.height > 200);
+        const allImgs = Array.from(document.querySelectorAll('img')).filter(i => {
+            if (i.width < 200 || i.height < 200) return false;
+            const src = (i.currentSrc || i.src || '').toLowerCase();
+            if (!src || src.includes('.svg') || src.startsWith('data:image/svg') || src.includes('image/svg+xml')) return false;
+            if (src.includes('logo') || src.includes('avatar') || src.includes('badge')) return false;
+            return true;
+        });
         if (allImgs.length > 0 && !rootDomain.includes('redgifs.com') && !rootDomain.includes('vk')) {
-            return { urls: [allImgs[0].src], type: 'image' };
+            return { urls: [allImgs[0].currentSrc || allImgs[0].src], type: 'image' };
         }
         
         return null;
@@ -154,8 +160,11 @@
             }).catch(e => { console.error('[MOSSAD] Pinterest download resolve error:', e); showToast('❌ Медиа не найдено', true); if (onDoneCallback) onDoneCallback(); });
             return;
         }
+        const pendingConfirm = (typeof getPendingDuplicateInfo === 'function') ? getPendingDuplicateInfo() : null;
         if (duplicateRecord) {
             _activeDuplicateRecord = duplicateRecord;
+        } else if (pendingConfirm && pendingConfirm.record) {
+            _activeDuplicateRecord = pendingConfirm.record;
         } else if (!bypassDuplicateCheck) {
             _activeDuplicateRecord = null;
         }
@@ -207,10 +216,13 @@
         _lastDownloadUrl = primaryUrl;
         _lastDownloadTime = now;
 
-        const currentDup = duplicateRecord || _activeDuplicateRecord;
+        const currentDup = duplicateRecord || _activeDuplicateRecord || (pendingConfirm && pendingConfirm.record ? pendingConfirm.record : null);
+        const dupInfo = currentDup ? (typeof findOriginalRecordInfo === 'function' ? findOriginalRecordInfo(currentDup) : null) : null;
         const isDup = Boolean(currentDup && (currentDup.filename || currentDup.rootFilename));
-        const rootBase = isDup ? (currentDup.rootFilename || (extractRootFilename(currentDup.filename))) : '';
-        const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL` : '';
+        const rootBase = dupInfo ? dupInfo.rootBase : (isDup ? (currentDup.rootFilename || extractRootFilename(currentDup.filename)) : '');
+        const dupNum = dupInfo ? (dupInfo.count || 1) : 1;
+        const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL${dupNum}` : '';
+        const siteCount = (typeof mossadIncSiteDlCount === 'function') ? mossadIncSiteDlCount(rootDomain) : 1;
         
         // v1.3.53: данные для имени — общий mossadFilenameContext (его же использует окно «?»)
         const fctx = mossadFilenameContext(media);
@@ -240,14 +252,17 @@
         // --- Применяем шаблон имени файла, если включён ---
         if (config.filenameTemplateEnabled) {
             const ext2 = media.type === 'video' ? 'mp4' : 'jpg';
-            const vars = buildFilenameVars(Object.assign({}, fctx, { dblSuffix, rootBase }));
+            const vars = buildFilenameVars(Object.assign({}, fctx, { dblSuffix, rootBase, siteCount, dupNum }));
             filename = renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2);
         } else if (isDup) {
-            // Без шаблона: добавляем разметку дубликата перед расширением
+            // Без шаблона: добавляем разметку дубликата с учетом dblPosition (end/middle)
             const lastDot = filename.lastIndexOf('.');
             const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
             const extPart = lastDot !== -1 ? filename.slice(lastDot) : (media.type === 'video' ? '.mp4' : '.jpg');
-            filename = `${base}${dblSuffix}${extPart}`;
+            const formatted = (typeof formatDblMark === 'function')
+                ? formatDblMark(base, dblSuffix, rootBase, dupNum, config.dblPosition || 'end')
+                : `${base}${dblSuffix}`;
+            filename = `${formatted}${extPart}`;
         }
 
         const urls = media.urls;

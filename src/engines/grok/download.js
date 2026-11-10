@@ -147,17 +147,30 @@
         const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
         const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
         const ext2 = media ? media.ext : (hasVid ? 'mp4' : 'jpg');
-        const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (extractRootFilename(duplicateRecord.filename))) : '';
-        const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
 
-        // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4
+        const pendingConfirm = (typeof getPendingDuplicateInfo === 'function') ? getPendingDuplicateInfo() : null;
+        const currentDup = duplicateRecord || (pendingConfirm && pendingConfirm.record ? pendingConfirm.record : null);
+        const dupInfo = currentDup ? (typeof findOriginalRecordInfo === 'function' ? findOriginalRecordInfo(currentDup) : null) : null;
+        const isDup = Boolean(currentDup && (currentDup.filename || currentDup.rootFilename));
+        const rootBase = dupInfo ? dupInfo.rootBase : (isDup ? (currentDup.rootFilename || extractRootFilename(currentDup.filename)) : '');
+        const dupNum = dupInfo ? (dupInfo.count || 1) : 1;
+        const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL${dupNum}` : '';
+        const siteCount = (typeof mossadIncSiteDlCount === 'function') ? mossadIncSiteDlCount('grok.com') : 1;
+
+        // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4 (с учетом dblPosition)
         const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
-        let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
+        let defaultBase = `${defaultPrefix}-grok`;
+        if (isDup) {
+            defaultBase = (typeof formatDblMark === 'function')
+                ? formatDblMark(defaultBase, dblSuffix, rootBase, dupNum, config.dblPosition || 'end')
+                : `${defaultBase}${dblSuffix}`;
+        }
+        let grokFilename = `${defaultBase}.${ext2}`;
 
         if (config.filenameTemplateEnabled) {
             // v1.3.53: общий словарь тегов (buildFilenameVars) — тот же, что в окне «?»
-            const vars = buildFilenameVars(Object.assign(grokFilenameContext(media), { dblSuffix, rootBase }));
-            grokFilename = renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2);
+            const vars = buildFilenameVars(Object.assign(grokFilenameContext(media), { dblSuffix, rootBase, siteCount, dupNum }));
+            grokFilename = renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2);
         }
 
         let postActionTriggered = false;

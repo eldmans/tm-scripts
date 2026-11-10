@@ -716,14 +716,22 @@
                     <label title="Пауза при потере фокуса браузера"><input id="mossad-cb-brsr" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnBrsrSwitch ? 'checked' : ''}> Brsr</label>
                     <label title="Авто Full Screen при переходе"><input id="mossad-cb-universal-fs" type="checkbox" style="accent-color:#3b82f6;" ${(config.autoFS !== undefined ? config.autoFS : config.pinterestAutoFS) ? 'checked' : ''}> FS</label>
                     <label title="Качать дубликаты сразу без подтверждения"><input id="mossad-cb-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}> Дубли</label>
+                    <label title="Позиция пометки дубликата (DBL): в конце или в середине имени файла" style="display:flex; align-items:center; gap:2px; font-size:11px;">
+                        DBL:
+                        <select id="mossad-sel-dbl-pos" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:1px 2px; font-size:10px;">
+                            <option value="end" ${config.dblPosition === 'end' ? 'selected' : ''}>В конце</option>
+                            <option value="middle" ${config.dblPosition === 'middle' ? 'selected' : ''}>В сер-не</option>
+                        </select>
+                    </label>
                     ${rootDomain === 'grok.com' ? `
                     <label title="Удержание позиции + автоподтверждение удаления"><input id="mossad-cb-holdpost" type="checkbox" style="accent-color:#3b82f6;" ${(config.deleteHoldpost || config.deleteAutoconfirm) ? 'checked' : ''}> hold post</label>
                     ` : ''}
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <label title="Ширина списка плейлиста в px (0 = авто под ширину меню)" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-                        Ширина списка (px): <input id="mossad-in-playlist-w" type="number" min="0" max="800" step="10" value="${config.playlistWidth || 0}" style="width:48px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="0 = авто под ширину меню">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size:11px; color:#9ca3af;">
+                    <span title="Сквозной номер успешных закачек на текущем сайте">📥 Закачек: <b id="mossad-txt-site-dl-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b></span>
+                    <label title="Ширина списка плейлиста в px (0 = авто под ширину меню)" style="display:flex; align-items:center; gap:4px;">
+                        Список px: <input id="mossad-in-playlist-w" type="number" min="0" max="800" step="10" value="${config.playlistWidth || 0}" style="width:44px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="0 = авто под ширину меню">
                     </label>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
@@ -907,6 +915,13 @@
             const cbAllowDup = panel.querySelector('#mossad-cb-allow-dup');
             if (cbAllowDup) {
                 cbAllowDup.onchange = (e) => Settings.set('allowDuplicates', e.target.checked);
+            }
+            const selDblPos = panel.querySelector('#mossad-sel-dbl-pos');
+            if (selDblPos) {
+                selDblPos.onchange = (e) => {
+                    Settings.set('dblPosition', e.target.value);
+                    showToast(`DBL пометка: ${e.target.value === 'middle' ? 'В середине' : 'В конце'}`);
+                };
             }
             if (rootDomain === 'grok.com') {
                 const cbHold = panel.querySelector('#mossad-cb-holdpost');

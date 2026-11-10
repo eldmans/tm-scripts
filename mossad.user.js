@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.6
+// @version      1.4.7
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.6';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.7';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -759,6 +759,7 @@ stopOnBrsrSwitch: false,
 deleteAutoconfirm: true,
 deleteHoldpost: true,
 allowDuplicates: false,
+dblPosition: 'end',
 githubToken: '',
 githubConfigPath: 'mossad-config.json',
 filenameTemplate: '',
@@ -837,7 +838,7 @@ const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
 const GLOBAL_DEFAULT_KEYS = [
 'slideshowDelay', 'videoLoops', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
 'downloadType', 'pdAction', 'filenameTemplateEnabled',
-'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates',
+'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'dblPosition',
 'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
 'playlistRows', 'playlistWidth', 'collectWatchSec', 'updateCheckIntervalSec',
 'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',
@@ -1952,12 +1953,12 @@ if (!rawName || typeof rawName !== 'string') return 'original';
 let name = rawName.replace(/\.[^/.]+$/, '').trim();
 if (!name) return 'original';
 if (name.includes('(')) {
-while (/\bDBL\b/i.test(name)) {
-const m = name.match(/\(([^()]+)\)\s*DBL/i);
+while (/\bDBL\d*\b/i.test(name)) {
+const m = name.match(/\(([^()]+)\)\s*DBL\d*/i);
 if (m && m[1]) {
 name = m[1].trim();
 } else {
-name = name.replace(/\s*[-_]?\s*DBL\b/gi, '').trim();
+name = name.replace(/\s*[-_]?\s*DBL\d*\b/gi, '').trim();
 break;
 }
 }
@@ -1970,7 +1971,7 @@ name = parts[0];
 }
 }
 }
-name = name.replace(/\s*[-_]?\s*DBL\b/gi, '').trim();
+name = name.replace(/\s*[-_]?\s*DBL\d*\b/gi, '').trim();
 name = name.replace(/^[()]+|[()]+$/g, '').trim();
 name = name.replace(/[\s_-]+$/, '').trim();
 if (name.length > 50) {
@@ -1979,6 +1980,61 @@ name = name.slice(0, 50).trim() + '…';
 return name || 'original';
 }
 window.extractRootFilename = extractRootFilename;
+function formatDblMark(base, dblSuffix, rootBase, dupNum = 1, dblPosition = (config.dblPosition || 'end')) {
+if (!dblSuffix) return base;
+const tag = `DBL${dupNum || 1}`;
+const cleanRoot = rootBase || 'original';
+if (dblPosition === 'middle') {
+const sepMatch = base.match(/[-_~]/);
+if (sepMatch) {
+const sep = sepMatch[0];
+const parts = base.split(sep);
+if (parts.length >= 2) {
+const mid = Math.floor(parts.length / 2);
+const left = parts.slice(0, mid).join(sep);
+const right = parts.slice(mid).join(sep);
+return `${left}-(${cleanRoot})_${tag}-${right}`.replace(/-{2,}/g, '-');
+}
+}
+return `${base}-(${cleanRoot})_${tag}`;
+}
+return `${base}${dblSuffix}`;
+}
+window.formatDblMark = formatDblMark;
+function mossadSiteCounterKey(domain = rootDomain) {
+const d = (domain || rootDomain || 'site').replace(/[^a-z0-9._-]/gi, '_').toLowerCase();
+return `mossad_site_dl_count_${d}`;
+}
+function mossadGetSiteDlCount(domain = rootDomain) {
+const k = mossadSiteCounterKey(domain);
+let val = 0;
+try {
+if (typeof GM_getValue === 'function') val = parseInt(GM_getValue(k, 0), 10) || 0;
+if (!val) val = parseInt(localStorage.getItem(k) || '0', 10) || 0;
+} catch (e) {}
+return val;
+}
+window.mossadGetSiteDlCount = mossadGetSiteDlCount;
+function mossadIncSiteDlCount(domain = rootDomain) {
+const k = mossadSiteCounterKey(domain);
+const cur = mossadGetSiteDlCount(domain) + 1;
+try {
+if (typeof GM_setValue === 'function') GM_setValue(k, cur);
+localStorage.setItem(k, String(cur));
+} catch (e) {}
+return cur;
+}
+window.mossadIncSiteDlCount = mossadIncSiteDlCount;
+function mossadSetSiteDlCount(val, domain = rootDomain) {
+const k = mossadSiteCounterKey(domain);
+const num = Math.max(0, parseInt(val, 10) || 0);
+try {
+if (typeof GM_setValue === 'function') GM_setValue(k, num);
+localStorage.setItem(k, String(num));
+} catch (e) {}
+return num;
+}
+window.mossadSetSiteDlCount = mossadSetSiteDlCount;
 let _isRewinding = false;
 window._isRewinding = false;
 function doRewind(onComplete) {
@@ -2036,6 +2092,7 @@ const MOSSAD_TPL_TAGS = [
 { k: 'time', aliases: [], what: 'Время скачивания: чч-мм-сс' },
 { k: 'ext', aliases: [], what: 'Расширение: mp4 / jpg (добавляется само, если имя не оканчивается на него)' },
 { k: 'n', aliases: [], what: 'Последние 6 цифр текущего времени в мс (не счётчик)' },
+{ k: 'count', aliases: ['sitecount', 'num', 'seq', 'dlcount'], what: 'Порядковый номер успешной закачки на текущем сайте (1, 2, 3...)' },
 { k: 'dbl', aliases: [], what: 'Пометка дубликата « (исходное имя) DBL»; без тега добавляется в конец сама' },
 { k: 'oldname', aliases: ['copy', 'root'], what: 'Имя ранее скачанного файла (только для дубликата, до 50 символов)' },
 ];
@@ -2237,6 +2294,8 @@ const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
 const ext = ctx.ext || (ctx.type === 'video' ? 'mp4' : 'jpg');
 const titleRaw = ctx.title != null ? ctx.title : (document.title || '');
 const junk = mossadParseJunkList(ctx.junk != null ? ctx.junk : mossadJunkText());
+const siteCount = ctx.siteCount != null ? ctx.siteCount : (typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 1);
+const dupNum = ctx.dupNum || 1;
 return {
 id: postId,
 conv: String(ctx.convId || ''),
@@ -2255,6 +2314,9 @@ date: `${p2(now.getDate())}.${p2(now.getMonth() + 1)}.${String(now.getFullYear()
 time: `${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`,
 ext,
 n: String(now.getTime()).slice(-6),
+count: String(siteCount).padStart(3, '0'),
+countraw: String(siteCount),
+dupnum: dupNum,
 dbl: ctx.dblSuffix || '',
 oldname: ctx.rootBase || '',
 };
@@ -2405,7 +2467,7 @@ extPart = `.${ext}`;
 }
 if (!base) base = String(vars.id || '').slice(0, 8) || 'media';
 if (base.length > MOSSAD_NAME_MAX) base = base.slice(0, MOSSAD_NAME_MAX).replace(/[-_~.\s]+$/, '');
-if (isDup && !hasDblVar && dblSuffix) base = `${base}${dblSuffix}`;
+if (isDup && !hasDblVar && dblSuffix) base = (typeof formatDblMark === "function") ? formatDblMark(base, dblSuffix, vars.oldname, vars.dupnum, config.dblPosition || "end") : `${base}${dblSuffix}`;
 return `${base}${extPart}`;
 }
 window.renderFilenameTemplate = renderFilenameTemplate;
@@ -2887,16 +2949,24 @@ url: url,
 name: filename,
 saveAs: false,
 onload: () => {
-showToast('✅ Сохранено!');
+const siteCount = (typeof mossadGetSiteDlCount === 'function') ? mossadGetSiteDlCount() : 0;
+showToast(siteCount ? `✅ Сохранено! [№${siteCount} на ${rootDomain}]` : '✅ Сохранено!');
 if (onSuccess) { try { onSuccess(); } catch (e) {} }
+const doSave = (hashVal = '') => {
 saveFileToHistory({
-hash: '',
+hash: hashVal,
 filename,
 rootFilename: extractRootFilename(filename),
 url: url || location.href,
 postUrl: postUrl || location.href,
 domain: rootDomain
 });
+};
+if (typeof resolveMediaHash === 'function') {
+resolveMediaHash(url).then(h => doSave(h || '')).catch(() => doSave(''));
+} else {
+doSave('');
+}
 },
 onerror: (err) => {
 console.warn('[MOSSAD] GM_download failed, trying fallback:', err);
@@ -2980,7 +3050,8 @@ const a = document.createElement('a');
 a.href = blobUrl; a.download = filename;
 document.body.appendChild(a); a.click();
 setTimeout(() => { a.remove(); URL.revokeObjectURL(blobUrl); }, 2000);
-showToast('✅ Сохранено!');
+const siteCount = (typeof mossadGetSiteDlCount === 'function') ? mossadGetSiteDlCount() : 0;
+showToast(siteCount ? `✅ Сохранено! [№${siteCount} на ${rootDomain}]` : '✅ Сохранено!');
 }
 
 // ── src/download/history.js ──
@@ -2990,6 +3061,76 @@ const MOSSAD_STORE_NAME = 'downloads';
 let _mossadDBPromise = null;
 let _pendingDuplicateConfirm = null;
 let _dupTimerInterval = null;
+function isPostUrlSpecific(url) {
+if (!url || typeof url !== 'string') return false;
+try {
+const u = new URL(url);
+const host = u.hostname.toLowerCase();
+if (host.includes('huggingface') || host.includes('hf.space')) return false;
+if (u.pathname === '/' || u.pathname === '') return false;
+if (host.includes('grok.com') && u.pathname.includes('/imagine/post/')) return true;
+if (host.includes('pinterest.') && u.pathname.includes('/pin/')) return true;
+if (host.includes('instagram.com') && /\/(?:p|reel)\//.test(u.pathname)) return true;
+if (host.includes('redgifs.com') && u.pathname.includes('/watch/')) return true;
+return false;
+} catch (e) {
+return false;
+}
+}
+window.isPostUrlSpecific = isPostUrlSpecific;
+async function resolveMediaHash(mediaUrl) {
+if (!mediaUrl || typeof mediaUrl !== 'string') return null;
+try {
+if (mediaUrl.startsWith('data:')) {
+const res = await fetch(mediaUrl);
+const blob = await res.blob();
+return await computeSHA256(blob);
+}
+if (mediaUrl.startsWith('blob:') || (typeof location !== 'undefined' && mediaUrl.startsWith(location.origin))) {
+const res = await fetch(mediaUrl);
+if (res.ok) {
+const blob = await res.blob();
+return await computeSHA256(blob);
+}
+}
+} catch (e) {}
+return null;
+}
+window.resolveMediaHash = resolveMediaHash;
+function findOriginalRecordInfo(matchRecord) {
+if (!matchRecord) return { originalRecord: null, originalName: '', rootBase: '', count: 1, allRoots: '' };
+const root = matchRecord.rootFilename || extractRootFilename(matchRecord.filename);
+const hash = matchRecord.hash || '';
+const matches = [];
+for (const r of _cachedHashes.values()) {
+if ((hash && r.hash && r.hash === hash) || (root && r.rootFilename && r.rootFilename === root)) {
+matches.push(r);
+}
+}
+if (matches.length === 0) matches.push(matchRecord);
+matches.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.id || '').localeCompare(b.id || ''));
+const earliest = matches[0];
+const originalFilename = earliest.filename || matchRecord.filename || 'original';
+const originalRoot = earliest.rootFilename || extractRootFilename(originalFilename);
+const uniqueRoots = Array.from(new Set(matches.map(m => m.rootFilename || extractRootFilename(m.filename)).filter(Boolean)));
+let allRoots = uniqueRoots.join(', ');
+if (allRoots.length > 50) allRoots = allRoots.slice(0, 50).trim() + '…';
+const count = matches.length;
+return {
+originalRecord: earliest,
+originalName: originalFilename,
+rootBase: originalRoot || 'original',
+count: count,
+allRoots: allRoots || originalRoot || 'original'
+};
+}
+window.findOriginalRecordInfo = findOriginalRecordInfo;
+function getPendingDuplicateInfo() {
+if (!_pendingDuplicateConfirm) return null;
+if (Date.now() > _pendingDuplicateConfirm.expiresAt) return null;
+return _pendingDuplicateConfirm;
+}
+window.getPendingDuplicateInfo = getPendingDuplicateInfo;
 const _cachedHashes = new Map();
 const _cachedUrls = new Map();
 const _videoHashes = new Set();
@@ -3007,7 +3148,7 @@ _photoHashes.add(record.hash);
 }
 }
 if (record.url) _cachedUrls.set(record.url, record);
-if (record.postUrl) _cachedUrls.set(record.postUrl, record);
+if (record.postUrl && isPostUrlSpecific(record.postUrl)) _cachedUrls.set(record.postUrl, record);
 }
 async function loadHistoryCache() {
 if (_isCacheLoaded) return;
@@ -3076,6 +3217,10 @@ return null;
 }
 }
 async function checkFileInHistory(hash, mediaUrl, postUrl, mediaType = null) {
+if (!hash && mediaUrl) {
+const h = await resolveMediaHash(mediaUrl);
+if (h) hash = h;
+}
 if (hash) {
 if (mediaType === 'video' && _videoHashes.has(hash)) {
 return _cachedHashes.get(hash);
@@ -3090,7 +3235,7 @@ return _cachedHashes.get(hash);
 if (mediaUrl && _cachedUrls.has(mediaUrl)) {
 return _cachedUrls.get(mediaUrl);
 }
-if (postUrl && _cachedUrls.has(postUrl)) {
+if (postUrl && isPostUrlSpecific(postUrl) && _cachedUrls.has(postUrl)) {
 return _cachedUrls.get(postUrl);
 }
 if (_isCacheLoaded) {
@@ -3117,7 +3262,7 @@ checkUrls();
 }
 function checkUrls() {
 const urlIdx = store.index('url');
-const targetUrl = mediaUrl || postUrl;
+const targetUrl = mediaUrl || (isPostUrlSpecific(postUrl) ? postUrl : null);
 if (targetUrl) {
 const urlReq = urlIdx.get(targetUrl);
 urlReq.onsuccess = () => {
@@ -3214,11 +3359,11 @@ notice.innerHTML = `
                 </span>
                 <button id="mossad-dup-close" style="background:transparent; border:none; color:#9ca3af; cursor:pointer; font-size:12px; padding:0 4px;">✕</button>
             </div>
-            <div style="color:#f3f4f6; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px;" title="${record.filename}">
-                📄 ${record.filename}
+            <div style="color:#f3f4f6; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px;" title="${dupInfo.originalName || record.filename}">
+                📄 Исходный: ${dupInfo.originalName || record.filename}
             </div>
             <div style="color:#9ca3af; font-size:11px;">
-                📅 ${record.date || 'ранее'}
+                📅 ${dupInfo.originalRecord?.date || record.date || 'ранее'} · Копия #${dupInfo.count} (след. DBL${dupInfo.count})
             </div>
             <div id="mossad-dup-timer-txt" style="color:#facc15; font-size:11px; font-weight:bold; margin-top:2px;">
                 ⏱ Нажмите «Скачать» за ${secondsLeft}с для повтора
@@ -3231,9 +3376,14 @@ _pendingDuplicateConfirm = null;
 if (notice && notice.parentNode) notice.remove();
 };
 notice.querySelector('#mossad-dup-close').onclick = closeNotice;
+const dupInfo = findOriginalRecordInfo(record);
 const lockedId = record.id || record.hash || lockedMediaUrl || lockedPostUrl || '';
 _pendingDuplicateConfirm = {
 id: lockedId,
+record,
+dupInfo,
+rootBase: dupInfo.rootBase,
+count: dupInfo.count,
 lockedPostUrl: lockedPostUrl || '',
 lockedMediaUrl: lockedMediaUrl || '',
 expiresAt: Date.now() + 6000,
@@ -4419,13 +4569,25 @@ const shortId = currentPostId ? currentPostId.slice(0, 8) : String(Date.now()).s
 const shortId4 = currentPostId ? currentPostId.slice(0, 4) : '';
 const shortConv4 = currentConvId ? currentConvId.slice(0, 4) : '';
 const ext2 = media ? media.ext : (hasVid ? 'mp4' : 'jpg');
-const rootBase = duplicateRecord ? (duplicateRecord.rootFilename || (extractRootFilename(duplicateRecord.filename))) : '';
-const dblSuffix = duplicateRecord ? ` (${rootBase || 'original'}) DBL` : '';
+const pendingConfirm = (typeof getPendingDuplicateInfo === 'function') ? getPendingDuplicateInfo() : null;
+const currentDup = duplicateRecord || (pendingConfirm && pendingConfirm.record ? pendingConfirm.record : null);
+const dupInfo = currentDup ? (typeof findOriginalRecordInfo === 'function' ? findOriginalRecordInfo(currentDup) : null) : null;
+const isDup = Boolean(currentDup && (currentDup.filename || currentDup.rootFilename));
+const rootBase = dupInfo ? dupInfo.rootBase : (isDup ? (currentDup.rootFilename || extractRootFilename(currentDup.filename)) : '');
+const dupNum = dupInfo ? (dupInfo.count || 1) : 1;
+const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL${dupNum}` : '';
+const siteCount = (typeof mossadIncSiteDlCount === 'function') ? mossadIncSiteDlCount('grok.com') : 1;
 const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
-let grokFilename = `${defaultPrefix}-grok${dblSuffix}.${ext2}`;
+let defaultBase = `${defaultPrefix}-grok`;
+if (isDup) {
+defaultBase = (typeof formatDblMark === 'function')
+? formatDblMark(defaultBase, dblSuffix, rootBase, dupNum, config.dblPosition || 'end')
+: `${defaultBase}${dblSuffix}`;
+}
+let grokFilename = `${defaultBase}.${ext2}`;
 if (config.filenameTemplateEnabled) {
-const vars = buildFilenameVars(Object.assign(grokFilenameContext(media), { dblSuffix, rootBase }));
-grokFilename = renderFilenameTemplate(config.filenameTemplate, vars, Boolean(duplicateRecord), dblSuffix, ext2);
+const vars = buildFilenameVars(Object.assign(grokFilenameContext(media), { dblSuffix, rootBase, siteCount, dupNum }));
+grokFilename = renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2);
 }
 let postActionTriggered = false;
 const triggerImmediatePostAction = () => {
@@ -9468,13 +9630,24 @@ const txt = (b.textContent || '').trim().toLowerCase();
 return submitKeywords.some(kw => txt.includes(kw));
 }) || null;
 }
+function isSvgMedia(src) {
+if (!src || typeof src !== 'string') return true;
+const s = src.toLowerCase();
+return s.includes('.svg') || s.startsWith('data:image/svg') || s.includes('image/svg+xml');
+}
+function extractItemId(src) {
+if (!src) return String(Date.now()).slice(-8);
+const m = src.match(/\/([a-zA-Z0-9_-]{6,36})\.(?:png|jpe?g|webp|mp4|webm)/i);
+if (m && m[1]) return m[1].slice(0, 12);
+return String(Date.now()).slice(-8);
+}
 function findMedia() {
 if (!isSupported()) return null;
 const videos = Array.from(document.querySelectorAll('.gradio-video video, .output-video video, div[data-testid="video"] video, video'));
 const validVideo = videos.find(v => {
 const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
-return src && !src.startsWith('blob:http') && !src.includes('tampermonkey') && v.videoWidth > 100;
-}) || videos.find(v => (v.src || v.currentSrc) && (v.offsetWidth > 150 || v.videoWidth > 100));
+return src && !src.startsWith('blob:http') && !src.includes('tampermonkey') && !isSvgMedia(src) && (v.videoWidth > 100 || v.offsetWidth > 150);
+});
 if (validVideo) {
 const src = validVideo.src || (validVideo.querySelector('source') && validVideo.querySelector('source').src) || validVideo.currentSrc;
 if (src) {
@@ -9485,16 +9658,19 @@ type: 'video',
 userName: meta.author,
 spaceName: meta.space,
 subtype: meta.subtype,
-itemId: String(Date.now()).slice(-8),
+itemId: extractItemId(src),
 postUrl: location.href
 };
 }
 }
 const dlLinks = Array.from(document.querySelectorAll('a[download], a.download-button, a[title*="Download" i]'));
 for (const a of dlLinks) {
-const href = a.href;
+const href = a.href || '';
+const dlAttr = a.getAttribute('download') || '';
+if (isSvgMedia(href) || isSvgMedia(dlAttr)) continue;
+if (a.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"]')) continue;
 if (href && (href.startsWith('http') || href.startsWith('blob:'))) {
-const isVid = /\.(mp4|webm)(\?|$)/i.test(href);
+const isVid = /\.(mp4|webm)(\?|$)/i.test(href) || /\.(mp4|webm)$/i.test(dlAttr);
 const meta = getSpaceMetadata();
 return {
 urls: [href],
@@ -9502,52 +9678,70 @@ type: isVid ? 'video' : 'image',
 userName: meta.author,
 spaceName: meta.space,
 subtype: meta.subtype,
-itemId: String(Date.now()).slice(-8),
+itemId: extractItemId(href) || extractItemId(dlAttr),
 postUrl: location.href
 };
 }
 }
 const imgSelectors = [
-'.gradio-image img',
-'div[data-testid="image"] img',
 '.output-image img',
+'div[data-testid="image"]:not(.input-image) img',
+'.image-preview img',
 '.gallery img',
-'div.image-container img',
-'div[data-testid="stImage"] img'
+'div[data-testid="stImage"] img',
+'.gradio-image:not(.input-image) img',
+'div.image-container img'
 ];
 for (const sel of imgSelectors) {
 const imgs = Array.from(document.querySelectorAll(sel));
-const goodImg = imgs.find(i => (i.naturalWidth > 150 || i.width > 150) && i.src && !i.src.includes('avatar') && !i.src.includes('icon'));
-if (goodImg && goodImg.src) {
+const goodImg = imgs.find(i => {
+const src = i.currentSrc || i.src || '';
+if (!src || isSvgMedia(src)) return false;
+if (src.includes('avatar') || src.includes('icon') || src.includes('logo') || src.includes('badge')) return false;
+if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
+if (i.naturalWidth > 0 && i.naturalWidth < 120) return false;
+if (i.naturalWidth === 0 && (i.offsetWidth < 120 || i.offsetHeight < 120)) return false;
+return true;
+});
+if (goodImg) {
+const src = goodImg.currentSrc || goodImg.src;
+if (src) {
 const meta = getSpaceMetadata();
 return {
-urls: [goodImg.src],
+urls: [src],
 type: 'image',
 userName: meta.author,
 spaceName: meta.space,
 subtype: meta.subtype,
-itemId: String(Date.now()).slice(-8),
+itemId: extractItemId(src),
 postUrl: location.href
 };
+}
 }
 }
 const allImgs = Array.from(document.querySelectorAll('img')).filter(i => {
 if (i.naturalWidth < 200 && i.width < 200) return false;
-const src = i.src || '';
-if (src.includes('logo') || src.includes('avatar') || src.includes('badge')) return false;
+const src = i.currentSrc || i.src || '';
+if (!src || isSvgMedia(src)) return false;
+if (src.includes('logo') || src.includes('avatar') || src.includes('badge') || src.includes('icon')) return false;
+if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
 return true;
 });
 if (allImgs.length > 0) {
+const targetImg = allImgs[allImgs.length - 1];
+const src = targetImg.currentSrc || targetImg.src;
+if (src && !isSvgMedia(src)) {
 const meta = getSpaceMetadata();
 return {
-urls: [allImgs[allImgs.length - 1].src],
+urls: [src],
 type: 'image',
 userName: meta.author,
 spaceName: meta.space,
 subtype: meta.subtype,
-itemId: String(Date.now()).slice(-8),
+itemId: extractItemId(src),
 postUrl: location.href
 };
+}
 }
 return null;
 }
@@ -9580,26 +9774,29 @@ return localStorage.getItem(key) === 'true';
 return false;
 }
 function startWatcher() {
-if (_isWaitingForGeneration) return;
+if (_isWaitingForGeneration) {
+console.log('[MOSSAD HF] Ждун уже активен, проверка продолжается...');
+return;
+}
 _isWaitingForGeneration = true;
-showToast('⏳ Ждун автосохранения активен...');
+showToast('⏳ Ждун HF Авто-DL активен...');
 const startMedia = findMedia();
 const initialSrc = startMedia && startMedia.urls ? startMedia.urls[0] : null;
 let checkCount = 0;
-const maxChecks = 300;
+const maxChecks = 500;
 if (_autoSaveTimer) clearInterval(_autoSaveTimer);
 _autoSaveTimer = setInterval(() => {
 checkCount++;
+const isGenerating = Boolean(document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"], [aria-busy="true"]'));
 const curMedia = findMedia();
 const curSrc = curMedia && curMedia.urls ? curMedia.urls[0] : null;
-const isGenerating = Boolean(document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"]'));
 if (curSrc && curSrc !== initialSrc && curSrc !== _lastDownloadedSrc && !isGenerating) {
 clearInterval(_autoSaveTimer);
 _autoSaveTimer = null;
 _isWaitingForGeneration = false;
 _lastDownloadedSrc = curSrc;
-showToast('🎉 Генерация завершена! Автоскачивание...');
-triggerDownload(true);
+showToast('🎉 Генерация завершена! HF Авто-DL...');
+triggerDownload(true, null, null, curMedia);
 return;
 }
 if (checkCount >= maxChecks) {
@@ -9608,7 +9805,54 @@ _autoSaveTimer = null;
 _isWaitingForGeneration = false;
 console.log('[MOSSAD HF] Тайм-аут ожидания генерации');
 }
-}, 1000);
+}, 600);
+}
+let _hfAutoDlHooked = false;
+function initAutoDlListeners() {
+if (_hfAutoDlHooked || !isSupported()) return;
+_hfAutoDlHooked = true;
+document.addEventListener('click', (e) => {
+if (!isAutoSaveEnabled()) return;
+const target = e.target;
+if (!target) return;
+const btn = target.closest('button, input[type="submit"], input[type="button"], [role="button"]');
+if (!btn) return;
+const submitBtn = findSubmitButton();
+if (btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''))) {
+setTimeout(() => startWatcher(), 200);
+}
+}, true);
+document.addEventListener('keydown', (e) => {
+if (!isAutoSaveEnabled()) return;
+if (e.key === 'Enter' && !e.shiftKey) {
+const tag = (e.target && e.target.tagName || '').toLowerCase();
+if (tag === 'textarea' || tag === 'input') {
+setTimeout(() => startWatcher(), 300);
+}
+}
+}, true);
+try {
+const observer = new MutationObserver((mutations) => {
+if (!isAutoSaveEnabled() || _isWaitingForGeneration) return;
+for (const m of mutations) {
+if (m.type === 'childList' || m.type === 'attributes') {
+const isGen = document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"]');
+if (isGen) {
+startWatcher();
+break;
+}
+}
+}
+});
+observer.observe(document.body || document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-testid', 'aria-busy'] });
+} catch(e) {}
+}
+if (typeof document !== 'undefined') {
+if (document.readyState === 'loading') {
+document.addEventListener('DOMContentLoaded', initAutoDlListeners);
+} else {
+initAutoDlListeners();
+}
 }
 return {
 isSupported,
@@ -9779,9 +10023,15 @@ if (img && img.src) {
 const fullImg = img.src.replace(/\/736x\//, '/originals/').replace(/\/474x\//, '/originals/');
 return { urls: [fullImg], type: 'image' };
 }
-const allImgs = Array.from(document.querySelectorAll('img')).filter(i => i.width > 200 && i.height > 200);
+const allImgs = Array.from(document.querySelectorAll('img')).filter(i => {
+if (i.width < 200 || i.height < 200) return false;
+const src = (i.currentSrc || i.src || '').toLowerCase();
+if (!src || src.includes('.svg') || src.startsWith('data:image/svg') || src.includes('image/svg+xml')) return false;
+if (src.includes('logo') || src.includes('avatar') || src.includes('badge')) return false;
+return true;
+});
 if (allImgs.length > 0 && !rootDomain.includes('redgifs.com') && !rootDomain.includes('vk')) {
-return { urls: [allImgs[0].src], type: 'image' };
+return { urls: [allImgs[0].currentSrc || allImgs[0].src], type: 'image' };
 }
 return null;
 }
@@ -9842,8 +10092,11 @@ triggerDownload(bypassDuplicateCheck, duplicateRecord, onDoneCallback, m);
 }).catch(e => { console.error('[MOSSAD] Pinterest download resolve error:', e); showToast('❌ Медиа не найдено', true); if (onDoneCallback) onDoneCallback(); });
 return;
 }
+const pendingConfirm = (typeof getPendingDuplicateInfo === 'function') ? getPendingDuplicateInfo() : null;
 if (duplicateRecord) {
 _activeDuplicateRecord = duplicateRecord;
+} else if (pendingConfirm && pendingConfirm.record) {
+_activeDuplicateRecord = pendingConfirm.record;
 } else if (!bypassDuplicateCheck) {
 _activeDuplicateRecord = null;
 }
@@ -9885,10 +10138,13 @@ return;
 }
 _lastDownloadUrl = primaryUrl;
 _lastDownloadTime = now;
-const currentDup = duplicateRecord || _activeDuplicateRecord;
+const currentDup = duplicateRecord || _activeDuplicateRecord || (pendingConfirm && pendingConfirm.record ? pendingConfirm.record : null);
+const dupInfo = currentDup ? (typeof findOriginalRecordInfo === 'function' ? findOriginalRecordInfo(currentDup) : null) : null;
 const isDup = Boolean(currentDup && (currentDup.filename || currentDup.rootFilename));
-const rootBase = isDup ? (currentDup.rootFilename || (extractRootFilename(currentDup.filename))) : '';
-const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL` : '';
+const rootBase = dupInfo ? dupInfo.rootBase : (isDup ? (currentDup.rootFilename || extractRootFilename(currentDup.filename)) : '');
+const dupNum = dupInfo ? (dupInfo.count || 1) : 1;
+const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL${dupNum}` : '';
+const siteCount = (typeof mossadIncSiteDlCount === 'function') ? mossadIncSiteDlCount(rootDomain) : 1;
 const fctx = mossadFilenameContext(media);
 const postId = fctx.postId;
 const convId = fctx.convId;
@@ -9911,13 +10167,16 @@ filename = `${titleClean}.${ext}`;
 }
 if (config.filenameTemplateEnabled) {
 const ext2 = media.type === 'video' ? 'mp4' : 'jpg';
-const vars = buildFilenameVars(Object.assign({}, fctx, { dblSuffix, rootBase }));
+const vars = buildFilenameVars(Object.assign({}, fctx, { dblSuffix, rootBase, siteCount, dupNum }));
 filename = renderFilenameTemplate(config.filenameTemplate, vars, isDup, dblSuffix, ext2);
 } else if (isDup) {
 const lastDot = filename.lastIndexOf('.');
 const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
 const extPart = lastDot !== -1 ? filename.slice(lastDot) : (media.type === 'video' ? '.mp4' : '.jpg');
-filename = `${base}${dblSuffix}${extPart}`;
+const formatted = (typeof formatDblMark === 'function')
+? formatDblMark(base, dblSuffix, rootBase, dupNum, config.dblPosition || 'end')
+: `${base}${dblSuffix}`;
+filename = `${formatted}${extPart}`;
 }
 const urls = media.urls;
 let attemptedIndex = 0;
@@ -12538,14 +12797,22 @@ panel.innerHTML = `
                     <label title="Пауза при потере фокуса браузера"><input id="mossad-cb-brsr" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnBrsrSwitch ? 'checked' : ''}> Brsr</label>
                     <label title="Авто Full Screen при переходе"><input id="mossad-cb-universal-fs" type="checkbox" style="accent-color:#3b82f6;" ${(config.autoFS !== undefined ? config.autoFS : config.pinterestAutoFS) ? 'checked' : ''}> FS</label>
                     <label title="Качать дубликаты сразу без подтверждения"><input id="mossad-cb-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}> Дубли</label>
+                    <label title="Позиция пометки дубликата (DBL): в конце или в середине имени файла" style="display:flex; align-items:center; gap:2px; font-size:11px;">
+                        DBL:
+                        <select id="mossad-sel-dbl-pos" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:1px 2px; font-size:10px;">
+                            <option value="end" ${config.dblPosition === 'end' ? 'selected' : ''}>В конце</option>
+                            <option value="middle" ${config.dblPosition === 'middle' ? 'selected' : ''}>В сер-не</option>
+                        </select>
+                    </label>
                     ${rootDomain === 'grok.com' ? `
                     <label title="Удержание позиции + автоподтверждение удаления"><input id="mossad-cb-holdpost" type="checkbox" style="accent-color:#3b82f6;" ${(config.deleteHoldpost || config.deleteAutoconfirm) ? 'checked' : ''}> hold post</label>
                     ` : ''}
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <label title="Ширина списка плейлиста в px (0 = авто под ширину меню)" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-                        Ширина списка (px): <input id="mossad-in-playlist-w" type="number" min="0" max="800" step="10" value="${config.playlistWidth || 0}" style="width:48px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="0 = авто под ширину меню">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size:11px; color:#9ca3af;">
+                    <span title="Сквозной номер успешных закачек на текущем сайте">📥 Закачек: <b id="mossad-txt-site-dl-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b></span>
+                    <label title="Ширина списка плейлиста в px (0 = авто под ширину меню)" style="display:flex; align-items:center; gap:4px;">
+                        Список px: <input id="mossad-in-playlist-w" type="number" min="0" max="800" step="10" value="${config.playlistWidth || 0}" style="width:44px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="0 = авто под ширину меню">
                     </label>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
@@ -12718,6 +12985,13 @@ Settings.set('pinterestAutoFS', e.target.checked);
 const cbAllowDup = panel.querySelector('#mossad-cb-allow-dup');
 if (cbAllowDup) {
 cbAllowDup.onchange = (e) => Settings.set('allowDuplicates', e.target.checked);
+}
+const selDblPos = panel.querySelector('#mossad-sel-dbl-pos');
+if (selDblPos) {
+selDblPos.onchange = (e) => {
+Settings.set('dblPosition', e.target.value);
+showToast(`DBL пометка: ${e.target.value === 'middle' ? 'В середине' : 'В конце'}`);
+};
 }
 if (rootDomain === 'grok.com') {
 const cbHold = panel.querySelector('#mossad-cb-holdpost');
@@ -13950,6 +14224,7 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'pdAction', t: 'sel', label: 'После скачивания', opts: [['none', '—'], ['upns', 'Не СШ +1'], ['always', '+1 всегда'], ['del', 'Delete (Grok)']] },
 { k: 'filenameTemplateEnabled', t: 'bool', label: 'Использовать шаблон' },
 { k: 'allowDuplicates', t: 'bool', label: 'Дубли: качать без вопроса' },
+{ k: 'dblPosition', t: 'sel', label: 'Позиция пометки DBL', opts: [['end', 'В конце имени'], ['middle', 'В середине имени']] },
 { k: 'deleteHoldpost', t: 'hold', label: 'hold post (удаление)' },
 { k: 'stopOnTabSwitch', t: 'bool', label: 'Tab: стоп при смене вкладки' },
 { k: 'stopOnBrsrSwitch', t: 'bool', label: 'Brsr: стоп при уходе из браузера' },
@@ -14347,6 +14622,14 @@ modal.innerHTML = `
               <input id="mossad-gen-junk" type="text" placeholder="Watch Online, &quot; - Brave&quot;" value="${mossadJunkText().replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
                 style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
             </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;">
+              <span title="Позиция пометки дубликата в имени файла: в конце имени или в середине">Пометка дубликата (DBL):</span>
+              <select id="mossad-gen-dbl-pos" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+                <option value="end" ${config.dblPosition === 'end' ? 'selected' : ''}>В конце имени (по умолчанию)</option>
+                <option value="middle" ${config.dblPosition === 'middle' ? 'selected' : ''}>В середине имени</option>
+              </select>
+              <span style="font-size:11px;color:#9ca3af;margin-left:auto;" title="Сквозной номер успешных закачек для ${rootDomain}">Закачек на сайте: <b id="mossad-gen-site-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b></span>
+            </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Клик мышью вне окон MOSSAD сворачивает панель настроек виджета до краткого меню">
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
               Сворачивать панель кликом вне её
@@ -14390,7 +14673,7 @@ return `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-              <span>v${SCRIPT_VERSION} · 2026-11-09</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-10</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -15001,6 +15284,14 @@ mossadWireTplHelp(genTpl.parentElement);
 }
 const genJunk = modal.querySelector('#mossad-gen-junk');
 if (genJunk) genJunk.oninput = genJunk.onchange = (e) => mossadSetJunkText(e.target.value);
+const genDblPos = modal.querySelector('#mossad-gen-dbl-pos');
+if (genDblPos) {
+genDblPos.onchange = (e) => {
+Settings.set('dblPosition', e.target.value);
+const p = document.querySelector('#mossad-sel-dbl-pos');
+if (p) p.value = e.target.value;
+};
+}
 modal.querySelector('#mossad-cb-outside-close').onchange = (e) => {
 Settings.setQuiet('closePanelOnOutsideClick', e.target.checked);
 };

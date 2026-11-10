@@ -18,6 +18,7 @@
         deleteAutoconfirm: true,      // hold post включён (один чекбокс управляет обоими флагами, ANTI_PATTERNS §2)
         deleteHoldpost: true,
         allowDuplicates: false,       // Дубли: качать дубликаты сразу без подтверждения
+        dblPosition: 'end',           // Пометка дубликата DBL: 'end' (в конце) | 'middle' (в середине)
         // v1.3.50: allowedDomains убран — список сайтов в GM `mossad_sites` (domain.js, вкладка «🌍 Сайты»)
         githubToken: '',
         githubConfigPath: 'mossad-config.json',
@@ -106,7 +107,7 @@
     const GLOBAL_DEFAULT_KEYS = [
         'slideshowDelay', 'videoLoops', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
         'downloadType', 'pdAction', 'filenameTemplateEnabled',
-        'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates',
+        'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'dblPosition',
         'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
         'playlistRows', 'playlistWidth', 'collectWatchSec', 'updateCheckIntervalSec',
         'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',

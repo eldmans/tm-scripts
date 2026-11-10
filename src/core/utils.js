@@ -535,12 +535,12 @@
 
         if (name.includes('(')) {
             // Разворачиваем вложенные DBL-матрёшки
-            while (/\bDBL\b/i.test(name)) {
-                const m = name.match(/\(([^()]+)\)\s*DBL/i);
+            while (/\bDBL\d*\b/i.test(name)) {
+                const m = name.match(/\(([^()]+)\)\s*DBL\d*/i);
                 if (m && m[1]) {
                     name = m[1].trim();
                 } else {
-                    name = name.replace(/\s*[-_]?\s*DBL\b/gi, '').trim();
+                    name = name.replace(/\s*[-_]?\s*DBL\d*\b/gi, '').trim();
                     break;
                 }
             }
@@ -555,7 +555,7 @@
             }
         }
 
-        name = name.replace(/\s*[-_]?\s*DBL\b/gi, '').trim();
+        name = name.replace(/\s*[-_]?\s*DBL\d*\b/gi, '').trim();
         name = name.replace(/^[()]+|[()]+$/g, '').trim();
         name = name.replace(/[\s_-]+$/, '').trim();
 
@@ -567,6 +567,72 @@
         return name || 'original';
     }
     window.extractRootFilename = extractRootFilename;
+
+    /**
+     * Форматирует пометку дубликата в зависимости от позиции: 'end' (в конце) или 'middle' (в середине).
+     */
+    function formatDblMark(base, dblSuffix, rootBase, dupNum = 1, dblPosition = (config.dblPosition || 'end')) {
+        if (!dblSuffix) return base;
+        const tag = `DBL${dupNum || 1}`;
+        const cleanRoot = rootBase || 'original';
+        if (dblPosition === 'middle') {
+            const sepMatch = base.match(/[-_~]/);
+            if (sepMatch) {
+                const sep = sepMatch[0];
+                const parts = base.split(sep);
+                if (parts.length >= 2) {
+                    const mid = Math.floor(parts.length / 2);
+                    const left = parts.slice(0, mid).join(sep);
+                    const right = parts.slice(mid).join(sep);
+                    return `${left}-(${cleanRoot})_${tag}-${right}`.replace(/-{2,}/g, '-');
+                }
+            }
+            return `${base}-(${cleanRoot})_${tag}`;
+        }
+        return `${base}${dblSuffix}`;
+    }
+    window.formatDblMark = formatDblMark;
+
+    /**
+     * Сквозной счетчик скачиваний для текущего домена/сайта.
+     */
+    function mossadSiteCounterKey(domain = rootDomain) {
+        const d = (domain || rootDomain || 'site').replace(/[^a-z0-9._-]/gi, '_').toLowerCase();
+        return `mossad_site_dl_count_${d}`;
+    }
+
+    function mossadGetSiteDlCount(domain = rootDomain) {
+        const k = mossadSiteCounterKey(domain);
+        let val = 0;
+        try {
+            if (typeof GM_getValue === 'function') val = parseInt(GM_getValue(k, 0), 10) || 0;
+            if (!val) val = parseInt(localStorage.getItem(k) || '0', 10) || 0;
+        } catch (e) {}
+        return val;
+    }
+    window.mossadGetSiteDlCount = mossadGetSiteDlCount;
+
+    function mossadIncSiteDlCount(domain = rootDomain) {
+        const k = mossadSiteCounterKey(domain);
+        const cur = mossadGetSiteDlCount(domain) + 1;
+        try {
+            if (typeof GM_setValue === 'function') GM_setValue(k, cur);
+            localStorage.setItem(k, String(cur));
+        } catch (e) {}
+        return cur;
+    }
+    window.mossadIncSiteDlCount = mossadIncSiteDlCount;
+
+    function mossadSetSiteDlCount(val, domain = rootDomain) {
+        const k = mossadSiteCounterKey(domain);
+        const num = Math.max(0, parseInt(val, 10) || 0);
+        try {
+            if (typeof GM_setValue === 'function') GM_setValue(k, num);
+            localStorage.setItem(k, String(num));
+        } catch (e) {}
+        return num;
+    }
+    window.mossadSetSiteDlCount = mossadSetSiteDlCount;
 
     /**
      * Флаг выполнения перемотки ленты
@@ -651,6 +717,7 @@
         { k: 'time',       aliases: [],                         what: 'Время скачивания: чч-мм-сс' },
         { k: 'ext',        aliases: [],                         what: 'Расширение: mp4 / jpg (добавляется само, если имя не оканчивается на него)' },
         { k: 'n',          aliases: [],                         what: 'Последние 6 цифр текущего времени в мс (не счётчик)' },
+        { k: 'count',      aliases: ['sitecount', 'num', 'seq', 'dlcount'], what: 'Порядковый номер успешной закачки на текущем сайте (1, 2, 3...)' },
         { k: 'dbl',        aliases: [],                         what: 'Пометка дубликата « (исходное имя) DBL»; без тега добавляется в конец сама' },
         { k: 'oldname',    aliases: ['copy', 'root'],           what: 'Имя ранее скачанного файла (только для дубликата, до 50 символов)' },
     ];
@@ -890,6 +957,8 @@
         const ext = ctx.ext || (ctx.type === 'video' ? 'mp4' : 'jpg');
         const titleRaw = ctx.title != null ? ctx.title : (document.title || '');
         const junk = mossadParseJunkList(ctx.junk != null ? ctx.junk : mossadJunkText()); // v1.3.74: минус-слова сайта
+        const siteCount = ctx.siteCount != null ? ctx.siteCount : (typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 1);
+        const dupNum = ctx.dupNum || 1;
         return {
             id:         postId,
             conv:       String(ctx.convId || ''),
@@ -908,6 +977,9 @@
             time:       `${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`,
             ext,
             n:          String(now.getTime()).slice(-6),
+            count:      String(siteCount).padStart(3, '0'),
+            countraw:   String(siteCount),
+            dupnum:     dupNum,
             dbl:        ctx.dblSuffix || '',
             oldname:    ctx.rootBase || '',
         };
@@ -1082,7 +1154,7 @@
         if (!base) base = String(vars.id || '').slice(0, 8) || 'media';
         if (base.length > MOSSAD_NAME_MAX) base = base.slice(0, MOSSAD_NAME_MAX).replace(/[-_~.\s]+$/, '');
 
-        if (isDup && !hasDblVar && dblSuffix) base = `${base}${dblSuffix}`;
+        if (isDup && !hasDblVar && dblSuffix) base = (typeof formatDblMark === "function") ? formatDblMark(base, dblSuffix, vars.oldname, vars.dupnum, config.dblPosition || "end") : `${base}${dblSuffix}`;
         return `${base}${extPart}`;
     }
     window.renderFilenameTemplate = renderFilenameTemplate;

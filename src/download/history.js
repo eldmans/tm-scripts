@@ -9,6 +9,91 @@
     let _mossadDBPromise = null;
     let _pendingDuplicateConfirm = null; // { key, expiresAt, executeDownload }
     let _dupTimerInterval = null;
+    function isPostUrlSpecific(url) {
+        if (!url || typeof url !== 'string') return false;
+        try {
+            const u = new URL(url);
+            const host = u.hostname.toLowerCase();
+            if (host.includes('huggingface') || host.includes('hf.space')) return false;
+            if (u.pathname === '/' || u.pathname === '') return false;
+            if (host.includes('grok.com') && u.pathname.includes('/imagine/post/')) return true;
+            if (host.includes('pinterest.') && u.pathname.includes('/pin/')) return true;
+            if (host.includes('instagram.com') && /\/(?:p|reel)\//.test(u.pathname)) return true;
+            if (host.includes('redgifs.com') && u.pathname.includes('/watch/')) return true;
+            return false;
+        } catch (e) {
+            return false;
+        }
+    }
+    window.isPostUrlSpecific = isPostUrlSpecific;
+
+    async function resolveMediaHash(mediaUrl) {
+        if (!mediaUrl || typeof mediaUrl !== 'string') return null;
+        try {
+            if (mediaUrl.startsWith('data:')) {
+                const res = await fetch(mediaUrl);
+                const blob = await res.blob();
+                return await computeSHA256(blob);
+            }
+            if (mediaUrl.startsWith('blob:') || (typeof location !== 'undefined' && mediaUrl.startsWith(location.origin))) {
+                const res = await fetch(mediaUrl);
+                if (res.ok) {
+                    const blob = await res.blob();
+                    return await computeSHA256(blob);
+                }
+            }
+        } catch (e) {}
+        return null;
+    }
+    window.resolveMediaHash = resolveMediaHash;
+
+    /**
+     * Находит информацию о самом первом (исходном) файле в истории
+     * и считает общее количество существующих копий (для DBL1, DBL2...).
+     */
+    function findOriginalRecordInfo(matchRecord) {
+        if (!matchRecord) return { originalRecord: null, originalName: '', rootBase: '', count: 1, allRoots: '' };
+
+        const root = matchRecord.rootFilename || extractRootFilename(matchRecord.filename);
+        const hash = matchRecord.hash || '';
+
+        const matches = [];
+        for (const r of _cachedHashes.values()) {
+            if ((hash && r.hash && r.hash === hash) || (root && r.rootFilename && r.rootFilename === root)) {
+                matches.push(r);
+            }
+        }
+        if (matches.length === 0) matches.push(matchRecord);
+
+        matches.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.id || '').localeCompare(b.id || ''));
+
+        const earliest = matches[0];
+        const originalFilename = earliest.filename || matchRecord.filename || 'original';
+        const originalRoot = earliest.rootFilename || extractRootFilename(originalFilename);
+
+        const uniqueRoots = Array.from(new Set(matches.map(m => m.rootFilename || extractRootFilename(m.filename)).filter(Boolean)));
+        let allRoots = uniqueRoots.join(', ');
+        if (allRoots.length > 50) allRoots = allRoots.slice(0, 50).trim() + '…';
+
+        const count = matches.length;
+
+        return {
+            originalRecord: earliest,
+            originalName: originalFilename,
+            rootBase: originalRoot || 'original',
+            count: count,
+            allRoots: allRoots || originalRoot || 'original'
+        };
+    }
+    window.findOriginalRecordInfo = findOriginalRecordInfo;
+
+    function getPendingDuplicateInfo() {
+        if (!_pendingDuplicateConfirm) return null;
+        if (Date.now() > _pendingDuplicateConfirm.expiresAt) return null;
+        return _pendingDuplicateConfirm;
+    }
+    window.getPendingDuplicateInfo = getPendingDuplicateInfo;
+
 
     // IN-MEMORY FAST CACHE (O(1) lookup for 18000+ records)
     const _cachedHashes = new Map(); // hash -> record
@@ -29,7 +114,7 @@
             }
         }
         if (record.url) _cachedUrls.set(record.url, record);
-        if (record.postUrl) _cachedUrls.set(record.postUrl, record);
+        if (record.postUrl && isPostUrlSpecific(record.postUrl)) _cachedUrls.set(record.postUrl, record);
     }
 
     /**
@@ -122,6 +207,11 @@
      * @returns {Promise<Object|null>} Возвращает запись из базы или null.
      */
     async function checkFileInHistory(hash, mediaUrl, postUrl, mediaType = null) {
+        // Если хеш не передан, но есть mediaUrl (blob или same-origin), вычисляем хеш контента
+        if (!hash && mediaUrl) {
+            const h = await resolveMediaHash(mediaUrl);
+            if (h) hash = h;
+        }
         // 1. МГНОВЕННАЯ ПРОВЕРКА В ПАМЯТИ (O(1), 0 миллисекунд)
         if (hash) {
             if (mediaType === 'video' && _videoHashes.has(hash)) {
@@ -137,7 +227,7 @@
         if (mediaUrl && _cachedUrls.has(mediaUrl)) {
             return _cachedUrls.get(mediaUrl);
         }
-        if (postUrl && _cachedUrls.has(postUrl)) {
+        if (postUrl && isPostUrlSpecific(postUrl) && _cachedUrls.has(postUrl)) {
             return _cachedUrls.get(postUrl);
         }
 
@@ -170,7 +260,7 @@
 
                 function checkUrls() {
                     const urlIdx = store.index('url');
-                    const targetUrl = mediaUrl || postUrl;
+                    const targetUrl = mediaUrl || (isPostUrlSpecific(postUrl) ? postUrl : null);
                     if (targetUrl) {
                         const urlReq = urlIdx.get(targetUrl);
                         urlReq.onsuccess = () => {
@@ -293,11 +383,11 @@
                 </span>
                 <button id="mossad-dup-close" style="background:transparent; border:none; color:#9ca3af; cursor:pointer; font-size:12px; padding:0 4px;">✕</button>
             </div>
-            <div style="color:#f3f4f6; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px;" title="${record.filename}">
-                📄 ${record.filename}
+            <div style="color:#f3f4f6; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px;" title="${dupInfo.originalName || record.filename}">
+                📄 Исходный: ${dupInfo.originalName || record.filename}
             </div>
             <div style="color:#9ca3af; font-size:11px;">
-                📅 ${record.date || 'ранее'}
+                📅 ${dupInfo.originalRecord?.date || record.date || 'ранее'} · Копия #${dupInfo.count} (след. DBL${dupInfo.count})
             </div>
             <div id="mossad-dup-timer-txt" style="color:#facc15; font-size:11px; font-weight:bold; margin-top:2px;">
                 ⏱ Нажмите «Скачать» за ${secondsLeft}с для повтора
@@ -316,9 +406,14 @@
 
         // Сохраняем ожидание подтверждения — фиксируем URL/ID файла МОМЕНТА нажатия,
         // чтобы подтверждение сработало только для того же файла, а не любого дубля.
+        const dupInfo = findOriginalRecordInfo(record);
         const lockedId = record.id || record.hash || lockedMediaUrl || lockedPostUrl || '';
         _pendingDuplicateConfirm = {
             id: lockedId,
+            record,
+            dupInfo,
+            rootBase: dupInfo.rootBase,
+            count: dupInfo.count,
             lockedPostUrl: lockedPostUrl || '',
             lockedMediaUrl: lockedMediaUrl || '',
             expiresAt: Date.now() + 6000,

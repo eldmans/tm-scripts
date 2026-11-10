@@ -12,16 +12,24 @@
                     name: filename,
                     saveAs: false,
                     onload: () => {
-                        showToast('✅ Сохранено!');
+                        const siteCount = (typeof mossadGetSiteDlCount === 'function') ? mossadGetSiteDlCount() : 0;
+                        showToast(siteCount ? `✅ Сохранено! [№${siteCount} на ${rootDomain}]` : '✅ Сохранено!');
                         if (onSuccess) { try { onSuccess(); } catch (e) {} }
-                        saveFileToHistory({
-                            hash: '',
-                            filename,
-                            rootFilename: extractRootFilename(filename),
-                            url: url || location.href,
-                            postUrl: postUrl || location.href,
-                            domain: rootDomain
-                        });
+                        const doSave = (hashVal = '') => {
+                            saveFileToHistory({
+                                hash: hashVal,
+                                filename,
+                                rootFilename: extractRootFilename(filename),
+                                url: url || location.href,
+                                postUrl: postUrl || location.href,
+                                domain: rootDomain
+                            });
+                        };
+                        if (typeof resolveMediaHash === 'function') {
+                            resolveMediaHash(url).then(h => doSave(h || '')).catch(() => doSave(''));
+                        } else {
+                            doSave('');
+                        }
                     },
                     onerror: (err) => {
                         console.warn('[MOSSAD] GM_download failed, trying fallback:', err);
@@ -109,6 +117,7 @@
         a.href = blobUrl; a.download = filename;
         document.body.appendChild(a); a.click();
         setTimeout(() => { a.remove(); URL.revokeObjectURL(blobUrl); }, 2000);
-        showToast('✅ Сохранено!');
+        const siteCount = (typeof mossadGetSiteDlCount === 'function') ? mossadGetSiteDlCount() : 0;
+        showToast(siteCount ? `✅ Сохранено! [№${siteCount} на ${rootDomain}]` : '✅ Сохранено!');
     }
 
