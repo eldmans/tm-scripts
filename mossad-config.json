@@ -10,7 +10,7 @@
   "slideshowDelay": 1,
   "delayAfterVideo": 1,
   "downloadType": "none",
-  "pdAction": "upns",
+  "pdAction": "none",
   "stopOnTabSwitch": false,
   "stopOnBrsrSwitch": false,
   "deleteAutoconfirm": true,
