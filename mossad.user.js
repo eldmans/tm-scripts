@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.8
+// @version      1.4.9
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.8';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.9';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -770,8 +770,6 @@ playlistWidth: 0,
 widgetZoom: 0.9,
 closePanelOnOutsideClick: true,
 collectWatchSec: 30,
-autoUpdateCheck: false,
-updateCheckIntervalSec: 60,
 showSoundToast: true,
 debugSlideshow: false,
 pinterestMode: 'rand',
@@ -841,7 +839,7 @@ const GLOBAL_DEFAULT_KEYS = [
 'downloadType', 'pdAction', 'filenameTemplateEnabled',
 'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'dblPosition',
 'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
-'playlistRows', 'playlistWidth', 'collectWatchSec', 'autoUpdateCheck', 'updateCheckIntervalSec',
+'playlistRows', 'playlistWidth', 'collectWatchSec',
 'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',
 'grokCollapsePromptOnNav', 'grokHistoryDwellSec',
 'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS', 'pinterestJumpKeys',
@@ -12560,42 +12558,37 @@ mossadLabelEl(btnUpdate, 'update');
 btnUpdate.style.cssText = `background: #18202f; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; color: #64748b; opacity: 0.55; cursor: pointer; font-size: 13px; padding: 4px 10px; min-width: 32px; transition: all 0.3s ease; text-align: center;`;
 let _turboUpdateCheck = false;
 let _turboTimeoutId = null;
-let _hasUpdateFound = false;
-let _remoteFoundVer = null;
-function isMossadBarOrUiVisible() {
-if (window.widgetState === 'hidden') return false;
-if (container && container.style.display === 'none') return false;
-const isTopBarVis = topBar && topBar.style.display !== 'none' && topBar.offsetWidth > 0;
-const isHudVis = hudRow && hudRow.style.display !== 'none' && hudRow.offsetWidth > 0;
-const isPanelVis = panel && panel.style.display !== 'none' && panel.offsetWidth > 0;
-const pl = document.getElementById('mossad-playlist-panel');
-const isPlVis = pl && pl.style.display !== 'none' && pl.offsetWidth > 0;
-const modal = document.getElementById('mossad-hk-modal');
-const isModalVis = modal && modal.style.display !== 'none';
-return isTopBarVis || isHudVis || isPanelVis || isPlVis || isModalVis;
-}
+let _turboIntervalId = null;
+let _updateCheckInProgress = false;
 function stopTurboMode(notify = false) {
 _turboUpdateCheck = false;
 if (_turboTimeoutId) {
 clearTimeout(_turboTimeoutId);
 _turboTimeoutId = null;
 }
-if (!_hasUpdateFound) {
-setUpdateBtnState('idle');
+if (_turboIntervalId) {
+clearInterval(_turboIntervalId);
+_turboIntervalId = null;
 }
+setUpdateBtnState('idle');
 if (notify) {
-showToast('⚪ Турбо-опрос завершён (лимит 2 мин). Возврат к обычному режиму.');
+showToast('⚪ Ожидание обновления завершено (2 мин истекли).');
 }
 }
 function startTurboMode() {
+if (_turboUpdateCheck) {
+stopTurboMode(false);
+}
 _turboUpdateCheck = true;
-if (_turboTimeoutId) clearTimeout(_turboTimeoutId);
 _turboTimeoutId = setTimeout(() => {
 stopTurboMode(true);
 }, 120000);
+_turboIntervalId = setInterval(() => {
+if (_turboUpdateCheck) checkRemoteVersion();
+}, 5000);
 setUpdateBtnState('turbo');
-showToast('🟢 Турбо-опрос включен (на 2 мин, каждые 7 с). При релизе окно обновления откроется автоматически.');
-checkRemoteVersion(true);
+showToast('🟢 Ожидание обновления активно (2 мин, каждые 5 с). Как только выйдет новая версия — откроется окно установки.');
+checkRemoteVersion();
 }
 function openUpdateTab() {
 const updateUrl = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
@@ -12608,47 +12601,36 @@ return;
 window.open(updateUrl, '_blank');
 }
 btnUpdate.onclick = () => {
+if (_turboUpdateCheck) stopTurboMode(false);
+showToast('🚀 Открываем обновление скрипта...');
 openUpdateTab();
 };
 btnUpdate.oncontextmenu = (e) => {
 e.preventDefault();
 e.stopPropagation();
-if (_hasUpdateFound) {
-openUpdateTab();
-return;
-}
 if (_turboUpdateCheck) {
 stopTurboMode(false);
-showToast('⚪ Турбо-опрос выключен (обычный опрос раз в 60 с).');
+showToast('⚪ Ожидание обновления отменено.');
 } else {
 startTurboMode();
 }
 };
-function setUpdateBtnState(state, remoteVersion) {
+function setUpdateBtnState(state) {
 if (!btnUpdate || !btnUpdate.isConnected) return;
-if (state === 'available') {
-_hasUpdateFound = true;
-_remoteFoundVer = remoteVersion;
-btnUpdate.style.background = '#1e3a8a';
-btnUpdate.style.color = '#38bdf8';
-btnUpdate.style.border = '1px solid #3b82f6';
-btnUpdate.style.boxShadow = '0 0 12px rgba(56, 189, 248, 0.7)';
-btnUpdate.style.opacity = '1';
-btnUpdate.title = `🚀 Доступно обновление: v${remoteVersion}! Клик — обновить (Win+Alt+R)`;
-} else if (state === 'turbo') {
+if (state === 'turbo') {
 btnUpdate.style.background = 'rgba(16, 185, 129, 0.2)';
 btnUpdate.style.color = '#10b981';
 btnUpdate.style.border = '1px solid #10b981';
 btnUpdate.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.4)';
 btnUpdate.style.opacity = '1';
-btnUpdate.title = '🟢 Турбо-опрос активен (2 мин, каждые 7 с). ПКМ — выключить';
+btnUpdate.title = '🟢 Ожидание обновления (2 мин, каждые 5 с). ПКМ — отменить, ЛКМ — открыть скрипт сейчас';
 } else {
 btnUpdate.style.background = '#18202f';
 btnUpdate.style.color = '#64748b';
 btnUpdate.style.border = '1px solid rgba(255, 255, 255, 0.06)';
 btnUpdate.style.boxShadow = 'none';
 btnUpdate.style.opacity = '0.55';
-btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION}). ПКМ — турбо-опрос, ЛКМ — переустановить`;
+btnUpdate.title = `MOSSAD v${SCRIPT_VERSION}\nЛКМ — сразу обновить (открыть скрипт)\nПКМ — ждать релиз (2 мин опрос)`;
 }
 }
 setUpdateBtnState('idle');
@@ -12664,39 +12646,23 @@ if (rv < lv) return false;
 }
 return false;
 }
-let _lastUpdateCheckTime = 0;
-let _updateCheckInProgress = false;
-function checkRemoteVersion(force = false) {
-if (!force && !_turboUpdateCheck && !config.autoUpdateCheck) return;
-if (!isMossadBarOrUiVisible()) {
-if (_turboUpdateCheck) stopTurboMode(false);
-return;
-}
-const now = Date.now();
-const minInterval = _turboUpdateCheck ? 7000 : (Math.max(10, (config.updateCheckIntervalSec || 60)) * 1000);
-if (!force && (now - _lastUpdateCheckTime < minInterval)) return;
+function checkRemoteVersion() {
+if (!_turboUpdateCheck) return;
 if (_updateCheckInProgress) return;
 _updateCheckInProgress = true;
-_lastUpdateCheckTime = now;
+const now = Date.now();
 const url = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/src/banner.js?t=' + now;
 const onText = (txt) => {
 _updateCheckInProgress = false;
+if (!_turboUpdateCheck) return;
 const m = txt && txt.match(/\/\/\s*@version\s+([0-9.]+)/i);
 if (m && m[1]) {
 const remoteVer = m[1].trim();
 const hasUpdate = isNewerVersion(remoteVer, SCRIPT_VERSION);
 if (hasUpdate) {
-const wasTurbo = _turboUpdateCheck;
 stopTurboMode(false);
-setUpdateBtnState('available', remoteVer);
-if (wasTurbo) {
-showToast(`🎉 Найдена v${remoteVer}! Окно обновления открыто.`);
+showToast(`🎉 Найдена v${remoteVer}! Открываем окно установки...`);
 openUpdateTab();
-}
-} else if (_turboUpdateCheck) {
-setUpdateBtnState('turbo');
-} else {
-setUpdateBtnState('idle');
 }
 }
 };
@@ -12718,9 +12684,6 @@ fetch(url, { cache: 'no-store' })
 .then(onText)
 .catch(() => { _updateCheckInProgress = false; });
 }
-setTimeout(() => { if (config.autoUpdateCheck) checkRemoteVersion(true); }, 2000);
-setInterval(() => { if (config.autoUpdateCheck || _turboUpdateCheck) checkRemoteVersion(false); }, 5000);
-window.addEventListener('focus', () => { if (config.autoUpdateCheck) checkRemoteVersion(false); });
 const btnTodo = document.createElement('button');
 btnTodo.id = 'mossad-btn-todo';
 mossadLabelEl(btnTodo, 'todoBtn');
@@ -14474,7 +14437,6 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'playlistRows', t: 'num', label: 'Список: видимых строк', step: 1, min: 5 },
 { k: 'playlistWidth', t: 'num', label: 'Список: ширина, px (0 = авто)', step: 10, min: 0 },
 { k: 'collectWatchSec', t: 'num', label: 'Досбор после «Собрать», сек', step: 5, min: 5 },
-{ k: 'autoUpdateCheck', t: 'bool', label: 'Автопроверка обновлений (GitHub)' },
 { k: 'pinterestMode', t: 'text', label: 'Pinterest: режим (rand / +1 / 1–30)' },
 { k: 'pinterestFilterType', t: 'sel', label: 'Pinterest: фильтр', opts: [['ratio', 'Пропорция %'], ['all', 'Все'], ['image', 'Только фото'], ['video', 'Только видео']] },
 { k: 'pinterestPhotoPercent', t: 'num', label: 'Pinterest: % фото (балансировка серий)', step: 5, min: 0 },
@@ -14913,14 +14875,10 @@ return `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-10</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-13</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
-              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#d1d5db;cursor:pointer;margin-left:auto;" title="Автоматическая фоновая проверка обновлений на GitHub. Если выключено — обновление проверяется только вручную (кнопка 🔄 или Win+Alt+R)">
-                <input id="mossad-cb-auto-update" type="checkbox" style="accent-color:#3b82f6;" ${config.autoUpdateCheck ? 'checked' : ''}>
-                Автообновление
-              </label>
             </div>
             </div>
             <div data-pane="hotkeys" style="display:none; flex-direction:column; gap:8px;">
@@ -15567,13 +15525,6 @@ e.preventDefault(); e.stopPropagation();
 mossadBeep(k, { test: true, cfg: beepsFromForm() });
 };
 });
-const cbAutoUpdate = modal.querySelector('#mossad-cb-auto-update');
-if (cbAutoUpdate) {
-cbAutoUpdate.onchange = (e) => {
-Settings.set('autoUpdateCheck', e.target.checked);
-showToast(e.target.checked ? '🔔 Автообновление: проверка включена' : '🔕 Автообновление: автопроверка выключена');
-};
-}
 modal.querySelector('#mossad-cb-debug').onchange = (e) => {
 Settings.setQuiet('debugSlideshow', e.target.checked);
 if (e.target.checked) mossadDebug('settings', 'debug-лог включён');

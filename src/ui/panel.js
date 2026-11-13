@@ -180,23 +180,8 @@
 
         let _turboUpdateCheck = false;
         let _turboTimeoutId = null;
-        let _hasUpdateFound = false;
-        let _remoteFoundVer = null;
-
-        // v1.3.98: Проверка видимости элементов MOSSAD (помимо овалов квоты/истории).
-        // Если виджет скрыт (только овалы или вообще ничего) — любые опросы GitHub НЕ выполняются!
-        function isMossadBarOrUiVisible() {
-            if (window.widgetState === 'hidden') return false;
-            if (container && container.style.display === 'none') return false;
-            const isTopBarVis = topBar && topBar.style.display !== 'none' && topBar.offsetWidth > 0;
-            const isHudVis = hudRow && hudRow.style.display !== 'none' && hudRow.offsetWidth > 0;
-            const isPanelVis = panel && panel.style.display !== 'none' && panel.offsetWidth > 0;
-            const pl = document.getElementById('mossad-playlist-panel');
-            const isPlVis = pl && pl.style.display !== 'none' && pl.offsetWidth > 0;
-            const modal = document.getElementById('mossad-hk-modal');
-            const isModalVis = modal && modal.style.display !== 'none';
-            return isTopBarVis || isHudVis || isPanelVis || isPlVis || isModalVis;
-        }
+        let _turboIntervalId = null;
+        let _updateCheckInProgress = false;
 
         function stopTurboMode(notify = false) {
             _turboUpdateCheck = false;
@@ -204,24 +189,31 @@
                 clearTimeout(_turboTimeoutId);
                 _turboTimeoutId = null;
             }
-            if (!_hasUpdateFound) {
-                setUpdateBtnState('idle');
+            if (_turboIntervalId) {
+                clearInterval(_turboIntervalId);
+                _turboIntervalId = null;
             }
+            setUpdateBtnState('idle');
             if (notify) {
-                showToast('⚪ Турбо-опрос завершён (лимит 2 мин). Возврат к обычному режиму.');
+                showToast('⚪ Ожидание обновления завершено (2 мин истекли).');
             }
         }
 
         function startTurboMode() {
+            if (_turboUpdateCheck) {
+                stopTurboMode(false);
+            }
             _turboUpdateCheck = true;
-            if (_turboTimeoutId) clearTimeout(_turboTimeoutId);
             // Лимит турбо-режима: 2 минуты (120 секунд), затем авто-отключение
             _turboTimeoutId = setTimeout(() => {
                 stopTurboMode(true);
             }, 120000);
+            _turboIntervalId = setInterval(() => {
+                if (_turboUpdateCheck) checkRemoteVersion();
+            }, 5000);
             setUpdateBtnState('turbo');
-            showToast('🟢 Турбо-опрос включен (на 2 мин, каждые 7 с). При релизе окно обновления откроется автоматически.');
-            checkRemoteVersion(true);
+            showToast('🟢 Ожидание обновления активно (2 мин, каждые 5 с). Как только выйдет новая версия — откроется окно установки.');
+            checkRemoteVersion();
         }
 
         function openUpdateTab() {
@@ -236,49 +228,39 @@
         }
 
         btnUpdate.onclick = () => {
+            // ЛКМ: сразу пытается обновить
+            if (_turboUpdateCheck) stopTurboMode(false);
+            showToast('🚀 Открываем обновление скрипта...');
             openUpdateTab();
         };
 
         btnUpdate.oncontextmenu = (e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (_hasUpdateFound) {
-                openUpdateTab();
-                return;
-            }
             if (_turboUpdateCheck) {
                 stopTurboMode(false);
-                showToast('⚪ Турбо-опрос выключен (обычный опрос раз в 60 с).');
+                showToast('⚪ Ожидание обновления отменено.');
             } else {
                 startTurboMode();
             }
         };
 
-        function setUpdateBtnState(state, remoteVersion) {
+        function setUpdateBtnState(state) {
             if (!btnUpdate || !btnUpdate.isConnected) return;
-            if (state === 'available') {
-                _hasUpdateFound = true;
-                _remoteFoundVer = remoteVersion;
-                btnUpdate.style.background = '#1e3a8a';
-                btnUpdate.style.color = '#38bdf8';
-                btnUpdate.style.border = '1px solid #3b82f6';
-                btnUpdate.style.boxShadow = '0 0 12px rgba(56, 189, 248, 0.7)';
-                btnUpdate.style.opacity = '1';
-                btnUpdate.title = `🚀 Доступно обновление: v${remoteVersion}! Клик — обновить (Win+Alt+R)`;
-            } else if (state === 'turbo') {
+            if (state === 'turbo') {
                 btnUpdate.style.background = 'rgba(16, 185, 129, 0.2)';
                 btnUpdate.style.color = '#10b981';
                 btnUpdate.style.border = '1px solid #10b981';
                 btnUpdate.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.4)';
                 btnUpdate.style.opacity = '1';
-                btnUpdate.title = '🟢 Турбо-опрос активен (2 мин, каждые 7 с). ПКМ — выключить';
+                btnUpdate.title = '🟢 Ожидание обновления (2 мин, каждые 5 с). ПКМ — отменить, ЛКМ — открыть скрипт сейчас';
             } else {
                 btnUpdate.style.background = '#18202f';
                 btnUpdate.style.color = '#64748b';
                 btnUpdate.style.border = '1px solid rgba(255, 255, 255, 0.06)';
                 btnUpdate.style.boxShadow = 'none';
                 btnUpdate.style.opacity = '0.55';
-                btnUpdate.title = `Скрипт актуален (v${SCRIPT_VERSION}). ПКМ — турбо-опрос, ЛКМ — переустановить`;
+                btnUpdate.title = `MOSSAD v${SCRIPT_VERSION}\nЛКМ — сразу обновить (открыть скрипт)\nПКМ — ждать релиз (2 мин опрос)`;
             }
         }
         setUpdateBtnState('idle');
@@ -296,43 +278,24 @@
             return false;
         }
 
-        let _lastUpdateCheckTime = 0;
-        let _updateCheckInProgress = false;
-        function checkRemoteVersion(force = false) {
-            // v1.4.8: Если автопроверка выключена — фоновые проверки не выполняются (кроме ручного клика/турбо)
-            if (!force && !_turboUpdateCheck && !config.autoUpdateCheck) return;
-            // v1.3.98: Проверка строго только при видимом интерфейсе MOSSAD (помимо овалов)
-            if (!isMossadBarOrUiVisible()) {
-                if (_turboUpdateCheck) stopTurboMode(false);
-                return;
-            }
-
-            const now = Date.now();
-            const minInterval = _turboUpdateCheck ? 7000 : (Math.max(10, (config.updateCheckIntervalSec || 60)) * 1000);
-            if (!force && (now - _lastUpdateCheckTime < minInterval)) return;
+        function checkRemoteVersion() {
+            if (!_turboUpdateCheck) return;
             if (_updateCheckInProgress) return;
             _updateCheckInProgress = true;
-            _lastUpdateCheckTime = now;
 
+            const now = Date.now();
             const url = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/src/banner.js?t=' + now;
             const onText = (txt) => {
                 _updateCheckInProgress = false;
+                if (!_turboUpdateCheck) return;
                 const m = txt && txt.match(/\/\/\s*@version\s+([0-9.]+)/i);
                 if (m && m[1]) {
                     const remoteVer = m[1].trim();
                     const hasUpdate = isNewerVersion(remoteVer, SCRIPT_VERSION);
                     if (hasUpdate) {
-                        const wasTurbo = _turboUpdateCheck;
                         stopTurboMode(false);
-                        setUpdateBtnState('available', remoteVer);
-                        if (wasTurbo) {
-                            showToast(`🎉 Найдена v${remoteVer}! Окно обновления открыто.`);
-                            openUpdateTab();
-                        }
-                    } else if (_turboUpdateCheck) {
-                        setUpdateBtnState('turbo');
-                    } else {
-                        setUpdateBtnState('idle');
+                        showToast(`🎉 Найдена v${remoteVer}! Открываем окно установки...`);
+                        openUpdateTab();
                     }
                 }
             };
@@ -355,10 +318,6 @@
                 .then(onText)
                 .catch(() => { _updateCheckInProgress = false; });
         }
-
-        setTimeout(() => { if (config.autoUpdateCheck) checkRemoteVersion(true); }, 2000);
-        setInterval(() => { if (config.autoUpdateCheck || _turboUpdateCheck) checkRemoteVersion(false); }, 5000);
-        window.addEventListener('focus', () => { if (config.autoUpdateCheck) checkRemoteVersion(false); });
 
         // «2DO» тудушки (шире на 30%)
         const btnTodo = document.createElement('button');
