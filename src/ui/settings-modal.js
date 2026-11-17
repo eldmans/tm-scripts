@@ -709,6 +709,53 @@
         updatePreview();
     }
 
+    /**
+     * v1.4.20: Позиционирование окна настроек под основным виджетом MOSSAD
+     * (если пользователь не сохранял кастомную геометрию окна через S/A).
+     */
+    function mossadDockUnderWidget(modal) {
+        if (!modal) return;
+        const widget = document.getElementById('mossad-main-panel') || document.getElementById('mossad-widget-container');
+        const vw = window.innerWidth || document.documentElement.clientWidth || 1024;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 768;
+
+        let wr = null;
+        if (widget) {
+            const r = widget.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) wr = r;
+        }
+
+        const mr = modal.getBoundingClientRect();
+        const mw = mr.width || 460;
+        const mh = mr.height || 540;
+
+        if (wr) {
+            // По горизонтали: выравниваем по тому же краю (правому или левому)
+            let left = (wr.left + wr.width / 2 > vw / 2) ? (wr.right - mw) : wr.left;
+            left = Math.max(10, Math.min(left, vw - mw - 10));
+
+            // По вертикали: под виджетом, если влезает, иначе над ним или с прижимом к низу
+            let top = wr.bottom + 8;
+            if (top + mh > vh - 10) {
+                if (wr.top - mh - 8 >= 10) {
+                    top = wr.top - mh - 8;
+                } else {
+                    top = Math.max(10, vh - mh - 10);
+                }
+            }
+
+            modal.style.left = Math.round(left) + 'px';
+            modal.style.top = Math.round(top) + 'px';
+            modal.style.right = 'auto';
+            modal.style.bottom = 'auto';
+            modal.style.transform = 'none';
+        } else {
+            modal.style.left = '50%';
+            modal.style.top = '50%';
+            modal.style.transform = 'translate(-50%, -50%)';
+        }
+    }
+
     /** tab: 'general' | 'hotkeys' | 'defaults' | 'labels' | 'todos' | 'sites'; не задан / 'last' — последняя открытая вкладка (v1.3.45). */
     function openSettingsWindow(tab) {
         if (!SETTINGS_TABS.includes(tab)) tab = getLastSettingsTab();
@@ -1372,10 +1419,14 @@
         document.body.appendChild(modal);
         // v1.3.78: ресайз за края, перетаскивание за шапку, S/A — запомнить геометрию окна.
         // Заданная высота окна → вкладки тянутся на всю высоту и прокручиваются сами
-        mossadWinAttach(modal, 'settings', { handle: modal.firstElementChild, onGeom: (m) => {
+        const restored = mossadWinAttach(modal, 'settings', { handle: modal.firstElementChild, onGeom: (m) => {
             if (!m.style.height || m.style.height === 'auto') return;
             m.querySelectorAll('[data-pane]').forEach(p => { p.style.maxHeight = 'none'; p.style.flex = '1 1 auto'; p.style.minHeight = '0'; p.style.overflowY = 'auto'; });
         } });
+        // v1.4.20: если сохранённой геометрии нет — позиционируем под основным виджетом MOSSAD
+        if (!restored) {
+            mossadDockUnderWidget(modal);
+        }
 
         // ── Вкладки ──
         const setTab = (t) => {

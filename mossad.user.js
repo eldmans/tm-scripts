@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.19
+// @version      1.4.20
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -657,7 +657,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.19';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.20';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -16548,6 +16548,41 @@ btnRefresh.textContent = '🔄 Обновить данные';
 }
 updatePreview();
 }
+function mossadDockUnderWidget(modal) {
+if (!modal) return;
+const widget = document.getElementById('mossad-main-panel') || document.getElementById('mossad-widget-container');
+const vw = window.innerWidth || document.documentElement.clientWidth || 1024;
+const vh = window.innerHeight || document.documentElement.clientHeight || 768;
+let wr = null;
+if (widget) {
+const r = widget.getBoundingClientRect();
+if (r.width > 0 && r.height > 0) wr = r;
+}
+const mr = modal.getBoundingClientRect();
+const mw = mr.width || 460;
+const mh = mr.height || 540;
+if (wr) {
+let left = (wr.left + wr.width / 2 > vw / 2) ? (wr.right - mw) : wr.left;
+left = Math.max(10, Math.min(left, vw - mw - 10));
+let top = wr.bottom + 8;
+if (top + mh > vh - 10) {
+if (wr.top - mh - 8 >= 10) {
+top = wr.top - mh - 8;
+} else {
+top = Math.max(10, vh - mh - 10);
+}
+}
+modal.style.left = Math.round(left) + 'px';
+modal.style.top = Math.round(top) + 'px';
+modal.style.right = 'auto';
+modal.style.bottom = 'auto';
+modal.style.transform = 'none';
+} else {
+modal.style.left = '50%';
+modal.style.top = '50%';
+modal.style.transform = 'translate(-50%, -50%)';
+}
+}
 function openSettingsWindow(tab) {
 if (!SETTINGS_TABS.includes(tab)) tab = getLastSettingsTab();
 const existing = document.getElementById('mossad-hk-modal');
@@ -17148,10 +17183,13 @@ document.addEventListener('pointercancel', endDrag, true);
 });
 modal._mossadEndDrag = () => endDrag(null);
 document.body.appendChild(modal);
-mossadWinAttach(modal, 'settings', { handle: modal.firstElementChild, onGeom: (m) => {
+const restored = mossadWinAttach(modal, 'settings', { handle: modal.firstElementChild, onGeom: (m) => {
 if (!m.style.height || m.style.height === 'auto') return;
 m.querySelectorAll('[data-pane]').forEach(p => { p.style.maxHeight = 'none'; p.style.flex = '1 1 auto'; p.style.minHeight = '0'; p.style.overflowY = 'auto'; });
 } });
+if (!restored) {
+mossadDockUnderWidget(modal);
+}
 const setTab = (t) => {
 const want = SETTINGS_TABS.includes(t) ? t : 'hotkeys';
 modal.dataset.tab = want;
