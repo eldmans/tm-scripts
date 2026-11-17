@@ -88,7 +88,6 @@
                 }
             } catch (_) {}
         }
-        _initNetworkSniffer();
 
         /**
          * Переключение Большого режима / Large Mode (Theater mode) на Faphouse
@@ -383,15 +382,24 @@
             obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
         }
 
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', _initFocusFix);
-        } else {
-            _initFocusFix();
+        function init() {
+            if (!isSupported()) return;
+            _initNetworkSniffer();
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', _initFocusFix);
+            } else {
+                _initFocusFix();
+            }
         }
 
         return {
+            id: 'faphouse',
             isSupported,
             toggleLargeMode,
-            findMedia
+            findMedia,
+            init
         };
     })();
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.register('faphouse', window.MOSSAD_ENGINES.faphouse);
+    }

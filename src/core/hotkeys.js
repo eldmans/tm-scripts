@@ -2,11 +2,20 @@
     function mossadPlayInWindow() {
         let videoUrl = '';
         try {
-            const engines = window.MOSSAD_ENGINES || {};
-            for (const eng of [engines.faphouse, engines.xvideos, engines.redgifs, engines.huggingface, engines.instagram]) {
-                if (eng && typeof eng.isSupported === 'function' && eng.isSupported() && typeof eng.findMedia === 'function') {
-                    const m = eng.findMedia();
-                    if (m && m.urls && m.urls[0] && !m.urls[0].startsWith('blob:')) { videoUrl = m.urls[0]; break; }
+            if (typeof MossadEngineRegistry !== 'undefined') {
+                const active = MossadEngineRegistry.getActiveEngine();
+                if (active && typeof active.findMedia === 'function') {
+                    const m = active.findMedia();
+                    if (m && m.urls && m.urls[0] && !m.urls[0].startsWith('blob:')) videoUrl = m.urls[0];
+                }
+            }
+            if (!videoUrl) {
+                const engines = window.MOSSAD_ENGINES || {};
+                for (const eng of [engines.faphouse, engines.xvideos, engines.redgifs, engines.huggingface, engines.instagram]) {
+                    if (eng && typeof eng.isSupported === 'function' && eng.isSupported() && typeof eng.findMedia === 'function') {
+                        const m = eng.findMedia();
+                        if (m && m.urls && m.urls[0] && !m.urls[0].startsWith('blob:')) { videoUrl = m.urls[0]; break; }
+                    }
                 }
             }
         } catch (_) {}
@@ -33,6 +42,15 @@
      */
     function mossadToggleLargePlayer() {
         let handled = false;
+
+        // 0. Активный движок из реестра
+        if (typeof MossadEngineRegistry !== 'undefined') {
+            const active = MossadEngineRegistry.getActiveEngine();
+            if (active && typeof active.toggleLargeMode === 'function') {
+                handled = active.toggleLargeMode();
+                if (handled) return handled;
+            }
+        }
 
         // 1. XVideos / XV-RU / XNXX
         if (window.MOSSAD_ENGINES?.xvideos?.isSupported()) {
@@ -790,7 +808,11 @@
     // Проверяем GitHub при старте (с задержкой чтобы не мешать загрузке)
     setTimeout(checkAndPullOnStartup, 3000);
 
-    // v1.4.15: автоматическое открытие мастера первичной настройки сайта, если он ожидает
+    // v1.4.18: Инициализация активного платформенного движка через реестр (On-Demand)
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.initActiveEngine();
+    }
+
     setTimeout(() => {
         try {
             if (typeof GM_getValue === 'function') {

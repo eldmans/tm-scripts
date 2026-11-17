@@ -117,8 +117,13 @@
         }
 
         return {
+            id: 'xvideos',
             isSupported,
             toggleDoubleSize,
+            toggleLargeMode: toggleDoubleSize,
             findMedia
         };
     })();
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.register('xvideos', window.MOSSAD_ENGINES.xvideos);
+    }

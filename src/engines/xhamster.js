@@ -151,8 +151,12 @@
         }
 
         return {
+            id: 'xhamster',
             isSupported,
             toggleLargeMode,
             findMedia
         };
     })();
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.register('xhamster', window.MOSSAD_ENGINES.xhamster);
+    }

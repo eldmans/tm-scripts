@@ -396,12 +396,17 @@
         }
 
         return {
+            id: 'huggingface',
             isSupported,
             getSpaceMetadata,
             findSubmitButton,
             findMedia,
             triggerGenerate,
             startWatcher,
-            isAutoSaveEnabled
+            isAutoSaveEnabled,
+            init: initAutoDlListeners
         };
     })();
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.register('huggingface', window.MOSSAD_ENGINES.huggingface);
+    }

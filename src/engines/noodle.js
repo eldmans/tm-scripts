@@ -23,3 +23,10 @@
         setInterval(cleanupJoinNow, 500);
     }
 
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.register('noodle', {
+            id: 'noodle',
+            isSupported: () => rootDomain === 'noodlemagazine.com'
+        });
+    }
+

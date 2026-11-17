@@ -749,3 +749,11 @@
         }
         return null;
     }
+
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.register('pinterest', {
+            id: 'pinterest',
+            isSupported: () => rootDomain.includes('pinterest.'),
+            findMedia: pinterestResolveMedia
+        });
+    }

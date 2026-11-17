@@ -144,7 +144,9 @@
             if (document.body) _igStartObs(); else document.addEventListener('DOMContentLoaded', _igStartObs);
         }
 
-        return { isSupported, findMedia, onNavigate, init };
+        return { id: 'instagram', isSupported, findMedia, onNavigate, init };
     })();
-    window.MOSSAD_ENGINES.instagram.init();
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.register('instagram', window.MOSSAD_ENGINES.instagram);
+    }
 

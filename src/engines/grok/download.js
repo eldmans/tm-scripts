@@ -272,9 +272,8 @@
 
 
     // Автоматический перехват отправки промпта в Grok в Universal Prompt Vault
-    if (typeof document !== 'undefined') {
+    if (rootDomain === 'grok.com' && typeof document !== 'undefined') {
         document.addEventListener('keydown', function handleGrokPromptSubmit(e) {
-            if (rootDomain !== 'grok.com') return;
             if (e.key === 'Enter' && !e.shiftKey) {
                 const ta = document.querySelector('textarea, div[contenteditable="true"]');
                 if (ta && (ta === e.target || ta.contains(e.target))) {

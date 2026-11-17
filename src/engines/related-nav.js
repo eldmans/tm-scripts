@@ -208,8 +208,8 @@
          * Обработчик нажатий клавиш для навигации по Related карточкам
          */
         function handleKeyDown(e) {
-            // Pinterest обслуживается собственным модулем pinterest-keys.js
-            if (rootDomain.includes('pinterest.')) return false;
+            // Grok и Pinterest обслуживаются собственными модулями
+            if (rootDomain === 'grok.com' || rootDomain.includes('pinterest.')) return false;
 
             // Если фокус в поле ввода — не перехватываем
             const t = e.target;
@@ -295,6 +295,7 @@
 
         // Слушатель keydown в capture-фазе
         function init() {
+            if (rootDomain === 'grok.com' || rootDomain.includes('pinterest.')) return;
             window.addEventListener('keydown', handleKeyDown, true);
         }
 

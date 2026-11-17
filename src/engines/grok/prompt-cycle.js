@@ -710,8 +710,9 @@
         return list[(i + (down ? 1 : -1) + list.length) % list.length];
     }
 
-    window.addEventListener('keydown', function grokComposerArrows(e) {
-        if (rootDomain !== 'grok.com' || window.capturingFor !== null) return;
+    if (rootDomain === 'grok.com') {
+        window.addEventListener('keydown', function grokComposerArrows(e) {
+            if (window.capturingFor !== null) return;
         const t = grokComposerArrowCtl(e);
         if (!t) return;
         e.__mossadGrokCtlArrow = true;
@@ -863,8 +864,9 @@
         }
     }, true);
 
-    window.addEventListener('popstate', () => {
-        if (rootDomain === 'grok.com' && typeof grokResetCycleState === 'function') {
-            grokResetCycleState();
-        }
-    });
+        window.addEventListener('popstate', () => {
+            if (typeof grokResetCycleState === 'function') {
+                grokResetCycleState();
+            }
+        });
+    }

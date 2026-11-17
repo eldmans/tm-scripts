@@ -481,12 +481,11 @@
         updateGrokHistoryPill();
     }
 
-    // ── Перехват хоткеев Alt+1..Alt+4 (ТОЛЬКО внутри диалога) ──
-    window.addEventListener('keydown', function handleGrokHistoryNavKeys(e) {
-        if (rootDomain !== 'grok.com') return;
-
-        // ТРЕБОВАНИЕ: хоткеи Alt+1..4 активны ТОЛЬКО внутри диалога (conversation)
-        if (!isGrokInsideConversation()) return;
+    // ── Перехват хоткеев Alt+1..Alt+4 (ТОЛЬКО внутри диалога Grok) ──
+    if (rootDomain === 'grok.com') {
+        window.addEventListener('keydown', function handleGrokHistoryNavKeys(e) {
+            // ТРЕБОВАНИЕ: хоткеи Alt+1..4 активны ТОЛЬКО внутри диалога (conversation)
+            if (!isGrokInsideConversation()) return;
 
         const isFirstHk = (config.hk && config.hk.grokFirstSlide && hotkeyMatches(e, config.hk.grokFirstSlide)) ||
                           (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === 'Digit1' || e.key === '1'));
@@ -583,7 +582,8 @@
         } else if (isFwdHk) {
             grokHistoryForward();
         }
-    }, true);
+        }, true);
+    }
 
     // v1.4.3: Стрелки ←/→ внутри поля ввода промпта КАТЕГОРИЧЕСКИ НЕ ДОЛЖНЫ сворачивать/размывать промпт!
     // Обработчик handleGrokNavPromptCollapse полностью удалён.

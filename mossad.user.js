@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.17
+// @version      1.4.18
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -657,7 +657,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.17';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.18';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -2662,6 +2662,45 @@ mode: 'cors'
 }
 window.sendPromptToVault = sendPromptToVault;
 
+// ── src/engines/registry.js ──
+window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
+const MossadEngineRegistry = {
+register(id, engineDef) {
+if (!id || !engineDef) return;
+window.MOSSAD_ENGINES[id] = engineDef;
+if (!engineDef.id) engineDef.id = id;
+},
+get(id) {
+return window.MOSSAD_ENGINES[id] || null;
+},
+getActiveEngine() {
+for (const key of Object.keys(window.MOSSAD_ENGINES)) {
+const eng = window.MOSSAD_ENGINES[key];
+if (eng && typeof eng.isSupported === 'function') {
+try {
+if (eng.isSupported()) return eng;
+} catch (e) {
+console.warn(`[MOSSAD/Registry] Ошибка isSupported в движке ${key}:`, e);
+}
+}
+}
+return null;
+},
+initActiveEngine() {
+const active = this.getActiveEngine();
+if (active) {
+if (typeof active.init === 'function') {
+try {
+active.init();
+console.log(`%c[MOSSAD/Engine] Инициализирован движок: ${active.id || 'unnamed'}`, 'color:#3b82f6;font-weight:bold;');
+} catch (err) {
+console.error(`[MOSSAD/Engine] Ошибка инициализации движка ${active.id}:`, err);
+}
+}
+}
+}
+};
+
 // ── src/ui/labels.js ──
 const LABELS_GM_KEY = 'mossad_labels';
 const LABEL_DEFS = [
@@ -3097,6 +3136,12 @@ function cleanupJoinNow() {
 document.querySelectorAll('.fh-button, a[href*="faphouse.com"], .c_video > div[data-noscript]').forEach(el => { el.style.setProperty('display', 'none', 'important'); el.remove(); });
 }
 setInterval(cleanupJoinNow, 500);
+}
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('noodle', {
+id: 'noodle',
+isSupported: () => rootDomain === 'noodlemagazine.com'
+});
 }
 
 // ── src/download/blob.js ──
@@ -4301,6 +4346,12 @@ return rootDomain === 'grok.com' && /\/imagine\/post\//.test(location.pathname);
 function isGrokSavedPage() {
 return rootDomain === 'grok.com' && /\/imagine\/saved/.test(location.pathname);
 }
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('grok', {
+id: 'grok',
+isSupported: () => rootDomain === 'grok.com'
+});
+}
 
 // ── src/engines/grok/helpers.js ──
 function findGrokButton(keywords, rootEl = document) {
@@ -5059,9 +5110,8 @@ fallbackGrokNativeClick(onDownloadFinalized);
 triggerImmediatePostAction();
 return true;
 }
-if (typeof document !== 'undefined') {
+if (rootDomain === 'grok.com' && typeof document !== 'undefined') {
 document.addEventListener('keydown', function handleGrokPromptSubmit(e) {
-if (rootDomain !== 'grok.com') return;
 if (e.key === 'Enter' && !e.shiftKey) {
 const ta = document.querySelector('textarea, div[contenteditable="true"]');
 if (ta && (ta === e.target || ta.contains(e.target))) {
@@ -8223,8 +8273,9 @@ if (i < 0) i = list.findIndex(_gcIsOn);
 if (i < 0) return list[down ? 0 : list.length - 1];
 return list[(i + (down ? 1 : -1) + list.length) % list.length];
 }
+if (rootDomain === 'grok.com') {
 window.addEventListener('keydown', function grokComposerArrows(e) {
-if (rootDomain !== 'grok.com' || window.capturingFor !== null) return;
+if (window.capturingFor !== null) return;
 const t = grokComposerArrowCtl(e);
 if (!t) return;
 e.__mossadGrokCtlArrow = true;
@@ -8358,10 +8409,11 @@ if (isSubmit) grokCaptureCurrentPrompt();
 }
 }, true);
 window.addEventListener('popstate', () => {
-if (rootDomain === 'grok.com' && typeof grokResetCycleState === 'function') {
+if (typeof grokResetCycleState === 'function') {
 grokResetCycleState();
 }
 });
+}
 
 // ── src/engines/grok/key-guard.js ──
 const GROK_KEYGUARD_MS = 300;
@@ -9499,8 +9551,8 @@ showToast(`⏭ Слайд: ${_grokSlideHistIndex + 1}/${history.length}`);
 grokNavigateToSlide(target);
 updateGrokHistoryPill();
 }
+if (rootDomain === 'grok.com') {
 window.addEventListener('keydown', function handleGrokHistoryNavKeys(e) {
-if (rootDomain !== 'grok.com') return;
 if (!isGrokInsideConversation()) return;
 const isFirstHk = (config.hk && config.hk.grokFirstSlide && hotkeyMatches(e, config.hk.grokFirstSlide)) ||
 (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === 'Digit1' || e.key === '1'));
@@ -9589,6 +9641,7 @@ grokHistoryBack();
 grokHistoryForward();
 }
 }, true);
+}
 function initGrokSlideHistory() {
 if (rootDomain !== 'grok.com') return;
 _onGrokSlideChanged();
@@ -9728,9 +9781,11 @@ subtree: true, childList: true, attributes: true, attributeFilter: ['src']
 };
 if (document.body) _igStartObs(); else document.addEventListener('DOMContentLoaded', _igStartObs);
 }
-return { isSupported, findMedia, onNavigate, init };
+return { id: 'instagram', isSupported, findMedia, onNavigate, init };
 })();
-window.MOSSAD_ENGINES.instagram.init();
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('instagram', window.MOSSAD_ENGINES.instagram);
+}
 
 // ── src/engines/redgifs.js ──
 window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
@@ -10115,6 +10170,7 @@ if (!isSupported()) return;
 setInterval(updateGalleryUI, 2000);
 }
 return {
+id: 'redgifs',
 isSupported,
 getActiveItem,
 getActiveVideo,
@@ -10147,8 +10203,8 @@ if (window.MOSSAD_ENGINES?.redgifs?.navigate) {
 return window.MOSSAD_ENGINES.redgifs.navigate(dir);
 }
 }
-if (window.MOSSAD_ENGINES?.redgifs) {
-window.MOSSAD_ENGINES.redgifs.init();
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('redgifs', window.MOSSAD_ENGINES.redgifs);
 }
 
 // ── src/engines/huggingface.js ──
@@ -10466,15 +10522,20 @@ initAutoDlListeners();
 }
 }
 return {
+id: 'huggingface',
 isSupported,
 getSpaceMetadata,
 findSubmitButton,
 findMedia,
 triggerGenerate,
 startWatcher,
-isAutoSaveEnabled
+isAutoSaveEnabled,
+init: initAutoDlListeners
 };
 })();
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('huggingface', window.MOSSAD_ENGINES.huggingface);
+}
 
 // ── src/engines/xvideos.js ──
 window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
@@ -10563,11 +10624,16 @@ desc: title
 };
 }
 return {
+id: 'xvideos',
 isSupported,
 toggleDoubleSize,
+toggleLargeMode: toggleDoubleSize,
 findMedia
 };
 })();
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('xvideos', window.MOSSAD_ENGINES.xvideos);
+}
 
 // ── src/engines/faphouse.js ──
 window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
@@ -10643,7 +10709,6 @@ return origOpen.call(this, method, url, ...rest);
 }
 } catch (_) {}
 }
-_initNetworkSniffer();
 function toggleLargeMode() {
 let handled = false;
 const btn = document.querySelector(
@@ -10878,17 +10943,26 @@ _attachToIframes();
 const obs = new MutationObserver(_attachToIframes);
 obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
 }
+function init() {
+if (!isSupported()) return;
+_initNetworkSniffer();
 if (document.readyState === 'loading') {
 document.addEventListener('DOMContentLoaded', _initFocusFix);
 } else {
 _initFocusFix();
 }
+}
 return {
+id: 'faphouse',
 isSupported,
 toggleLargeMode,
-findMedia
+findMedia,
+init
 };
 })();
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('faphouse', window.MOSSAD_ENGINES.faphouse);
+}
 
 // ── src/engines/xhamster.js ──
 window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
@@ -11009,14 +11083,25 @@ desc: title
 };
 }
 return {
+id: 'xhamster',
 isSupported,
 toggleLargeMode,
 findMedia
 };
 })();
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('xhamster', window.MOSSAD_ENGINES.xhamster);
+}
 
 // ── src/download/router.js ──
 function findMediaForDownload() {
+if (typeof MossadEngineRegistry !== 'undefined') {
+const active = MossadEngineRegistry.getActiveEngine();
+if (active && typeof active.findMedia === 'function') {
+const m = active.findMedia();
+if (m) return m;
+}
+}
 if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
 const hfMedia = window.MOSSAD_ENGINES.huggingface.findMedia();
 if (hfMedia) return hfMedia;
@@ -12773,6 +12858,13 @@ return { urls: Array.from(new Set([_pinOriginalsUrl(src), src])), type: 'photo',
 }
 return null;
 }
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('pinterest', {
+id: 'pinterest',
+isSupported: () => rootDomain.includes('pinterest.'),
+findMedia: pinterestResolveMedia
+});
+}
 
 // ── src/engines/pinterest-keys.js ──
 const PIN_JUMP_MODES = ['off', 'focus', 'keys', 'badges', 'shift'];
@@ -13194,7 +13286,7 @@ if (hud) hud.style.opacity = '0';
 }, 3500);
 }
 function handleKeyDown(e) {
-if (rootDomain.includes('pinterest.')) return false;
+if (rootDomain === 'grok.com' || rootDomain.includes('pinterest.')) return false;
 const t = e.target;
 if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return false;
 if (window.capturingFor !== null && window.capturingFor !== undefined) return false;
@@ -13265,6 +13357,7 @@ return true;
 return false;
 }
 function init() {
+if (rootDomain === 'grok.com' || rootDomain.includes('pinterest.')) return;
 window.addEventListener('keydown', handleKeyDown, true);
 }
 if (document.readyState === 'loading') {
@@ -17292,11 +17385,20 @@ if (typeof showToast === 'function') showToast('🌐 Общие умолчани
 function mossadPlayInWindow() {
 let videoUrl = '';
 try {
+if (typeof MossadEngineRegistry !== 'undefined') {
+const active = MossadEngineRegistry.getActiveEngine();
+if (active && typeof active.findMedia === 'function') {
+const m = active.findMedia();
+if (m && m.urls && m.urls[0] && !m.urls[0].startsWith('blob:')) videoUrl = m.urls[0];
+}
+}
+if (!videoUrl) {
 const engines = window.MOSSAD_ENGINES || {};
 for (const eng of [engines.faphouse, engines.xvideos, engines.redgifs, engines.huggingface, engines.instagram]) {
 if (eng && typeof eng.isSupported === 'function' && eng.isSupported() && typeof eng.findMedia === 'function') {
 const m = eng.findMedia();
 if (m && m.urls && m.urls[0] && !m.urls[0].startsWith('blob:')) { videoUrl = m.urls[0]; break; }
+}
 }
 }
 } catch (_) {}
@@ -17317,6 +17419,13 @@ showToast(label);
 }
 function mossadToggleLargePlayer() {
 let handled = false;
+if (typeof MossadEngineRegistry !== 'undefined') {
+const active = MossadEngineRegistry.getActiveEngine();
+if (active && typeof active.toggleLargeMode === 'function') {
+handled = active.toggleLargeMode();
+if (handled) return handled;
+}
+}
 if (window.MOSSAD_ENGINES?.xvideos?.isSupported()) {
 handled = window.MOSSAD_ENGINES.xvideos.toggleDoubleSize();
 if (handled) return handled;
@@ -17919,6 +18028,9 @@ showToast('⏸ Слайдшоу на паузе');
 }
 }
 setTimeout(checkAndPullOnStartup, 3000);
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.initActiveEngine();
+}
 setTimeout(() => {
 try {
 if (typeof GM_getValue === 'function') {

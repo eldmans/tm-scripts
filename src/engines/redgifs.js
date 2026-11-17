@@ -494,6 +494,7 @@
         }
 
         return {
+            id: 'redgifs',
             isSupported,
             getActiveItem,
             getActiveVideo,
@@ -533,6 +534,6 @@
         }
     }
 
-    if (window.MOSSAD_ENGINES?.redgifs) {
-        window.MOSSAD_ENGINES.redgifs.init();
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.register('redgifs', window.MOSSAD_ENGINES.redgifs);
     }

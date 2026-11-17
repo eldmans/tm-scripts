@@ -22,6 +22,7 @@ MODULES = [
     "src/core/config.js",
     "src/core/sync.js",
     "src/core/utils.js",
+    "src/engines/registry.js",
     "src/ui/labels.js",
     "src/ui/win.js",
     "src/engines/noodle.js",

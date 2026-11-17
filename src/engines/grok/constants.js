@@ -18,3 +18,10 @@
     function isGrokSavedPage() {
         return rootDomain === 'grok.com' && /\/imagine\/saved/.test(location.pathname);
     }
+
+    if (typeof MossadEngineRegistry !== 'undefined') {
+        MossadEngineRegistry.register('grok', {
+            id: 'grok',
+            isSupported: () => rootDomain === 'grok.com'
+        });
+    }

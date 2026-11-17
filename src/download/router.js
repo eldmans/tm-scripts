@@ -1,4 +1,13 @@
     function findMediaForDownload() {
+        // v1.4.18: Делегирование активному платформенному движку через MossadEngineRegistry
+        if (typeof MossadEngineRegistry !== 'undefined') {
+            const active = MossadEngineRegistry.getActiveEngine();
+            if (active && typeof active.findMedia === 'function') {
+                const m = active.findMedia();
+                if (m) return m;
+            }
+        }
+
         // Hugging Face Spaces — делегируем к движку
         if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
             const hfMedia = window.MOSSAD_ENGINES.huggingface.findMedia();
