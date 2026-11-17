@@ -815,7 +815,10 @@
                 <option value="end" ${config.dblPosition === 'end' ? 'selected' : ''}>В конце имени (по умолчанию)</option>
                 <option value="middle" ${config.dblPosition === 'middle' ? 'selected' : ''}>В середине имени</option>
               </select>
-              <span style="font-size:11px;color:#9ca3af;margin-left:auto;" title="Сквозной номер успешных закачек для ${rootDomain}">Закачек на сайте: <b id="mossad-gen-site-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b></span>
+              <span style="font-size:11px;color:#9ca3af;margin-left:auto;display:flex;align-items:center;gap:6px;" title="Сквозной номер успешных закачек для ${rootDomain}">
+                Закачек на сайте: <b id="mossad-gen-site-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b>
+                <button id="mossad-btn-cloud-sync-db" style="background:#1e3a8a;border:1px solid #3b82f6;border-radius:4px;color:#93c5fd;padding:1px 7px;cursor:pointer;font-size:11px;font-weight:bold;" title="Синхронизировать базу хешей скачанных файлов с GitHub">☁️ Облако хешей</button>
+              </span>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Клик мышью вне окон MOSSAD сворачивает панель настроек виджета до краткого меню">
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
@@ -1579,6 +1582,13 @@
                 mossadSaveSiteTemplate('');
                 if (genTpl) genTpl.value = '';
                 if (typeof showToast === 'function') showToast(`↺ Шаблон сброшен на стандартный для ${rootDomain} (${getDefaultFilenameTemplate()})`);
+            };
+        }
+        const btnCloudSyncDb = modal.querySelector('#mossad-btn-cloud-sync-db');
+        if (btnCloudSyncDb) {
+            btnCloudSyncDb.onclick = (e) => {
+                e.preventDefault();
+                if (typeof syncHashesWithGitHub === 'function') syncHashesWithGitHub();
             };
         }
         const genJunk = modal.querySelector('#mossad-gen-junk'); // v1.3.74

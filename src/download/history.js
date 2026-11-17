@@ -59,31 +59,33 @@
     async function resolveMediaHash(mediaUrl) {
         if (!mediaUrl || typeof mediaUrl !== 'string') return null;
         try {
+            // v1.4.16: Fast-Hash — срез 64 КБ (bytes=0-65535) содержит moov/ftyp MP4 и заголовки фото,
+            // вычисляется мгновенно (<100 мс) без выкачивания 1 МБ трафика
             if (mediaUrl.startsWith('data:')) {
                 const res = await fetch(mediaUrl);
                 const blob = await res.blob();
-                return await computeSHA256(blob.slice(0, 1048576));
+                return await computeSHA256(blob.slice(0, 65536));
             }
             if (mediaUrl.startsWith('blob:')) {
                 const res = await fetch(mediaUrl);
                 if (res.ok) {
                     const blob = await res.blob();
-                    return await computeSHA256(blob.slice(0, 1048576));
+                    return await computeSHA256(blob.slice(0, 65536));
                 }
             }
-            // Кросс-доменные CDN ссылки через GM_xmlhttpRequest со срезом 1 МБ
+            // Кросс-доменные CDN ссылки через GM_xmlhttpRequest со срезом 64 КБ
             if (/^https?:\/\//i.test(mediaUrl)) {
                 return new Promise((resolve) => {
                     if (typeof GM_xmlhttpRequest !== 'function') return resolve(null);
                     let settled = false;
                     const timer = setTimeout(() => {
                         if (!settled) { settled = true; resolve(null); }
-                    }, 3500);
+                    }, 2200);
 
                     GM_xmlhttpRequest({
                         method: 'GET',
                         url: mediaUrl,
-                        headers: { 'Range': 'bytes=0-1048575' },
+                        headers: { 'Range': 'bytes=0-65535' },
                         responseType: 'blob',
                         onload: async (res) => {
                             if (settled) return;
@@ -91,7 +93,7 @@
                             clearTimeout(timer);
                             if ((res.status === 200 || res.status === 206) && res.response) {
                                 try {
-                                    const sliceBlob = res.response.slice(0, 1048576);
+                                    const sliceBlob = res.response.slice(0, 65536);
                                     const hash = await computeSHA256(sliceBlob);
                                     resolve(hash);
                                 } catch (_) {
@@ -458,6 +460,15 @@
         }
 
         let secondsLeft = 6;
+        // v1.4.16: вычисление dupInfo ДО генерации разметки (исправление TDZ ReferenceError)
+        const dupInfo = findOriginalRecordInfo(record);
+        const previewUrl = lockedMediaUrl || record.url;
+        const isVid = record.type === 'video' || (record.filename && /\.(mp4|webm|mov|mkv)$/i.test(record.filename));
+        const thumbHtml = previewUrl && !previewUrl.startsWith('data:') ? `
+            <div style="flex-shrink:0;width:56px;height:42px;border-radius:4px;overflow:hidden;border:1px solid #374151;background:#0b1220;display:flex;align-items:center;justify-content:center;">
+                ${isVid ? `<video src="${previewUrl}" style="width:100%;height:100%;object-fit:cover;" muted autoplay loop playsinline></video>` : `<img src="${previewUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.style.display='none'">`}
+            </div>
+        ` : '';
 
         notice.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -466,11 +477,16 @@
                 </span>
                 <button id="mossad-dup-close" style="background:transparent; border:none; color:#9ca3af; cursor:pointer; font-size:12px; padding:0 4px;">✕</button>
             </div>
-            <div style="color:#f3f4f6; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px;" title="${dupInfo.originalName || record.filename}">
-                📄 Исходный: ${dupInfo.originalName || record.filename}
-            </div>
-            <div style="color:#9ca3af; font-size:11px;">
-                📅 ${dupInfo.originalRecord?.date || record.date || 'ранее'} · Копия #${dupInfo.count} (след. DBL${dupInfo.count})
+            <div style="display:flex; gap:8px; align-items:center; margin-top:2px;">
+                ${thumbHtml}
+                <div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;">
+                    <div style="color:#f3f4f6; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;" title="${dupInfo.originalName || record.filename}">
+                        📄 ${dupInfo.originalName || record.filename}
+                    </div>
+                    <div style="color:#9ca3af; font-size:10px;">
+                        📅 ${dupInfo.originalRecord?.date || record.date || 'ранее'} · Копия #${dupInfo.count} (след. DBL${dupInfo.count})
+                    </div>
+                </div>
             </div>
             <div id="mossad-dup-timer-txt" style="color:#facc15; font-size:11px; font-weight:bold; margin-top:2px;">
                 ⏱ Нажмите «Скачать» за ${secondsLeft}с для повтора
@@ -489,7 +505,6 @@
 
         // Сохраняем ожидание подтверждения — фиксируем URL/ID файла МОМЕНТА нажатия,
         // чтобы подтверждение сработало только для того же файла, а не любого дубля.
-        const dupInfo = findOriginalRecordInfo(record);
         const lockedId = record.id || record.hash || lockedMediaUrl || lockedPostUrl || '';
         _pendingDuplicateConfirm = {
             id: lockedId,
@@ -584,3 +599,146 @@
             return 0;
         }
     }
+
+    /**
+     * v1.4.16: Синхронизация базы хешей с GitHub (двустороннее слияние).
+     * Читает локальные записи из IndexedDB, скачивает remote 'mossad-hashes.json',
+     * объединяет их и сохраняет обратно в IndexedDB и на GitHub.
+     */
+    async function syncHashesWithGitHub() {
+        if (!config.githubToken) {
+            if (typeof showToast === 'function') showToast('⚠️ GitHub Token не указан в настройках', false, 3000);
+            return false;
+        }
+        const token = config.githubToken;
+        const path = 'mossad-hashes.json';
+        const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
+
+        if (typeof showToast === 'function') showToast('☁️ Синхронизация базы хешей...', false, 2500);
+
+        try {
+            // 1. Читаем локальные записи
+            const db = await getDownloadDB();
+            const localRecords = await new Promise((resolve) => {
+                const tx = db.transaction(MOSSAD_STORE_NAME, 'readonly');
+                const store = tx.objectStore(MOSSAD_STORE_NAME);
+                const req = store.getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => resolve([]);
+            });
+
+            // 2. Запрашиваем файл с GitHub
+            let remoteRecords = [];
+            let sha = null;
+            try {
+                const res = await new Promise((resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: `${apiUrl}?t=${Date.now()}`,
+                        headers: {
+                            'Authorization': `token ${token}`,
+                            'Accept': 'application/vnd.github.v3+json'
+                        },
+                        onload: resolve,
+                        onerror: reject
+                    });
+                });
+                if (res.status === 200) {
+                    const data = JSON.parse(res.responseText);
+                    sha = data.sha;
+                    const decoded = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\n/g, '')))));
+                    if (Array.isArray(decoded)) remoteRecords = decoded;
+                }
+            } catch (e1) {
+                console.warn('[MOSSAD DB Sync] Remote file not found or empty:', e1);
+            }
+
+            // 3. Объединяем локальные и удалённые (по hash или url)
+            const map = new Map();
+            for (const r of remoteRecords) {
+                const key = r.hash || r.url || r.filename;
+                if (key) map.set(key, r);
+            }
+            for (const r of localRecords) {
+                const key = r.hash || r.url || r.filename;
+                if (key) {
+                    const existing = map.get(key);
+                    map.set(key, existing ? Object.assign({}, existing, r) : r);
+                }
+            }
+            const merged = Array.from(map.values());
+
+            // 4. Записываем объединённые в локальную IndexedDB и кеш
+            await importDownloadHistory(merged);
+
+            // 5. Отправляем объединенный массив на GitHub
+            const exportData = merged.map(r => ({
+                hash: r.hash || '',
+                filename: r.filename || '',
+                type: r.type || 'photo',
+                date: r.date || '',
+                url: r.url || '',
+                domain: r.domain || ''
+            }));
+            const content = btoa(unescape(encodeURIComponent(JSON.stringify(exportData, null, 2))));
+            const body = JSON.stringify({
+                message: `mossad: sync hash database (${merged.length} items)`,
+                content,
+                branch: GITHUB_BRANCH,
+                ...(sha ? { sha } : {})
+            });
+
+            await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'PUT',
+                    url: apiUrl,
+                    headers: {
+                        'Authorization': `token ${token}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/vnd.github.v3+json'
+                    },
+                    data: body,
+                    onload: (res) => {
+                        if (res.status >= 200 && res.status < 300) resolve();
+                        else reject(new Error(`HTTP ${res.status}: ${res.responseText}`));
+                    },
+                    onerror: reject
+                });
+            });
+
+            if (typeof showToast === 'function') showToast(`✅ База хешей синхронизирована: ${merged.length} записей!`, true, 3500);
+            return true;
+        } catch (err) {
+            console.error('[MOSSAD DB Sync] Error:', err);
+            if (typeof showToast === 'function') showToast(`⚠️ Ошибка синхронизации базы: ${err.message}`, false, 4000);
+            return false;
+        }
+    }
+    window.syncHashesWithGitHub = syncHashesWithGitHub;
+
+    /**
+     * v1.4.16: Мелодия из 5 нот через Web Audio API (C5, E5, G5, C6, E6)
+     */
+    function mossadPlayChime() {
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51];
+            const times = [0, 0.12, 0.24, 0.38, 0.54];
+            const durs  = [0.10, 0.10, 0.12, 0.14, 0.28];
+            notes.forEach((freq, idx) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, ctx.currentTime + times[idx]);
+                gain.gain.setValueAtTime(0.18, ctx.currentTime + times[idx]);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + times[idx] + durs[idx]);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(ctx.currentTime + times[idx]);
+                osc.stop(ctx.currentTime + times[idx] + durs[idx]);
+            });
+        } catch (e) {}
+    }
+    window.mossadPlayChime = mossadPlayChime;

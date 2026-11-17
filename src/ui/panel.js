@@ -709,7 +709,7 @@
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="⚙ Открыть окно настроек и горячих клавиш MOSSAD" data-mossad-label="settings">${LH('settings')}</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
-                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py) для предотвращения дублей" data-mossad-label="importDb">${LH('importDb')}</button>
+                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="База хешей: ЛКМ — импорт локального JSON, ПКМ — ☁️ Синхронизация с GitHub" data-mossad-label="importDb">${LH('importDb')}</button>
                     <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию для ${rootDomain}" data-mossad-label="resetCfg">${LH('resetCfg')}</button>
                     <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
@@ -924,6 +924,13 @@
             const fileDbInput = panel.querySelector('#mossad-file-db');
             if (btnImportDb && fileDbInput) {
                 btnImportDb.onclick = () => fileDbInput.click();
+                btnImportDb.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof syncHashesWithGitHub === 'function') {
+                        syncHashesWithGitHub();
+                    }
+                };
                 fileDbInput.onchange = (e) => {
                     const file = e.target.files && e.target.files[0];
                     if (!file) return;

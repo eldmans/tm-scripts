@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.15
+// @version      1.4.16
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -657,7 +657,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.15';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.16';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -3274,13 +3274,13 @@ try {
 if (mediaUrl.startsWith('data:')) {
 const res = await fetch(mediaUrl);
 const blob = await res.blob();
-return await computeSHA256(blob.slice(0, 1048576));
+return await computeSHA256(blob.slice(0, 65536));
 }
 if (mediaUrl.startsWith('blob:')) {
 const res = await fetch(mediaUrl);
 if (res.ok) {
 const blob = await res.blob();
-return await computeSHA256(blob.slice(0, 1048576));
+return await computeSHA256(blob.slice(0, 65536));
 }
 }
 if (/^https?:\/\//i.test(mediaUrl)) {
@@ -3289,11 +3289,11 @@ if (typeof GM_xmlhttpRequest !== 'function') return resolve(null);
 let settled = false;
 const timer = setTimeout(() => {
 if (!settled) { settled = true; resolve(null); }
-}, 3500);
+}, 2200);
 GM_xmlhttpRequest({
 method: 'GET',
 url: mediaUrl,
-headers: { 'Range': 'bytes=0-1048575' },
+headers: { 'Range': 'bytes=0-65535' },
 responseType: 'blob',
 onload: async (res) => {
 if (settled) return;
@@ -3301,7 +3301,7 @@ settled = true;
 clearTimeout(timer);
 if ((res.status === 200 || res.status === 206) && res.response) {
 try {
-const sliceBlob = res.response.slice(0, 1048576);
+const sliceBlob = res.response.slice(0, 65536);
 const hash = await computeSHA256(sliceBlob);
 resolve(hash);
 } catch (_) {
@@ -3593,6 +3593,14 @@ notice.style.position = 'fixed'; notice.style.top = '16px'; notice.style.left = 
 notice.style.transform = 'translateX(-50%)'; notice.style.zIndex = '2147483646'; notice.style.marginTop = '0';
 }
 let secondsLeft = 6;
+const dupInfo = findOriginalRecordInfo(record);
+const previewUrl = lockedMediaUrl || record.url;
+const isVid = record.type === 'video' || (record.filename && /\.(mp4|webm|mov|mkv)$/i.test(record.filename));
+const thumbHtml = previewUrl && !previewUrl.startsWith('data:') ? `
+            <div style="flex-shrink:0;width:56px;height:42px;border-radius:4px;overflow:hidden;border:1px solid #374151;background:#0b1220;display:flex;align-items:center;justify-content:center;">
+                ${isVid ? `<video src="${previewUrl}" style="width:100%;height:100%;object-fit:cover;" muted autoplay loop playsinline></video>` : `<img src="${previewUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.style.display='none'">`}
+            </div>
+        ` : '';
 notice.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight:bold; color:#f87171; display:flex; align-items:center; gap:4px;">
@@ -3600,11 +3608,16 @@ notice.innerHTML = `
                 </span>
                 <button id="mossad-dup-close" style="background:transparent; border:none; color:#9ca3af; cursor:pointer; font-size:12px; padding:0 4px;">✕</button>
             </div>
-            <div style="color:#f3f4f6; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px;" title="${dupInfo.originalName || record.filename}">
-                📄 Исходный: ${dupInfo.originalName || record.filename}
-            </div>
-            <div style="color:#9ca3af; font-size:11px;">
-                📅 ${dupInfo.originalRecord?.date || record.date || 'ранее'} · Копия #${dupInfo.count} (след. DBL${dupInfo.count})
+            <div style="display:flex; gap:8px; align-items:center; margin-top:2px;">
+                ${thumbHtml}
+                <div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;">
+                    <div style="color:#f3f4f6; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;" title="${dupInfo.originalName || record.filename}">
+                        📄 ${dupInfo.originalName || record.filename}
+                    </div>
+                    <div style="color:#9ca3af; font-size:10px;">
+                        📅 ${dupInfo.originalRecord?.date || record.date || 'ранее'} · Копия #${dupInfo.count} (след. DBL${dupInfo.count})
+                    </div>
+                </div>
             </div>
             <div id="mossad-dup-timer-txt" style="color:#facc15; font-size:11px; font-weight:bold; margin-top:2px;">
                 ⏱ Нажмите «Скачать» за ${secondsLeft}с для повтора
@@ -3617,7 +3630,6 @@ _pendingDuplicateConfirm = null;
 if (notice && notice.parentNode) notice.remove();
 };
 notice.querySelector('#mossad-dup-close').onclick = closeNotice;
-const dupInfo = findOriginalRecordInfo(record);
 const lockedId = record.id || record.hash || lockedMediaUrl || lockedPostUrl || '';
 _pendingDuplicateConfirm = {
 id: lockedId,
@@ -3695,6 +3707,126 @@ console.error('[MOSSAD DB] Ошибка импорта истории:', e);
 return 0;
 }
 }
+async function syncHashesWithGitHub() {
+if (!config.githubToken) {
+if (typeof showToast === 'function') showToast('⚠️ GitHub Token не указан в настройках', false, 3000);
+return false;
+}
+const token = config.githubToken;
+const path = 'mossad-hashes.json';
+const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
+if (typeof showToast === 'function') showToast('☁️ Синхронизация базы хешей...', false, 2500);
+try {
+const db = await getDownloadDB();
+const localRecords = await new Promise((resolve) => {
+const tx = db.transaction(MOSSAD_STORE_NAME, 'readonly');
+const store = tx.objectStore(MOSSAD_STORE_NAME);
+const req = store.getAll();
+req.onsuccess = () => resolve(req.result || []);
+req.onerror = () => resolve([]);
+});
+let remoteRecords = [];
+let sha = null;
+try {
+const res = await new Promise((resolve, reject) => {
+GM_xmlhttpRequest({
+method: 'GET',
+url: `${apiUrl}?t=${Date.now()}`,
+headers: {
+'Authorization': `token ${token}`,
+'Accept': 'application/vnd.github.v3+json'
+},
+onload: resolve,
+onerror: reject
+});
+});
+if (res.status === 200) {
+const data = JSON.parse(res.responseText);
+sha = data.sha;
+const decoded = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\n/g, '')))));
+if (Array.isArray(decoded)) remoteRecords = decoded;
+}
+} catch (e1) {
+console.warn('[MOSSAD DB Sync] Remote file not found or empty:', e1);
+}
+const map = new Map();
+for (const r of remoteRecords) {
+const key = r.hash || r.url || r.filename;
+if (key) map.set(key, r);
+}
+for (const r of localRecords) {
+const key = r.hash || r.url || r.filename;
+if (key) {
+const existing = map.get(key);
+map.set(key, existing ? Object.assign({}, existing, r) : r);
+}
+}
+const merged = Array.from(map.values());
+await importDownloadHistory(merged);
+const exportData = merged.map(r => ({
+hash: r.hash || '',
+filename: r.filename || '',
+type: r.type || 'photo',
+date: r.date || '',
+url: r.url || '',
+domain: r.domain || ''
+}));
+const content = btoa(unescape(encodeURIComponent(JSON.stringify(exportData, null, 2))));
+const body = JSON.stringify({
+message: `mossad: sync hash database (${merged.length} items)`,
+content,
+branch: GITHUB_BRANCH,
+...(sha ? { sha } : {})
+});
+await new Promise((resolve, reject) => {
+GM_xmlhttpRequest({
+method: 'PUT',
+url: apiUrl,
+headers: {
+'Authorization': `token ${token}`,
+'Content-Type': 'application/json',
+'Accept': 'application/vnd.github.v3+json'
+},
+data: body,
+onload: (res) => {
+if (res.status >= 200 && res.status < 300) resolve();
+else reject(new Error(`HTTP ${res.status}: ${res.responseText}`));
+},
+onerror: reject
+});
+});
+if (typeof showToast === 'function') showToast(`✅ База хешей синхронизирована: ${merged.length} записей!`, true, 3500);
+return true;
+} catch (err) {
+console.error('[MOSSAD DB Sync] Error:', err);
+if (typeof showToast === 'function') showToast(`⚠️ Ошибка синхронизации базы: ${err.message}`, false, 4000);
+return false;
+}
+}
+window.syncHashesWithGitHub = syncHashesWithGitHub;
+function mossadPlayChime() {
+try {
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+if (!AudioCtx) return;
+const ctx = new AudioCtx();
+const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51];
+const times = [0, 0.12, 0.24, 0.38, 0.54];
+const durs = [0.10, 0.10, 0.12, 0.14, 0.28];
+notes.forEach((freq, idx) => {
+const osc = ctx.createOscillator();
+const gain = ctx.createGain();
+osc.type = 'sine';
+osc.frequency.setValueAtTime(freq, ctx.currentTime + times[idx]);
+gain.gain.setValueAtTime(0.18, ctx.currentTime + times[idx]);
+gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + times[idx] + durs[idx]);
+osc.connect(gain);
+gain.connect(ctx.destination);
+osc.start(ctx.currentTime + times[idx]);
+osc.stop(ctx.currentTime + times[idx] + durs[idx]);
+});
+} catch (e) {}
+}
+window.mossadPlayChime = mossadPlayChime;
 
 // ── src/download/beeps.js ──
 const BEEPS_GM_KEY = 'mossad_beeps';
@@ -14048,7 +14180,7 @@ panel.innerHTML = `
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="⚙ Открыть окно настроек и горячих клавиш MOSSAD" data-mossad-label="settings">${LH('settings')}</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
-                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py) для предотвращения дублей" data-mossad-label="importDb">${LH('importDb')}</button>
+                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="База хешей: ЛКМ — импорт локального JSON, ПКМ — ☁️ Синхронизация с GitHub" data-mossad-label="importDb">${LH('importDb')}</button>
                     <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию для ${rootDomain}" data-mossad-label="resetCfg">${LH('resetCfg')}</button>
                     <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
@@ -14252,6 +14384,13 @@ const btnImportDb = panel.querySelector('#mossad-btn-import-db');
 const fileDbInput = panel.querySelector('#mossad-file-db');
 if (btnImportDb && fileDbInput) {
 btnImportDb.onclick = () => fileDbInput.click();
+btnImportDb.oncontextmenu = (e) => {
+e.preventDefault();
+e.stopPropagation();
+if (typeof syncHashesWithGitHub === 'function') {
+syncHashesWithGitHub();
+}
+};
 fileDbInput.onchange = (e) => {
 const file = e.target.files && e.target.files[0];
 if (!file) return;
@@ -16216,7 +16355,10 @@ modal.innerHTML = `
                 <option value="end" ${config.dblPosition === 'end' ? 'selected' : ''}>В конце имени (по умолчанию)</option>
                 <option value="middle" ${config.dblPosition === 'middle' ? 'selected' : ''}>В середине имени</option>
               </select>
-              <span style="font-size:11px;color:#9ca3af;margin-left:auto;" title="Сквозной номер успешных закачек для ${rootDomain}">Закачек на сайте: <b id="mossad-gen-site-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b></span>
+              <span style="font-size:11px;color:#9ca3af;margin-left:auto;display:flex;align-items:center;gap:6px;" title="Сквозной номер успешных закачек для ${rootDomain}">
+                Закачек на сайте: <b id="mossad-gen-site-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b>
+                <button id="mossad-btn-cloud-sync-db" style="background:#1e3a8a;border:1px solid #3b82f6;border-radius:4px;color:#93c5fd;padding:1px 7px;cursor:pointer;font-size:11px;font-weight:bold;" title="Синхронизировать базу хешей скачанных файлов с GitHub">☁️ Облако хешей</button>
+              </span>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Клик мышью вне окон MOSSAD сворачивает панель настроек виджета до краткого меню">
               <input id="mossad-cb-outside-close" type="checkbox" style="accent-color:#3b82f6;" ${config.closePanelOnOutsideClick !== false ? 'checked' : ''}>
@@ -16895,6 +17037,13 @@ e.preventDefault();
 mossadSaveSiteTemplate('');
 if (genTpl) genTpl.value = '';
 if (typeof showToast === 'function') showToast(`↺ Шаблон сброшен на стандартный для ${rootDomain} (${getDefaultFilenameTemplate()})`);
+};
+}
+const btnCloudSyncDb = modal.querySelector('#mossad-btn-cloud-sync-db');
+if (btnCloudSyncDb) {
+btnCloudSyncDb.onclick = (e) => {
+e.preventDefault();
+if (typeof syncHashesWithGitHub === 'function') syncHashesWithGitHub();
 };
 }
 const genJunk = modal.querySelector('#mossad-gen-junk');
