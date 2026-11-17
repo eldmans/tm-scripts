@@ -24,6 +24,7 @@
                                 postUrl: postUrl || location.href,
                                 domain: rootDomain
                             });
+                            if (typeof mossadRecordSiteDownload === 'function') mossadRecordSiteDownload(rootDomain);
                         };
                         if (typeof resolveMediaHash === 'function') {
                             resolveMediaHash(url).then(h => doSave(h || '')).catch(() => doSave(''));
@@ -100,7 +101,8 @@
 
     function saveBlobToDisk(blob, filename, directUrl = null, postUrl = null) {
         if (typeof computeSHA256 === 'function' && typeof saveFileToHistory === 'function') {
-            computeSHA256(blob).then(hash => {
+            const sliceBlob = blob.slice(0, 1048576);
+            computeSHA256(sliceBlob).then(hash => {
                 saveFileToHistory({
                     hash,
                     filename,
@@ -110,6 +112,7 @@
                     size: blob.size,
                     domain: rootDomain
                 });
+                if (typeof mossadRecordSiteDownload === 'function') mossadRecordSiteDownload(rootDomain);
             });
         }
         const blobUrl = URL.createObjectURL(blob);

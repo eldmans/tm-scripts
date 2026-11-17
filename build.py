@@ -58,6 +58,7 @@ MODULES = [
     "src/slideshow/engine.js",
     "src/engines/pinterest.js",
     "src/engines/pinterest-keys.js",
+    "src/engines/related-nav.js",
     "src/ui/tpl-help.js",
     "src/ui/panel.js",
     "src/ui/todos.js",

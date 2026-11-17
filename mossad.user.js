@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.13
+// @version      1.4.14
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -657,7 +657,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.13';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.14';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -696,6 +696,77 @@ for (const x of (list || [])) { const d = mossadNormSite(x); if (d && !out.inclu
 try { if (typeof GM_setValue === 'function') { GM_setValue(MOSSAD_SITES_GM_KEY, JSON.stringify(out)); return out; } } catch (e) {}
 return null;
 }
+const MOSSAD_SITES_META_KEY = 'mossad_sites_meta';
+const MOSSAD_SITE_CATEGORIES = {
+video: { id: 'video', label: 'Видео', icon: '🎬', sites: ['faphouse.com', 'xvideos.com', 'xv-ru.com', 'xnxx.com', 'xhamster.com', 'xhamster.desi', 'xhamster2.com', 'noodlemagazine.com', 'vkvideo.ru', 'vk.video', 'pornhub.com'] },
+feed: { id: 'feed', label: 'Ленты / Пины', icon: '📌', sites: ['pinterest.com', 'pinterest.ru', 'instagram.com', 'redgifs.com'] },
+ai: { id: 'ai', label: 'Нейросети', icon: '🤖', sites: ['grok.com', 'huggingface.co', 'hf.space', 'civitai.red'] },
+general: { id: 'general', label: 'Общие', icon: '🌐', sites: [] }
+};
+function mossadGetSiteCategory(site) {
+const d = mossadNormSite(site);
+if (!d) return MOSSAD_SITE_CATEGORIES.general;
+for (const cat of ['video', 'feed', 'ai']) {
+if (MOSSAD_SITE_CATEGORIES[cat].sites.some(s => d === s || d.endsWith('.' + s))) {
+return MOSSAD_SITE_CATEGORIES[cat];
+}
+}
+return MOSSAD_SITE_CATEGORIES.general;
+}
+function mossadReadSiteMeta() {
+let raw = null;
+try { if (typeof GM_getValue === 'function') raw = GM_getValue(MOSSAD_SITES_META_KEY, null); } catch (e) {}
+let obj = raw;
+try { if (typeof raw === 'string') obj = JSON.parse(raw); } catch (e) { obj = null; }
+if (!obj || typeof obj !== 'object') obj = {};
+return obj;
+}
+function mossadWriteSiteMeta(meta) {
+try { if (typeof GM_setValue === 'function') { GM_setValue(MOSSAD_SITES_META_KEY, JSON.stringify(meta)); return true; } } catch (e) {}
+return false;
+}
+function mossadRecordSiteVisit(site) {
+const d = mossadNormSite(site);
+if (!d) return;
+const meta = mossadReadSiteMeta();
+meta.stats = meta.stats || {};
+meta.stats[d] = meta.stats[d] || { visits: 0, downloads: 0, lastVisited: 0 };
+meta.stats[d].visits = (meta.stats[d].visits || 0) + 1;
+meta.stats[d].lastVisited = Date.now();
+mossadWriteSiteMeta(meta);
+}
+function mossadRecordSiteDownload(site) {
+const d = mossadNormSite(site);
+if (!d) return;
+const meta = mossadReadSiteMeta();
+meta.stats = meta.stats || {};
+meta.stats[d] = meta.stats[d] || { visits: 0, downloads: 0, lastVisited: 0 };
+meta.stats[d].downloads = (meta.stats[d].downloads || 0) + 1;
+meta.stats[d].lastDownloaded = Date.now();
+mossadWriteSiteMeta(meta);
+}
+function mossadGetSiteStatsSummary() {
+const meta = mossadReadSiteMeta();
+const stats = meta.stats || {};
+const first = meta.firstAdded || (MOSSAD_BUILTIN_SITES.length ? MOSSAD_BUILTIN_SITES[0] : '—');
+const last = meta.lastAdded || (MOSSAD_BUILTIN_SITES.length ? MOSSAD_BUILTIN_SITES[MOSSAD_BUILTIN_SITES.length - 1] : '—');
+let topDomain = '—';
+let topScore = 0;
+for (const [dom, st] of Object.entries(stats)) {
+const score = (st.visits || 0) + (st.downloads || 0) * 3;
+if (score > topScore) {
+topScore = score;
+topDomain = dom;
+}
+}
+return {
+firstAdded: first,
+lastAdded: last,
+mostFrequent: topDomain,
+topScore: topScore,
+stats: stats
+};
+}
 function mossadIsBuiltinHost(host) { return MOSSAD_BUILTIN_SITES.some(d => mossadHostMatches(host, d)); }
 function mossadIsHostAllowed(host) { return mossadIsBuiltinHost(host) || mossadReadUserSites().some(d => mossadHostMatches(host, d)); }
 function mossadAddUserSite(site) {
@@ -704,7 +775,16 @@ if (!d) return '';
 if (MOSSAD_BUILTIN_SITES.includes(d)) return d;
 const list = mossadReadUserSites();
 if (!list.includes(d)) list.push(d);
-return mossadWriteUserSites(list) ? d : '';
+const ok = mossadWriteUserSites(list);
+if (ok) {
+const meta = mossadReadSiteMeta();
+if (!meta.firstAdded) meta.firstAdded = d;
+meta.lastAdded = d;
+meta.sites = meta.sites || {};
+meta.sites[d] = { addedAt: Date.now() };
+mossadWriteSiteMeta(meta);
+}
+return ok ? d : '';
 }
 function mossadRemoveUserSite(hostOrSite) {
 const h = mossadNormSite(hostOrSite);
@@ -758,6 +838,7 @@ try { _mossadMenuId = GM_registerMenuCommand(title, fn); } catch (e) {}
 }
 mossadRegisterSiteMenu();
 if (!_isAllowed) return;
+try { mossadRecordSiteVisit(rootDomain); } catch (e) {}
 
 // ── v1.3.54: дальше — только на сайтах из списка (на остальных V8 тело лишь пред-разбирает) ──
 mossadMain();
@@ -834,7 +915,9 @@ grokQuotaTimeMode: 'auto',
 grokQuotaPos: null,
 grokCollapsePromptOnNav: true,
 grokHistoryDwellSec: 5,
-pinterestJumpKeys: 'off',
+pinterestJumpKeys: 'focus',
+relatedNavPreset: 'cycle',
+relatedNavArrows: true,
 pinterestDir: 'fwd',
 pinterestFilterType: 'ratio',
 pinterestPhotoPercent: 50,
@@ -893,6 +976,7 @@ const GLOBAL_DEFAULT_KEYS = [
 'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',
 'grokCollapsePromptOnNav', 'grokHistoryDwellSec',
 'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS', 'pinterestJumpKeys',
+'relatedNavPreset', 'relatedNavArrows',
 ];
 const GlobalDefaults = {
 KEY: GLOBAL_DEFAULTS_GM_KEY,
@@ -987,6 +1071,8 @@ if (!(config.pinterestMode === 'rand' || config.pinterestMode === '+1' || /^\d+$
 if (/^\d+$/.test(String(config.pinterestMode))) config.pinterestMode = String(Math.min(30, Math.max(1, parseInt(config.pinterestMode, 10))));
 if (config.pinterestDir !== 'back') config.pinterestDir = 'fwd';
 if (!['off', 'focus', 'keys', 'badges', 'shift'].includes(config.pinterestJumpKeys)) config.pinterestJumpKeys = 'off';
+if (!['cycle', 'digits'].includes(config.relatedNavPreset)) config.relatedNavPreset = 'cycle';
+if (typeof config.relatedNavArrows !== 'boolean') config.relatedNavArrows = true;
 const GITHUB_TOKEN_GM_KEY = 'mossad_github_token';
 const _hasGmStore = (typeof GM_getValue === 'function' && typeof GM_setValue === 'function');
 function serializeLocalConfig() {
@@ -3010,6 +3096,7 @@ url: url || location.href,
 postUrl: postUrl || location.href,
 domain: rootDomain
 });
+if (typeof mossadRecordSiteDownload === 'function') mossadRecordSiteDownload(rootDomain);
 };
 if (typeof resolveMediaHash === 'function') {
 resolveMediaHash(url).then(h => doSave(h || '')).catch(() => doSave(''));
@@ -3082,7 +3169,8 @@ showToast('📥 Скачивание запущено через браузер'
 }
 function saveBlobToDisk(blob, filename, directUrl = null, postUrl = null) {
 if (typeof computeSHA256 === 'function' && typeof saveFileToHistory === 'function') {
-computeSHA256(blob).then(hash => {
+const sliceBlob = blob.slice(0, 1048576);
+computeSHA256(sliceBlob).then(hash => {
 saveFileToHistory({
 hash,
 filename,
@@ -3092,6 +3180,7 @@ postUrl: postUrl || location.href,
 size: blob.size,
 domain: rootDomain
 });
+if (typeof mossadRecordSiteDownload === 'function') mossadRecordSiteDownload(rootDomain);
 });
 }
 const blobUrl = URL.createObjectURL(blob);
@@ -3110,6 +3199,33 @@ const MOSSAD_STORE_NAME = 'downloads';
 let _mossadDBPromise = null;
 let _pendingDuplicateConfirm = null;
 let _dupTimerInterval = null;
+function cleanMediaUrl(url) {
+if (!url || typeof url !== 'string') return '';
+if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+try {
+const u = new URL(url);
+const transientParams = new Set([
+'token', 'expires', 'expire', 'exp', 'sig', 'signature', 'h', 'ttl',
+'validfrom', 'validto', 'ip', 't', 'st', 'e', 'auth', 'sessionid',
+'session', 'ts', 'time', '_', 'hash', 'v', 'download'
+]);
+const sp = new URLSearchParams(u.search);
+let changed = false;
+for (const key of Array.from(sp.keys())) {
+if (transientParams.has(key.toLowerCase())) {
+sp.delete(key);
+changed = true;
+}
+}
+if (changed) {
+u.search = sp.toString() ? `?${sp.toString()}` : '';
+}
+return u.origin + u.pathname + (u.search || '');
+} catch (_) {
+return url.split('?')[0];
+}
+}
+window.cleanMediaUrl = cleanMediaUrl;
 function isPostUrlSpecific(url) {
 if (!url || typeof url !== 'string') return false;
 try {
@@ -3121,6 +3237,7 @@ if (host.includes('grok.com') && u.pathname.includes('/imagine/post/')) return t
 if (host.includes('pinterest.') && u.pathname.includes('/pin/')) return true;
 if (host.includes('instagram.com') && /\/(?:p|reel)\//.test(u.pathname)) return true;
 if (host.includes('redgifs.com') && u.pathname.includes('/watch/')) return true;
+if (/(?:xvideos|xnxx|xv-ru|faphouse|xhamster|noodlemagazine)/i.test(host) && /\/video/i.test(u.pathname)) return true;
 return false;
 } catch (e) {
 return false;
@@ -3133,14 +3250,51 @@ try {
 if (mediaUrl.startsWith('data:')) {
 const res = await fetch(mediaUrl);
 const blob = await res.blob();
-return await computeSHA256(blob);
+return await computeSHA256(blob.slice(0, 1048576));
 }
-if (mediaUrl.startsWith('blob:') || (typeof location !== 'undefined' && mediaUrl.startsWith(location.origin))) {
+if (mediaUrl.startsWith('blob:')) {
 const res = await fetch(mediaUrl);
 if (res.ok) {
 const blob = await res.blob();
-return await computeSHA256(blob);
+return await computeSHA256(blob.slice(0, 1048576));
 }
+}
+if (/^https?:\/\//i.test(mediaUrl)) {
+return new Promise((resolve) => {
+if (typeof GM_xmlhttpRequest !== 'function') return resolve(null);
+let settled = false;
+const timer = setTimeout(() => {
+if (!settled) { settled = true; resolve(null); }
+}, 3500);
+GM_xmlhttpRequest({
+method: 'GET',
+url: mediaUrl,
+headers: { 'Range': 'bytes=0-1048575' },
+responseType: 'blob',
+onload: async (res) => {
+if (settled) return;
+settled = true;
+clearTimeout(timer);
+if ((res.status === 200 || res.status === 206) && res.response) {
+try {
+const sliceBlob = res.response.slice(0, 1048576);
+const hash = await computeSHA256(sliceBlob);
+resolve(hash);
+} catch (_) {
+resolve(null);
+}
+} else {
+resolve(null);
+}
+},
+onerror: () => {
+if (!settled) { settled = true; clearTimeout(timer); resolve(null); }
+},
+ontimeout: () => {
+if (!settled) { settled = true; clearTimeout(timer); resolve(null); }
+}
+});
+});
 }
 } catch (e) {}
 return null;
@@ -3182,6 +3336,7 @@ return _pendingDuplicateConfirm;
 window.getPendingDuplicateInfo = getPendingDuplicateInfo;
 const _cachedHashes = new Map();
 const _cachedUrls = new Map();
+const _cachedCleanUrls = new Map();
 const _videoHashes = new Set();
 const _photoHashes = new Set();
 let _isCacheLoaded = false;
@@ -3196,8 +3351,16 @@ _videoHashes.add(record.hash);
 _photoHashes.add(record.hash);
 }
 }
-if (record.url) _cachedUrls.set(record.url, record);
-if (record.postUrl && isPostUrlSpecific(record.postUrl)) _cachedUrls.set(record.postUrl, record);
+if (record.url) {
+_cachedUrls.set(record.url, record);
+const cu = cleanMediaUrl(record.url);
+if (cu) _cachedCleanUrls.set(cu, record);
+}
+if (record.postUrl && isPostUrlSpecific(record.postUrl)) {
+_cachedUrls.set(record.postUrl, record);
+const cpu = cleanMediaUrl(record.postUrl);
+if (cpu) _cachedCleanUrls.set(cpu, record);
+}
 }
 async function loadHistoryCache() {
 if (_isCacheLoaded) return;
@@ -3266,26 +3429,31 @@ return null;
 }
 }
 async function checkFileInHistory(hash, mediaUrl, postUrl, mediaType = null) {
-if (!hash && mediaUrl) {
-const h = await resolveMediaHash(mediaUrl);
-if (h) hash = h;
-}
 if (hash) {
-if (mediaType === 'video' && _videoHashes.has(hash)) {
-return _cachedHashes.get(hash);
+if (mediaType === 'video' && _videoHashes.has(hash)) return _cachedHashes.get(hash);
+if (mediaType === 'photo' && _photoHashes.has(hash)) return _cachedHashes.get(hash);
+if (!mediaType && _cachedHashes.has(hash)) return _cachedHashes.get(hash);
 }
-if (mediaType === 'photo' && _photoHashes.has(hash)) {
-return _cachedHashes.get(hash);
+if (mediaUrl) {
+if (_cachedUrls.has(mediaUrl)) return _cachedUrls.get(mediaUrl);
+const cu = cleanMediaUrl(mediaUrl);
+if (cu && _cachedCleanUrls.has(cu)) return _cachedCleanUrls.get(cu);
 }
-if (!mediaType && _cachedHashes.has(hash)) {
-return _cachedHashes.get(hash);
+if (postUrl && isPostUrlSpecific(postUrl)) {
+if (_cachedUrls.has(postUrl)) return _cachedUrls.get(postUrl);
+const cpu = cleanMediaUrl(postUrl);
+if (cpu && _cachedCleanUrls.has(cpu)) return _cachedCleanUrls.get(cpu);
 }
+if (!hash && mediaUrl) {
+try {
+const h = await resolveMediaHash(mediaUrl);
+if (h) {
+hash = h;
+if (mediaType === 'video' && _videoHashes.has(hash)) return _cachedHashes.get(hash);
+if (mediaType === 'photo' && _photoHashes.has(hash)) return _cachedHashes.get(hash);
+if (_cachedHashes.has(hash)) return _cachedHashes.get(hash);
 }
-if (mediaUrl && _cachedUrls.has(mediaUrl)) {
-return _cachedUrls.get(mediaUrl);
-}
-if (postUrl && isPostUrlSpecific(postUrl) && _cachedUrls.has(postUrl)) {
-return _cachedUrls.get(postUrl);
+} catch (_) {}
 }
 if (_isCacheLoaded) {
 return null;
@@ -10874,9 +11042,24 @@ return;
 }
 const now = Date.now();
 if (primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
-console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, пропущено.');
+console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, запрос подтверждения дубликата.');
 try { mossadBeep('dup'); } catch (e) {}
+const rec = (typeof _cachedUrls !== 'undefined' && _cachedUrls.get(primaryUrl))
+|| (typeof _cachedCleanUrls !== 'undefined' && typeof cleanMediaUrl === 'function' && _cachedCleanUrls.get(cleanMediaUrl(primaryUrl)))
+|| {
+filename: 'только что скачанный файл',
+date: 'только что',
+url: primaryUrl,
+postUrl: canonicalPostUrl
+};
+if (typeof showDuplicateDownloadNotice === 'function') {
+showDuplicateDownloadNotice(rec, () => {
+_lastDownloadTime = 0;
+triggerDownload(true, rec, onDoneCallback, presetMedia);
+}, canonicalPostUrl, primaryUrl);
+} else {
 showToast(`⚠️ Только что скачано (${Math.max(1, Math.round((now - _lastDownloadTime) / 1000))} с назад)`, false, 2500);
+}
 const act = mossadPdAction();
 if (act === 'upns' || act === 'always') {
 performPostDownloadAction();
@@ -12414,10 +12597,7 @@ return null;
 // ── src/engines/pinterest-keys.js ──
 const PIN_JUMP_MODES = ['off', 'focus', 'keys', 'badges', 'shift'];
 const PIN_FOCUS_SEL = 'a[href*="/pin/"], [role="link"], [tabindex]:not([tabindex="-1"])';
-const PIN_JUMP_ALL_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0',
-'KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP',
-'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL',
-'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM'];
+const PIN_JUMP_ALL_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
 const PIN_BADGE_THROTTLE_MS = 340;
 const PIN_BADGE_LAYER_ID = 'mossad-pin-badges';
 function pinterestJumpMode() {
@@ -12564,16 +12744,73 @@ _pj.shown = want;
 _pjObserve(want);
 if (want) pinterestRenderBadges(); else _pjClearBadges();
 }
+let _pinNavIndex = -1;
 function _pjKeyDown(e) {
 if (typeof e.getModifierState === 'function') _pj.caps = !!e.getModifierState('CapsLock');
 if (e.key === 'Shift') { _pj.shift = true; _pjUpdateShown(); return; }
 if (_pj.mode === 'shift') _pjUpdateShown();
-if (e.ctrlKey || e.altKey || e.metaKey || e.repeat || _pjJumpBlocked(e)) return;
-const { codes } = pinterestJumpCodes();
-const i = codes.indexOf(e.code);
-if (i < 0) return;
+if (e.ctrlKey || e.metaKey || e.repeat || _pjJumpBlocked(e)) return;
+const preset = config.relatedNavPreset || 'cycle';
+const cands = getPinterestCandidatePins();
+if (!cands.length) return;
+if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+if (_pinNavIndex >= 0 || e.shiftKey) {
 e.preventDefault(); e.stopPropagation();
-if (_pj.mode === 'focus') pinterestJumpFocus(i); else pinterestJumpTo(i);
+_pinNavIndex = _pinNavIndex < 0 ? 0 : Math.min(cands.length - 1, _pinNavIndex + 1);
+pinterestJumpFocus(_pinNavIndex);
+return;
+}
+}
+if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+if (_pinNavIndex > 0) {
+e.preventDefault(); e.stopPropagation();
+_pinNavIndex = Math.max(0, _pinNavIndex - 1);
+pinterestJumpFocus(_pinNavIndex);
+return;
+}
+}
+}
+if (preset === 'cycle' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+if (e.code === 'Digit1' || e.key === '1') {
+e.preventDefault(); e.stopPropagation();
+_pinNavIndex = 0;
+if (_pj.mode === 'focus') pinterestJumpFocus(0); else pinterestJumpTo(0);
+return;
+}
+if (e.code === 'Digit4' || e.key === '4') {
+e.preventDefault(); e.stopPropagation();
+_pinNavIndex = cands.length - 1;
+if (_pj.mode === 'focus') pinterestJumpFocus(_pinNavIndex); else pinterestJumpTo(_pinNavIndex);
+return;
+}
+if (e.code === 'Digit2' || e.key === '2') {
+e.preventDefault(); e.stopPropagation();
+_pinNavIndex = _pinNavIndex <= 0 ? cands.length - 1 : _pinNavIndex - 1;
+if (_pj.mode === 'focus') pinterestJumpFocus(_pinNavIndex); else pinterestJumpTo(_pinNavIndex);
+return;
+}
+if (e.code === 'Digit3' || e.key === '3') {
+e.preventDefault(); e.stopPropagation();
+_pinNavIndex = _pinNavIndex >= cands.length - 1 ? 0 : _pinNavIndex + 1;
+if (_pj.mode === 'focus') pinterestJumpFocus(_pinNavIndex); else pinterestJumpTo(_pinNavIndex);
+return;
+}
+}
+const digitCodes = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
+const dIdx = digitCodes.indexOf(e.code);
+if (dIdx >= 0) {
+let targetIdx = dIdx;
+if (e.shiftKey) targetIdx += 10;
+else if (e.altKey) targetIdx += 20;
+else if (e.altKey) return;
+if (targetIdx < cands.length) {
+e.preventDefault(); e.stopPropagation();
+_pinNavIndex = targetIdx;
+if (_pj.mode === 'focus') pinterestJumpFocus(targetIdx); else pinterestJumpTo(targetIdx);
+return;
+}
+}
 }
 function _pjJumpBlocked(e) {
 if (_pjJumpIsTypingSafe(e)) return true;
@@ -12614,6 +12851,253 @@ _pjUpdateShown();
 }
 window.pinterestJumpApply = pinterestJumpApply;
 if (rootDomain.includes('pinterest.')) setTimeout(pinterestJumpApply, 0);
+
+// ── src/engines/related-nav.js ──
+window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
+window.MOSSAD_ENGINES.related = (() => {
+let _currentIndex = -1;
+let _activeHoverVideo = null;
+let _hudTimer = null;
+function getCandidateItems() {
+if (rootDomain.includes('pinterest.') && typeof getPinterestCandidatePins === 'function') {
+const pins = getPinterestCandidatePins();
+return pins.map((p, idx) => ({
+element: (p.element && p.element.closest && p.element.closest('[data-grid-item]')) || p.element,
+link: (p.element && p.element.querySelector && p.element.querySelector('a[href*="/pin/"]')) || p.element,
+url: p.url,
+title: p.title || `Пин #${idx + 1}`,
+type: p.type || 'image',
+video: p.element && p.element.querySelector ? p.element.querySelector('video') : null
+})).filter(x => x.element);
+}
+if (/(?:xvideos|xnxx|xv-ru)/i.test(rootDomain)) {
+const cards = Array.from(document.querySelectorAll('#related-videos .thumb-block, .related-videos .thumb-block, .video-related .thumb-block, .thumb-block'));
+if (cards.length) {
+return cards.map((el, idx) => {
+const a = el.querySelector('a[href*="/video"]') || el.querySelector('a');
+const v = el.querySelector('video');
+const t = (el.querySelector('.title, p a, .video-title') || {}).textContent || `Видео #${idx + 1}`;
+return { element: el, link: a, url: a ? a.href : '', title: t.trim(), type: 'video', video: v };
+}).filter(x => x.link);
+}
+}
+if (/(?:xhamster|xh\d*)/i.test(rootDomain)) {
+const cards = Array.from(document.querySelectorAll('.video-thumb, [data-qa="video-thumb"], .thumb-list__item, .role-popover-root'));
+if (cards.length) {
+return cards.map((el, idx) => {
+const a = el.querySelector('a[href*="/videos/"]') || el.querySelector('a');
+const v = el.querySelector('video');
+const t = (el.querySelector('.video-thumb__title, [data-qa="video-thumb-title"]') || {}).textContent || `Видео #${idx + 1}`;
+return { element: el, link: a, url: a ? a.href : '', title: t.trim(), type: 'video', video: v };
+}).filter(x => x.link);
+}
+}
+if (/faphouse/i.test(rootDomain)) {
+const cards = Array.from(document.querySelectorAll('.video-preview, .thumb, .item, a[href*="/videos/"]')).map(el => {
+const card = el.closest('.video-preview, .thumb, .item') || el;
+return card;
+});
+const uniqCards = Array.from(new Set(cards));
+if (uniqCards.length) {
+return uniqCards.map((el, idx) => {
+const a = el.tagName === 'A' ? el : el.querySelector('a[href*="/videos/"]') || el.querySelector('a');
+const v = el.querySelector('video');
+const t = (el.querySelector('.title, h3, .video-title') || {}).textContent || `Видео #${idx + 1}`;
+return { element: el, link: a, url: a ? a.href : '', title: t.trim(), type: 'video', video: v };
+}).filter(x => x.link);
+}
+}
+if (/noodlemagazine/i.test(rootDomain)) {
+const cards = Array.from(document.querySelectorAll('.c_video .item, .related .item, .video_item, a[href*="/video/"]'));
+const uniq = Array.from(new Set(cards));
+if (uniq.length) {
+return uniq.map((el, idx) => {
+const a = el.tagName === 'A' ? el : el.querySelector('a[href*="/video/"]') || el.querySelector('a');
+const v = el.querySelector('video');
+const t = (el.querySelector('.title, .item_title') || {}).textContent || `Видео #${idx + 1}`;
+return { element: el, link: a, url: a ? a.href : '', title: t.trim(), type: 'video', video: v };
+}).filter(x => x.link);
+}
+}
+const generic = Array.from(document.querySelectorAll('[data-grid-item], .video-card, .media-card, .thumbnail'));
+if (generic.length) {
+return generic.map((el, idx) => {
+const a = el.querySelector('a') || el;
+const v = el.querySelector('video');
+return { element: el, link: a, url: a ? a.href : '', title: (el.textContent || '').slice(0, 40).trim() || `#${idx + 1}`, type: 'video', video: v };
+}).filter(x => x.link);
+}
+return [];
+}
+function focusItem(index, doOpen = false, inBackground = false) {
+const items = getCandidateItems();
+if (!items.length) {
+showToast('⚠️ Похожие медиа не найдены на странице', true);
+return false;
+}
+const clamped = Math.max(0, Math.min(items.length - 1, index));
+_currentIndex = clamped;
+const item = items[clamped];
+const el = item.element || item.link;
+if (doOpen) {
+if (inBackground && typeof GM_openInTab === 'function') {
+GM_openInTab(item.url, { active: false, insert: true });
+showToast(`📑 В фоновой вкладке: ${item.title}`);
+} else if (inBackground) {
+window.open(item.url, '_blank');
+showToast(`📑 В новой вкладке: ${item.title}`);
+} else {
+showToast(`➡️ Открываю: ${item.title}`);
+if (item.link) {
+try { item.link.click(); } catch (_) { window.location.href = item.url; }
+} else if (item.url) {
+window.location.href = item.url;
+}
+}
+return true;
+}
+document.querySelectorAll('.mossad-related-focused').forEach(c => {
+c.classList.remove('mossad-related-focused');
+c.style.outline = '';
+c.style.boxShadow = '';
+});
+if (_activeHoverVideo && _activeHoverVideo !== item.video) {
+try { _activeHoverVideo.pause(); } catch (_) {}
+_activeHoverVideo = null;
+}
+if (el) {
+el.classList.add('mossad-related-focused');
+el.style.outline = '3px solid #3b82f6';
+el.style.boxShadow = '0 0 16px rgba(59, 130, 246, 0.7)';
+try {
+el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+} catch (_) {}
+try {
+(item.link || el).focus({ preventScroll: true });
+} catch (_) {}
+if (item.video) {
+try {
+item.video.muted = true;
+const p = item.video.play();
+if (p && p.catch) p.catch(() => {});
+_activeHoverVideo = item.video;
+} catch (_) {}
+}
+_showRelatedHud(clamped + 1, items.length, item.title);
+}
+return true;
+}
+function _showRelatedHud(curr, total, title) {
+let hud = document.getElementById('mossad-related-hud');
+if (!hud) {
+hud = document.createElement('div');
+hud.id = 'mossad-related-hud';
+hud.style.cssText = `
+                    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+                    background: rgba(17, 24, 39, 0.94); border: 1px solid #3b82f6; border-radius: 8px;
+                    padding: 8px 16px; color: #fff; font: 600 13px system-ui, sans-serif;
+                    z-index: 2147483646; box-shadow: 0 8px 24px rgba(0,0,0,0.6); pointer-events: none;
+                    display: flex; align-items: center; gap: 8px; max-width: 90vw; white-space: nowrap;
+                    overflow: hidden; text-overflow: ellipsis; transition: opacity 0.2s;
+                `;
+document.body.appendChild(hud);
+}
+hud.innerHTML = `
+                <span style="color:#60a5fa; font-weight:700;">[${curr}/${total}]</span>
+                <span style="overflow:hidden; text-overflow:ellipsis; max-width:500px;">${String(title).replace(/</g, '&lt;')}</span>
+                <span style="color:#9ca3af; font-size:11px; margin-left:4px;">Enter — перейти · Ctrl+Enter — вкладка</span>
+            `;
+hud.style.opacity = '1';
+if (_hudTimer) clearTimeout(_hudTimer);
+_hudTimer = setTimeout(() => {
+if (hud) hud.style.opacity = '0';
+}, 3500);
+}
+function handleKeyDown(e) {
+if (rootDomain.includes('pinterest.')) return false;
+const t = e.target;
+if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return false;
+if (window.capturingFor !== null && window.capturingFor !== undefined) return false;
+const preset = config.relatedNavPreset || 'cycle';
+const items = getCandidateItems();
+if (!items.length) return false;
+if (_currentIndex >= 0 && _currentIndex < items.length) {
+if (e.key === 'Enter') {
+e.preventDefault(); e.stopPropagation();
+const inBg = !!e.ctrlKey || !!e.metaKey;
+focusItem(_currentIndex, true, inBg);
+return true;
+}
+}
+if (config.relatedNavArrows !== false && !e.ctrlKey && !e.altKey && !e.metaKey) {
+if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+if (_currentIndex >= 0 || e.shiftKey) {
+e.preventDefault(); e.stopPropagation();
+const nextIdx = _currentIndex < 0 ? 0 : Math.min(items.length - 1, _currentIndex + 1);
+focusItem(nextIdx);
+return true;
+}
+}
+if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+if (_currentIndex > 0) {
+e.preventDefault(); e.stopPropagation();
+focusItem(_currentIndex - 1);
+return true;
+}
+}
+}
+if (preset === 'cycle' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+if (e.code === 'Digit1' || e.key === '1') {
+e.preventDefault(); e.stopPropagation();
+focusItem(0);
+return true;
+}
+if (e.code === 'Digit4' || e.key === '4') {
+e.preventDefault(); e.stopPropagation();
+focusItem(items.length - 1);
+return true;
+}
+if (e.code === 'Digit2' || e.key === '2') {
+e.preventDefault(); e.stopPropagation();
+const prev = _currentIndex <= 0 ? items.length - 1 : _currentIndex - 1;
+focusItem(prev);
+return true;
+}
+if (e.code === 'Digit3' || e.key === '3') {
+e.preventDefault(); e.stopPropagation();
+const next = _currentIndex >= items.length - 1 ? 0 : _currentIndex + 1;
+focusItem(next);
+return true;
+}
+}
+if (preset === 'digits' && !e.ctrlKey && !e.metaKey) {
+const digitCodes = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
+const dIdx = digitCodes.indexOf(e.code);
+if (dIdx >= 0) {
+e.preventDefault(); e.stopPropagation();
+let target = dIdx;
+if (e.shiftKey) target += 10;
+else if (e.altKey) target += 20;
+focusItem(target);
+return true;
+}
+}
+return false;
+}
+function init() {
+window.addEventListener('keydown', handleKeyDown, true);
+}
+if (document.readyState === 'loading') {
+document.addEventListener('DOMContentLoaded', init);
+} else {
+init();
+}
+return {
+getCandidateItems,
+focusItem,
+handleKeyDown
+};
+})();
 
 // ── src/ui/tpl-help.js ──
 let _tplHelp = null;
@@ -14576,10 +15060,25 @@ if (!pane || !pane.isConnected) { _mossadSitesPane = null; return; }
 const user = mossadReadUserSites();
 const here = (d) => mossadHostMatches(hostname, d) ? ' <span style="color:#10b981;" title="Текущий сайт">● здесь</span>' : '';
 const chip = 'display:flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid #374151;border-radius:6px;background:#0b1220;font:12px ui-monospace,Consolas,monospace;color:#e5e7eb;';
+const getCatBadge = (d) => {
+const c = (typeof mossadGetSiteCategory === 'function') ? mossadGetSiteCategory(d) : { icon: '🌐', label: 'Общий' };
+return `<span style="font-size:10px;padding:1px 5px;border-radius:4px;background:#1e293b;color:#94a3b8;border:1px solid #334155;" title="${c.label}">${c.icon} ${c.label}</span>`;
+};
+const statsBox = pane.querySelector('#mossad-sites-stats-box');
+if (statsBox && typeof mossadGetSiteStatsSummary === 'function') {
+const sum = mossadGetSiteStatsSummary();
+statsBox.innerHTML = `
+                <span title="Первый добавленный сайт">🏁 <b>Первый:</b> <code style="color:#60a5fa;">${mossadEscHtml(sum.firstAdded)}</code></span>
+                <span style="color:#4b5563;">·</span>
+                <span title="Последний добавленный сайт">🕒 <b>Последний:</b> <code style="color:#34d399;">${mossadEscHtml(sum.lastAdded)}</code></span>
+                <span style="color:#4b5563;">·</span>
+                <span title="Самый активный по визитам и скачиваниям">🔥 <b>Самый частый:</b> <code style="color:#fbbf24;">${mossadEscHtml(sum.mostFrequent)}</code></span>
+            `;
+}
 pane.querySelector('#mossad-sites-builtin').innerHTML = MOSSAD_BUILTIN_SITES.map(d =>
-`<div style="${chip}color:#9ca3af;" title="Встроенный сайт — убрать нельзя">🔒 ${mossadEscHtml(d)}${here(d)}</div>`).join('');
+`<div style="${chip}color:#9ca3af;" title="Встроенный сайт — убрать нельзя">🔒 ${mossadEscHtml(d)}${here(d)}<div style="margin-left:auto;">${getCatBadge(d)}</div></div>`).join('');
 pane.querySelector('#mossad-sites-user').innerHTML = user.length ? user.map(d =>
-`<div data-site="${mossadEscHtml(d)}" style="${chip}">${mossadEscHtml(d)}${here(d)}<button data-site-del="${mossadEscHtml(d)}" title="Убрать сайт из списка" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#f87171;padding:0 7px;cursor:pointer;font-size:11px;font-weight:bold;">${LH('sitesRemove')}</button></div>`).join('')
+`<div data-site="${mossadEscHtml(d)}" style="${chip}">${mossadEscHtml(d)}${here(d)}<div style="margin-left:auto;display:flex;align-items:center;gap:6px;">${getCatBadge(d)}<button data-site-del="${mossadEscHtml(d)}" title="Убрать сайт из списка" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#f87171;padding:0 7px;cursor:pointer;font-size:11px;font-weight:bold;">${LH('sitesRemove')}</button></div></div>`).join('')
 : '<div style="font-size:11px;color:#6b7280;">Пока пусто</div>';
 const cur = pane.querySelector('#mossad-sites-add-current');
 const curNorm = mossadNormSite(hostname);
@@ -14597,13 +15096,14 @@ const btnCss = 'background:#374151;border:1px solid #4b5563;padding:5px 9px;bord
 pane.innerHTML = `
             <div style="font-size:11px;color:#9ca3af;line-height:1.35;">Сайты, где работает MOSSAD. Список общий для всех сайтов и контейнеров. Поддомены входят автоматически (<code>site.com</code> → <code>m.site.com</code>). То же — в меню Tampermonkey: «➕ Добавить этот сайт в MOSSAD».</div>
             <div style="font-size:11px;color:#fbbf24;">⚠️ После добавления или удаления перезагрузи страницу того сайта.</div>
+            <div id="mossad-sites-stats-box" style="display:flex;gap:8px;padding:5px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:11px;color:#c9d1d9;align-items:center;flex-wrap:wrap;"></div>
             <div style="display:flex;gap:6px;align-items:center;">
               <input id="mossad-sites-input" type="text" placeholder="example.com" spellcheck="false" style="flex:1;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:4px 6px;font-size:12px;">
               <button id="mossad-sites-add" style="${btnCss}background:#065f46;border-color:#10b981;" data-mossad-label="sitesAdd">${LH('sitesAdd')}</button>
               <button id="mossad-sites-add-current" style="${btnCss}color:#60a5fa;" data-mossad-label="sitesAddCurrent">${LH('sitesAddCurrent')}</button>
             </div>
             <div id="mossad-sites-status" style="font-size:11px;color:#9ca3af;min-height:14px;"></div>
-            <div style="overflow-y:auto;max-height:calc(85vh - 320px);display:flex;flex-direction:column;gap:6px;padding-right:4px;">
+            <div style="overflow-y:auto;max-height:calc(85vh - 340px);display:flex;flex-direction:column;gap:6px;padding-right:4px;">
               <div style="font-size:11px;color:#6b7280;" data-mossad-label="sitesUser">${LH('sitesUser')}</div>
               <div id="mossad-sites-user" style="display:flex;flex-direction:column;gap:3px;"></div>
               <div style="font-size:11px;color:#6b7280;margin-top:4px;" data-mossad-label="sitesBuiltin">${LH('sitesBuiltin')}</div>
@@ -14962,6 +15462,8 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
 { k: 'pinterestAutoFS', t: 'bool', label: 'Pinterest: авто «полный масштаб»' },
 { k: 'pinterestJumpKeys', t: 'sel', label: 'Pinterest: похожий пин по клавише', opts: [['off', 'Выкл'], ['focus', 'Фокус'], ['keys', 'Переход'], ['badges', 'Переход + номера'], ['shift', 'Переход, номера по Shift / CapsLock']] },
+{ k: 'relatedNavPreset', t: 'sel', label: 'Похожие медиа: клавиши выбора', opts: [['cycle', 'Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)'], ['digits', 'Десятки 1..10 (Shift +10, Alt +20)']] },
+{ k: 'relatedNavArrows', t: 'bool', label: 'Похожие медиа: стрелки ← → ↑ ↓ + предпросмотр' },
 ];
 function initGlobalDefaultsTab(modal) {
 const form = modal.querySelector('#mossad-def-form');
@@ -15310,6 +15812,19 @@ modal.innerHTML = `
               </div>
               <div id="mossad-gen-pjump-skip" style="font-size:11px;color:#9ca3af;margin-top:2px;"></div>
             </div>` : ''}
+            <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;display:flex;flex-direction:column;gap:4px;" title="Клавиши быстрого выбора карточек из блока похожих/рекомендаций (Faphouse, xHamster, xVideos, Pinterest и др.)">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span>🎯 Похожие медиа:</span>
+                <select id="mossad-related-nav-preset" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
+                  <option value="cycle" ${(config.relatedNavPreset || 'cycle') === 'cycle' ? 'selected' : ''}>Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)</option>
+                  <option value="digits" ${(config.relatedNavPreset || 'cycle') === 'digits' ? 'selected' : ''}>Десятки 1..10 (Shift +10, Alt +20)</option>
+                </select>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                <input id="mossad-related-nav-arrows" type="checkbox" style="accent-color:#10b981;" ${config.relatedNavArrows !== false ? 'checked' : ''}>
+                <span>Стрелки ← → ↑ ↓ с живым предпросмотром (видео без звука)</span>
+              </label>
+            </div>
             ${rootDomain === 'grok.com' ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Вне поля ввода эти клавиши не переводят фокус в промт Grok (например, R у расширения Speed Control). Другие расширения клавишу видят">
               <span data-mossad-label="noPromptLabel" style="white-space:nowrap;">${LH('noPromptLabel')}</span>
               <input id="mossad-gen-nokeys" type="text" value="${String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -15394,7 +15909,7 @@ return `
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-13</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-17</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -15979,6 +16494,14 @@ if (el) el.textContent = sk.length ? `${L('pinJumpSkipped')} ${sk.map(x => x.lab
 };
 paintSkip();
 genPJump.onchange = (e) => { Settings.setQuiet('pinterestJumpKeys', e.target.value); pinterestJumpApply(); paintSkip(); };
+}
+const selRelPreset = modal.querySelector('#mossad-related-nav-preset');
+if (selRelPreset) {
+selRelPreset.onchange = (e) => Settings.setQuiet('relatedNavPreset', e.target.value);
+}
+const cbRelArrows = modal.querySelector('#mossad-related-nav-arrows');
+if (cbRelArrows) {
+cbRelArrows.onchange = (e) => Settings.setQuiet('relatedNavArrows', e.target.checked);
 }
 const genNoKeys = modal.querySelector('#mossad-gen-nokeys');
 if (genNoKeys) {

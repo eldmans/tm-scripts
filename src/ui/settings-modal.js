@@ -380,6 +380,8 @@
         { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
         { k: 'pinterestAutoFS',   t: 'bool', label: 'Pinterest: авто «полный масштаб»' },
         { k: 'pinterestJumpKeys', t: 'sel', label: 'Pinterest: похожий пин по клавише', opts: [['off', 'Выкл'], ['focus', 'Фокус'], ['keys', 'Переход'], ['badges', 'Переход + номера'], ['shift', 'Переход, номера по Shift / CapsLock']] },
+        { k: 'relatedNavPreset',  t: 'sel', label: 'Похожие медиа: клавиши выбора', opts: [['cycle', 'Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)'], ['digits', 'Десятки 1..10 (Shift +10, Alt +20)']] },
+        { k: 'relatedNavArrows',  t: 'bool', label: 'Похожие медиа: стрелки ← → ↑ ↓ + предпросмотр' },
     ];
 
     function initGlobalDefaultsTab(modal) {
@@ -758,6 +760,19 @@
               </div>
               <div id="mossad-gen-pjump-skip" style="font-size:11px;color:#9ca3af;margin-top:2px;"></div>
             </div>` : ''}
+            <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;display:flex;flex-direction:column;gap:4px;" title="Клавиши быстрого выбора карточек из блока похожих/рекомендаций (Faphouse, xHamster, xVideos, Pinterest и др.)">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span>🎯 Похожие медиа:</span>
+                <select id="mossad-related-nav-preset" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
+                  <option value="cycle" ${(config.relatedNavPreset || 'cycle') === 'cycle' ? 'selected' : ''}>Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)</option>
+                  <option value="digits" ${(config.relatedNavPreset || 'cycle') === 'digits' ? 'selected' : ''}>Десятки 1..10 (Shift +10, Alt +20)</option>
+                </select>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                <input id="mossad-related-nav-arrows" type="checkbox" style="accent-color:#10b981;" ${config.relatedNavArrows !== false ? 'checked' : ''}>
+                <span>Стрелки ← → ↑ ↓ с живым предпросмотром (видео без звука)</span>
+              </label>
+            </div>
             ${rootDomain === 'grok.com' ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Вне поля ввода эти клавиши не переводят фокус в промт Grok (например, R у расширения Speed Control). Другие расширения клавишу видят">
               <span data-mossad-label="noPromptLabel" style="white-space:nowrap;">${LH('noPromptLabel')}</span>
               <input id="mossad-gen-nokeys" type="text" value="${String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -842,7 +857,7 @@
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-13</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-17</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -1508,6 +1523,14 @@
             };
             paintSkip();
             genPJump.onchange = (e) => { Settings.setQuiet('pinterestJumpKeys', e.target.value); pinterestJumpApply(); paintSkip(); };
+        }
+        const selRelPreset = modal.querySelector('#mossad-related-nav-preset');
+        if (selRelPreset) {
+            selRelPreset.onchange = (e) => Settings.setQuiet('relatedNavPreset', e.target.value);
+        }
+        const cbRelArrows = modal.querySelector('#mossad-related-nav-arrows');
+        if (cbRelArrows) {
+            cbRelArrows.onchange = (e) => Settings.setQuiet('relatedNavArrows', e.target.checked);
         }
         // v1.3.64: Grok — клавиши, которые не кидают в промт
         const genNoKeys = modal.querySelector('#mossad-gen-nokeys');

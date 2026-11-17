@@ -12,10 +12,9 @@
     // a[href*="/pin/"], оборачивающая PinImage/видео; именно она получает фокус по Tab), а НЕ внешний контейнер
     // плитки с кнопкой «…». Запасные: role=link / tabindex ≥ 0 вокруг медиа → первая ссылка на пин → найденная ссылка.
     const PIN_FOCUS_SEL = 'a[href*="/pin/"], [role="link"], [tabindex]:not([tabindex="-1"])';
-    const PIN_JUMP_ALL_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0',
-        'KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP',
-        'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL',
-        'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM'];
+    // v1.4.14: строго только цифры 1..0 (первые 10 пинов). Буквы алфавита полностью убраны.
+    // С Shift — 11..20 (Shift+1 = 11), с Alt — 21..30 (Alt+1 = 21).
+    const PIN_JUMP_ALL_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
     const PIN_BADGE_THROTTLE_MS = 340; // ≤ 3 перерисовки в секунду
     const PIN_BADGE_LAYER_ID = 'mossad-pin-badges';
 
@@ -176,16 +175,82 @@
         if (want) pinterestRenderBadges(); else _pjClearBadges();
     }
 
+    let _pinNavIndex = -1;
+
     function _pjKeyDown(e) {
         if (typeof e.getModifierState === 'function') _pj.caps = !!e.getModifierState('CapsLock');
         if (e.key === 'Shift') { _pj.shift = true; _pjUpdateShown(); return; }
         if (_pj.mode === 'shift') _pjUpdateShown();
-        if (e.ctrlKey || e.altKey || e.metaKey || e.repeat || _pjJumpBlocked(e)) return;
-        const { codes } = pinterestJumpCodes();
-        const i = codes.indexOf(e.code);
-        if (i < 0) return;
-        e.preventDefault(); e.stopPropagation();
-        if (_pj.mode === 'focus') pinterestJumpFocus(i); else pinterestJumpTo(i);
+        if (e.ctrlKey || e.metaKey || e.repeat || _pjJumpBlocked(e)) return;
+
+        const preset = config.relatedNavPreset || 'cycle'; // 'cycle' | 'digits'
+        const cands = getPinterestCandidatePins();
+        if (!cands.length) return;
+
+        // 1. Стрелочная навигация ← → ↑ ↓
+        if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                if (_pinNavIndex >= 0 || e.shiftKey) {
+                    e.preventDefault(); e.stopPropagation();
+                    _pinNavIndex = _pinNavIndex < 0 ? 0 : Math.min(cands.length - 1, _pinNavIndex + 1);
+                    pinterestJumpFocus(_pinNavIndex);
+                    return;
+                }
+            }
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                if (_pinNavIndex > 0) {
+                    e.preventDefault(); e.stopPropagation();
+                    _pinNavIndex = Math.max(0, _pinNavIndex - 1);
+                    pinterestJumpFocus(_pinNavIndex);
+                    return;
+                }
+            }
+        }
+
+        // 2. Пресет 'cycle': 1 - первый, 4 - последний, 2 - назад, 3 - вперёд
+        if (preset === 'cycle' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            if (e.code === 'Digit1' || e.key === '1') {
+                e.preventDefault(); e.stopPropagation();
+                _pinNavIndex = 0;
+                if (_pj.mode === 'focus') pinterestJumpFocus(0); else pinterestJumpTo(0);
+                return;
+            }
+            if (e.code === 'Digit4' || e.key === '4') {
+                e.preventDefault(); e.stopPropagation();
+                _pinNavIndex = cands.length - 1;
+                if (_pj.mode === 'focus') pinterestJumpFocus(_pinNavIndex); else pinterestJumpTo(_pinNavIndex);
+                return;
+            }
+            if (e.code === 'Digit2' || e.key === '2') {
+                e.preventDefault(); e.stopPropagation();
+                _pinNavIndex = _pinNavIndex <= 0 ? cands.length - 1 : _pinNavIndex - 1;
+                if (_pj.mode === 'focus') pinterestJumpFocus(_pinNavIndex); else pinterestJumpTo(_pinNavIndex);
+                return;
+            }
+            if (e.code === 'Digit3' || e.key === '3') {
+                e.preventDefault(); e.stopPropagation();
+                _pinNavIndex = _pinNavIndex >= cands.length - 1 ? 0 : _pinNavIndex + 1;
+                if (_pj.mode === 'focus') pinterestJumpFocus(_pinNavIndex); else pinterestJumpTo(_pinNavIndex);
+                return;
+            }
+        }
+
+        // 3. Пресет 'digits': 1..10, Shift+1..10 = 11..20, Alt+1..10 = 21..30
+        const digitCodes = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
+        const dIdx = digitCodes.indexOf(e.code);
+        if (dIdx >= 0) {
+            let targetIdx = dIdx;
+            if (e.shiftKey) targetIdx += 10;
+            else if (e.altKey) targetIdx += 20;
+            else if (e.altKey) return; // если Alt занят
+
+            if (targetIdx < cands.length) {
+                e.preventDefault(); e.stopPropagation();
+                _pinNavIndex = targetIdx;
+                if (_pj.mode === 'focus') pinterestJumpFocus(targetIdx); else pinterestJumpTo(targetIdx);
+                return;
+            }
+        }
     }
     function _pjJumpBlocked(e) {
         if (_pjJumpIsTypingSafe(e)) return true;

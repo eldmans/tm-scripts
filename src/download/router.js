@@ -224,10 +224,24 @@
         // Защита от повторного скачивания одного файла за короткое время
         const now = Date.now();
         if (primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
-            console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, пропущено.');
-            // v1.3.82: раньше — молча; теперь сигнал «уже скачивали» и подсказка
+            console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, запрос подтверждения дубликата.');
             try { mossadBeep('dup'); } catch (e) {}
-            showToast(`⚠️ Только что скачано (${Math.max(1, Math.round((now - _lastDownloadTime) / 1000))} с назад)`, false, 2500);
+            const rec = (typeof _cachedUrls !== 'undefined' && _cachedUrls.get(primaryUrl))
+                || (typeof _cachedCleanUrls !== 'undefined' && typeof cleanMediaUrl === 'function' && _cachedCleanUrls.get(cleanMediaUrl(primaryUrl)))
+                || {
+                    filename: 'только что скачанный файл',
+                    date: 'только что',
+                    url: primaryUrl,
+                    postUrl: canonicalPostUrl
+                };
+            if (typeof showDuplicateDownloadNotice === 'function') {
+                showDuplicateDownloadNotice(rec, () => {
+                    _lastDownloadTime = 0;
+                    triggerDownload(true, rec, onDoneCallback, presetMedia);
+                }, canonicalPostUrl, primaryUrl);
+            } else {
+                showToast(`⚠️ Только что скачано (${Math.max(1, Math.round((now - _lastDownloadTime) / 1000))} с назад)`, false, 2500);
+            }
             const act = mossadPdAction();
             if (act === 'upns' || act === 'always') {
                 performPostDownloadAction();

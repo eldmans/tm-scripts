@@ -1,4 +1,4 @@
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.13';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.14';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -49,6 +49,86 @@
         try { if (typeof GM_setValue === 'function') { GM_setValue(MOSSAD_SITES_GM_KEY, JSON.stringify(out)); return out; } } catch (e) {}
         return null;
     }
+    const MOSSAD_SITES_META_KEY = 'mossad_sites_meta';
+
+    // ── v1.4.14: Категории сайтов MOSSAD ──
+    const MOSSAD_SITE_CATEGORIES = {
+        video: { id: 'video', label: 'Видео', icon: '🎬', sites: ['faphouse.com', 'xvideos.com', 'xv-ru.com', 'xnxx.com', 'xhamster.com', 'xhamster.desi', 'xhamster2.com', 'noodlemagazine.com', 'vkvideo.ru', 'vk.video', 'pornhub.com'] },
+        feed:  { id: 'feed', label: 'Ленты / Пины', icon: '📌', sites: ['pinterest.com', 'pinterest.ru', 'instagram.com', 'redgifs.com'] },
+        ai:    { id: 'ai', label: 'Нейросети', icon: '🤖', sites: ['grok.com', 'huggingface.co', 'hf.space', 'civitai.red'] },
+        general: { id: 'general', label: 'Общие', icon: '🌐', sites: [] }
+    };
+
+    function mossadGetSiteCategory(site) {
+        const d = mossadNormSite(site);
+        if (!d) return MOSSAD_SITE_CATEGORIES.general;
+        for (const cat of ['video', 'feed', 'ai']) {
+            if (MOSSAD_SITE_CATEGORIES[cat].sites.some(s => d === s || d.endsWith('.' + s))) {
+                return MOSSAD_SITE_CATEGORIES[cat];
+            }
+        }
+        return MOSSAD_SITE_CATEGORIES.general;
+    }
+
+    function mossadReadSiteMeta() {
+        let raw = null;
+        try { if (typeof GM_getValue === 'function') raw = GM_getValue(MOSSAD_SITES_META_KEY, null); } catch (e) {}
+        let obj = raw;
+        try { if (typeof raw === 'string') obj = JSON.parse(raw); } catch (e) { obj = null; }
+        if (!obj || typeof obj !== 'object') obj = {};
+        return obj;
+    }
+
+    function mossadWriteSiteMeta(meta) {
+        try { if (typeof GM_setValue === 'function') { GM_setValue(MOSSAD_SITES_META_KEY, JSON.stringify(meta)); return true; } } catch (e) {}
+        return false;
+    }
+
+    function mossadRecordSiteVisit(site) {
+        const d = mossadNormSite(site);
+        if (!d) return;
+        const meta = mossadReadSiteMeta();
+        meta.stats = meta.stats || {};
+        meta.stats[d] = meta.stats[d] || { visits: 0, downloads: 0, lastVisited: 0 };
+        meta.stats[d].visits = (meta.stats[d].visits || 0) + 1;
+        meta.stats[d].lastVisited = Date.now();
+        mossadWriteSiteMeta(meta);
+    }
+
+    function mossadRecordSiteDownload(site) {
+        const d = mossadNormSite(site);
+        if (!d) return;
+        const meta = mossadReadSiteMeta();
+        meta.stats = meta.stats || {};
+        meta.stats[d] = meta.stats[d] || { visits: 0, downloads: 0, lastVisited: 0 };
+        meta.stats[d].downloads = (meta.stats[d].downloads || 0) + 1;
+        meta.stats[d].lastDownloaded = Date.now();
+        mossadWriteSiteMeta(meta);
+    }
+
+    function mossadGetSiteStatsSummary() {
+        const meta = mossadReadSiteMeta();
+        const stats = meta.stats || {};
+        const first = meta.firstAdded || (MOSSAD_BUILTIN_SITES.length ? MOSSAD_BUILTIN_SITES[0] : '—');
+        const last = meta.lastAdded || (MOSSAD_BUILTIN_SITES.length ? MOSSAD_BUILTIN_SITES[MOSSAD_BUILTIN_SITES.length - 1] : '—');
+        let topDomain = '—';
+        let topScore = 0;
+        for (const [dom, st] of Object.entries(stats)) {
+            const score = (st.visits || 0) + (st.downloads || 0) * 3;
+            if (score > topScore) {
+                topScore = score;
+                topDomain = dom;
+            }
+        }
+        return {
+            firstAdded: first,
+            lastAdded: last,
+            mostFrequent: topDomain,
+            topScore: topScore,
+            stats: stats
+        };
+    }
+
     function mossadIsBuiltinHost(host) { return MOSSAD_BUILTIN_SITES.some(d => mossadHostMatches(host, d)); }
     function mossadIsHostAllowed(host) { return mossadIsBuiltinHost(host) || mossadReadUserSites().some(d => mossadHostMatches(host, d)); }
     /** Добавить сайт в общий список. Возвращает нормализованный домен или '' (мусор/нет GM). */
@@ -58,7 +138,16 @@
         if (MOSSAD_BUILTIN_SITES.includes(d)) return d;
         const list = mossadReadUserSites();
         if (!list.includes(d)) list.push(d);
-        return mossadWriteUserSites(list) ? d : '';
+        const ok = mossadWriteUserSites(list);
+        if (ok) {
+            const meta = mossadReadSiteMeta();
+            if (!meta.firstAdded) meta.firstAdded = d;
+            meta.lastAdded = d;
+            meta.sites = meta.sites || {};
+            meta.sites[d] = { addedAt: Date.now() };
+            mossadWriteSiteMeta(meta);
+        }
+        return ok ? d : '';
     }
     /** Убрать из своего списка все записи, под которые попадает host (или ровно этот домен). */
     function mossadRemoveUserSite(hostOrSite) {
@@ -122,3 +211,4 @@
     }
     mossadRegisterSiteMenu();
     if (!_isAllowed) return; // Выход — сайт не в списке (только команда меню, без DOM и слушателей)
+    try { mossadRecordSiteVisit(rootDomain); } catch (e) {}

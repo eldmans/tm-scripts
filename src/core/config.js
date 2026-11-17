@@ -47,7 +47,9 @@
         grokQuotaPos: null,                // v1.3.87: позиция плашки { left, top } (null = по центру вверху)
         grokCollapsePromptOnNav: true,     // v1.3.89: сворачивать поле промпта при любом листании слайдов
         grokHistoryDwellSec: 5,            // v1.3.89: секунд на слайде для сохранения в историю
-        pinterestJumpKeys: 'off',          // v1.3.59: похожий пин по клавише: off | focus | keys | badges | shift
+        pinterestJumpKeys: 'focus',        // v1.3.59 / v1.4.14: похожий пин по клавише (по умолчанию 'focus')
+        relatedNavPreset: 'cycle',         // v1.4.14: пресет навигации по похожим: 'cycle' (1-первый, 4-последний, 2-назад, 3-вперед) | 'digits' (1..10, Shift+1..10, Alt+1..10)
+        relatedNavArrows: true,            // v1.4.14: навигация стрелками с живым предпросмотром (видео без звука)
         pinterestDir: 'fwd',               // v1.3.51: малое слайдшоу на Pinterest: 'fwd' — новые пины, 'back' — назад по истории
         pinterestFilterType: 'ratio',      // 'all' | 'ratio' | 'image' | 'video'
         pinterestPhotoPercent: 50,         // 0..100 % (видео = 100 - photo)
@@ -113,6 +115,7 @@
         'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',
         'grokCollapsePromptOnNav', 'grokHistoryDwellSec',
         'pinterestMode', 'pinterestFilterType', 'pinterestPhotoPercent', 'pinterestMaxVideoDuration', 'pinterestAutoFS', 'pinterestJumpKeys',
+        'relatedNavPreset', 'relatedNavArrows',
     ];
     const GlobalDefaults = {
         KEY: GLOBAL_DEFAULTS_GM_KEY,
@@ -222,6 +225,8 @@
     if (/^\d+$/.test(String(config.pinterestMode))) config.pinterestMode = String(Math.min(30, Math.max(1, parseInt(config.pinterestMode, 10))));
     if (config.pinterestDir !== 'back') config.pinterestDir = 'fwd';
     if (!['off', 'focus', 'keys', 'badges', 'shift'].includes(config.pinterestJumpKeys)) config.pinterestJumpKeys = 'off';
+    if (!['cycle', 'digits'].includes(config.relatedNavPreset)) config.relatedNavPreset = 'cycle';
+    if (typeof config.relatedNavArrows !== 'boolean') config.relatedNavArrows = true;
 
     // ── GitHub-токен: хранится в общем хранилище Tampermonkey (GM_setValue), а НЕ в localStorage сайта ──
     // v1.3.34: раньше токен лежал в localStorage каждого сайта (`mossad_{domain}_config`) и был

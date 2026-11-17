@@ -9,6 +9,34 @@
     let _mossadDBPromise = null;
     let _pendingDuplicateConfirm = null; // { key, expiresAt, executeDownload }
     let _dupTimerInterval = null;
+    function cleanMediaUrl(url) {
+        if (!url || typeof url !== 'string') return '';
+        if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+        try {
+            const u = new URL(url);
+            const transientParams = new Set([
+                'token', 'expires', 'expire', 'exp', 'sig', 'signature', 'h', 'ttl',
+                'validfrom', 'validto', 'ip', 't', 'st', 'e', 'auth', 'sessionid',
+                'session', 'ts', 'time', '_', 'hash', 'v', 'download'
+            ]);
+            const sp = new URLSearchParams(u.search);
+            let changed = false;
+            for (const key of Array.from(sp.keys())) {
+                if (transientParams.has(key.toLowerCase())) {
+                    sp.delete(key);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                u.search = sp.toString() ? `?${sp.toString()}` : '';
+            }
+            return u.origin + u.pathname + (u.search || '');
+        } catch (_) {
+            return url.split('?')[0];
+        }
+    }
+    window.cleanMediaUrl = cleanMediaUrl;
+
     function isPostUrlSpecific(url) {
         if (!url || typeof url !== 'string') return false;
         try {
@@ -20,6 +48,7 @@
             if (host.includes('pinterest.') && u.pathname.includes('/pin/')) return true;
             if (host.includes('instagram.com') && /\/(?:p|reel)\//.test(u.pathname)) return true;
             if (host.includes('redgifs.com') && u.pathname.includes('/watch/')) return true;
+            if (/(?:xvideos|xnxx|xv-ru|faphouse|xhamster|noodlemagazine)/i.test(host) && /\/video/i.test(u.pathname)) return true;
             return false;
         } catch (e) {
             return false;
@@ -33,14 +62,53 @@
             if (mediaUrl.startsWith('data:')) {
                 const res = await fetch(mediaUrl);
                 const blob = await res.blob();
-                return await computeSHA256(blob);
+                return await computeSHA256(blob.slice(0, 1048576));
             }
-            if (mediaUrl.startsWith('blob:') || (typeof location !== 'undefined' && mediaUrl.startsWith(location.origin))) {
+            if (mediaUrl.startsWith('blob:')) {
                 const res = await fetch(mediaUrl);
                 if (res.ok) {
                     const blob = await res.blob();
-                    return await computeSHA256(blob);
+                    return await computeSHA256(blob.slice(0, 1048576));
                 }
+            }
+            // Кросс-доменные CDN ссылки через GM_xmlhttpRequest со срезом 1 МБ
+            if (/^https?:\/\//i.test(mediaUrl)) {
+                return new Promise((resolve) => {
+                    if (typeof GM_xmlhttpRequest !== 'function') return resolve(null);
+                    let settled = false;
+                    const timer = setTimeout(() => {
+                        if (!settled) { settled = true; resolve(null); }
+                    }, 3500);
+
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: mediaUrl,
+                        headers: { 'Range': 'bytes=0-1048575' },
+                        responseType: 'blob',
+                        onload: async (res) => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(timer);
+                            if ((res.status === 200 || res.status === 206) && res.response) {
+                                try {
+                                    const sliceBlob = res.response.slice(0, 1048576);
+                                    const hash = await computeSHA256(sliceBlob);
+                                    resolve(hash);
+                                } catch (_) {
+                                    resolve(null);
+                                }
+                            } else {
+                                resolve(null);
+                            }
+                        },
+                        onerror: () => {
+                            if (!settled) { settled = true; clearTimeout(timer); resolve(null); }
+                        },
+                        ontimeout: () => {
+                            if (!settled) { settled = true; clearTimeout(timer); resolve(null); }
+                        }
+                    });
+                });
             }
         } catch (e) {}
         return null;
@@ -98,6 +166,7 @@
     // IN-MEMORY FAST CACHE (O(1) lookup for 18000+ records)
     const _cachedHashes = new Map(); // hash -> record
     const _cachedUrls = new Map();   // url -> record
+    const _cachedCleanUrls = new Map(); // cleanUrl -> record
     const _videoHashes = new Set();  // hashes of videos
     const _photoHashes = new Set();  // hashes of photos
     let _isCacheLoaded = false;
@@ -113,8 +182,16 @@
                 _photoHashes.add(record.hash);
             }
         }
-        if (record.url) _cachedUrls.set(record.url, record);
-        if (record.postUrl && isPostUrlSpecific(record.postUrl)) _cachedUrls.set(record.postUrl, record);
+        if (record.url) {
+            _cachedUrls.set(record.url, record);
+            const cu = cleanMediaUrl(record.url);
+            if (cu) _cachedCleanUrls.set(cu, record);
+        }
+        if (record.postUrl && isPostUrlSpecific(record.postUrl)) {
+            _cachedUrls.set(record.postUrl, record);
+            const cpu = cleanMediaUrl(record.postUrl);
+            if (cpu) _cachedCleanUrls.set(cpu, record);
+        }
     }
 
     /**
@@ -207,28 +284,34 @@
      * @returns {Promise<Object|null>} Возвращает запись из базы или null.
      */
     async function checkFileInHistory(hash, mediaUrl, postUrl, mediaType = null) {
-        // Если хеш не передан, но есть mediaUrl (blob или same-origin), вычисляем хеш контента
-        if (!hash && mediaUrl) {
-            const h = await resolveMediaHash(mediaUrl);
-            if (h) hash = h;
-        }
         // 1. МГНОВЕННАЯ ПРОВЕРКА В ПАМЯТИ (O(1), 0 миллисекунд)
         if (hash) {
-            if (mediaType === 'video' && _videoHashes.has(hash)) {
-                return _cachedHashes.get(hash);
-            }
-            if (mediaType === 'photo' && _photoHashes.has(hash)) {
-                return _cachedHashes.get(hash);
-            }
-            if (!mediaType && _cachedHashes.has(hash)) {
-                return _cachedHashes.get(hash);
-            }
+            if (mediaType === 'video' && _videoHashes.has(hash)) return _cachedHashes.get(hash);
+            if (mediaType === 'photo' && _photoHashes.has(hash)) return _cachedHashes.get(hash);
+            if (!mediaType && _cachedHashes.has(hash)) return _cachedHashes.get(hash);
         }
-        if (mediaUrl && _cachedUrls.has(mediaUrl)) {
-            return _cachedUrls.get(mediaUrl);
+        if (mediaUrl) {
+            if (_cachedUrls.has(mediaUrl)) return _cachedUrls.get(mediaUrl);
+            const cu = cleanMediaUrl(mediaUrl);
+            if (cu && _cachedCleanUrls.has(cu)) return _cachedCleanUrls.get(cu);
         }
-        if (postUrl && isPostUrlSpecific(postUrl) && _cachedUrls.has(postUrl)) {
-            return _cachedUrls.get(postUrl);
+        if (postUrl && isPostUrlSpecific(postUrl)) {
+            if (_cachedUrls.has(postUrl)) return _cachedUrls.get(postUrl);
+            const cpu = cleanMediaUrl(postUrl);
+            if (cpu && _cachedCleanUrls.has(cpu)) return _cachedCleanUrls.get(cpu);
+        }
+
+        // 2. Если по URL не найден, вычисляем хеш (blob или кросс-доменный срез 1 МБ)
+        if (!hash && mediaUrl) {
+            try {
+                const h = await resolveMediaHash(mediaUrl);
+                if (h) {
+                    hash = h;
+                    if (mediaType === 'video' && _videoHashes.has(hash)) return _cachedHashes.get(hash);
+                    if (mediaType === 'photo' && _photoHashes.has(hash)) return _cachedHashes.get(hash);
+                    if (_cachedHashes.has(hash)) return _cachedHashes.get(hash);
+                }
+            } catch (_) {}
         }
 
         // Если кеш уже прогрет и совпадений нет — гарантированно новый файл!
