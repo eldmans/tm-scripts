@@ -1,3 +1,31 @@
+    // v1.4.12: «📺 Play in Window» — открыть прямой URL видео (или страницу) в новой вкладке
+    function mossadPlayInWindow() {
+        let videoUrl = '';
+        try {
+            const engines = window.MOSSAD_ENGINES || {};
+            for (const eng of [engines.faphouse, engines.xvideos, engines.redgifs, engines.huggingface, engines.instagram]) {
+                if (eng && typeof eng.isSupported === 'function' && eng.isSupported() && typeof eng.findMedia === 'function') {
+                    const m = eng.findMedia();
+                    if (m && m.urls && m.urls[0] && !m.urls[0].startsWith('blob:')) { videoUrl = m.urls[0]; break; }
+                }
+            }
+        } catch (_) {}
+        if (!videoUrl) {
+            try {
+                const v = typeof getActiveVideo === 'function' ? getActiveVideo() : document.querySelector('video');
+                if (v) { const s = v.currentSrc || v.src || ''; if (s && !s.startsWith('blob:')) videoUrl = s; }
+            } catch (_) {}
+        }
+        const openUrl = videoUrl || location.href;
+        const label = videoUrl ? '📺 Видео открыто в новой вкладке' : '🗗 Страница открыта в новой вкладке';
+        if (typeof GM_openInTab === 'function') {
+            GM_openInTab(openUrl, { active: true });
+        } else {
+            window.open(openUrl, '_blank');
+        }
+        showToast(label);
+    }
+
     function mossadXvDoubleSizeMatch(e) {
         const hk = config.hk && config.hk.xvDoubleSize;
         if (!hk || !hk.key) return false;
@@ -590,6 +618,14 @@
                 else { video._mossadUserPaused = true; video.pause(); }
                 showToast(video.paused ? '▶ Проигрывание' : '⏸ Пауза');
             }
+        }
+
+        // v1.4.12: «📺 Play in Window» — открыть видео в отдельной вкладке
+        if (config.hk.playInWindow && config.hk.playInWindow.key && hotkeyMatches(e, config.hk.playInWindow)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            mossadPlayInWindow();
+            return;
         }
 
         // Привязать виджет к левому верхнему краю

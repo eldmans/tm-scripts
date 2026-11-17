@@ -75,7 +75,7 @@
     // Закреплённые (🔒) строки НЕ меняются ни сбросом, ни рассылкой: ни клавиша, ни место.
     const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
     const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide', 'expand', 'xvDoubleSize', 'generate'];
+    const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide', 'expand', 'xvDoubleSize', 'generate', 'playInWindow'];
     function readHotkeyDefaults() {
         let raw = null;
         try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -894,7 +894,7 @@
         const HOTKEY_CATEGORIES = [
             { id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize'] },
             { id: 'cat-nav', title: '🎞 Листание и навигация по кадрам', keys: ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'rewind', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide'] },
-            { id: 'cat-dl', title: '💾 Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate'] },
+            { id: 'cat-dl', title: '💾 Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate', 'playInWindow'] },
             { id: 'cat-ui', title: '🛠 Меню, окна и утилиты', keys: ['updateScript', 'slideshowPanel', 'help', 'history', 'snapWidget', 'openTodos', 'grokCycle'] }
         ];
 
@@ -925,6 +925,7 @@
             deleteVid:        'Удалить видео/пост (Delete)',
             duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
             generate:         'Генерация Space / Отправка Grok (Ctrl+Enter)',
+            playInWindow:     '📺 Открыть видео в новой вкладке (по умолчанию не назначено)',
 
             // Меню, окна и утилиты
             updateScript:     'Обновить скрипт с GitHub (Win+Alt+R / клик 🔄)',

@@ -354,8 +354,18 @@
             window.updateWidgetUI();
         };
 
-        // Новый порядок: таймер | 🚀 | ▼ | 🔄 | 📝 | ... [авто-отступ] ... | ✕
-        topBar.append(btnTogglePills, timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+        // Новый порядок: таймер | 🚀 | 📺 | ▼ | 🔄 | 📝 | ... [авто-отступ] ... | ✕
+        // v1.4.12: кнопка «📺 Play in Window» — открыть видео в отдельной вкладке
+        const btnPlayWin = document.createElement('button');
+        btnPlayWin.id = 'mossad-btn-play-win';
+        btnPlayWin.textContent = '📺';
+        btnPlayWin.title = 'Открыть видео в новой вкладке (настройки → playInWindow)';
+        btnPlayWin.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #e5e7eb; cursor: pointer; font-size: 11px; font-weight: 700; padding: 4px 7px; transition: background 0.2s;`;
+        btnPlayWin.onmouseenter = () => { btnPlayWin.style.background = '#374151'; };
+        btnPlayWin.onmouseleave = () => { btnPlayWin.style.background = '#1f2937'; };
+        btnPlayWin.onclick = (e) => { e.stopPropagation(); if (typeof mossadPlayInWindow === 'function') mossadPlayInWindow(); };
+
+        topBar.append(btnTogglePills, timerEl, btnStart, btnPlayWin, btnTogglePanel, btnUpdate, btnTodo, btnClose);
         // ── HUD СЛАЙД-ШОУ (v1.3.93): компактная плашка настроек активного показа ──
         // Появляется ТОЛЬКО когда слайд-шоу запущено. Исчезает при остановке.
         hudRow = document.createElement('div');

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.11
+// @version      1.4.12
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -657,7 +657,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.11';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.12';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -873,6 +873,7 @@ grokHistBack: { key: '2', ctrl: false, alt: true, shift: false },
 grokHistFwd: { key: '3', ctrl: false, alt: true, shift: false },
 grokLastSlide: { key: '4', ctrl: false, alt: true, shift: false },
 updateScript: { key: 'r', ctrl: false, alt: true, shift: false, meta: true },
+playInWindow: { key: '', ctrl: false, alt: false, shift: false },
 }
 };
 let config = {};
@@ -10367,6 +10368,45 @@ function _decodeUrl(raw) {
 if (!raw) return '';
 try { return decodeURIComponent(raw.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))); } catch (e) { return raw; }
 }
+function _initFocusFix() {
+if (!isSupported()) return;
+document.addEventListener('click', (e) => {
+if (e.target && e.target.tagName === 'IFRAME') return;
+const ae = document.activeElement;
+if (ae && ae.tagName === 'IFRAME') {
+try { document.body.focus(); } catch (_) {}
+}
+}, true);
+function _tryForwardIframeKeys(iframe) {
+try {
+const iWin = iframe.contentWindow;
+if (!iWin || !iWin.document) return;
+if (iWin._mossadFwdAttached) return;
+iWin._mossadFwdAttached = true;
+iWin.addEventListener('keydown', (ev) => {
+try {
+window.dispatchEvent(new KeyboardEvent('keydown', {
+key: ev.key, code: ev.code,
+ctrlKey: ev.ctrlKey, altKey: ev.altKey,
+shiftKey: ev.shiftKey, metaKey: ev.metaKey,
+bubbles: true, cancelable: true
+}));
+} catch (_) {}
+}, true);
+} catch (_) {}
+}
+const _attachToIframes = () => {
+document.querySelectorAll('iframe').forEach(f => _tryForwardIframeKeys(f));
+};
+_attachToIframes();
+const obs = new MutationObserver(_attachToIframes);
+obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
+}
+if (document.readyState === 'loading') {
+document.addEventListener('DOMContentLoaded', _initFocusFix);
+} else {
+_initFocusFix();
+}
 return { isSupported, findMedia };
 })();
 
@@ -12894,7 +12934,15 @@ return;
 window.widgetState = 'hidden';
 window.updateWidgetUI();
 };
-topBar.append(btnTogglePills, timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+const btnPlayWin = document.createElement('button');
+btnPlayWin.id = 'mossad-btn-play-win';
+btnPlayWin.textContent = '📺';
+btnPlayWin.title = 'Открыть видео в новой вкладке (настройки → playInWindow)';
+btnPlayWin.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #e5e7eb; cursor: pointer; font-size: 11px; font-weight: 700; padding: 4px 7px; transition: background 0.2s;`;
+btnPlayWin.onmouseenter = () => { btnPlayWin.style.background = '#374151'; };
+btnPlayWin.onmouseleave = () => { btnPlayWin.style.background = '#1f2937'; };
+btnPlayWin.onclick = (e) => { e.stopPropagation(); if (typeof mossadPlayInWindow === 'function') mossadPlayInWindow(); };
+topBar.append(btnTogglePills, timerEl, btnStart, btnPlayWin, btnTogglePanel, btnUpdate, btnTodo, btnClose);
 hudRow = document.createElement('div');
 hudRow.id = 'mossad-slideshow-hud';
 hudRow.style.cssText = `
@@ -14358,7 +14406,7 @@ return out.filter(k => k != null);
 }
 const HK_DEFAULTS_GM_KEY = 'mossad_hk_defaults';
 const HK_DEFAULTS_APPLIED_LS = 'mossad_hk_defaults_applied';
-const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide', 'expand', 'xvDoubleSize', 'generate'];
+const HK_FACTORY_ORDER = ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'help', 'history', 'slideshowPanel', 'slideshowStart', 'galleryPlayPause', 'galleryStop', 'duplicateNext', 'rewind', 'snapWidget', 'openTodos', 'grokCycle', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide', 'expand', 'xvDoubleSize', 'generate', 'playInWindow'];
 function readHotkeyDefaults() {
 let raw = null;
 try { if (typeof GM_getValue === 'function') raw = GM_getValue(HK_DEFAULTS_GM_KEY, null); } catch (e) {}
@@ -15106,7 +15154,7 @@ const list = modal.querySelector('#mossad-hk-list');
 const HOTKEY_CATEGORIES = [
 { id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize'] },
 { id: 'cat-nav', title: '🎞 Листание и навигация по кадрам', keys: ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'rewind', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide'] },
-{ id: 'cat-dl', title: '💾 Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate'] },
+{ id: 'cat-dl', title: '💾 Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate', 'playInWindow'] },
 { id: 'cat-ui', title: '🛠 Меню, окна и утилиты', keys: ['updateScript', 'slideshowPanel', 'help', 'history', 'snapWidget', 'openTodos', 'grokCycle'] }
 ];
 const keysMap = {
@@ -15131,6 +15179,7 @@ upscale: 'Улучшить (Shift+«+» / Shift+Num+)',
 deleteVid: 'Удалить видео/пост (Delete)',
 duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
 generate: 'Генерация Space / Отправка Grok (Ctrl+Enter)',
+playInWindow: '📺 Открыть видео в новой вкладке (по умолчанию не назначено)',
 updateScript: 'Обновить скрипт с GitHub (Win+Alt+R / клик 🔄)',
 slideshowPanel: 'Меню: полное / краткое / скрыть (Ctrl+Insert)',
 help: 'Настройки клавиш (Ctrl+F1)',
@@ -15867,6 +15916,32 @@ if (typeof showToast === 'function') showToast('🌐 Общие умолчани
 }
 
 // ── src/core/hotkeys.js ──
+function mossadPlayInWindow() {
+let videoUrl = '';
+try {
+const engines = window.MOSSAD_ENGINES || {};
+for (const eng of [engines.faphouse, engines.xvideos, engines.redgifs, engines.huggingface, engines.instagram]) {
+if (eng && typeof eng.isSupported === 'function' && eng.isSupported() && typeof eng.findMedia === 'function') {
+const m = eng.findMedia();
+if (m && m.urls && m.urls[0] && !m.urls[0].startsWith('blob:')) { videoUrl = m.urls[0]; break; }
+}
+}
+} catch (_) {}
+if (!videoUrl) {
+try {
+const v = typeof getActiveVideo === 'function' ? getActiveVideo() : document.querySelector('video');
+if (v) { const s = v.currentSrc || v.src || ''; if (s && !s.startsWith('blob:')) videoUrl = s; }
+} catch (_) {}
+}
+const openUrl = videoUrl || location.href;
+const label = videoUrl ? '📺 Видео открыто в новой вкладке' : '🗗 Страница открыта в новой вкладке';
+if (typeof GM_openInTab === 'function') {
+GM_openInTab(openUrl, { active: true });
+} else {
+window.open(openUrl, '_blank');
+}
+showToast(label);
+}
 function mossadXvDoubleSizeMatch(e) {
 const hk = config.hk && config.hk.xvDoubleSize;
 if (!hk || !hk.key) return false;
@@ -16336,6 +16411,12 @@ if (video.paused) { video._mossadUserPaused = false; video.play(); }
 else { video._mossadUserPaused = true; video.pause(); }
 showToast(video.paused ? '▶ Проигрывание' : '⏸ Пауза');
 }
+}
+if (config.hk.playInWindow && config.hk.playInWindow.key && hotkeyMatches(e, config.hk.playInWindow)) {
+e.preventDefault();
+e.stopImmediatePropagation();
+mossadPlayInWindow();
+return;
 }
 if (hotkeyMatches(e, config.hk.snapWidget)) {
 e.preventDefault();

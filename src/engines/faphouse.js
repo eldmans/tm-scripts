@@ -165,5 +165,56 @@
             try { return decodeURIComponent(raw.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))); } catch (e) { return raw; }
         }
 
+        /**
+         * v1.4.12: фикс потери фокуса — если плеер в <iframe>, события keydown не доходят
+         * до window родительской страницы. Решение:
+         *  1. При клике на страницу вне iframe — снимаем фокус с iframe.
+         *  2. Пробуем добавить keydown-listener внутри same-origin iframe и форвардить хоткеи.
+         */
+        function _initFocusFix() {
+            if (!isSupported()) return;
+            // При клике вне iframe — снимаем фокус с iframe чтобы хоткеи снова работали
+            document.addEventListener('click', (e) => {
+                if (e.target && e.target.tagName === 'IFRAME') return;
+                const ae = document.activeElement;
+                if (ae && ae.tagName === 'IFRAME') {
+                    try { document.body.focus(); } catch (_) {}
+                }
+            }, true);
+            // Форвардируем keydown из same-origin iframe в родительский window
+            function _tryForwardIframeKeys(iframe) {
+                try {
+                    const iWin = iframe.contentWindow;
+                    if (!iWin || !iWin.document) return;
+                    if (iWin._mossadFwdAttached) return;
+                    iWin._mossadFwdAttached = true;
+                    iWin.addEventListener('keydown', (ev) => {
+                        try {
+                            window.dispatchEvent(new KeyboardEvent('keydown', {
+                                key: ev.key, code: ev.code,
+                                ctrlKey: ev.ctrlKey, altKey: ev.altKey,
+                                shiftKey: ev.shiftKey, metaKey: ev.metaKey,
+                                bubbles: true, cancelable: true
+                            }));
+                        } catch (_) {}
+                    }, true);
+                } catch (_) {} // cross-origin → молча
+            }
+            // Наблюдаем за iframe которые появляются в DOM
+            const _attachToIframes = () => {
+                document.querySelectorAll('iframe').forEach(f => _tryForwardIframeKeys(f));
+            };
+            _attachToIframes();
+            const obs = new MutationObserver(_attachToIframes);
+            obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
+        }
+
+        // Запускаем фикс фокуса при загрузке
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', _initFocusFix);
+        } else {
+            _initFocusFix();
+        }
+
         return { isSupported, findMedia };
     })();
