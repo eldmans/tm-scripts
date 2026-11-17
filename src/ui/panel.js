@@ -359,7 +359,7 @@
         const btnPlayWin = document.createElement('button');
         btnPlayWin.id = 'mossad-btn-play-win';
         btnPlayWin.textContent = '📺';
-        btnPlayWin.title = 'Открыть видео в новой вкладке (настройки → playInWindow)';
+        btnPlayWin.title = '📺 Воспроизвести видео в отдельном окне без интерфейса сайта (хоткей playInWindow в настройках)';
         btnPlayWin.style.cssText = `background: #1f2937; border: none; border-radius: 6px; color: #e5e7eb; cursor: pointer; font-size: 11px; font-weight: 700; padding: 4px 7px; transition: background 0.2s;`;
         btnPlayWin.onmouseenter = () => { btnPlayWin.style.background = '#374151'; };
         btnPlayWin.onmouseleave = () => { btnPlayWin.style.background = '#1f2937'; };
@@ -707,9 +707,10 @@
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;" data-mossad-label="settings">${LH('settings')}</button>
-                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py)" data-mossad-label="importDb">${LH('importDb')}</button>
-                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию" data-mossad-label="resetCfg">${LH('resetCfg')}</button>
+                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="⚙ Открыть окно настроек и горячих клавиш MOSSAD" data-mossad-label="settings">${LH('settings')}</button>
+                    <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
+                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импортировать базу хешей (результат scan_local_files.py) для предотвращения дублей" data-mossad-label="importDb">${LH('importDb')}</button>
+                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию для ${rootDomain}" data-mossad-label="resetCfg">${LH('resetCfg')}</button>
                     <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
             `;
@@ -944,6 +945,10 @@
             panel.querySelector('#mossad-btn-hk').onclick = () => {
                 openSettingsWindow(); // v1.3.45: последняя открытая вкладка (раньше всегда «Общие»)
             };
+            const btnWiz = panel.querySelector('#mossad-btn-wiz');
+            if (btnWiz) {
+                btnWiz.onclick = () => { if (typeof mossadOpenSiteWizard === 'function') mossadOpenSiteWizard(hostname); };
+            }
             panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
                 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
                 localStorage.removeItem(STORAGE_KEY);

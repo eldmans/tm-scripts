@@ -56,6 +56,7 @@
         delete exportCfg.allowedDomains; // v1.3.50: список сайтов живёт в GM `mossad_sites`
         delete exportCfg.pinterestHistory;    // v1.3.51: история пинов — локальная, не синхронизируется
         delete exportCfg.pinterestHistoryIdx;
+        delete exportCfg.filenameTemplate; // v1.4.15: шаблон сугубо локальный для каждого сайта! Не перезаписывать другие сайты через общий корень.
         const content = btoa(unescape(encodeURIComponent(JSON.stringify(exportCfg, null, 2))));
         
         const body = JSON.stringify({
@@ -99,7 +100,12 @@
                             // Применяем конфиг, сохраняя локальный токен
                             const token = config.githubToken;
                             // v1.3.51: локальную историю пинов не затираем (файл общий для всех сайтов)
-                            if (decoded && typeof decoded === 'object') { delete decoded.pinterestHistory; delete decoded.pinterestHistoryIdx; }
+                            // v1.4.15: локальный шаблон сайта не затираем из общего облачного корня
+                            if (decoded && typeof decoded === 'object') {
+                                delete decoded.pinterestHistory;
+                                delete decoded.pinterestHistoryIdx;
+                                delete decoded.filenameTemplate;
+                            }
                             Object.assign(config, decoded);
                             config.githubToken = token;
                             try { normalizeAllHotkeys(); } catch (e) {} // v1.3.45: одна привязка на действие

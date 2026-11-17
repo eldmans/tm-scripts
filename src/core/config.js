@@ -664,6 +664,17 @@
         config.filenameTemplate = '';
         try { if (GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
     }
+    // v1.4.15: защита Grok от чужого шаблона видео-сайтов ({title}), утёкшего через GitHub Sync
+    if (rootDomain === 'grok.com' && config.filenameTemplate && config.filenameTemplate.includes('{title}')) {
+        let savedGmTpl = null;
+        try { if (typeof GM_getValue === 'function') savedGmTpl = GM_getValue('mossad_tpl_grok.com', null); } catch (e) {}
+        if (!savedGmTpl || savedGmTpl.includes('{title}')) {
+            config.filenameTemplate = '';
+            try { if (typeof GM_setValue === 'function') GM_setValue('mossad_tpl_grok.com', ''); } catch (e) {}
+            try { if (GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
+            console.log('[MOSSAD v1.4.15] Восстановлен стандартный шаблон для grok.com');
+        }
+    }
 
     /**
      * v1.3.39: старый дефолт «Улучшить» Ctrl+PageUp → Shift+«+» (Ctrl+PageUp/PageDown в Grok переключают

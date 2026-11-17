@@ -1,4 +1,4 @@
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.14';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.15';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -180,10 +180,14 @@
     // v1.3.54: всё после выхода ниже лежит внутри mossadMain() (см. build.py), отсюда openSettingsWindow
     // не виден — src/core/boot.js кладёт его сюда и перерегистрирует команду меню.
     let mossadOpenSettingsHook = null;
+    let mossadOpenWizardHook = null;
+    let _mossadWizardMenuId = null;
     function mossadRegisterSiteMenu() {
         if (typeof GM_registerMenuCommand !== 'function') return;
         try { if (_mossadMenuId !== null && typeof GM_unregisterMenuCommand === 'function') GM_unregisterMenuCommand(_mossadMenuId); } catch (e) {}
+        try { if (_mossadWizardMenuId !== null && typeof GM_unregisterMenuCommand === 'function') GM_unregisterMenuCommand(_mossadWizardMenuId); } catch (e) {}
         _mossadMenuId = null;
+        _mossadWizardMenuId = null;
         const builtin = mossadIsBuiltinHost(hostname);
         const added = !builtin && mossadIsHostAllowed(hostname);
         let title, fn;
@@ -204,10 +208,14 @@
                 const d = mossadAddUserSite(hostname);
                 if (!d) { alert('MOSSAD: не удалось сохранить (GM-хранилище недоступно)'); return; }
                 mossadRegisterSiteMenu();
-                if (confirm(`MOSSAD: ${d} добавлен в список сайтов.\nПерезагрузить страницу, чтобы включить скрипт здесь?`)) location.reload();
+                try { if (typeof GM_setValue === 'function') GM_setValue('mossad_wizard_pending_' + d, true); } catch (e) {}
+                if (confirm(`MOSSAD: ${d} добавлен в список сайтов.\nПерезагрузить страницу, чтобы открыть мастер первичной настройки сайта?`)) location.reload();
             };
         }
         try { _mossadMenuId = GM_registerMenuCommand(title, fn); } catch (e) {}
+        if (_isAllowed && typeof mossadOpenWizardHook === 'function') {
+            try { _mossadWizardMenuId = GM_registerMenuCommand('🪄 Мастер настройки сайта (' + hostname + ')', () => mossadOpenWizardHook(hostname)); } catch (e) {}
+        }
     }
     mossadRegisterSiteMenu();
     if (!_isAllowed) return; // Выход — сайт не в списке (только команда меню, без DOM и слушателей)

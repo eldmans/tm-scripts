@@ -15,6 +15,7 @@
     var slideshowPaused    = sessionStorage.getItem(SESSION_PAUSED_KEY) === 'true';
 
     mossadOpenSettingsHook = openSettingsWindow;
+    mossadOpenWizardHook = (h) => { if (typeof mossadOpenSiteWizard === 'function') mossadOpenSiteWizard(h); };
     // v1.3.67: настройки скорости видео (лёгкий слой) сверяют клавиши с хоткеями MOSSAD
     mossadLightHkHook = {
         comboId: (b) => hotkeyComboId(b),
@@ -25,7 +26,7 @@
                 .map(k => ({ label: 'MOSSAD: ' + k, clear: () => { config.hk[k] = normalizeHotkeyBinding(null); Settings.save(); } }));
         },
     };
-    if (mossadIsBuiltinHost(hostname)) mossadRegisterSiteMenu(); // «🌍 Сайты MOSSAD» (до v1.3.54 регистрировалась сразу)
+    mossadRegisterSiteMenu(); // «🌍 Сайты MOSSAD» / «Мастер настройки» (v1.4.15)
 
     // Список изменили в другой вкладке/контейнере — обновить подпись команды меню и вкладку «🌍 Сайты»
     if (typeof GM_addValueChangeListener === 'function') {

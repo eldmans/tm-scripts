@@ -795,12 +795,15 @@
                 <button id="mossad-gen-prompthk-help" title="Выбрать хоткеи (клик — добавить, повторный клик — убрать)" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:4px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
               <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
+              <span style="font-size:10px;padding:1px 5px;border-radius:4px;background:#1e3a8a;color:#93c5fd;border:1px solid #3b82f6;font-weight:600;" title="Шаблон изолирован строго для ${rootDomain}">🎯 Только для ${rootDomain}</span>
               <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
                 style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
               <button class="mossad-tpl-help-btn" data-for="mossad-gen-tpl" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
+              <button id="mossad-btn-reset-site-tpl" title="Сбросить шаблон на стандартный для ${rootDomain} (${getDefaultFilenameTemplate()})" style="${MOSSAD_TPL_HELP_BTN_CSS}color:#f87171;font-weight:700;">↺</button>
             </div>
+            <div style="font-size:10px;color:#94a3b8;padding-left:4px;margin-top:-2px;margin-bottom:6px;">⚠️ Шаблон сохраняется <b>сугубо для ${rootDomain}</b> и никогда не перезаписывает Grok или другие сайты.</div>
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="v1.3.74: минус-слова для ${rootDomain} — через запятую, всегда убираются из {title} и {desc} (без учёта регистра). Текст с запятой или пробелами по краям — в кавычках: &quot; - Brave&quot;. В самом шаблоне то же делает {title--слово}">
               <span data-mossad-label="tplJunkLabel" style="white-space:nowrap;">${LH('tplJunkLabel')}</span>
               <input id="mossad-gen-junk" type="text" placeholder="Watch Online, &quot; - Brave&quot;" value="${mossadJunkText().replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -856,6 +859,15 @@
               Debug-лог слайдшоу/удаления
               <button id="mossad-debug-copy" title="Скопировать последние записи debug-лога в буфер обмена (и вывести таблицей в консоль)" style="margin-left:auto;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#fbbf24;padding:1px 8px;cursor:pointer;font-size:11px;" data-mossad-label="debugCopy">${LH('debugCopy')}</button>
             </label>
+            <details style="background:#0b1220;border:1px solid #1e293b;border-radius:8px;padding:8px 12px;font-size:11px;color:#94a3b8;cursor:pointer;margin-bottom:8px;">
+                <summary style="font-weight:600;color:#cbd5e1;user-select:none;outline:none;" title="Нажмите для справки о глобальных и локальных настройках">
+                    💡 Справка: Где глобальные настройки, а где сугубо для этого сайта?
+                </summary>
+                <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;line-height:1.4;cursor:default;">
+                    <div><b style="color:#60a5fa;">🌐 Глобальные (общие для ВСЕХ сайтов):</b> Горячие клавиши (хоткеи), звуковые сигналы (бипы), DND модификатор (Ctrl/Alt/Shift), список сайтов в Tampermonkey. Настроив их однажды, вы используете их везде одинаково.</div>
+                    <div><b style="color:#34d399;">🎯 Сугубо для этого сайта (${rootDomain}):</b> Шаблон имени файла, направление D-pad, индивидуальные задержки фото/видео, база защиты от повторных скачиваний (дедупликация). Они изолированы и не влияют на другие сайты.</div>
+                </div>
+            </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
               <span>v${SCRIPT_VERSION} · 2026-11-17</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
@@ -1559,6 +1571,15 @@
         if (genTpl) {
             genTpl.onchange = genTpl.onblur = (e) => mossadSaveSiteTemplate(e.target.value);
             mossadWireTplHelp(genTpl.parentElement);
+        }
+        const btnResetSiteTpl = modal.querySelector('#mossad-btn-reset-site-tpl');
+        if (btnResetSiteTpl) {
+            btnResetSiteTpl.onclick = (e) => {
+                e.preventDefault();
+                mossadSaveSiteTemplate('');
+                if (genTpl) genTpl.value = '';
+                if (typeof showToast === 'function') showToast(`↺ Шаблон сброшен на стандартный для ${rootDomain} (${getDefaultFilenameTemplate()})`);
+            };
         }
         const genJunk = modal.querySelector('#mossad-gen-junk'); // v1.3.74
         if (genJunk) genJunk.oninput = genJunk.onchange = (e) => mossadSetJunkText(e.target.value);

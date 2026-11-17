@@ -790,3 +790,22 @@
     // Проверяем GitHub при старте (с задержкой чтобы не мешать загрузке)
     setTimeout(checkAndPullOnStartup, 3000);
 
+    // v1.4.15: автоматическое открытие мастера первичной настройки сайта, если он ожидает
+    setTimeout(() => {
+        try {
+            if (typeof GM_getValue === 'function') {
+                const pendD = GM_getValue('mossad_wizard_pending_' + rootDomain, false) ||
+                              GM_getValue('mossad_wizard_pending_' + hostname, false);
+                if (pendD) {
+                    try {
+                        GM_setValue('mossad_wizard_pending_' + rootDomain, false);
+                        GM_setValue('mossad_wizard_pending_' + hostname, false);
+                    } catch (e1) {}
+                    if (typeof mossadOpenSiteWizard === 'function') {
+                        mossadOpenSiteWizard(hostname);
+                    }
+                }
+            }
+        } catch (e) {}
+    }, 900);
+

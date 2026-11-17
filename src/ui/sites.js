@@ -36,9 +36,9 @@
         }
 
         pane.querySelector('#mossad-sites-builtin').innerHTML = MOSSAD_BUILTIN_SITES.map(d =>
-            `<div style="${chip}color:#9ca3af;" title="Встроенный сайт — убрать нельзя">🔒 ${mossadEscHtml(d)}${here(d)}<div style="margin-left:auto;">${getCatBadge(d)}</div></div>`).join('');
+            `<div style="${chip}color:#9ca3af;" title="Встроенный сайт — убрать нельзя">🔒 ${mossadEscHtml(d)}${here(d)}<div style="margin-left:auto;display:flex;align-items:center;gap:6px;">${getCatBadge(d)}<button data-site-wiz="${mossadEscHtml(d)}" title="Открыть мастер настройки сайта для ${mossadEscHtml(d)}" style="background:#1e3a8a;border:1px solid #3b82f6;border-radius:4px;color:#93c5fd;padding:0 5px;cursor:pointer;font-size:11px;font-weight:bold;">🪄</button></div></div>`).join('');
         pane.querySelector('#mossad-sites-user').innerHTML = user.length ? user.map(d =>
-            `<div data-site="${mossadEscHtml(d)}" style="${chip}">${mossadEscHtml(d)}${here(d)}<div style="margin-left:auto;display:flex;align-items:center;gap:6px;">${getCatBadge(d)}<button data-site-del="${mossadEscHtml(d)}" title="Убрать сайт из списка" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#f87171;padding:0 7px;cursor:pointer;font-size:11px;font-weight:bold;">${LH('sitesRemove')}</button></div></div>`).join('')
+            `<div data-site="${mossadEscHtml(d)}" style="${chip}">${mossadEscHtml(d)}${here(d)}<div style="margin-left:auto;display:flex;align-items:center;gap:6px;">${getCatBadge(d)}<button data-site-wiz="${mossadEscHtml(d)}" title="Открыть мастер настройки сайта для ${mossadEscHtml(d)}" style="background:#1e3a8a;border:1px solid #3b82f6;border-radius:4px;color:#93c5fd;padding:0 5px;cursor:pointer;font-size:11px;font-weight:bold;">🪄 Настроить</button><button data-site-del="${mossadEscHtml(d)}" title="Убрать сайт из списка" style="background:#374151;border:1px solid #4b5563;border-radius:4px;color:#f87171;padding:0 7px;cursor:pointer;font-size:11px;font-weight:bold;">${LH('sitesRemove')}</button></div></div>`).join('')
             : '<div style="font-size:11px;color:#6b7280;">Пока пусто</div>';
         const cur = pane.querySelector('#mossad-sites-add-current');
         const curNorm = mossadNormSite(hostname);
@@ -79,15 +79,25 @@
             if (MOSSAD_BUILTIN_SITES.includes(d)) { say(`${d} — встроенный, уже работает`); return false; }
             if (mossadReadUserSites().includes(d)) { say(`${d} уже в списке`); return false; }
             if (!mossadAddUserSite(d)) { say('GM-хранилище недоступно', true); return false; }
+            try { if (typeof GM_setValue === 'function') GM_setValue('mossad_wizard_pending_' + d, true); } catch (e) {}
             say(`✅ ${d} добавлен — перезагрузи страницу сайта`);
             mossadSitesRerender();
             try { mossadRegisterSiteMenu(); } catch (e) {}
+            if (mossadHostMatches(hostname, d)) {
+                setTimeout(() => { if (typeof mossadOpenSiteWizard === 'function') mossadOpenSiteWizard(d); }, 400);
+            }
             return true;
         };
         pane.querySelector('#mossad-sites-add').onclick = () => { if (add(input.value)) input.value = ''; };
         input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (add(input.value)) input.value = ''; } });
         pane.querySelector('#mossad-sites-add-current').onclick = () => add(hostname);
-        pane.querySelector('#mossad-sites-user').addEventListener('click', (e) => {
+        const handleSiteClick = (e) => {
+            const wiz = e.target && e.target.closest ? e.target.closest('[data-site-wiz]') : null;
+            if (wiz) {
+                const d = wiz.dataset.siteWiz;
+                if (typeof mossadOpenSiteWizard === 'function') mossadOpenSiteWizard(d);
+                return;
+            }
             const b = e.target && e.target.closest ? e.target.closest('[data-site-del]') : null;
             if (!b) return;
             const d = b.dataset.siteDel;
@@ -96,6 +106,8 @@
             say(`${d} убран — перезагрузи страницу сайта`);
             mossadSitesRerender();
             try { mossadRegisterSiteMenu(); } catch (e2) {}
-        });
+        };
+        pane.querySelector('#mossad-sites-user').addEventListener('click', handleSiteClick);
+        pane.querySelector('#mossad-sites-builtin').addEventListener('click', handleSiteClick);
         mossadSitesRerender();
     }
