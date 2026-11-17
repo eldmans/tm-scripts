@@ -16,6 +16,12 @@
             if (xvMedia) return xvMedia;
         }
 
+        // v1.4.10: Faphouse — извлечение прямого MP4 / HLS вместо иконки/постера
+        if (window.MOSSAD_ENGINES?.faphouse?.isSupported()) {
+            const fhMedia = window.MOSSAD_ENGINES.faphouse.findMedia();
+            if (fhMedia) return fhMedia;
+        }
+
         // v1.3.52: Pinterest — асинхронно через pinterestResolveMedia() в triggerDownload (API пина).
         // Синхронный путь сюда больше не заходит; запасной ответ — только главный пин, без «первой картинки страницы».
         if (rootDomain.includes('pinterest.')) {

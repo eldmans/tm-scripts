@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.9
+// @version      1.4.10
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -608,7 +608,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.9';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.10';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -618,7 +618,7 @@ return parts.slice(-2).join('.');
 }
 const rootDomain = getRootDomain(hostname);
 const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
-const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space', 'xv-ru.com', 'xvideos.com'];
+const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space', 'xv-ru.com', 'xvideos.com', 'faphouse.com'];
 const MOSSAD_SITES_GM_KEY = 'mossad_sites';
 function mossadNormSite(s) {
 let d = String(s == null ? '' : s).trim().toLowerCase();
@@ -10194,6 +10194,133 @@ findMedia
 };
 })();
 
+// ── src/engines/faphouse.js ──
+window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
+window.MOSSAD_ENGINES.faphouse = (() => {
+function isSupported() {
+return /(?:faphouse\.com)/i.test(rootDomain);
+}
+function findMedia() {
+if (!isSupported()) return null;
+const urls = [];
+let title = '';
+try {
+const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+const nuxt = uWin.__NUXT__ || uWin.__nuxt__;
+if (nuxt) {
+const payload = nuxt.state || nuxt.data || nuxt.payload || {};
+const str = JSON.stringify(payload);
+_extractMp4FromStr(str, urls);
+if (!title) {
+const tm = str.match(/"title"\s*:\s*"([^"]{3,120})"/);
+if (tm) title = tm[1];
+}
+}
+const pinia = uWin.__pinia || uWin.__store;
+if (pinia && !urls.length) {
+_extractMp4FromStr(JSON.stringify(pinia), urls);
+}
+const candidates = [
+uWin.playerConfig, uWin.videoConfig, uWin.videoData,
+uWin.VIDEO_DATA, uWin.PLAYER_CONFIG, uWin.videoSources,
+uWin.fhPlayerConfig, uWin.fhVideo
+];
+for (const obj of candidates) {
+if (obj && !urls.length) {
+_extractMp4FromStr(JSON.stringify(obj), urls);
+}
+}
+const appCandidates = [
+uWin.initialState, uWin.appData, uWin.__APP__,
+uWin.__INITIAL_STATE__, uWin.__INITIAL_DATA__
+];
+for (const obj of appCandidates) {
+if (obj && !urls.length) {
+try { _extractMp4FromStr(JSON.stringify(obj), urls); } catch (e) {}
+}
+}
+} catch (e) {}
+if (!urls.length) {
+const scripts = document.getElementsByTagName('script');
+for (let i = 0; i < scripts.length; i++) {
+const text = scripts[i].textContent || '';
+if (!text) continue;
+if (text.includes('__NUXT_DATA__') || text.includes('__NUXT__') ||
+text.includes('video_url') || text.includes('videoUrl') ||
+text.includes('.mp4') || text.includes('.m3u8') || text.includes('hls')) {
+_extractMp4FromStr(text, urls);
+if (!title) {
+const tm = text.match(/"title"\s*:\s*"([^"]{3,120})"/);
+if (tm) title = tm[1];
+}
+if (urls.length) break;
+}
+}
+}
+if (!urls.length) {
+const videos = Array.from(document.querySelectorAll('video'));
+for (const v of videos) {
+const src = v.currentSrc || v.src || '';
+if (src && !src.startsWith('blob:')) {
+urls.push(src);
+break;
+}
+for (const s of v.querySelectorAll('source')) {
+if (s.src && !s.src.startsWith('blob:')) {
+urls.push(s.src);
+break;
+}
+}
+if (urls.length) break;
+}
+}
+if (!urls.length) return null;
+if (!title) {
+title = (document.querySelector('h1.video-title, h1, .title') || {}).textContent
+|| document.title || '';
+}
+title = title.replace(/\s+/g, ' ').trim();
+return {
+urls: Array.from(new Set(urls.filter(Boolean))),
+type: 'video',
+desc: title
+};
+}
+function _extractMp4FromStr(str, urls) {
+if (!str || typeof str !== 'string') return;
+const keyPatterns = [
+/["'](?:video_url|videoUrl|mp4_url|src|hlsUrl|hls_url|cdnUrl|cdn_url|streamUrl|stream_url|url_mp4|url_hls|fileUrl|file_url|mediaUrl|media_url)["']\s*:\s*["']([^"']{10,}\.(?:mp4|m3u8)[^"']*)/gi,
+/["']src["']\s*:\s*["'](https?:\/\/[^"']{10,}\.(?:mp4|m3u8)[^"']*)/gi,
+];
+for (const re of keyPatterns) {
+let m;
+re.lastIndex = 0;
+while ((m = re.exec(str)) !== null) {
+const u = _decodeUrl(m[1]);
+if (u && !urls.includes(u)) urls.push(u);
+}
+}
+if (!urls.length) {
+const broad = /https?:\\?\/\\?\/[^\s"'<>\\]{10,}\.(?:mp4|m3u8)[^\s"'<>\\]*/gi;
+let m;
+while ((m = broad.exec(str)) !== null) {
+const u = _decodeUrl(m[0].replace(/\\+\//g, '/').replace(/\\n|\\r/g, ''));
+if (u && !urls.includes(u)) urls.push(u);
+}
+}
+urls.sort((a, b) => {
+const aHls = a.includes('.m3u8') ? 1 : 0;
+const bHls = b.includes('.m3u8') ? 1 : 0;
+return aHls - bHls;
+});
+}
+function _decodeUrl(raw) {
+if (!raw) return '';
+try { return decodeURIComponent(raw.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))); } catch (e) { return raw; }
+}
+return { isSupported, findMedia };
+})();
+
 // ── src/download/router.js ──
 function findMediaForDownload() {
 if (window.MOSSAD_ENGINES?.huggingface?.isSupported()) {
@@ -10206,6 +10333,10 @@ return window.MOSSAD_ENGINES.instagram.findMedia();
 if (window.MOSSAD_ENGINES?.xvideos?.isSupported()) {
 const xvMedia = window.MOSSAD_ENGINES.xvideos.findMedia();
 if (xvMedia) return xvMedia;
+}
+if (window.MOSSAD_ENGINES?.faphouse?.isSupported()) {
+const fhMedia = window.MOSSAD_ENGINES.faphouse.findMedia();
+if (fhMedia) return fhMedia;
 }
 if (rootDomain.includes('pinterest.')) {
 const img = pinterestMainImage();

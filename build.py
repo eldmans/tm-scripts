@@ -52,6 +52,7 @@ MODULES = [
     "src/engines/redgifs.js",
     "src/engines/huggingface.js",
     "src/engines/xvideos.js",
+    "src/engines/faphouse.js",
     "src/download/router.js",
     "src/slideshow/engine.js",
     "src/engines/pinterest.js",
