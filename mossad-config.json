@@ -18,7 +18,7 @@
   "allowDuplicates": false,
   "dblPosition": "end",
   "githubConfigPath": "mossad-config.json",
-  "filenameTemplate": "{title}~{domain}",
+  "filenameTemplate": "{conv}{title}~{domain}",
   "filenameTemplateEnabled": true,
   "hfAutoSave": "always",
   "playlistRows": 30,
@@ -132,13 +132,13 @@
       "shift": false
     },
     "nextSlide": {
-      "key": "ArrowRight",
+      "key": "",
       "ctrl": false,
       "alt": false,
       "shift": false
     },
     "prevSlide": {
-      "key": "ArrowLeft",
+      "key": "",
       "ctrl": false,
       "alt": false,
       "shift": false
@@ -247,5 +247,7 @@
   "updateCheckIntervalSec": 60,
   "npkExpandAdded": true,
   "npkHistNavAdded": true,
-  "photoDuration": 1
+  "photoDuration": 1,
+  "relatedNavPreset": "cycle",
+  "relatedNavArrows": true
 }
