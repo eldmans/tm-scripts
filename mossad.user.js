@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.16
+// @version      1.4.17
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -657,7 +657,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.16';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.17';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -889,6 +889,7 @@ slideshowLoopMode: 'off',
 loopFeed: false,
 slideshowDirections: ['up'],
 videoLoops: 1,
+videoAutoAdvanceOnEnd: true,
 slideshowDelay: 1,
 delayAfterVideo: 1,
 downloadType: 'none',
@@ -977,7 +978,7 @@ config = stored ? JSON.parse(stored) : {};
 } catch (e) {}
 const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
 const GLOBAL_DEFAULT_KEYS = [
-'slideshowDelay', 'videoLoops', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
+'slideshowDelay', 'videoLoops', 'videoAutoAdvanceOnEnd', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
 'downloadType', 'pdAction', 'filenameTemplateEnabled',
 'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'dblPosition',
 'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
@@ -11805,6 +11806,29 @@ lastRAFTime = performance.now();
 _videoReachedEndZone = false;
 _videoDetachedSince = 0;
 _endedConsumed = false;
+if (!video._mossadEndedWired) {
+video._mossadEndedWired = true;
+video.addEventListener('ended', () => {
+if (!slideshowActive) return;
+if (config.videoAutoAdvanceOnEnd !== false) {
+mossadDebug('ended', 'видео завершилось (событие onended)');
+_videoReachedEndZone = true;
+if (currentVideoNode === video && !_endedConsumed) {
+_endedConsumed = true;
+currentLoopCount++;
+if (currentLoopCount >= config.videoLoops) {
+countdownSeconds = config.delayAfterVideo;
+if (countdownSeconds > 0) {
+isCountingDown = true;
+runPhotoTimer('video-onended');
+} else {
+triggerNextSlide('video-onended');
+}
+}
+}
+}
+});
+}
 if (video.ended) {
 try { video.currentTime = 0; video.play().catch(() => {}); } catch(e) {}
 }
@@ -11977,7 +12001,7 @@ try { currentVideoNode.play().catch(() => {}); } catch (e) {}
 }
 }
 }
-if (currentVideoNode.paused) {
+if (currentVideoNode.paused && !currentVideoNode.ended) {
 const now = timeNow || performance.now();
 if (rootDomain === 'grok.com' && now - _lastRebindCheck > 500) {
 _lastRebindCheck = now;
@@ -15429,6 +15453,10 @@ box.innerHTML = `
                         <span style="font-size:10px;color:#94a3b8;line-height:1.25;">Окно не скроллится автоматически.</span>
                     </label>
                 </div>
+                <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#cbd5e1;cursor:pointer;margin-top:2px;" title="Когда ролик заканчивается (событие onended), MOSSAD автоматически переходит к следующему слайду (идеально для Shorts, Reels, видеохостингов)">
+                    <input id="mossad-wiz-auto-advance" type="checkbox" style="accent-color:#10b981;" ${config.videoAutoAdvanceOnEnd !== false ? 'checked' : ''}>
+                    <span>⏭ Автопереход к следующему слайду по окончании видео (onended)</span>
+                </label>
             </div>
 
             <!-- Section 3: Навигация по похожим медиа -->
@@ -15606,6 +15634,10 @@ config.relatedNavPreset = relPreset.value;
 }
 if (relArrows) {
 config.relatedNavArrows = !!relArrows.checked;
+}
+const autoAdv = box.querySelector('#mossad-wiz-auto-advance');
+if (autoAdv) {
+config.videoAutoAdvanceOnEnd = !!autoAdv.checked;
 }
 if (typeof mossadSaveSiteTemplate === 'function') {
 mossadSaveSiteTemplate(tplVal);
@@ -16313,6 +16345,10 @@ modal.innerHTML = `
                 <span>Стрелки ← → ↑ ↓ с живым предпросмотром (видео без звука)</span>
               </label>
             </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Когда ролик заканчивается (событие onended), MOSSAD автоматически переходит к следующему слайду (идеально для Shorts, Reels, видеохостингов)">
+              <input id="mossad-cb-video-auto-advance" type="checkbox" style="accent-color:#10b981;" ${config.videoAutoAdvanceOnEnd !== false ? 'checked' : ''}>
+              <span>⏭ Автопереход к следующему слайду по окончании видео (onended)</span>
+            </label>
             ${rootDomain === 'grok.com' ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Вне поля ввода эти клавиши не переводят фокус в промт Grok (например, R у расширения Speed Control). Другие расширения клавишу видят">
               <span data-mossad-label="noPromptLabel" style="white-space:nowrap;">${LH('noPromptLabel')}</span>
               <input id="mossad-gen-nokeys" type="text" value="${String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -17045,6 +17081,10 @@ btnCloudSyncDb.onclick = (e) => {
 e.preventDefault();
 if (typeof syncHashesWithGitHub === 'function') syncHashesWithGitHub();
 };
+}
+const cbAutoAdv = modal.querySelector('#mossad-cb-video-auto-advance');
+if (cbAutoAdv) {
+cbAutoAdv.onchange = (e) => Settings.set('videoAutoAdvanceOnEnd', e.target.checked);
 }
 const genJunk = modal.querySelector('#mossad-gen-junk');
 if (genJunk) genJunk.oninput = genJunk.onchange = (e) => mossadSetJunkText(e.target.value);

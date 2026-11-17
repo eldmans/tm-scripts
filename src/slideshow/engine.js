@@ -665,6 +665,30 @@
             _videoReachedEndZone = false;
             _videoDetachedSince = 0;
             _endedConsumed = false;
+            // v1.4.17: Прямой слушатель события ended для мгновенного авто-перехода (Shorts, Reels, хостинги)
+            if (!video._mossadEndedWired) {
+                video._mossadEndedWired = true;
+                video.addEventListener('ended', () => {
+                    if (!slideshowActive) return;
+                    if (config.videoAutoAdvanceOnEnd !== false) {
+                        mossadDebug('ended', 'видео завершилось (событие onended)');
+                        _videoReachedEndZone = true;
+                        if (currentVideoNode === video && !_endedConsumed) {
+                            _endedConsumed = true;
+                            currentLoopCount++;
+                            if (currentLoopCount >= config.videoLoops) {
+                                countdownSeconds = config.delayAfterVideo;
+                                if (countdownSeconds > 0) {
+                                    isCountingDown = true;
+                                    runPhotoTimer('video-onended');
+                                } else {
+                                    triggerNextSlide('video-onended');
+                                }
+                            }
+                        }
+                    }
+                });
+            }
             if (video.ended) {
                 // Ролик уже закончился (не зациклен) — начинаем круг заново, а не засчитываем мгновенно
                 try { video.currentTime = 0; video.play().catch(() => {}); } catch(e) {}
@@ -884,8 +908,10 @@
             }
         }
 
-        // Если видео на паузе: либо пользователь поставил паузу (ждём), либо мы следим не за тем элементом
-        if (currentVideoNode.paused) {
+        // Если видео на паузе: либо пользователь поставил паузу (ждём), либо мы следим не за тем элементом.
+        // ВАЖНО (v1.4.17): в HTML5 Video при завершении ролика (ended === true) браузер автоматически
+        // выставляет paused = true! Проверка паузы не должна блокировать завершение ролика.
+        if (currentVideoNode.paused && !currentVideoNode.ended) {
             const now = timeNow || performance.now();
             if (rootDomain === 'grok.com' && now - _lastRebindCheck > 500) {
                 _lastRebindCheck = now;

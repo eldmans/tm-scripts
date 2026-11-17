@@ -124,6 +124,10 @@
                         <span style="font-size:10px;color:#94a3b8;line-height:1.25;">Окно не скроллится автоматически.</span>
                     </label>
                 </div>
+                <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#cbd5e1;cursor:pointer;margin-top:2px;" title="Когда ролик заканчивается (событие onended), MOSSAD автоматически переходит к следующему слайду (идеально для Shorts, Reels, видеохостингов)">
+                    <input id="mossad-wiz-auto-advance" type="checkbox" style="accent-color:#10b981;" ${config.videoAutoAdvanceOnEnd !== false ? 'checked' : ''}>
+                    <span>⏭ Автопереход к следующему слайду по окончании видео (onended)</span>
+                </label>
             </div>
 
             <!-- Section 3: Навигация по похожим медиа -->
@@ -318,6 +322,10 @@
                 }
                 if (relArrows) {
                     config.relatedNavArrows = !!relArrows.checked;
+                }
+                const autoAdv = box.querySelector('#mossad-wiz-auto-advance');
+                if (autoAdv) {
+                    config.videoAutoAdvanceOnEnd = !!autoAdv.checked;
                 }
 
                 // Сохранение шаблона сайта

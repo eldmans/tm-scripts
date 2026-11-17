@@ -773,6 +773,10 @@
                 <span>Стрелки ← → ↑ ↓ с живым предпросмотром (видео без звука)</span>
               </label>
             </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Когда ролик заканчивается (событие onended), MOSSAD автоматически переходит к следующему слайду (идеально для Shorts, Reels, видеохостингов)">
+              <input id="mossad-cb-video-auto-advance" type="checkbox" style="accent-color:#10b981;" ${config.videoAutoAdvanceOnEnd !== false ? 'checked' : ''}>
+              <span>⏭ Автопереход к следующему слайду по окончании видео (onended)</span>
+            </label>
             ${rootDomain === 'grok.com' ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="Вне поля ввода эти клавиши не переводят фокус в промт Grok (например, R у расширения Speed Control). Другие расширения клавишу видят">
               <span data-mossad-label="noPromptLabel" style="white-space:nowrap;">${LH('noPromptLabel')}</span>
               <input id="mossad-gen-nokeys" type="text" value="${String(config.grokNoPromptKeys == null ? '' : config.grokNoPromptKeys).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -1590,6 +1594,10 @@
                 e.preventDefault();
                 if (typeof syncHashesWithGitHub === 'function') syncHashesWithGitHub();
             };
+        }
+        const cbAutoAdv = modal.querySelector('#mossad-cb-video-auto-advance');
+        if (cbAutoAdv) {
+            cbAutoAdv.onchange = (e) => Settings.set('videoAutoAdvanceOnEnd', e.target.checked);
         }
         const genJunk = modal.querySelector('#mossad-gen-junk'); // v1.3.74
         if (genJunk) genJunk.oninput = genJunk.onchange = (e) => mossadSetJunkText(e.target.value);
