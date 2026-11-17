@@ -11,15 +11,49 @@
         const sec = document.createElement('div');
         sec.setAttribute('data-light', 'dnd');
         sec.style.cssText = 'background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:#d1d5db;';
-        sec.innerHTML = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">⬇ DND: скачивание по Ctrl+клик (все сайты)</div>
+        sec.innerHTML = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">⬇ DND: скачивание по клику с модификатором (все сайты)</div>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;"><input data-dnd-cfg="enabled" type="checkbox" ${c.enabled ? 'checked' : ''} style="accent-color:#3b82f6;"> Включено</label>
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">Левый клик (скачать):
+              <select data-dnd-cfg="leftMod" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+                <option value="ctrl">Ctrl</option>
+                <option value="alt">Alt</option>
+                <option value="shift">Shift</option>
+                <option value="ctrl+shift">Ctrl+Shift</option>
+                <option value="alt+shift">Alt+Shift</option>
+                <option value="ctrl+alt">Ctrl+Alt</option>
+              </select>
+              + клик
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">Правый клик (меню):
+              <select data-dnd-cfg="rightMod" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+                <option value="ctrl">Ctrl</option>
+                <option value="alt">Alt</option>
+                <option value="shift">Shift</option>
+                <option value="ctrl+shift">Ctrl+Shift</option>
+                <option value="alt+shift">Alt+Shift</option>
+                <option value="ctrl+alt">Ctrl+Alt</option>
+              </select>
+              + ПКМ
+            </label>
             <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">Подпапка в «Загрузках»:
               <input data-dnd-cfg="folder" type="text" value="${String(c.folder).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="пусто — корень" style="width:120px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;"></label>
-            <div style="color:#9ca3af;line-height:1.35;">Ctrl + левый клик по картинке/видео — скачать. Ctrl + правый клик — меню: Скачать, Папка…, Копировать кадр.
-            Для подпапок в Tampermonkey: Настройки → «Режим загрузки: Browser API».</div>`;
+            <div data-dnd-desc style="color:#9ca3af;line-height:1.35;"></div>`;
         sec.querySelector('[data-dnd-cfg="enabled"]').onchange = (e) => mossadDndSave({ enabled: e.target.checked });
         const f = sec.querySelector('[data-dnd-cfg="folder"]');
         f.onchange = () => { const v = mossadDndNormFolder(f.value); f.value = v; mossadDndSave({ folder: v }); };
+        const selLeft = sec.querySelector('[data-dnd-cfg="leftMod"]');
+        const selRight = sec.querySelector('[data-dnd-cfg="rightMod"]');
+        const descEl = sec.querySelector('[data-dnd-desc]');
+        const modLabel = (k) => ({ ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', 'ctrl+shift': 'Ctrl+Shift', 'alt+shift': 'Alt+Shift', 'ctrl+alt': 'Ctrl+Alt' }[k] || k);
+        const _updateDesc = () => {
+            const lm = selLeft.value, rm = selRight.value;
+            descEl.textContent = modLabel(lm) + ' + левый клик по картинке/видео — скачать. ' + modLabel(rm) + ' + правый клик — меню: Скачать, Папка…, Копировать кадр. Для подпапок в Tampermonkey: Настройки → «Режим загрузки: Browser API».';
+        };
+        selLeft.value = c.leftMod || 'ctrl';
+        selRight.value = c.rightMod || 'ctrl';
+        selLeft.onchange = (e) => { mossadDndSave({ leftMod: e.target.value }); _updateDesc(); };
+        selRight.onchange = (e) => { mossadDndSave({ rightMod: e.target.value }); _updateDesc(); };
+        _updateDesc();
         box.appendChild(sec);
     } });
 

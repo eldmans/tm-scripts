@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.10
+// @version      1.4.11
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -32,12 +32,25 @@ let o = null;
 try { if (typeof GM_getValue === 'function') o = GM_getValue(MOSSAD_DND_GM_KEY, null); } catch (e) {}
 try { if (typeof o === 'string') o = JSON.parse(o); } catch (e) { o = null; }
 o = (o && typeof o === 'object') ? o : {};
-return { enabled: o.enabled !== false, folder: typeof o.folder === 'string' ? o.folder : 'DND/' };
+return { enabled: o.enabled !== false, folder: typeof o.folder === 'string' ? o.folder : 'DND/', leftMod: typeof o.leftMod === 'string' ? o.leftMod : 'ctrl', rightMod: typeof o.rightMod === 'string' ? o.rightMod : 'ctrl' };
 }
 function mossadDndSave(patch) {
 const c = Object.assign(mossadDndCfg(), patch || {});
 try { if (typeof GM_setValue === 'function') GM_setValue(MOSSAD_DND_GM_KEY, JSON.stringify(c)); } catch (e) {}
 return c;
+}
+function mossadDndModMatch(e, modKey) {
+const c = !!e.ctrlKey, a = !!e.altKey, s = !!e.shiftKey, m = !!e.metaKey;
+if (m) return false;
+switch (modKey || 'ctrl') {
+case 'ctrl': return c && !a && !s;
+case 'alt': return !c && a && !s;
+case 'shift': return !c && !a && s;
+case 'ctrl+shift': return c && !a && s;
+case 'alt+shift': return !c && a && s;
+case 'ctrl+alt': return c && a && !s;
+default: return c && !a && !s;
+}
 }
 function mossadDndNormFolder(f) {
 const parts = String(f || '').replace(/\\/g, '/').split('/').map(p => p.trim().replace(/[<>:"|?*\x00-\x1f]/g, '_')).filter(p => p && p !== '.' && p !== '..');
@@ -212,16 +225,18 @@ window.addEventListener('blur', off);
 m._mossadOff = () => { window.removeEventListener('pointerdown', off, true); window.removeEventListener('keydown', off, true); window.removeEventListener('blur', off); };
 }
 function _dndOnClick(e) {
-if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.button !== 0) return;
+const cfg = mossadDndCfg();
+if (!mossadDndModMatch(e, cfg.leftMod) || e.button !== 0) return;
 const el = mossadMediaAt(e.clientX, e.clientY, e.target);
-if (!el || !mossadDndCfg().enabled) return;
+if (!el || !cfg.enabled) return;
 e.preventDefault(); e.stopPropagation();
 mossadDndDownload(el);
 }
 function _dndOnContext(e) {
-if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+const cfg = mossadDndCfg();
+if (!mossadDndModMatch(e, cfg.rightMod)) return;
 const el = mossadMediaAt(e.clientX, e.clientY, e.target);
-if (!el || !mossadDndCfg().enabled) return;
+if (!el || !cfg.enabled) return;
 e.preventDefault(); e.stopPropagation();
 mossadDndMenu(el, e.clientX, e.clientY);
 }
@@ -502,15 +517,49 @@ const c = mossadDndCfg();
 const sec = document.createElement('div');
 sec.setAttribute('data-light', 'dnd');
 sec.style.cssText = 'background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:#d1d5db;';
-sec.innerHTML = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">⬇ DND: скачивание по Ctrl+клик (все сайты)</div>
+sec.innerHTML = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">⬇ DND: скачивание по клику с модификатором (все сайты)</div>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;"><input data-dnd-cfg="enabled" type="checkbox" ${c.enabled ? 'checked' : ''} style="accent-color:#3b82f6;"> Включено</label>
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">Левый клик (скачать):
+              <select data-dnd-cfg="leftMod" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+                <option value="ctrl">Ctrl</option>
+                <option value="alt">Alt</option>
+                <option value="shift">Shift</option>
+                <option value="ctrl+shift">Ctrl+Shift</option>
+                <option value="alt+shift">Alt+Shift</option>
+                <option value="ctrl+alt">Ctrl+Alt</option>
+              </select>
+              + клик
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">Правый клик (меню):
+              <select data-dnd-cfg="rightMod" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
+                <option value="ctrl">Ctrl</option>
+                <option value="alt">Alt</option>
+                <option value="shift">Shift</option>
+                <option value="ctrl+shift">Ctrl+Shift</option>
+                <option value="alt+shift">Alt+Shift</option>
+                <option value="ctrl+alt">Ctrl+Alt</option>
+              </select>
+              + ПКМ
+            </label>
             <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">Подпапка в «Загрузках»:
               <input data-dnd-cfg="folder" type="text" value="${String(c.folder).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="пусто — корень" style="width:120px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;"></label>
-            <div style="color:#9ca3af;line-height:1.35;">Ctrl + левый клик по картинке/видео — скачать. Ctrl + правый клик — меню: Скачать, Папка…, Копировать кадр.
-            Для подпапок в Tampermonkey: Настройки → «Режим загрузки: Browser API».</div>`;
+            <div data-dnd-desc style="color:#9ca3af;line-height:1.35;"></div>`;
 sec.querySelector('[data-dnd-cfg="enabled"]').onchange = (e) => mossadDndSave({ enabled: e.target.checked });
 const f = sec.querySelector('[data-dnd-cfg="folder"]');
 f.onchange = () => { const v = mossadDndNormFolder(f.value); f.value = v; mossadDndSave({ folder: v }); };
+const selLeft = sec.querySelector('[data-dnd-cfg="leftMod"]');
+const selRight = sec.querySelector('[data-dnd-cfg="rightMod"]');
+const descEl = sec.querySelector('[data-dnd-desc]');
+const modLabel = (k) => ({ ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', 'ctrl+shift': 'Ctrl+Shift', 'alt+shift': 'Alt+Shift', 'ctrl+alt': 'Ctrl+Alt' }[k] || k);
+const _updateDesc = () => {
+const lm = selLeft.value, rm = selRight.value;
+descEl.textContent = modLabel(lm) + ' + левый клик по картинке/видео — скачать. ' + modLabel(rm) + ' + правый клик — меню: Скачать, Папка…, Копировать кадр. Для подпапок в Tampermonkey: Настройки → «Режим загрузки: Browser API».';
+};
+selLeft.value = c.leftMod || 'ctrl';
+selRight.value = c.rightMod || 'ctrl';
+selLeft.onchange = (e) => { mossadDndSave({ leftMod: e.target.value }); _updateDesc(); };
+selRight.onchange = (e) => { mossadDndSave({ rightMod: e.target.value }); _updateDesc(); };
+_updateDesc();
 box.appendChild(sec);
 } });
 mossadLightSections.push({ id: 'speed', render(box) {
@@ -608,7 +657,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.10';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.11';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {

@@ -13,12 +13,26 @@
         try { if (typeof GM_getValue === 'function') o = GM_getValue(MOSSAD_DND_GM_KEY, null); } catch (e) {}
         try { if (typeof o === 'string') o = JSON.parse(o); } catch (e) { o = null; }
         o = (o && typeof o === 'object') ? o : {};
-        return { enabled: o.enabled !== false, folder: typeof o.folder === 'string' ? o.folder : 'DND/' };
+        return { enabled: o.enabled !== false, folder: typeof o.folder === 'string' ? o.folder : 'DND/', leftMod: typeof o.leftMod === 'string' ? o.leftMod : 'ctrl', rightMod: typeof o.rightMod === 'string' ? o.rightMod : 'ctrl' };
     }
     function mossadDndSave(patch) {
         const c = Object.assign(mossadDndCfg(), patch || {});
         try { if (typeof GM_setValue === 'function') GM_setValue(MOSSAD_DND_GM_KEY, JSON.stringify(c)); } catch (e) {}
         return c;
+    }
+    function mossadDndModMatch(e, modKey) {
+        // modKey: 'ctrl' | 'alt' | 'shift' | 'ctrl+shift' | 'alt+shift' | 'ctrl+alt'
+        const c = !!e.ctrlKey, a = !!e.altKey, s = !!e.shiftKey, m = !!e.metaKey;
+        if (m) return false; // Meta/Win никогда
+        switch (modKey || 'ctrl') {
+            case 'ctrl':       return c && !a && !s;
+            case 'alt':        return !c && a && !s;
+            case 'shift':      return !c && !a && s;
+            case 'ctrl+shift': return c && !a && s;
+            case 'alt+shift':  return !c && a && s;
+            case 'ctrl+alt':   return c && a && !s;
+            default:           return c && !a && !s;
+        }
     }
     /** «DND», «/DND/», «a\\b» → «DND/», «a/b/»; пусто → '' (корень «Загрузок»). Без «..» и недопустимых символов. */
     function mossadDndNormFolder(f) {
@@ -206,16 +220,18 @@
 
     // ── два слушателя на всю страницу; без Ctrl — мгновенный выход ──
     function _dndOnClick(e) {
-        if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.button !== 0) return;
+        const cfg = mossadDndCfg();
+        if (!mossadDndModMatch(e, cfg.leftMod) || e.button !== 0) return;
         const el = mossadMediaAt(e.clientX, e.clientY, e.target);
-        if (!el || !mossadDndCfg().enabled) return;
+        if (!el || !cfg.enabled) return;
         e.preventDefault(); e.stopPropagation(); // не открывать ссылку в новой вкладке
         mossadDndDownload(el);
     }
     function _dndOnContext(e) {
-        if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+        const cfg = mossadDndCfg();
+        if (!mossadDndModMatch(e, cfg.rightMod)) return;
         const el = mossadMediaAt(e.clientX, e.clientY, e.target);
-        if (!el || !mossadDndCfg().enabled) return;
+        if (!el || !cfg.enabled) return;
         e.preventDefault(); e.stopPropagation();
         mossadDndMenu(el, e.clientX, e.clientY);
     }
