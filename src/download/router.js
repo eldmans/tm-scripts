@@ -22,6 +22,12 @@
             if (fhMedia) return fhMedia;
         }
 
+        // v1.4.13: xHamster — извлечение MP4 / HLS
+        if (window.MOSSAD_ENGINES?.xhamster?.isSupported()) {
+            const xhMedia = window.MOSSAD_ENGINES.xhamster.findMedia();
+            if (xhMedia) return xhMedia;
+        }
+
         // v1.3.52: Pinterest — асинхронно через pinterestResolveMedia() в triggerDownload (API пина).
         // Синхронный путь сюда больше не заходит; запасной ответ — только главный пин, без «первой картинки страницы».
         if (rootDomain.includes('pinterest.')) {
@@ -85,11 +91,20 @@
             return { urls: [fullImg], type: 'image' };
         }
         
+        // v1.4.13: на видео-платформах категорически запрещено падать в фоллбэк картинок (скачивание короны/логотипа)
+        const isVideoPlatform = /(?:faphouse|xvideos|xnxx|xv-ru|xhamster|noodlemagazine|vkvideo|pornhub|redgifs)/i.test(rootDomain) ||
+                                (config && config.downloadType === 'video');
+        if (isVideoPlatform) {
+            return null;
+        }
+
         const allImgs = Array.from(document.querySelectorAll('img')).filter(i => {
             if (i.width < 200 || i.height < 200) return false;
             const src = (i.currentSrc || i.src || '').toLowerCase();
             if (!src || src.includes('.svg') || src.startsWith('data:image/svg') || src.includes('image/svg+xml')) return false;
-            if (src.includes('logo') || src.includes('avatar') || src.includes('badge')) return false;
+            if (src.includes('logo') || src.includes('avatar') || src.includes('badge') ||
+                src.includes('crown') || src.includes('vip') || src.includes('premium') ||
+                src.includes('icon') || src.includes('header') || src.includes('banner')) return false;
             return true;
         });
         if (allImgs.length > 0 && !rootDomain.includes('redgifs.com') && !rootDomain.includes('vk')) {

@@ -26,11 +26,111 @@
         showToast(label);
     }
 
+    /**
+     * v1.4.13: Универсальный Большой режим плеера / Large Mode (T или L по умолчанию)
+     * Поддерживает: xHamster (Large mode), xVideos / xv-ru (Double size), Faphouse,
+     * а также автопоиск кнопки в тулбаре плеера и универсальный CSS-режим.
+     */
+    function mossadToggleLargePlayer() {
+        let handled = false;
+
+        // 1. XVideos / XV-RU / XNXX
+        if (window.MOSSAD_ENGINES?.xvideos?.isSupported()) {
+            handled = window.MOSSAD_ENGINES.xvideos.toggleDoubleSize();
+            if (handled) return handled;
+        }
+
+        // 2. xHamster (хомяки)
+        if (window.MOSSAD_ENGINES?.xhamster?.isSupported()) {
+            handled = window.MOSSAD_ENGINES.xhamster.toggleLargeMode();
+            if (handled) return handled;
+        }
+
+        // 3. Faphouse
+        if (window.MOSSAD_ENGINES?.faphouse?.isSupported() && typeof window.MOSSAD_ENGINES.faphouse.toggleLargeMode === 'function') {
+            handled = window.MOSSAD_ENGINES.faphouse.toggleLargeMode();
+            if (handled) return handled;
+        }
+
+        // 4. Поиск кнопки в плеере на любом сайте
+        const v = (typeof getActiveVideo === 'function' ? getActiveVideo() : null) || document.querySelector('video');
+        const container = v ? (v.closest('.video-player, .player-container, .player_wrap, .player, #player, .player-wrap, [data-player]') || v.parentElement) : document;
+        const btns = Array.from(container.querySelectorAll('button, [role="button"], span.has-clickable-effect, a'));
+        for (const b of btns) {
+            const t = ((b.getAttribute('title') || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.className || '')).toLowerCase();
+            if (/(?:large\s*mode|theater|theatre|double\s*size|wide\s*screen|wide\s*player|двойной\s*размер|театр|широк|крупн)/i.test(t) &&
+                !/(?:full\s*-?screen|полноэкран|во весь экран)/i.test(t)) {
+                b.click();
+                handled = true;
+                break;
+            }
+        }
+
+        // 5. Универсальный CSS-фоллбэк
+        if (!handled && v) {
+            const pCont = v.closest('.video-player, .player-container, .player_wrap, .player, #player, .player-wrap, .video-container') || v.parentElement;
+            if (pCont) {
+                pCont.classList.toggle('mossad-large-player-active');
+                if (!document.getElementById('mossad-large-player-style')) {
+                    const st = document.createElement('style');
+                    st.id = 'mossad-large-player-style';
+                    st.textContent = `
+                        .mossad-large-player-active {
+                            width: 100vw !important;
+                            max-width: 100vw !important;
+                            margin-left: calc(-50vw + 50%) !important;
+                            height: min(85vh, 56.25vw) !important;
+                            z-index: 9999 !important;
+                            position: relative !important;
+                            transition: all 0.3s ease !important;
+                        }
+                        .mossad-large-player-active video {
+                            width: 100% !important;
+                            height: 100% !important;
+                            object-fit: contain !important;
+                        }
+                    `;
+                    document.head.appendChild(st);
+                }
+                const isLg = pCont.classList.contains('mossad-large-player-active');
+                if (isLg) {
+                    try { pCont.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+                }
+                handled = true;
+                setTimeout(() => {
+                    showToast(isLg ? '🔲 Большой режим (Large Mode)' : '▫️ Обычный размер плеера');
+                }, 50);
+                return handled;
+            }
+        }
+
+        setTimeout(() => {
+            showToast(handled ? '🔲 Большой режим (Large Mode)' : '⚠️ Кнопка «Большой режим» (Large Mode) не найдена', !handled);
+        }, 60);
+
+        return handled;
+    }
+
+    function mossadLargePlayerMatch(e) {
+        const hk = config.hk && (config.hk.largePlayer || config.hk.xvDoubleSize);
+        if (hk && hk.key) {
+            if (hotkeyMatches(e, hk)) return true;
+            if (!hk.ctrl && !hk.alt && !hk.shift && e.shiftKey && hotkeyMatches(e, Object.assign({}, hk, { shift: true }))) return true;
+        }
+        // Если хоткей дефолтный (key: 't' или не настроен) — поддерживаем и T, и L (Large Mode, буква L)
+        const isDefaultHk = !hk || !hk.key || (hk.key.toLowerCase() === 't' && !hk.ctrl && !hk.alt);
+        if (isDefaultHk && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            if (e.code === 'KeyT' || e.code === 'KeyL' ||
+                e.key === 't' || e.key === 'T' || e.key === 'е' || e.key === 'Е' ||
+                e.key === 'l' || e.key === 'L' || e.key === 'д' || e.key === 'Д') {
+                return true;
+            }
+        }
+        return false;
+    }
+
     function mossadXvDoubleSizeMatch(e) {
-        const hk = config.hk && config.hk.xvDoubleSize;
-        if (!hk || !hk.key) return false;
-        if (hotkeyMatches(e, hk)) return true;
-        return !hk.ctrl && !hk.alt && !hk.shift && e.shiftKey && hotkeyMatches(e, Object.assign({}, hk, { shift: true }));
+        return mossadLargePlayerMatch(e);
     }
 
     // ============================================
@@ -595,10 +695,10 @@
             return;
         }
 
-        // v1.3.86: XVideos / xv-ru — 🔲 Двойной размер плеера (T по умолчанию)
-        if (window.MOSSAD_ENGINES?.xvideos?.isSupported() && config.hk.xvDoubleSize && mossadXvDoubleSizeMatch(e)) {
+        // v1.4.13: 🔲 Большой режим плеера / Large Mode (T или L по умолчанию — xHamster, XVideos, Faphouse и др.)
+        if (mossadLargePlayerMatch(e)) {
             e.preventDefault();
-            window.MOSSAD_ENGINES.xvideos.toggleDoubleSize();
+            mossadToggleLargePlayer();
             return;
         }
 

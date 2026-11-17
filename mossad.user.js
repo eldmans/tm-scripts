@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.12
+// @version      1.4.13
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -657,7 +657,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.12';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.13';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -667,7 +667,7 @@ return parts.slice(-2).join('.');
 }
 const rootDomain = getRootDomain(hostname);
 const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
-const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space', 'xv-ru.com', 'xvideos.com', 'faphouse.com'];
+const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space', 'xv-ru.com', 'xvideos.com', 'faphouse.com', 'xhamster.com', 'xhamster.desi', 'xhamster2.com'];
 const MOSSAD_SITES_GM_KEY = 'mossad_sites';
 function mossadNormSite(s) {
 let d = String(s == null ? '' : s).trim().toLowerCase();
@@ -10248,12 +10248,152 @@ findMedia
 window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
 window.MOSSAD_ENGINES.faphouse = (() => {
 function isSupported() {
-return /(?:faphouse\.com)/i.test(rootDomain);
+return /(?:faphouse\.com)/i.test(rootDomain) || /(?:faphouse\.com)/i.test(location.hostname);
+}
+const _capturedMediaUrls = new Set();
+let _capturedTitle = '';
+function _initNetworkSniffer() {
+if (!isSupported()) return;
+function _checkAndSaveUrl(url) {
+if (!url || typeof url !== 'string') return;
+if (/\.(?:m3u8|mp4)(?:\?|$)/i.test(url) || /\/(?:hls|stream|manifest|master)\//i.test(url)) {
+_capturedMediaUrls.add(url);
+}
+}
+try {
+const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+const patchHls = (HlsClass) => {
+if (!HlsClass || HlsClass._mossadPatched) return;
+HlsClass._mossadPatched = true;
+const origLoad = HlsClass.prototype.loadSource;
+if (origLoad) {
+HlsClass.prototype.loadSource = function(src) {
+_checkAndSaveUrl(src);
+return origLoad.apply(this, arguments);
+};
+}
+};
+if (uWin.Hls) patchHls(uWin.Hls);
+else {
+let _hlsVal = undefined;
+try {
+Object.defineProperty(uWin, 'Hls', {
+configurable: true,
+enumerable: true,
+get: () => _hlsVal,
+set: (val) => { _hlsVal = val; patchHls(val); }
+});
+} catch (_) {}
+}
+} catch (_) {}
+try {
+const targets = [typeof unsafeWindow !== 'undefined' ? unsafeWindow : null, window].filter(Boolean);
+for (const win of targets) {
+if (win._mossadFetchPatched) continue;
+win._mossadFetchPatched = true;
+const origFetch = win.fetch;
+if (typeof origFetch === 'function') {
+win.fetch = function(...args) {
+try {
+const reqUrl = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+_checkAndSaveUrl(reqUrl);
+} catch (_) {}
+return origFetch.apply(this, args);
+};
+}
+}
+} catch (_) {}
+try {
+const targets = [typeof unsafeWindow !== 'undefined' ? unsafeWindow : null, window].filter(Boolean);
+for (const win of targets) {
+if (!win.XMLHttpRequest || win.XMLHttpRequest._mossadXhrPatched) continue;
+win.XMLHttpRequest._mossadXhrPatched = true;
+const origOpen = win.XMLHttpRequest.prototype.open;
+win.XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+try {
+if (typeof url === 'string') _checkAndSaveUrl(url);
+} catch (_) {}
+return origOpen.call(this, method, url, ...rest);
+};
+}
+} catch (_) {}
+}
+_initNetworkSniffer();
+function toggleLargeMode() {
+let handled = false;
+const btn = document.querySelector(
+'button[title*="Large" i], button[title*="Theater" i], button[title*="Wide" i], ' +
+'button[title*="крупн" i], button[title*="театр" i], button[title*="размер" i], ' +
+'.theater-btn, button[data-action="theater"]'
+)?.closest('button, span, a, .has-clickable-effect');
+if (btn) {
+btn.click();
+handled = true;
+}
+const playerCont = document.querySelector('.video-player, .player_wrap, .player-container, #player, .player, [data-player]');
+if (playerCont) {
+playerCont.classList.toggle('mossad-theater-active');
+if (!document.getElementById('mossad-fh-theater-style')) {
+const st = document.createElement('style');
+st.id = 'mossad-fh-theater-style';
+st.textContent = `
+                        .mossad-theater-active {
+                            width: 100vw !important;
+                            max-width: 100vw !important;
+                            margin-left: calc(-50vw + 50%) !important;
+                            height: min(85vh, 56.25vw) !important;
+                            z-index: 9999 !important;
+                            position: relative !important;
+                            transition: all 0.3s ease !important;
+                        }
+                        .mossad-theater-active video {
+                            width: 100% !important;
+                            height: 100% !important;
+                            object-fit: contain !important;
+                        }
+                    `;
+document.head.appendChild(st);
+}
+const isWide = playerCont.classList.contains('mossad-theater-active');
+if (isWide) {
+try { playerCont.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+}
+handled = true;
+setTimeout(() => {
+showToast(isWide ? '🔲 Большой режим (Large Mode)' : '▫️ Обычный размер плеера');
+}, 50);
+return handled;
+}
+setTimeout(() => {
+showToast(handled ? '🔲 Большой режим (Large Mode)' : '⚠️ Кнопка «Большой режим» не найдена', !handled);
+}, 60);
+return handled;
 }
 function findMedia() {
 if (!isSupported()) return null;
 const urls = [];
-let title = '';
+let title = _capturedTitle || '';
+if (_capturedMediaUrls.size > 0) {
+for (const u of _capturedMediaUrls) {
+if (u && !urls.includes(u)) urls.push(u);
+}
+}
+const nuxtDataScript = document.getElementById('__NUXT_DATA__');
+if (nuxtDataScript && nuxtDataScript.textContent) {
+try {
+const parsed = JSON.parse(nuxtDataScript.textContent);
+if (Array.isArray(parsed)) {
+for (const item of parsed) {
+if (typeof item === 'string') {
+if (/\.(?:mp4|m3u8)(?:\?|$)/i.test(item) || /\/(?:hls|stream)\//i.test(item)) {
+const dec = _decodeUrl(item);
+if (dec && !urls.includes(dec)) urls.push(dec);
+}
+}
+}
+}
+} catch (_) {}
+}
 try {
 const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 const nuxt = uWin.__NUXT__ || uWin.__nuxt__;
@@ -10266,8 +10406,16 @@ const tm = str.match(/"title"\s*:\s*"([^"]{3,120})"/);
 if (tm) title = tm[1];
 }
 }
+if (Array.isArray(uWin.__NUXT_DATA__)) {
+for (const item of uWin.__NUXT_DATA__) {
+if (typeof item === 'string' && (/\.(?:mp4|m3u8)/i.test(item) || /\/(?:hls|stream)\//i.test(item))) {
+const dec = _decodeUrl(item);
+if (dec && !urls.includes(dec)) urls.push(dec);
+}
+}
+}
 const pinia = uWin.__pinia || uWin.__store;
-if (pinia && !urls.length) {
+if (pinia) {
 _extractMp4FromStr(JSON.stringify(pinia), urls);
 }
 const candidates = [
@@ -10276,62 +10424,73 @@ uWin.VIDEO_DATA, uWin.PLAYER_CONFIG, uWin.videoSources,
 uWin.fhPlayerConfig, uWin.fhVideo
 ];
 for (const obj of candidates) {
-if (obj && !urls.length) {
-_extractMp4FromStr(JSON.stringify(obj), urls);
+if (obj) _extractMp4FromStr(JSON.stringify(obj), urls);
 }
-}
-const appCandidates = [
-uWin.initialState, uWin.appData, uWin.__APP__,
-uWin.__INITIAL_STATE__, uWin.__INITIAL_DATA__
-];
-for (const obj of appCandidates) {
-if (obj && !urls.length) {
-try { _extractMp4FromStr(JSON.stringify(obj), urls); } catch (e) {}
-}
-}
-} catch (e) {}
-if (!urls.length) {
+} catch (_) {}
 const scripts = document.getElementsByTagName('script');
 for (let i = 0; i < scripts.length; i++) {
 const text = scripts[i].textContent || '';
 if (!text) continue;
-if (text.includes('__NUXT_DATA__') || text.includes('__NUXT__') ||
-text.includes('video_url') || text.includes('videoUrl') ||
-text.includes('.mp4') || text.includes('.m3u8') || text.includes('hls')) {
+if (text.includes('video_url') || text.includes('videoUrl') ||
+text.includes('.mp4') || text.includes('.m3u8') || text.includes('/hls/')) {
 _extractMp4FromStr(text, urls);
 if (!title) {
 const tm = text.match(/"title"\s*:\s*"([^"]{3,120})"/);
 if (tm) title = tm[1];
 }
-if (urls.length) break;
 }
 }
+const metaVid = document.querySelector('meta[property="og:video"], meta[property="og:video:url"], meta[name="twitter:player:stream"]');
+if (metaVid && metaVid.content && !urls.includes(metaVid.content)) {
+urls.push(metaVid.content);
 }
-if (!urls.length) {
 const videos = Array.from(document.querySelectorAll('video'));
 for (const v of videos) {
 const src = v.currentSrc || v.src || '';
-if (src && !src.startsWith('blob:')) {
+if (src && !src.startsWith('blob:') && !urls.includes(src)) {
 urls.push(src);
-break;
 }
 for (const s of v.querySelectorAll('source')) {
-if (s.src && !s.src.startsWith('blob:')) {
+if (s.src && !s.src.startsWith('blob:') && !urls.includes(s.src)) {
 urls.push(s.src);
-break;
 }
 }
-if (urls.length) break;
 }
+document.querySelectorAll('iframe').forEach(f => {
+try {
+const iDoc = f.contentDocument;
+if (iDoc) {
+iDoc.querySelectorAll('video').forEach(v => {
+const src = v.currentSrc || v.src || '';
+if (src && !src.startsWith('blob:') && !urls.includes(src)) urls.push(src);
+v.querySelectorAll('source').forEach(s => {
+if (s.src && !s.src.startsWith('blob:') && !urls.includes(s.src)) urls.push(s.src);
+});
+});
 }
+} catch (_) {}
+});
 if (!urls.length) return null;
 if (!title) {
-title = (document.querySelector('h1.video-title, h1, .title') || {}).textContent
+title = (document.querySelector('h1.video-title, h1, .title, [data-qa="title"]') || {}).textContent
 || document.title || '';
 }
 title = title.replace(/\s+/g, ' ').trim();
+const expanded = [];
+for (const u of urls) {
+expanded.push(u);
+if (u.includes('.m3u8')) {
+const mp4Direct = u.replace(/\.m3u8(\?.*)?$/i, '.mp4$1').replace(/\/hls\//i, '/mp4/');
+if (!expanded.includes(mp4Direct)) expanded.push(mp4Direct);
+}
+}
+expanded.sort((a, b) => {
+const aHls = a.includes('.m3u8') ? 1 : 0;
+const bHls = b.includes('.m3u8') ? 1 : 0;
+return aHls - bHls;
+});
 return {
-urls: Array.from(new Set(urls.filter(Boolean))),
+urls: Array.from(new Set(expanded.filter(Boolean))),
 type: 'video',
 desc: title
 };
@@ -10350,19 +10509,12 @@ const u = _decodeUrl(m[1]);
 if (u && !urls.includes(u)) urls.push(u);
 }
 }
-if (!urls.length) {
 const broad = /https?:\\?\/\\?\/[^\s"'<>\\]{10,}\.(?:mp4|m3u8)[^\s"'<>\\]*/gi;
 let m;
 while ((m = broad.exec(str)) !== null) {
 const u = _decodeUrl(m[0].replace(/\\+\//g, '/').replace(/\\n|\\r/g, ''));
 if (u && !urls.includes(u)) urls.push(u);
 }
-}
-urls.sort((a, b) => {
-const aHls = a.includes('.m3u8') ? 1 : 0;
-const bHls = b.includes('.m3u8') ? 1 : 0;
-return aHls - bHls;
-});
 }
 function _decodeUrl(raw) {
 if (!raw) return '';
@@ -10380,8 +10532,7 @@ try { document.body.focus(); } catch (_) {}
 function _tryForwardIframeKeys(iframe) {
 try {
 const iWin = iframe.contentWindow;
-if (!iWin || !iWin.document) return;
-if (iWin._mossadFwdAttached) return;
+if (!iWin || !iWin.document || iWin._mossadFwdAttached) return;
 iWin._mossadFwdAttached = true;
 iWin.addEventListener('keydown', (ev) => {
 try {
@@ -10407,7 +10558,136 @@ document.addEventListener('DOMContentLoaded', _initFocusFix);
 } else {
 _initFocusFix();
 }
-return { isSupported, findMedia };
+return {
+isSupported,
+toggleLargeMode,
+findMedia
+};
+})();
+
+// ── src/engines/xhamster.js ──
+window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
+window.MOSSAD_ENGINES.xhamster = (() => {
+function isSupported() {
+return /(?:xhamster\d*|xh\d*)\.(?:com|desi|one|red|tube|gold)/i.test(rootDomain) ||
+/(?:xhamster|xh\d*)/i.test(location.hostname);
+}
+function toggleLargeMode() {
+let handled = false;
+try {
+const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+if (uWin.player && typeof uWin.player.toggleTheaterMode === 'function') {
+uWin.player.toggleTheaterMode();
+handled = true;
+} else if (uWin.xhPlayer && typeof uWin.xhPlayer.toggleSize === 'function') {
+uWin.xhPlayer.toggleSize();
+handled = true;
+}
+} catch (e) {}
+if (!handled) {
+const btn = document.querySelector(
+'[data-qa="player-size-button"], [data-role="theater-mode"], ' +
+'button[title*="Large" i], button[title*="Theater" i], button[title*="Theatre" i], ' +
+'button[title*="крупн" i], button[title*="театр" i], ' +
+'[aria-label*="Large" i], [aria-label*="Theater" i], .player-size-toggle, .icon-theater'
+)?.closest('button, span, a, .has-clickable-effect');
+if (btn) {
+btn.click();
+handled = true;
+}
+}
+if (!handled) {
+const cont = document.querySelector('.page-container, #player-container, .player-container, main');
+if (cont) {
+cont.classList.toggle('page-container--wide');
+handled = true;
+}
+}
+setTimeout(() => {
+const isWide = !!document.querySelector('.page-container--wide, [data-theater="true"], .player-enlarged');
+showToast(isWide ? '🔲 Большой режим (Large Mode)' : '▫️ Обычный размер плеера');
+}, 60);
+return handled;
+}
+function findMedia() {
+if (!isSupported()) return null;
+const urls = [];
+let title = '';
+try {
+const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+const inits = uWin.initials || uWin.initialData || (uWin.__INITIAL_STATE__ && uWin.__INITIAL_STATE__.initials);
+if (inits && inits.videoModel) {
+const vm = inits.videoModel;
+title = vm.title || '';
+const sources = vm.sources || {};
+if (sources.mp4 && typeof sources.mp4 === 'object') {
+const qKeys = ['1080p', '720p', '480p', '360p', '240p'];
+for (const q of qKeys) {
+if (sources.mp4[q]) urls.push(sources.mp4[q]);
+}
+for (const k in sources.mp4) {
+if (sources.mp4[k] && !urls.includes(sources.mp4[k])) urls.push(sources.mp4[k]);
+}
+}
+if (sources.hls && typeof sources.hls === 'object') {
+if (sources.hls.hls) urls.push(sources.hls.hls);
+if (sources.hls.url) urls.push(sources.hls.url);
+} else if (typeof sources.hls === 'string') {
+urls.push(sources.hls);
+}
+}
+} catch (e) {}
+if (!urls.length) {
+const initScript = document.getElementById('initials-script') ||
+Array.from(document.getElementsByTagName('script')).find(s => s.textContent && s.textContent.includes('window.initials'));
+if (initScript && initScript.textContent) {
+const text = initScript.textContent;
+const mp4Regex = /"https?:\/\/[^"]+\.mp4[^"]*"/gi;
+let m;
+while ((m = mp4Regex.exec(text)) !== null) {
+const clean = m[0].replace(/"/g, '').replace(/\\u0026/g, '&').replace(/\\/g, '');
+if (clean && !urls.includes(clean)) urls.push(clean);
+}
+const hlsRegex = /"https?:\/\/[^"]+\.m3u8[^"]*"/gi;
+while ((m = hlsRegex.exec(text)) !== null) {
+const clean = m[0].replace(/"/g, '').replace(/\\u0026/g, '&').replace(/\\/g, '');
+if (clean && !urls.includes(clean)) urls.push(clean);
+}
+if (!title) {
+const tm = text.match(/"title"\s*:\s*"([^"]+)"/);
+if (tm) title = tm[1];
+}
+}
+}
+if (!urls.length) {
+const metaVid = document.querySelector('meta[property="og:video"], meta[property="og:video:url"]');
+if (metaVid && metaVid.content) urls.push(metaVid.content);
+const videos = Array.from(document.querySelectorAll('video'));
+for (const v of videos) {
+const src = v.currentSrc || v.src || '';
+if (src && !src.startsWith('blob:') && !urls.includes(src)) urls.push(src);
+for (const s of v.querySelectorAll('source')) {
+if (s.src && !s.src.startsWith('blob:') && !urls.includes(s.src)) urls.push(s.src);
+}
+}
+}
+if (!urls.length) return null;
+if (!title) {
+title = (document.querySelector('h1.page-title, h1, [data-qa="video-title"]') || {}).textContent
+|| document.title || '';
+}
+title = title.replace(/\s+/g, ' ').trim();
+return {
+urls: Array.from(new Set(urls.filter(Boolean))),
+type: 'video',
+desc: title
+};
+}
+return {
+isSupported,
+toggleLargeMode,
+findMedia
+};
 })();
 
 // ── src/download/router.js ──
@@ -10426,6 +10706,10 @@ if (xvMedia) return xvMedia;
 if (window.MOSSAD_ENGINES?.faphouse?.isSupported()) {
 const fhMedia = window.MOSSAD_ENGINES.faphouse.findMedia();
 if (fhMedia) return fhMedia;
+}
+if (window.MOSSAD_ENGINES?.xhamster?.isSupported()) {
+const xhMedia = window.MOSSAD_ENGINES.xhamster.findMedia();
+if (xhMedia) return xhMedia;
 }
 if (rootDomain.includes('pinterest.')) {
 const img = pinterestMainImage();
@@ -10479,11 +10763,18 @@ if (img && img.src) {
 const fullImg = img.src.replace(/\/736x\//, '/originals/').replace(/\/474x\//, '/originals/');
 return { urls: [fullImg], type: 'image' };
 }
+const isVideoPlatform = /(?:faphouse|xvideos|xnxx|xv-ru|xhamster|noodlemagazine|vkvideo|pornhub|redgifs)/i.test(rootDomain) ||
+(config && config.downloadType === 'video');
+if (isVideoPlatform) {
+return null;
+}
 const allImgs = Array.from(document.querySelectorAll('img')).filter(i => {
 if (i.width < 200 || i.height < 200) return false;
 const src = (i.currentSrc || i.src || '').toLowerCase();
 if (!src || src.includes('.svg') || src.startsWith('data:image/svg') || src.includes('image/svg+xml')) return false;
-if (src.includes('logo') || src.includes('avatar') || src.includes('badge')) return false;
+if (src.includes('logo') || src.includes('avatar') || src.includes('badge') ||
+src.includes('crown') || src.includes('vip') || src.includes('premium') ||
+src.includes('icon') || src.includes('header') || src.includes('banner')) return false;
 return true;
 });
 if (allImgs.length > 0 && !rootDomain.includes('redgifs.com') && !rootDomain.includes('vk')) {
@@ -15164,7 +15455,7 @@ galleryStop: 'Стоп большого слайдшоу',
 playPause: 'Пауза/Плей видео (Pause)',
 sound: 'Звук вкл/выкл (ScrollLock)',
 expand: '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
-xvDoubleSize: 'XVideos / xv-ru — 🔲 Двойной размер плеера (T)',
+xvDoubleSize: '🔲 Большой режим плеера / Large Mode (T или L — xHamster, XVideos, Faphouse и др.)',
 nextSlide: 'Следующий слайд (ArrowRight)',
 prevSlide: 'Предыдущий слайд (ArrowLeft)',
 nextGroup: 'Следующая группа (Alt+PageDown)',
@@ -15942,11 +16233,91 @@ window.open(openUrl, '_blank');
 }
 showToast(label);
 }
-function mossadXvDoubleSizeMatch(e) {
-const hk = config.hk && config.hk.xvDoubleSize;
-if (!hk || !hk.key) return false;
+function mossadToggleLargePlayer() {
+let handled = false;
+if (window.MOSSAD_ENGINES?.xvideos?.isSupported()) {
+handled = window.MOSSAD_ENGINES.xvideos.toggleDoubleSize();
+if (handled) return handled;
+}
+if (window.MOSSAD_ENGINES?.xhamster?.isSupported()) {
+handled = window.MOSSAD_ENGINES.xhamster.toggleLargeMode();
+if (handled) return handled;
+}
+if (window.MOSSAD_ENGINES?.faphouse?.isSupported() && typeof window.MOSSAD_ENGINES.faphouse.toggleLargeMode === 'function') {
+handled = window.MOSSAD_ENGINES.faphouse.toggleLargeMode();
+if (handled) return handled;
+}
+const v = (typeof getActiveVideo === 'function' ? getActiveVideo() : null) || document.querySelector('video');
+const container = v ? (v.closest('.video-player, .player-container, .player_wrap, .player, #player, .player-wrap, [data-player]') || v.parentElement) : document;
+const btns = Array.from(container.querySelectorAll('button, [role="button"], span.has-clickable-effect, a'));
+for (const b of btns) {
+const t = ((b.getAttribute('title') || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.className || '')).toLowerCase();
+if (/(?:large\s*mode|theater|theatre|double\s*size|wide\s*screen|wide\s*player|двойной\s*размер|театр|широк|крупн)/i.test(t) &&
+!/(?:full\s*-?screen|полноэкран|во весь экран)/i.test(t)) {
+b.click();
+handled = true;
+break;
+}
+}
+if (!handled && v) {
+const pCont = v.closest('.video-player, .player-container, .player_wrap, .player, #player, .player-wrap, .video-container') || v.parentElement;
+if (pCont) {
+pCont.classList.toggle('mossad-large-player-active');
+if (!document.getElementById('mossad-large-player-style')) {
+const st = document.createElement('style');
+st.id = 'mossad-large-player-style';
+st.textContent = `
+                        .mossad-large-player-active {
+                            width: 100vw !important;
+                            max-width: 100vw !important;
+                            margin-left: calc(-50vw + 50%) !important;
+                            height: min(85vh, 56.25vw) !important;
+                            z-index: 9999 !important;
+                            position: relative !important;
+                            transition: all 0.3s ease !important;
+                        }
+                        .mossad-large-player-active video {
+                            width: 100% !important;
+                            height: 100% !important;
+                            object-fit: contain !important;
+                        }
+                    `;
+document.head.appendChild(st);
+}
+const isLg = pCont.classList.contains('mossad-large-player-active');
+if (isLg) {
+try { pCont.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+}
+handled = true;
+setTimeout(() => {
+showToast(isLg ? '🔲 Большой режим (Large Mode)' : '▫️ Обычный размер плеера');
+}, 50);
+return handled;
+}
+}
+setTimeout(() => {
+showToast(handled ? '🔲 Большой режим (Large Mode)' : '⚠️ Кнопка «Большой режим» (Large Mode) не найдена', !handled);
+}, 60);
+return handled;
+}
+function mossadLargePlayerMatch(e) {
+const hk = config.hk && (config.hk.largePlayer || config.hk.xvDoubleSize);
+if (hk && hk.key) {
 if (hotkeyMatches(e, hk)) return true;
-return !hk.ctrl && !hk.alt && !hk.shift && e.shiftKey && hotkeyMatches(e, Object.assign({}, hk, { shift: true }));
+if (!hk.ctrl && !hk.alt && !hk.shift && e.shiftKey && hotkeyMatches(e, Object.assign({}, hk, { shift: true }))) return true;
+}
+const isDefaultHk = !hk || !hk.key || (hk.key.toLowerCase() === 't' && !hk.ctrl && !hk.alt);
+if (isDefaultHk && !e.ctrlKey && !e.altKey && !e.metaKey) {
+if (e.code === 'KeyT' || e.code === 'KeyL' ||
+e.key === 't' || e.key === 'T' || e.key === 'е' || e.key === 'Е' ||
+e.key === 'l' || e.key === 'L' || e.key === 'д' || e.key === 'Д') {
+return true;
+}
+}
+return false;
+}
+function mossadXvDoubleSizeMatch(e) {
+return mossadLargePlayerMatch(e);
 }
 window.capturingFor = null;
 const GROK_LAYOUT_BRIDGE_CODES = ['KeyB', 'Slash'];
@@ -16393,9 +16764,9 @@ const fsBtn = pinterestFindFullScaleButton();
 if (fsBtn) clickElementFull(fsBtn); else showToast('⚠️ Кнопка «Показать в полном масштабе» не найдена', true);
 return;
 }
-if (window.MOSSAD_ENGINES?.xvideos?.isSupported() && config.hk.xvDoubleSize && mossadXvDoubleSizeMatch(e)) {
+if (mossadLargePlayerMatch(e)) {
 e.preventDefault();
-window.MOSSAD_ENGINES.xvideos.toggleDoubleSize();
+mossadToggleLargePlayer();
 return;
 }
 if (mossadExpandHotkeyMatch(e)) {

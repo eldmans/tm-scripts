@@ -906,7 +906,7 @@
             playPause:        'Пауза/Плей видео (Pause)',
             sound:            'Звук вкл/выкл (ScrollLock)',
             expand:           '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
-            xvDoubleSize:     'XVideos / xv-ru — 🔲 Двойной размер плеера (T)',
+            xvDoubleSize:     '🔲 Большой режим плеера / Large Mode (T или L — xHamster, XVideos, Faphouse и др.)',
 
             // Листание и навигация по кадрам
             nextSlide:        'Следующий слайд (ArrowRight)',
