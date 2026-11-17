@@ -42,6 +42,8 @@
   "grokCollapsePromptOnNav": true,
   "grokHistoryDwellSec": 3,
   "pinterestJumpKeys": "off",
+  "relatedNavPreset": "cycle",
+  "relatedNavArrows": true,
   "pinterestDir": "fwd",
   "pinterestFilterType": "ratio",
   "pinterestPhotoPercent": 50,
@@ -248,6 +250,5 @@
   "npkExpandAdded": true,
   "npkHistNavAdded": true,
   "photoDuration": 1,
-  "relatedNavPreset": "cycle",
-  "relatedNavArrows": true
+  "pauseDuration": 2
 }
