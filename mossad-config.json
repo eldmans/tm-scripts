@@ -18,7 +18,7 @@
   "allowDuplicates": false,
   "dblPosition": "end",
   "githubConfigPath": "mossad-config.json",
-  "filenameTemplate": "{conv[12]}~{domain}",
+  "filenameTemplate": "{title}~{domain}",
   "filenameTemplateEnabled": true,
   "hfAutoSave": "always",
   "playlistRows": 30,
