@@ -26,8 +26,6 @@
   "widgetZoom": 0.9,
   "closePanelOnOutsideClick": true,
   "collectWatchSec": 30,
-  "autoUpdateCheck": false,
-  "updateCheckIntervalSec": 60,
   "showSoundToast": true,
   "debugSlideshow": false,
   "pinterestMode": "rand",
@@ -134,13 +132,13 @@
       "shift": false
     },
     "nextSlide": {
-      "key": "",
+      "key": "ArrowRight",
       "ctrl": false,
       "alt": false,
       "shift": false
     },
     "prevSlide": {
-      "key": "",
+      "key": "ArrowLeft",
       "ctrl": false,
       "alt": false,
       "shift": false
@@ -237,8 +235,16 @@
       "ctrl": false,
       "alt": true,
       "shift": false
+    },
+    "playInWindow": {
+      "key": "",
+      "ctrl": false,
+      "alt": false,
+      "shift": false
     }
   },
+  "autoUpdateCheck": false,
+  "updateCheckIntervalSec": 60,
   "npkExpandAdded": true,
   "npkHistNavAdded": true,
   "photoDuration": 1
