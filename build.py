@@ -55,6 +55,7 @@ MODULES = [
     "src/engines/xvideos.js",
     "src/engines/faphouse.js",
     "src/engines/xhamster.js",
+    "src/engines/telegram.js",
     "src/download/router.js",
     "src/slideshow/engine.js",
     "src/engines/pinterest.js",

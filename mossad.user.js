@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.18
+// @version      1.4.19
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -657,7 +657,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.18';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.19';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -667,7 +667,7 @@ return parts.slice(-2).join('.');
 }
 const rootDomain = getRootDomain(hostname);
 const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
-const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space', 'xv-ru.com', 'xvideos.com', 'faphouse.com', 'xhamster.com', 'xhamster.desi', 'xhamster2.com'];
+const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space', 'xv-ru.com', 'xvideos.com', 'faphouse.com', 'xhamster.com', 'xhamster.desi', 'xhamster2.com', 'telegram.org'];
 const MOSSAD_SITES_GM_KEY = 'mossad_sites';
 function mossadNormSite(s) {
 let d = String(s == null ? '' : s).trim().toLowerCase();
@@ -3146,6 +3146,10 @@ isSupported: () => rootDomain === 'noodlemagazine.com'
 
 // ── src/download/blob.js ──
 function triggerDirectBlobDownload(url, filename, onErrorCallback, postUrl = null, onSuccess = null) {
+if (url && typeof url === 'string' && url.startsWith('blob:')) {
+fetchBlobFallback(url, filename, postUrl, onSuccess);
+return;
+}
 if (typeof GM_download === 'function') {
 try {
 showToast(`⏳ Скачивание: ${filename}...`);
@@ -3220,11 +3224,14 @@ else fetchBlobFallback(url, filename, postUrl);
 function downloadBlobMedia(url, filename, postUrl = null) {
 triggerDirectBlobDownload(url, filename, null, postUrl);
 }
-function fetchBlobFallback(url, filename, postUrl = null) {
+function fetchBlobFallback(url, filename, postUrl = null, onSuccess = null) {
 fetch(url).then(res => {
 if (!res.ok) throw new Error('HTTP ' + res.status);
 return res.blob();
-}).then(blob => saveBlobToDisk(blob, filename, url, postUrl))
+}).then(blob => {
+saveBlobToDisk(blob, filename, url, postUrl);
+if (onSuccess) { try { onSuccess(); } catch (e) {} }
+})
 .catch(err => {
 console.warn('[MOSSAD] fetch blob failed, using <a> download:', err);
 const a = document.createElement('a');
@@ -3235,6 +3242,7 @@ document.body.appendChild(a);
 a.click();
 setTimeout(() => a.remove(), 1000);
 showToast('📥 Скачивание запущено через браузер');
+if (onSuccess) { try { onSuccess(); } catch (e) {} }
 });
 }
 function saveBlobToDisk(blob, filename, directUrl = null, postUrl = null) {
@@ -11091,6 +11099,170 @@ findMedia
 })();
 if (typeof MossadEngineRegistry !== 'undefined') {
 MossadEngineRegistry.register('xhamster', window.MOSSAD_ENGINES.xhamster);
+}
+
+// ── src/engines/telegram.js ──
+window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
+window.MOSSAD_ENGINES.telegram = (() => {
+const _tgBlobs = new Map();
+function isSupported() {
+return rootDomain === 'telegram.org' || /(?:web\.telegram\.org|webk\.telegram\.org|weba\.telegram\.org)/i.test(location.hostname);
+}
+function _initBlobSniffer() {
+if (!isSupported() || window._mossadTgBlobPatched) return;
+window._mossadTgBlobPatched = true;
+const origCreate = window.URL.createObjectURL;
+if (typeof origCreate === 'function') {
+window.URL.createObjectURL = function(obj) {
+const url = origCreate.call(window.URL, obj);
+if (obj instanceof Blob) {
+try {
+_tgBlobs.set(url, { blob: obj, type: obj.type || '', time: Date.now() });
+if (_tgBlobs.size > 80) {
+const oldest = _tgBlobs.keys().next().value;
+_tgBlobs.delete(oldest);
+}
+} catch (_) {}
+}
+return url;
+};
+}
+}
+function getCaption(container) {
+if (!container) return '';
+const el = container.querySelector(
+'.media-viewer-caption, .MediaViewer-caption, .caption, ' +
+'.message-text, .translatable-message, .text-content, [class*="caption"]'
+);
+const raw = el ? (el.textContent || '') : '';
+return raw.replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+function findMedia() {
+if (!isSupported()) return null;
+const viewer = document.querySelector(
+'.media-viewer-moal, .media-viewer, .ImageViewer, .MediaViewer, .pswp, [class*="MediaViewer"]'
+);
+if (viewer && viewer.offsetParent !== null) {
+const v = viewer.querySelector('video');
+if (v) {
+const src = v.currentSrc || v.src || '';
+if (src) {
+return {
+urls: [src],
+type: 'video',
+desc: getCaption(viewer) || 'telegram_video'
+};
+}
+}
+const img = viewer.querySelector(
+'img.media-viewer-aspect-img, img.media-viewer-image, img.pswp__img, img[class*="full-image"], img'
+);
+if (img) {
+const src = img.currentSrc || img.src || '';
+if (src && !src.startsWith('data:image/svg')) {
+return {
+urls: [src],
+type: 'photo',
+desc: getCaption(viewer) || 'telegram_photo'
+};
+}
+}
+}
+const activeMsg = document.querySelector(
+'.bubble.is-selected, .bubble:hover, .Message.selected, .Message:hover, .message:hover'
+);
+if (activeMsg) {
+const v = activeMsg.querySelector('video');
+if (v && (v.currentSrc || v.src)) {
+return {
+urls: [v.currentSrc || v.src],
+type: 'video',
+desc: getCaption(activeMsg) || 'telegram_video'
+};
+}
+const img = activeMsg.querySelector('img.media-photo, img.thumbnail, img');
+if (img && (img.currentSrc || img.src) && !img.src.startsWith('data:image/svg')) {
+return {
+urls: [img.currentSrc || img.src],
+type: 'photo',
+desc: getCaption(activeMsg) || 'telegram_photo'
+};
+}
+}
+const allVideos = Array.from(document.querySelectorAll('video'));
+const playing = allVideos.find(v => !v.paused && v.currentTime > 0) || allVideos[0];
+if (playing && (playing.currentSrc || playing.src)) {
+const parentBubble = playing.closest('.bubble, .Message, .message, [data-message-id]');
+return {
+urls: [playing.currentSrc || playing.src],
+type: 'video',
+desc: getCaption(parentBubble) || 'telegram_video'
+};
+}
+return null;
+}
+function navigate(dir = 'down') {
+if (!isSupported()) return false;
+const isFwd = dir === 'down' || dir === 'right';
+const viewer = document.querySelector(
+'.media-viewer-moal, .media-viewer, .ImageViewer, .MediaViewer, .pswp'
+);
+if (viewer && viewer.offsetParent !== null) {
+const nextBtn = viewer.querySelector(
+'.media-viewer-button-next, .pswp__button--arrow--right, button[aria-label*="Next" i], .MediaViewer-next, [class*="arrow-right"]'
+);
+const prevBtn = viewer.querySelector(
+'.media-viewer-button-prev, .pswp__button--arrow--left, button[aria-label*="Previous" i], .MediaViewer-prev, [class*="arrow-left"]'
+);
+const target = isFwd ? nextBtn : prevBtn;
+if (target) {
+target.click();
+return true;
+}
+}
+const mediaMessages = Array.from(document.querySelectorAll(
+'.bubble:has(video), .bubble:has(img.media-photo), .Message:has(video), .Message:has(img)'
+));
+if (mediaMessages.length > 0) {
+const viewCenter = window.innerHeight / 2;
+let currentIdx = -1;
+let minDiff = Infinity;
+mediaMessages.forEach((el, idx) => {
+const rect = el.getBoundingClientRect();
+const diff = Math.abs((rect.top + rect.height / 2) - viewCenter);
+if (diff < minDiff) {
+minDiff = diff;
+currentIdx = idx;
+}
+});
+const targetIdx = isFwd
+? Math.min(mediaMessages.length - 1, currentIdx + 1)
+: Math.max(0, currentIdx - 1);
+if (targetIdx !== currentIdx && mediaMessages[targetIdx]) {
+mediaMessages[targetIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+const vid = mediaMessages[targetIdx].querySelector('video');
+if (vid) {
+try { vid.play().catch(() => {}); } catch (_) {}
+}
+return true;
+}
+}
+return false;
+}
+function init() {
+if (!isSupported()) return;
+_initBlobSniffer();
+}
+return {
+id: 'telegram',
+isSupported,
+findMedia,
+navigate,
+init
+};
+})();
+if (typeof MossadEngineRegistry !== 'undefined') {
+MossadEngineRegistry.register('telegram', window.MOSSAD_ENGINES.telegram);
 }
 
 // ── src/download/router.js ──

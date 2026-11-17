@@ -40,3 +40,12 @@
 | :--- | :--- | :--- | :--- |
 | **HLS / Direct MP4 Parser** | HTML5 Video API | Извлечение прямых mp4 ссылок из плееров и hls.m3u8 потоков | Интегрировано в `src/download/router.js` и `src/engines/xvideos.js` (v1.3.86) |
 | **Universal Fullscreen Toggle** | DOM Fullscreen API | Нажатие нативного `video.requestFullscreen()` или кнопок плеера | Интегрировано в клавишу `F` (v1.3.88) |
+
+---
+
+## 5. Telegram Web (`web.telegram.org`)
+
+| Решение / Скрипт | Источник | Что умеет / Ключевые API | Статус в MOSSAD |
+| :--- | :--- | :--- | :--- |
+| **Telegram Media Downloader (WebA / WebK)** | GreasyFork (Neet-Nestor, classccai, OsoCosmico) | Перехват `window.URL.createObjectURL` для захвата Blob/MediaSource, селекторы лайтбокса (`.media-viewer-moal`, `.MediaViewer`, `.ImageViewer`, `.pswp`), извлечение блоба через `fetch(blobUrl)` и скачивание даже из закрытых/защищенных каналов | Интегрируется в `src/engines/telegram.js` (v1.4.19) |
+

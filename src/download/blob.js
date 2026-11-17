@@ -2,6 +2,12 @@
     // PINTEREST / DOWNLOAD ENGINE
     // ============================================
     function triggerDirectBlobDownload(url, filename, onErrorCallback, postUrl = null, onSuccess = null) {
+        // v1.4.19: blob: URL (Telegram Web, Gradio, Hls) читаются напрямую через fetchBlobFallback без падений GM_download
+        if (url && typeof url === 'string' && url.startsWith('blob:')) {
+            fetchBlobFallback(url, filename, postUrl, onSuccess);
+            return;
+        }
+
         // v1.3.52: onSuccess — файл сохранён (для слайдшоу «скачать и листать»: не ждать страховочные 8 с)
         // 1. Предпочитаем GM_download (без CORS-проблем, скачивает напрямую в Загрузки)
         if (typeof GM_download === 'function') {
@@ -81,11 +87,14 @@
         triggerDirectBlobDownload(url, filename, null, postUrl);
     }
 
-    function fetchBlobFallback(url, filename, postUrl = null) {
+    function fetchBlobFallback(url, filename, postUrl = null, onSuccess = null) {
         fetch(url).then(res => {
             if (!res.ok) throw new Error('HTTP ' + res.status);
             return res.blob();
-        }).then(blob => saveBlobToDisk(blob, filename, url, postUrl))
+        }).then(blob => {
+            saveBlobToDisk(blob, filename, url, postUrl);
+            if (onSuccess) { try { onSuccess(); } catch (e) {} }
+        })
         .catch(err => {
             console.warn('[MOSSAD] fetch blob failed, using <a> download:', err);
             const a = document.createElement('a');
@@ -96,6 +105,7 @@
             a.click();
             setTimeout(() => a.remove(), 1000);
             showToast('📥 Скачивание запущено через браузер');
+            if (onSuccess) { try { onSuccess(); } catch (e) {} }
         });
     }
 
