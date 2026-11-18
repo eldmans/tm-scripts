@@ -846,6 +846,11 @@
                     <button id="mossad-btn-save-site-notes" style="background:#1f2937; border:1px solid #4b5563; border-radius:4px; color:#38bdf8; padding:3px 10px; cursor:pointer; font-size:11px; font-weight:bold;">💾 Сохранить заметку</button>
                   </div>
                 </div>
+
+                <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
+                  <span style="font-size:11px;color:#9ca3af;">Сброс настроек сайта:</span>
+                  <button id="mossad-btn-reset-cursite-all" type="button" style="background:#1f2937;border:1px solid #f87171;color:#f87171;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;font-weight:bold;" title="Сбросить все индивидуальные настройки и клавиши этого сайта">↺ Сбросить настройки сайта</button>
+                </div>
               </div>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
@@ -1550,6 +1555,21 @@
                 btnSaveNotes.onclick = () => {
                     mossadSetSiteNotes(txtNotes.value, rootDomain);
                     showToast(`📝 Заметки для ${rootDomain} сохранены!`);
+                };
+            }
+
+            const btnResetSiteAll = pane.querySelector('#mossad-btn-reset-cursite-all');
+            if (btnResetSiteAll) {
+                btnResetSiteAll.onclick = () => {
+                    if (!confirm(`Сбросить все настройки и горячие клавиши для ${rootDomain} по умолчанию?`)) return;
+                    localStorage.removeItem(STORAGE_KEY);
+                    localStorage.removeItem('mossad_playlist_width');
+                    if (typeof GM_deleteValue === 'function') {
+                        try { GM_deleteValue('mossad_tpl_' + rootDomain); } catch(e){}
+                        try { GM_deleteValue('mossad_site_subfolder_' + rootDomain); } catch(e){}
+                    }
+                    showToast(`↺ Настройки для ${rootDomain} сброшены!`);
+                    setTimeout(() => location.reload(), 500);
                 };
             }
         }

@@ -395,10 +395,11 @@
         btnPlayWin.onclick = (e) => { e.stopPropagation(); if (typeof mossadPlayInWindow === 'function') mossadPlayInWindow(); };
 
         // На Grok прямое открытие видео в отдельной вкладке заблокировано сервером — не захламляем панель
+        // Эргономика (8.2): переносим ▼/▲ в крайнее правое положение (правее ✕)
         if (rootDomain === 'grok.com') {
-            topBar.append(btnTogglePills, timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+            topBar.append(btnTogglePills, timerEl, btnStart, btnUpdate, btnTodo, btnClose, btnTogglePanel);
         } else {
-            topBar.append(btnTogglePills, timerEl, btnStart, btnPlayWin, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+            topBar.append(btnTogglePills, timerEl, btnStart, btnPlayWin, btnUpdate, btnTodo, btnClose, btnTogglePanel);
         }
         // ── HUD СЛАЙД-ШОУ (v1.3.93): компактная плашка настроек активного показа ──
         // Появляется ТОЛЬКО когда слайд-шоу запущено. Исчезает при остановке.
@@ -736,11 +737,9 @@
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="⚙ Открыть окно настроек и горячих клавиш MOSSAD" data-mossad-label="settings">${LH('settings')}</button>
+                    <button id="mossad-btn-hk" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:14px; transition:all 0.2s;" title="⚙ Окно настроек (Ctrl+F1)">⚙</button>
+                    <button id="mossad-btn-rewind-bar" style="flex:1; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:6px 8px; color:#38bdf8; cursor:pointer; font-weight:bold; font-size:12px; transition:all 0.2s;" title="↺ Перемотать видео назад / к началу">↺ Перемотка</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
-                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импорт базы хешей дедупликации (.json)" data-mossad-label="importDb">${LH('importDb')}</button>
-                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию для ${rootDomain}" data-mossad-label="resetCfg">${LH('resetCfg')}</button>
-                    <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
             `;
             
@@ -1027,26 +1026,31 @@
             panel.querySelector('#mossad-btn-hk').onclick = () => {
                 openSettingsWindow(); // v1.3.45: последняя открытая вкладка (раньше всегда «Общие»)
             };
+            const btnRewindBar = panel.querySelector('#mossad-btn-rewind-bar');
+            if (btnRewindBar) {
+                btnRewindBar.onclick = () => { if (typeof doRewind === 'function') doRewind(); };
+            }
             const btnWiz = panel.querySelector('#mossad-btn-wiz');
             if (btnWiz) {
                 btnWiz.onclick = () => { if (typeof mossadOpenSiteWizard === 'function') mossadOpenSiteWizard(hostname); };
             }
-            panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
-                if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
-                localStorage.removeItem(STORAGE_KEY);
-                localStorage.removeItem('mossad_playlist_width');
-                // v1.3.48: закреплённые (🔒) хоткеи сброс не меняет; остальные — к общим умолчаниям клавиш, если сохранены
-                const pinnedHk = {};
-                try { getHotkeyPinned().forEach(k => { if (config.hk && config.hk[k]) pinnedHk[k] = JSON.parse(JSON.stringify(config.hk[k])); }); } catch (e) {}
-                Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
-                try { Object.keys(config.hk).forEach(k => { config.hk[k] = hotkeyDefaultFor(k); }); } catch (e) {}
-                Object.assign(config.hk, pinnedHk);
-                // v1.3.41: сайт без своих настроек получает общие умолчания (вкладка «🌐 По умолчанию»), если они есть
-                const gd = GlobalDefaults.read();
-                if (gd) Object.assign(config, JSON.parse(JSON.stringify(gd)));
-                window.updateWidgetUI();
-                showToast(gd ? '✅ Настройки сайта сброшены к общим умолчаниям' : '✅ Настройки сброшены по умолчанию');
-            };
+            const btnResetCfg = panel.querySelector('#mossad-btn-reset-cfg');
+            if (btnResetCfg) {
+                btnResetCfg.onclick = () => {
+                    if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
+                    localStorage.removeItem(STORAGE_KEY);
+                    localStorage.removeItem('mossad_playlist_width');
+                    const pinnedHk = {};
+                    try { getHotkeyPinned().forEach(k => { if (config.hk && config.hk[k]) pinnedHk[k] = JSON.parse(JSON.stringify(config.hk[k])); }); } catch (e) {}
+                    Object.assign(config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+                    try { Object.keys(config.hk).forEach(k => { config.hk[k] = hotkeyDefaultFor(k); }); } catch (e) {}
+                    Object.assign(config.hk, pinnedHk);
+                    const gd = GlobalDefaults.read();
+                    if (gd) Object.assign(config, JSON.parse(JSON.stringify(gd)));
+                    saveConfigToStorage();
+                    location.reload();
+                };
+            }
         };
 
         container.append(topBar, hudRow, panel);

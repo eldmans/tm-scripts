@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.26
+// @version      1.4.28
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.26';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.28';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -14768,9 +14768,9 @@ btnPlayWin.onmouseenter = () => { btnPlayWin.style.background = '#374151'; };
 btnPlayWin.onmouseleave = () => { btnPlayWin.style.background = '#1f2937'; };
 btnPlayWin.onclick = (e) => { e.stopPropagation(); if (typeof mossadPlayInWindow === 'function') mossadPlayInWindow(); };
 if (rootDomain === 'grok.com') {
-topBar.append(btnTogglePills, timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+topBar.append(btnTogglePills, timerEl, btnStart, btnUpdate, btnTodo, btnClose, btnTogglePanel);
 } else {
-topBar.append(btnTogglePills, timerEl, btnStart, btnPlayWin, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+topBar.append(btnTogglePills, timerEl, btnStart, btnPlayWin, btnUpdate, btnTodo, btnClose, btnTogglePanel);
 }
 hudRow = document.createElement('div');
 hudRow.id = 'mossad-slideshow-hud';
@@ -15071,11 +15071,9 @@ panel.innerHTML = `
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="⚙ Открыть окно настроек и горячих клавиш MOSSAD" data-mossad-label="settings">${LH('settings')}</button>
+                    <button id="mossad-btn-hk" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:14px; transition:all 0.2s;" title="⚙ Окно настроек (Ctrl+F1)">⚙</button>
+                    <button id="mossad-btn-rewind-bar" style="flex:1; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:6px 8px; color:#38bdf8; cursor:pointer; font-weight:bold; font-size:12px; transition:all 0.2s;" title="↺ Перемотать видео назад / к началу">↺ Перемотка</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
-                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импорт базы хешей дедупликации (.json)" data-mossad-label="importDb">${LH('importDb')}</button>
-                    <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию для ${rootDomain}" data-mossad-label="resetCfg">${LH('resetCfg')}</button>
-                    <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
             `;
 panel.querySelectorAll('.mossad-dpad').forEach(btn => {
@@ -15351,11 +15349,17 @@ reader.readAsText(file, 'utf-8');
 panel.querySelector('#mossad-btn-hk').onclick = () => {
 openSettingsWindow();
 };
+const btnRewindBar = panel.querySelector('#mossad-btn-rewind-bar');
+if (btnRewindBar) {
+btnRewindBar.onclick = () => { if (typeof doRewind === 'function') doRewind(); };
+}
 const btnWiz = panel.querySelector('#mossad-btn-wiz');
 if (btnWiz) {
 btnWiz.onclick = () => { if (typeof mossadOpenSiteWizard === 'function') mossadOpenSiteWizard(hostname); };
 }
-panel.querySelector('#mossad-btn-reset-cfg').onclick = () => {
+const btnResetCfg = panel.querySelector('#mossad-btn-reset-cfg');
+if (btnResetCfg) {
+btnResetCfg.onclick = () => {
 if (!confirm('Сбросить все настройки и горячие клавиши по умолчанию?')) return;
 localStorage.removeItem(STORAGE_KEY);
 localStorage.removeItem('mossad_playlist_width');
@@ -15366,9 +15370,10 @@ try { Object.keys(config.hk).forEach(k => { config.hk[k] = hotkeyDefaultFor(k); 
 Object.assign(config.hk, pinnedHk);
 const gd = GlobalDefaults.read();
 if (gd) Object.assign(config, JSON.parse(JSON.stringify(gd)));
-window.updateWidgetUI();
-showToast(gd ? '✅ Настройки сайта сброшены к общим умолчаниям' : '✅ Настройки сброшены по умолчанию');
+saveConfigToStorage();
+location.reload();
 };
+}
 };
 container.append(topBar, hudRow, panel);
 const targetParent = document.body || document.documentElement;
@@ -17321,6 +17326,11 @@ modal.innerHTML = `
                     <button id="mossad-btn-save-site-notes" style="background:#1f2937; border:1px solid #4b5563; border-radius:4px; color:#38bdf8; padding:3px 10px; cursor:pointer; font-size:11px; font-weight:bold;">💾 Сохранить заметку</button>
                   </div>
                 </div>
+
+                <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
+                  <span style="font-size:11px;color:#9ca3af;">Сброс настроек сайта:</span>
+                  <button id="mossad-btn-reset-cursite-all" type="button" style="background:#1f2937;border:1px solid #f87171;color:#f87171;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;font-weight:bold;" title="Сбросить все индивидуальные настройки и клавиши этого сайта">↺ Сбросить настройки сайта</button>
+                </div>
               </div>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
@@ -17959,6 +17969,20 @@ if (btnSaveNotes && txtNotes) {
 btnSaveNotes.onclick = () => {
 mossadSetSiteNotes(txtNotes.value, rootDomain);
 showToast(`📝 Заметки для ${rootDomain} сохранены!`);
+};
+}
+const btnResetSiteAll = pane.querySelector('#mossad-btn-reset-cursite-all');
+if (btnResetSiteAll) {
+btnResetSiteAll.onclick = () => {
+if (!confirm(`Сбросить все настройки и горячие клавиши для ${rootDomain} по умолчанию?`)) return;
+localStorage.removeItem(STORAGE_KEY);
+localStorage.removeItem('mossad_playlist_width');
+if (typeof GM_deleteValue === 'function') {
+try { GM_deleteValue('mossad_tpl_' + rootDomain); } catch(e){}
+try { GM_deleteValue('mossad_site_subfolder_' + rootDomain); } catch(e){}
+}
+showToast(`↺ Настройки для ${rootDomain} сброшены!`);
+setTimeout(() => location.reload(), 500);
 };
 }
 }
