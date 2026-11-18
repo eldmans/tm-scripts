@@ -1,0 +1,19 @@
+{
+  "bot_token": "9052736319:AAEbs5ALim9PdRk_-IJOHX3WGDQELx88-hU",
+  "owner_chat_id": "2068829104",
+  "allowed_chat_ids": [
+    "2068829104",
+    "8149729924"
+  ],
+  "active_target": "eldar",
+  "alert_thresholds": [75, 50, 25, 15, 10, 5],
+  "last_alert_5h": 100,
+  "last_alert_weekly": 100,
+  "is_active": true,
+  "allowed_guests": {
+    "8149729924": {
+      "name": "нет_юзернейма",
+      "time": 1795014363.033248
+    }
+  }
+}

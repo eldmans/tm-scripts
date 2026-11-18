@@ -1,0 +1,25 @@
+{
+  "model": "Gemini 3.8 Flash (High)",
+  "script_version": "v1.4.24",
+  "quota_5h": {
+    "remaining_pct": 81,
+    "resets_at": "17:19:22 UTC",
+    "reset_timestamp": 1795022362,
+    "resets_in": "1 час 5 мин"
+  },
+  "quota_weekly": {
+    "remaining_pct": 77,
+    "resets_at": "2026-11-22 00:00:00 UTC",
+    "reset_timestamp": 1795305600,
+    "resets_in": "3 дня 7 часов"
+  },
+  "quota_remaining": "81%",
+  "quota_resets": "17:19:22 UTC (через 1 час 5 мин)",
+  "weekly_quota_remaining": "77%",
+  "weekly_quota_resets": "через 3 дня 7 часов",
+  "claude_quota_remaining": "56%",
+  "watchdog_timer": "task-110 (АКТИВЕН, сторож на 1 час)",
+  "build_status": "SYNTAX OK, VERIFY OK (863 КБ, 54 модуля)",
+  "workers_state": "Воркеры активны (Этап 1)",
+  "last_updated": "2026-11-18 16:15"
+}
