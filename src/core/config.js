@@ -666,17 +666,55 @@
         config.filenameTemplate = '';
         try { if (GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
     }
-    // v1.4.15: защита Grok от чужого шаблона видео-сайтов ({title}), утёкшего через GitHub Sync
-    if (rootDomain === 'grok.com' && config.filenameTemplate && config.filenameTemplate.includes('{title}')) {
-        let savedGmTpl = null;
-        try { if (typeof GM_getValue === 'function') savedGmTpl = GM_getValue('mossad_tpl_grok.com', null); } catch (e) {}
-        if (!savedGmTpl || savedGmTpl.includes('{title}')) {
-            config.filenameTemplate = '';
-            try { if (typeof GM_setValue === 'function') GM_setValue('mossad_tpl_grok.com', ''); } catch (e) {}
-            try { if (GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
-            console.log('[MOSSAD v1.4.15] Восстановлен стандартный шаблон для grok.com');
-        }
+    // v1.4.24: Управление подпапкой сохранения и заметками для текущего домена (Вкладка «Этот сайт»)
+    function mossadGetSiteSubfolder(domain = rootDomain) {
+        try {
+            if (typeof GM_getValue === 'function') {
+                const v = GM_getValue('mossad_subfolder_' + domain, null);
+                if (v != null) return String(v).trim();
+            }
+        } catch (_) {}
+        return (config && config.subfolder) ? String(config.subfolder).trim() : '';
     }
+
+    function mossadSetSiteSubfolder(folder, domain = rootDomain) {
+        const clean = String(folder || '').trim().replace(/^\/+|\/+$/g, '');
+        try {
+            if (typeof GM_setValue === 'function') {
+                GM_setValue('mossad_subfolder_' + domain, clean);
+            }
+        } catch (_) {}
+        if (config) config.subfolder = clean;
+        if (typeof Settings !== 'undefined' && Settings.save) Settings.save();
+        return clean;
+    }
+
+    function mossadGetSiteNotes(domain = rootDomain) {
+        try {
+            if (typeof GM_getValue === 'function') {
+                return GM_getValue('mossad_site_notes_' + domain, '') || '';
+            }
+        } catch (_) {}
+        return localStorage.getItem('mossad_site_notes_' + domain) || '';
+    }
+
+    function mossadSetSiteNotes(notes, domain = rootDomain) {
+        const text = String(notes || '').trim();
+        try {
+            if (typeof GM_setValue === 'function') {
+                GM_setValue('mossad_site_notes_' + domain, text);
+            }
+        } catch (_) {}
+        try {
+            localStorage.setItem('mossad_site_notes_' + domain, text);
+        } catch (_) {}
+        return text;
+    }
+
+    window.mossadGetSiteSubfolder = mossadGetSiteSubfolder;
+    window.mossadSetSiteSubfolder = mossadSetSiteSubfolder;
+    window.mossadGetSiteNotes = mossadGetSiteNotes;
+    window.mossadSetSiteNotes = mossadSetSiteNotes;
 
     /**
      * v1.3.39: старый дефолт «Улучшить» Ctrl+PageUp → Shift+«+» (Ctrl+PageUp/PageDown в Grok переключают

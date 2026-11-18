@@ -12,10 +12,12 @@
         // 1. Предпочитаем GM_download (без CORS-проблем, скачивает напрямую в Загрузки)
         if (typeof GM_download === 'function') {
             try {
-                showToast(`⏳ Скачивание: ${filename}...`);
+                const subfolder = (typeof mossadGetSiteSubfolder === 'function' ? mossadGetSiteSubfolder() : '') || (config && config.subfolder) || '';
+                const finalName = subfolder ? (subfolder.replace(/^\/+|\/+$/g, '') + '/' + filename) : filename;
+                showToast(`⏳ Скачивание: ${finalName}...`);
                 GM_download({
                     url: url,
-                    name: filename,
+                    name: finalName,
                     saveAs: false,
                     onload: () => {
                         const siteCount = (typeof mossadGetSiteDlCount === 'function') ? mossadGetSiteDlCount() : 0;

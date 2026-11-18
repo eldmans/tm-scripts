@@ -10,8 +10,8 @@
 
     // ── v1.3.45: память последней вкладки (UI-состояние — localStorage, как размеры списка/позиция виджета) ──
     const SETTINGS_TAB_LS_KEY = 'mossad_settings_tab';
-    const SETTINGS_TABS = ['general', 'hotkeys', 'video', 'quota', 'defaults', 'labels', 'todos', 'sites'];
-    function getLastSettingsTab(fallback = 'hotkeys') {
+    const SETTINGS_TABS = ['cursite', 'general', 'hotkeys', 'video', 'quota', 'defaults', 'labels', 'todos', 'sites'];
+    function getLastSettingsTab(fallback = 'cursite') {
         try {
             const t = localStorage.getItem(SETTINGS_TAB_LS_KEY);
             if (SETTINGS_TABS.includes(t)) return t;
@@ -779,7 +779,8 @@
               <h3 style="margin:0; color:#fff; font-size:16px;" data-mossad-label="settingsTitle">${LH('settingsTitle')}</h3>
               <button id="mossad-settings-x" title="Закрыть (настройки сохраняются)" style="background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">×</button>
             </div>
-            <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px;">
+            <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px; overflow-x:auto;">
+              <button data-tab="cursite" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #38bdf8;border-bottom:none;cursor:pointer;font-weight:bold;font-size:13px;line-height:1;color:#38bdf8;" title="🌐 ${rootDomain} — Индивидуальные настройки, папка и заметки для этого сайта">🌐 ${rootDomain}</button>
               <button data-tab="general" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabGeneral')}" data-mossad-label="tabGeneral" data-mossad-icon="1">${mossadLabelIcon(LH('tabGeneral'))}</button>
               <button data-tab="hotkeys" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabHotkeys')}" data-mossad-label="tabHotkeys" data-mossad-icon="1">${mossadLabelIcon(LH('tabHotkeys'))}</button>
               <button data-tab="video" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabVideo')} — Лёгкий слой на всех сайтах: DND-скачивание, скорость видео" data-mossad-label="tabVideo" data-mossad-icon="1" data-mossad-tip="Лёгкий слой на всех сайтах: DND-скачивание, скорость видео">${mossadLabelIcon(LH('tabVideo'))}</button>
@@ -788,6 +789,48 @@
               <button data-tab="labels" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabLabels')} — Свои подписи кнопок MOSSAD (для всех сайтов)" data-mossad-label="tabLabels" data-mossad-icon="1" data-mossad-tip="Свои подписи кнопок MOSSAD (для всех сайтов)">${mossadLabelIcon(LH('tabLabels'))}</button>
               <button data-tab="todos" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabTodos')} — Задачи для ассистента (текст + фото)" data-mossad-label="tabTodos" data-mossad-icon="1" data-mossad-tip="Задачи для ассистента (текст + фото)">${mossadLabelIcon(LH('tabTodos'))}</button>
               <button data-tab="sites" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabSites')} — На каких сайтах работает MOSSAD (общий список для всех контейнеров)" data-mossad-label="tabSites" data-mossad-icon="1" data-mossad-tip="На каких сайтах работает MOSSAD (общий список для всех контейнеров)">${mossadLabelIcon(LH('tabSites'))}</button>
+            </div>
+            <div data-pane="cursite" style="display:none; flex-direction:column; gap:8px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
+              <div style="background:#1f2937; border:1px solid rgba(56,189,248,0.4); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;">
+                <div style="font-size:13px; font-weight:bold; color:#38bdf8; display:flex; align-items:center; justify-content:space-between;">
+                  <span>🌐 Сайт: ${rootDomain}</span>
+                  <span style="font-size:11px; color:#9ca3af; font-weight:normal;">[№${(typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0)} скачиваний]</span>
+                </div>
+                
+                <div style="margin-top:4px;">
+                  <div style="font-size:11px; color:#9ca3af; margin-bottom:3px;">📁 Подпапка сохранения (внутри Загрузки/):</div>
+                  <div style="display:flex; gap:6px;">
+                    <input id="mossad-site-subfolder" type="text" placeholder="например: grok или neural/art (пусто = в корень Загрузок)" 
+                      style="flex:1; background:#111827; border:1px solid #374151; border-radius:4px; color:#e5e7eb; padding:4px 8px; font-size:12px;" 
+                      value="${(typeof mossadGetSiteSubfolder === 'function' ? mossadGetSiteSubfolder() : '') || (config.subfolder || '')}">
+                    <button id="mossad-btn-save-subfolder" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:4px 10px; cursor:pointer; font-size:12px; font-weight:bold;" title="Сохранить подпапку">💾</button>
+                  </div>
+                  <div style="font-size:10px; color:#6b7280; margin-top:2px;">Файлы с ${rootDomain} будут сохраняться в: Загрузки/&lt;подпапка&gt;/&lt;имя_файла&gt;</div>
+                </div>
+
+                <div style="margin-top:6px;">
+                  <div style="font-size:11px; color:#9ca3af; margin-bottom:3px; display:flex; justify-content:space-between;">
+                    <span>📝 Индивидуальный шаблон имени файла:</span>
+                    <button id="mossad-btn-site-tpl-help" style="background:transparent; border:none; color:#60a5fa; cursor:pointer; font-size:11px; padding:0;">[Теги ?]</button>
+                  </div>
+                  <div style="display:flex; gap:6px;">
+                    <input id="mossad-site-tpl" type="text" placeholder="Оставьте пустым для общего шаблона"
+                      style="flex:1; background:#111827; border:1px solid #374151; border-radius:4px; color:#e5e7eb; padding:4px 8px; font-size:12px; font-family:monospace;"
+                      value="${(typeof GM_getValue === 'function' ? GM_getValue('mossad_tpl_' + rootDomain, null) : null) || config.filenameTemplate || ''}">
+                    <button id="mossad-btn-save-site-tpl" style="background:#3b82f6; border:none; border-radius:4px; color:#fff; padding:4px 10px; cursor:pointer; font-size:12px;" title="Сохранить шаблон для этого сайта">💾</button>
+                    <button id="mossad-btn-reset-site-tpl" style="background:#374151; border:1px solid #4b5563; border-radius:4px; color:#f87171; padding:4px 8px; cursor:pointer; font-size:12px;" title="Сбросить на общий шаблон">↺</button>
+                  </div>
+                </div>
+
+                <div style="margin-top:6px;">
+                  <div style="font-size:11px; color:#9ca3af; margin-bottom:3px;">📝 Заметки и памятки по сайту ${rootDomain}:</div>
+                  <textarea id="mossad-site-notes" rows="4" placeholder="Заметки, баги, фичи и шпаргалка по этому сайту..."
+                    style="width:100%; box-sizing:border-box; background:#111827; border:1px solid #374151; border-radius:4px; color:#e5e7eb; padding:6px 8px; font-size:11px; resize:vertical; font-family:system-ui;"></textarea>
+                  <div style="display:flex; justify-content:flex-end; margin-top:4px;">
+                    <button id="mossad-btn-save-site-notes" style="background:#1f2937; border:1px solid #4b5563; border-radius:4px; color:#38bdf8; padding:3px 10px; cursor:pointer; font-size:11px; font-weight:bold;">💾 Сохранить заметку</button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div data-pane="general" style="display:none; flex-direction:column; gap:2px; overflow-y:auto; max-height:calc(85vh - 160px); padding-right:4px;">
             <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;">
@@ -1429,11 +1472,72 @@
             mossadDockUnderWidget(modal);
         }
 
+        function initCursiteTab(m) {
+            const pane = m.querySelector('[data-pane="cursite"]');
+            if (!pane || pane.dataset.initialized) return;
+            pane.dataset.initialized = 'true';
+
+            const inSub = pane.querySelector('#mossad-site-subfolder');
+            const btnSub = pane.querySelector('#mossad-btn-save-subfolder');
+            if (btnSub && inSub) {
+                btnSub.onclick = () => {
+                    const saved = mossadSetSiteSubfolder(inSub.value);
+                    inSub.value = saved;
+                    showToast(`📁 Папка для ${rootDomain}: ${saved || 'корень Загрузок'}`);
+                };
+            }
+
+            const inTpl = pane.querySelector('#mossad-site-tpl');
+            const btnSaveTpl = pane.querySelector('#mossad-btn-save-site-tpl');
+            const btnResetTpl = pane.querySelector('#mossad-btn-reset-site-tpl');
+            const btnTplHelp = pane.querySelector('#mossad-btn-site-tpl-help');
+            if (btnSaveTpl && inTpl) {
+                btnSaveTpl.onclick = () => {
+                    const val = inTpl.value.trim();
+                    if (typeof GM_setValue === 'function') {
+                        GM_setValue('mossad_tpl_' + rootDomain, val);
+                    }
+                    config.filenameTemplate = val;
+                    if (typeof Settings !== 'undefined' && Settings.save) Settings.save();
+                    showToast(`💾 Шаблон сохранён для ${rootDomain}`);
+                };
+            }
+            if (btnResetTpl && inTpl) {
+                btnResetTpl.onclick = () => {
+                    if (typeof GM_deleteValue === 'function') {
+                        GM_deleteValue('mossad_tpl_' + rootDomain);
+                    }
+                    inTpl.value = '';
+                    config.filenameTemplate = '';
+                    if (typeof Settings !== 'undefined' && Settings.save) Settings.save();
+                    showToast(`↺ Шаблон для ${rootDomain} сброшен к общему`);
+                };
+            }
+            if (btnTplHelp) {
+                btnTplHelp.onclick = () => {
+                    if (typeof toggleTemplateHelp === 'function') toggleTemplateHelp();
+                };
+            }
+
+            const txtNotes = pane.querySelector('#mossad-site-notes');
+            const btnSaveNotes = pane.querySelector('#mossad-btn-save-site-notes');
+            if (txtNotes) {
+                txtNotes.value = mossadGetSiteNotes(rootDomain);
+            }
+            if (btnSaveNotes && txtNotes) {
+                btnSaveNotes.onclick = () => {
+                    mossadSetSiteNotes(txtNotes.value, rootDomain);
+                    showToast(`📝 Заметки для ${rootDomain} сохранены!`);
+                };
+            }
+        }
+
         // ── Вкладки ──
         const setTab = (t) => {
-            const want = SETTINGS_TABS.includes(t) ? t : 'hotkeys';
+            const want = SETTINGS_TABS.includes(t) ? t : 'cursite';
             modal.dataset.tab = want;
             rememberSettingsTab(want); // v1.3.45
+            if (want === 'cursite') initCursiteTab(modal);
             if (want === 'labels') initLabelsTab(modal); // v1.3.46: строится лениво, при первом открытии вкладки
             // v1.3.73: ошибка ленивой сборки вкладки не должна мешать переключению (раньше «Тудушки» переставали щёлкаться)
             try {
@@ -1457,6 +1561,7 @@
         const otherTabsChips = modal.querySelector('#mossad-search-other-chips');
 
         const tabNames = {
+            cursite: '🌐 ' + rootDomain,
             general: '⚙️ Общие',
             hotkeys: '⌨️ Хоткеи',
             video: '🎥 Видео',
