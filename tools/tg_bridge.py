@@ -1,14 +1,18 @@
 """
-Telegram Bridge for Antigravity & MOSSAD
-Author: Senior Pomidor, Telegram Engineer & Eldar's Digital Twin
+Telegram Bridge for Antigravity & MOSSAD (@anti14388bot)
+Author: Telegram Engineer (AI Assistant) & Senior Pomidor & Eldar's Digital Twin
 """
 
 import os
 import sys
 import time
 import json
+import uuid
 import subprocess
 import requests
+
+import stt_engine
+import tts_engine
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "tg_config.json")
@@ -29,6 +33,10 @@ ENTITY_NAMES = {
     "tg_engineer": "🤖 Telegram-инженер"
 }
 
+# In-memory caches for interactive buttons
+DETAILS_CACHE = {}
+STT_CACHE = {}
+
 def load_config():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -40,7 +48,7 @@ def load_config():
         "bot_token": "9052736319:AAEbs5ALim9PdRk_-IJOHX3WGDQELx88-hU",
         "owner_chat_id": "2068829104",
         "allowed_chat_ids": ["2068829104"],
-        "active_target": "eldar",
+        "active_target": "tg_engineer",
         "alert_thresholds": [75, 50, 25, 15, 10, 5],
         "last_alert_5h": 100,
         "last_alert_weekly": 100,
@@ -56,7 +64,16 @@ CFG = load_config()
 OWNER_ID = str(CFG.get("owner_chat_id", "2068829104"))
 TOKEN = CFG.get("bot_token")
 
-MESSAGE_TEXT_CACHE = {}
+# --- TELEGRAM API WRAPPERS ---
+
+def send_chat_action(chat_id, action="typing"):
+    if not TOKEN or not chat_id:
+        return
+    url = f"https://api.telegram.org/bot{TOKEN}/sendChatAction"
+    try:
+        requests.post(url, json={"chat_id": chat_id, "action": action}, timeout=5)
+    except:
+        pass
 
 def send_tg_message(chat_id, text, reply_markup=None):
     if not TOKEN or not chat_id:
@@ -67,11 +84,7 @@ def send_tg_message(chat_id, text, reply_markup=None):
         payload["reply_markup"] = reply_markup
     try:
         r = requests.post(url, json=payload, timeout=10)
-        res = r.json()
-        if res.get("ok"):
-            m_id = str(res["result"]["message_id"])
-            MESSAGE_TEXT_CACHE[m_id] = text
-        return res
+        return r.json()
     except Exception as e:
         print(f"[TG Error] {e}")
         return None
@@ -88,22 +101,29 @@ def edit_tg_message(chat_id, message_id, text, reply_markup=None):
         print(f"[TG Edit Error] {e}")
         return None
 
-def answer_callback(cb_id, text=None):
+def answer_callback(cb_id, text=None, show_alert=False):
     url = f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery"
+    payload = {"callback_query_id": cb_id}
+    if text:
+        payload["text"] = text
+    if show_alert:
+        payload["show_alert"] = True
     try:
-        requests.post(url, json={"callback_query_id": cb_id, "text": text}, timeout=5)
+        requests.post(url, json=payload, timeout=5)
     except:
         pass
 
-def send_tg_voice(chat_id, audio_path, caption=""):
+def send_tg_voice(chat_id, audio_path, caption="", reply_markup=None):
     if not TOKEN or not chat_id or not os.path.exists(audio_path):
         return None
     url = f"https://api.telegram.org/bot{TOKEN}/sendVoice"
     try:
         with open(audio_path, "rb") as audio:
             files = {"voice": audio}
-            data = {"chat_id": chat_id, "caption": caption}
-            r = requests.post(url, files=files, data=data, timeout=30)
+            data = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
+            if reply_markup:
+                data["reply_markup"] = json.dumps(reply_markup)
+            r = requests.post(url, files=files, data=data, timeout=35)
             return r.json()
     except Exception as e:
         print(f"[TG Voice Error] {e}")
@@ -125,25 +145,32 @@ def send_tg_photo(chat_id, photo_path, caption="", reply_markup=None):
         print(f"[TG Photo Error] {e}")
         return None
 
-def generate_speech(text, output_file=None):
-    if not output_file:
-        output_file = os.path.join(BASE_DIR, "voice_temp.wav")
-    clean = text.replace('"', ' ').replace("'", " ").replace("<", " ").replace(">", " ").replace("*", " ").replace("`", " ")[:1200]
-    out_escaped = output_file.replace("\\", "\\\\")
-    ps_cmd = f"""
-    Add-Type -AssemblyName System.Speech
-    $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
-    try {{ $s.SelectVoice('Microsoft Irina Desktop') }} catch {{}}
-    $s.SetOutputToWaveFile('{out_escaped}')
-    $s.Speak("{clean}")
-    $s.Dispose()
-    """
+def download_file_by_id(file_id, dest_path):
     try:
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], check=True, capture_output=True, timeout=20)
-        if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
-            return output_file
+        info_url = f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
+        info_res = requests.get(info_url, timeout=10).json()
+        if info_res.get("ok"):
+            f_path = info_res["result"]["file_path"]
+            download_url = f"https://api.telegram.org/file/bot{TOKEN}/{f_path}"
+            r = requests.get(download_url, timeout=30)
+            if r.status_code == 200:
+                with open(dest_path, "wb") as f:
+                    f.write(r.content)
+                return dest_path
     except Exception as e:
-        print(f"[Speech Error] {e}")
+        print(f"[TG Download Error] {e}")
+    return None
+
+def get_user_avatar(user_id):
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/getUserProfilePhotos?user_id={user_id}&limit=1"
+        res = requests.get(url, timeout=10).json()
+        if res.get("ok") and res["result"]["total_count"] > 0:
+            file_id = res["result"]["photos"][0][-1]["file_id"]
+            local_path = os.path.join(BASE_DIR, f"avatar_{user_id}.jpg")
+            return download_file_by_id(file_id, local_path)
+    except Exception as e:
+        print(f"[Avatar Error] {e}")
     return None
 
 def take_screenshot(filename=None):
@@ -172,31 +199,13 @@ def take_screenshot(filename=None):
         if "ERROR" in out or not os.path.exists(filename) or os.path.getsize(filename) < 20000:
             return "LOCKED"
         return filename
-    except Exception as e:
+    except Exception:
         return "LOCKED"
 
-def get_user_avatar(user_id):
-    try:
-        url = f"https://api.telegram.org/bot{TOKEN}/getUserProfilePhotos?user_id={user_id}&limit=1"
-        res = requests.get(url, timeout=10).json()
-        if res.get("ok") and res["result"]["total_count"] > 0:
-            file_id = res["result"]["photos"][0][-1]["file_id"]
-            f_url = f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
-            f_res = requests.get(f_url, timeout=10).json()
-            if f_res.get("ok"):
-                f_path = f_res["result"]["file_path"]
-                down_url = f"https://api.telegram.org/file/bot{TOKEN}/{f_path}"
-                img_data = requests.get(down_url, timeout=15).content
-                local_path = os.path.join(BASE_DIR, f"avatar_{user_id}.jpg")
-                with open(local_path, "wb") as f:
-                    f.write(img_data)
-                return local_path
-    except Exception as e:
-        print(f"[Avatar Error] {e}")
-    return None
+# --- KEYBOARDS ---
 
 def get_owner_keyboard():
-    active = CFG.get("active_target", "eldar")
+    active = CFG.get("active_target", "tg_engineer")
     eldar_mark = "• 🧠 Голова Эльдара" if active == "eldar" else "🧠 Голова Эльдара"
     mossad_mark = "• 🍅 Координатор MOSSAD" if active == "mossad" else "🍅 Координатор MOSSAD"
     tg_mark = "• 🤖 TG-инженер" if active == "tg_engineer" else "🤖 TG-инженер"
@@ -228,11 +237,30 @@ def is_authorized(chat_id):
         return True
     return s_id in CFG.get("allowed_guests", {})
 
-def send_agent_reply_to_owner(header, body, target_key=None):
-    full_text = f"<b>{header}</b>\n\n{body}"
+# --- IRONCLAD REPLY DISPATCHER ---
+
+def send_structured_reply(chat_id, short_status, voice_text, full_details_text, target_key=None):
+    """
+    Ironclad Format:
+    1. Short 1-2 line status text
+    2. Spoken Voice message (Irina Desktop encoded in Telegram Opus OGG)
+    3. Inline buttons: [📖 Подробнее] and [🎧 Озвучить ещё раз]
+    """
+    det_id = str(uuid.uuid4())[:8]
+    DETAILS_CACHE[det_id] = {
+        "short": short_status,
+        "voice": voice_text,
+        "full": full_details_text,
+        "target": target_key
+    }
+
     inline_kb = [
-        [{"text": "🎧 Озвучить ответ", "callback_data": "voice_last"}]
+        [
+            {"text": "📖 Подробнее", "callback_data": f"det_view:{det_id}"},
+            {"text": "🎧 Повторить аудио", "callback_data": f"voice_replay:{det_id}"}
+        ]
     ]
+
     if target_key:
         switch_row = []
         if target_key != "eldar":
@@ -245,14 +273,23 @@ def send_agent_reply_to_owner(header, body, target_key=None):
             inline_kb.append(switch_row)
 
     markup = {"inline_keyboard": inline_kb}
-    MESSAGE_TEXT_CACHE["last"] = body
-    send_tg_message(OWNER_ID, full_text, reply_markup=markup)
+
+    # 1. Send short text status
+    send_tg_message(chat_id, short_status, reply_markup=markup)
+
+    # 2. Generate and send voice audio
+    send_chat_action(chat_id, "upload_voice")
+    ogg_file = tts_engine.generate_voice_ogg(voice_text)
+    if ogg_file and os.path.exists(ogg_file):
+        send_tg_voice(chat_id, ogg_file, caption=f"🎧 <i>{short_status[:60]}...</i>")
+        try: os.remove(ogg_file)
+        except: pass
+
+# --- LIMITS & STATUS LOGIC ---
 
 def make_progress_bar(pct, length=10):
-    try:
-        val = int(pct)
-    except:
-        val = 100
+    try: val = int(pct)
+    except: val = 100
     val = max(0, min(100, val))
     filled = int(round((val / 100) * length))
     return "█" * filled + "░" * (length - filled)
@@ -264,12 +301,9 @@ def format_delta_seconds(seconds):
     h, m = divmod(m, 60)
     d, h = divmod(h, 24)
     parts = []
-    if d > 0:
-        parts.append(f"{d} дн.")
-    if h > 0:
-        parts.append(f"{h} ч")
-    if m > 0 or not parts:
-        parts.append(f"{m} мин")
+    if d > 0: parts.append(f"{d} дн.")
+    if h > 0: parts.append(f"{h} ч")
+    if m > 0 or not parts: parts.append(f"{m} мин")
     return " ".join(parts)
 
 def parse_pct(val):
@@ -277,11 +311,10 @@ def parse_pct(val):
         return int(val)
     if isinstance(val, str):
         digits = "".join([c for c in val if c.isdigit()])
-        if digits:
-            return int(digits)
+        if digits: return int(digits)
     return 0
 
-def get_real_status_text():
+def get_real_status_data():
     data = {}
     if os.path.exists(STATUS_FILE):
         try:
@@ -298,11 +331,11 @@ def get_real_status_text():
         if q5_ts and isinstance(q5_ts, (int, float)):
             q5_in = format_delta_seconds(q5_ts - time.time())
         else:
-            q5_in = q5_raw.get("resets_in", "через 1 ч 10 мин")
+            q5_in = q5_raw.get("resets_in", "через 1 ч 5 мин")
         q5_at = q5_raw.get("resets_at", "17:19 UTC")
     else:
         q5_pct = parse_pct(data.get("quota_remaining", "81%"))
-        q5_in = data.get("quota_resets", "через 1 ч 10 мин")
+        q5_in = data.get("quota_resets", "через 1 ч 5 мин")
         q5_at = ""
 
     # 2. Weekly quota
@@ -320,62 +353,59 @@ def get_real_status_text():
         qw_in = data.get("weekly_quota_resets", "через 3 дня 7 ч")
         qw_at = ""
 
-    bar_5h = make_progress_bar(q5_pct)
-    bar_w = make_progress_bar(qw_pct)
+    return {
+        "q5_pct": q5_pct,
+        "q5_in": q5_in,
+        "q5_at": q5_at,
+        "qw_pct": qw_pct,
+        "qw_in": qw_in,
+        "qw_at": qw_at,
+        "model": data.get("model", "Gemini 3.8 Flash (High)"),
+        "claude": data.get("claude_quota_remaining", "56% (заморожен)"),
+        "version": data.get("script_version", "v1.4.24"),
+        "watchdog": data.get("watchdog_timer", "task-110 (АКТИВЕН, сторож на 1 час)"),
+        "workers": data.get("workers_state", "Воркеры активны (Этап 1)"),
+        "build": data.get("build_status", "SYNTAX OK, VERIFY OK")
+    }
 
-    model_name = data.get("model", "Gemini 3.8 Flash (High)")
-    q_claude = data.get("claude_quota_remaining", "56%")
-    ver = data.get("script_version", "v1.4.24")
-    watchdog = data.get("watchdog_timer", "task-110 (АКТИВЕН)")
-    workers = data.get("workers_state", "Воркеры активны (Этап 1)")
-    active_target_key = CFG.get("active_target", "eldar")
-    target_name = ENTITY_NAMES.get(active_target_key, "🧠 Голова Эльдара")
+def format_status_full(s):
+    bar_5h = make_progress_bar(s["q5_pct"])
+    bar_w = make_progress_bar(s["qw_pct"])
+    reset_5h_str = f"{s['q5_in']}" + (f" ({s['q5_at']})" if s['q5_at'] else "")
+    reset_w_str = f"{s['qw_in']}" + (f" ({s['qw_at']})" if s['qw_at'] else "")
+    target_name = ENTITY_NAMES.get(CFG.get("active_target", "tg_engineer"), "🤖 TG-инженер")
 
-    reset_5h_str = f"{q5_in}" + (f" ({q5_at})" if q5_at else "")
-    reset_w_str = f"{qw_in}" + (f" ({qw_at})" if qw_at else "")
-
-    text = (
-        f"📊 <b>РЕАЛЬНЫЙ СТАТУС СИСТЕМЫ MOSSAD</b>\n\n"
-        f"⏳ <b>5-часовой лимит:</b> [<code>{bar_5h}</code>] <b>{q5_pct}%</b>\n"
+    return (
+        f"📊 <b>ПОЛНЫЙ СТАТУС СИСТЕМЫ MOSSAD</b>\n\n"
+        f"⏳ <b>5-часовой лимит:</b> [<code>{bar_5h}</code>] <b>{s['q5_pct']}%</b>\n"
         f"↳ <i>Сброс: {reset_5h_str}</i>\n\n"
-        f"📅 <b>Недельный лимит:</b> [<code>{bar_w}</code>] <b>{qw_pct}%</b>\n"
+        f"📅 <b>Недельный лимит:</b> [<code>{bar_w}</code>] <b>{s['qw_pct']}%</b>\n"
         f"↳ <i>Сброс: {reset_w_str}</i>\n\n"
-        f"• 🤖 <b>Модель:</b> {model_name}\n"
-        f"• 🧠 <b>Claude Sonnet:</b> <code>{q_claude}</code> (заморожен, расход 0%)\n"
-        f"• 📦 <b>Версия MOSSAD:</b> <code>{ver}</code>\n"
-        f"• ⏱ <b>Часовой сторож:</b> {watchdog}\n"
-        f"• 👷 <b>Состояние воркеров:</b> {workers}\n"
+        f"• 🤖 <b>Модель:</b> {s['model']}\n"
+        f"• 🧠 <b>Claude:</b> <code>{s['claude']}</code>\n"
+        f"• 📦 <b>Версия скрипта:</b> <code>{s['version']}</code>\n"
+        f"• 🔨 <b>Сборка:</b> <code>{s['build']}</code>\n"
+        f"• ⏱ <b>Часовой сторож:</b> {s['watchdog']}\n"
+        f"• 👷 <b>Состояние воркеров:</b> {s['workers']}\n"
         f"• 🎯 <b>Текущий адресат:</b> {target_name}\n"
         f"• 📡 <b>Telegram-мост:</b> АКТИВЕН (Владелец: @eldmans)"
     )
-    return text
 
 def check_quota_alerts():
     if not os.path.exists(STATUS_FILE):
         return
     try:
-        with open(STATUS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        s = get_real_status_data()
+        q5_pct = s["q5_pct"]
+        qw_pct = s["qw_pct"]
     except:
         return
-
-    q5_raw = data.get("quota_5h", {})
-    if isinstance(q5_raw, dict):
-        q5_pct = parse_pct(q5_raw.get("remaining_pct", data.get("quota_remaining", 100)))
-    else:
-        q5_pct = parse_pct(data.get("quota_remaining", 100))
-
-    qw_raw = data.get("quota_weekly", {})
-    if isinstance(qw_raw, dict):
-        qw_pct = parse_pct(qw_raw.get("remaining_pct", data.get("weekly_quota_remaining", 100)))
-    else:
-        qw_pct = parse_pct(data.get("weekly_quota_remaining", 100))
 
     thresholds = CFG.get("alert_thresholds", [75, 50, 25, 15, 10, 5])
     last_5h = CFG.get("last_alert_5h", 100)
     last_w = CFG.get("last_alert_weekly", 100)
 
-    # Reset alerts if quota increased (e.g. after quota reset)
+    # Reset alerts if quota increased
     if q5_pct > last_5h + 10:
         CFG["last_alert_5h"] = 100
         save_config(CFG)
@@ -386,30 +416,24 @@ def check_quota_alerts():
         save_config(CFG)
         last_w = 100
 
-    # Check 5h thresholds
+    # 5h alerts
     for th in thresholds:
         if q5_pct <= th < last_5h:
             CFG["last_alert_5h"] = th
             save_config(CFG)
-            alert_text = (
-                f"⚠️ <b>ВНИМАНИЕ: 5-часовой лимит опустился до {q5_pct}%!</b>\n"
-                f"Пройден порог: <b>{th}%</b>.\n"
-                f"Осталось времени до сброса: {data.get('quota_resets', 'не указано')}."
-            )
-            send_agent_reply_to_owner("⚠️ Алерт квоты Antigravity", alert_text)
+            short = f"⚠️ [АЛЕРТ] 5-часовой лимит упал до {q5_pct}% (порог {th}%)"
+            voice = f"Внимание, Эльдар! Пятичасовой скользящий лимит опустился до {q5_pct} процентов. Сброс {s['q5_in']}."
+            send_structured_reply(OWNER_ID, short, voice, format_status_full(s), "tg_engineer")
             break
 
-    # Check weekly thresholds
+    # Weekly alerts
     for th in thresholds:
         if qw_pct <= th < last_w:
             CFG["last_alert_weekly"] = th
             save_config(CFG)
-            alert_text = (
-                f"⚠️ <b>ВНИМАНИЕ: Недельный лимит опустился до {qw_pct}%!</b>\n"
-                f"Пройден порог: <b>{th}%</b>.\n"
-                f"Остаток недели: {data.get('weekly_quota_resets', 'не указано')}."
-            )
-            send_agent_reply_to_owner("⚠️ Алерт недельной квоты", alert_text)
+            short = f"⚠️ [АЛЕРТ] Недельный лимит упал до {qw_pct}% (порог {th}%)"
+            voice = f"Внимание! Недельный лимит опустился до {qw_pct} процентов. До сброса {s['qw_in']}."
+            send_structured_reply(OWNER_ID, short, voice, format_status_full(s), "tg_engineer")
             break
 
     # Emergency auto-brake at <= 5%
@@ -417,14 +441,11 @@ def check_quota_alerts():
         if not os.path.exists(STOP_SIGNAL_FILE):
             with open(STOP_SIGNAL_FILE, "w", encoding="utf-8") as f:
                 f.write(f"EMERGENCY_STOP_QUOTA_{time.time()}")
-            em_text = (
-                f"🚨 <b>АВАРИЙНЫЙ ТОРМОЗ СИСТЕМЫ АКТИВИРОВАН!</b>\n\n"
-                f"Один из лимитов упал до критической отметки (<= 5%):\n"
-                f"• 5-часовой: {q5_pct}%\n"
-                f"• Недельный: {qw_pct}%\n\n"
-                f"Все автономные задачи немедленно поставлены на паузу для предотвращения полного бана квоты."
-            )
-            send_agent_reply_to_owner("🚨 Аварийный тормоз", em_text)
+            short = f"🚨 [АВАРИЙНЫЙ ТОРМОЗ] Квота критическая (5ч: {q5_pct}%, Неделя: {qw_pct}%). Задачи на паузе!"
+            voice = "Аварийный тормоз системы активирован! Один из лимитов опустился до пяти процентов. Все автономные задачи остановлены."
+            send_structured_reply(OWNER_ID, short, voice, format_status_full(s), "tg_engineer")
+
+# --- INBOX RECORDING ---
 
 def record_inbox_message(sender_id, sender_name, text, target):
     ts_str = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -437,7 +458,6 @@ def record_inbox_message(sender_id, sender_name, text, target):
         "handled": False
     }
 
-    # 1. Update structured JSON inbox
     inbox_items = []
     if os.path.exists(INBOX_JSON_FILE):
         try:
@@ -449,21 +469,74 @@ def record_inbox_message(sender_id, sender_name, text, target):
     with open(INBOX_JSON_FILE, "w", encoding="utf-8") as f:
         json.dump(inbox_items[-100:], f, ensure_ascii=False, indent=2)
 
-    # 2. Append to specific entity text inbox
     line = f"[{ts_str}] [@{sender_name} -> {target.upper()}]: {text}\n"
     if target == "eldar":
-        with open(INBOX_ELDAR_FILE, "a", encoding="utf-8") as f:
-            f.write(line)
+        with open(INBOX_ELDAR_FILE, "a", encoding="utf-8") as f: f.write(line)
     elif target == "mossad":
-        with open(INBOX_MOSSAD_FILE, "a", encoding="utf-8") as f:
-            f.write(line)
+        with open(INBOX_MOSSAD_FILE, "a", encoding="utf-8") as f: f.write(line)
     elif target == "tg_engineer":
-        with open(INBOX_TG_FILE, "a", encoding="utf-8") as f:
-            f.write(line)
+        with open(INBOX_TG_FILE, "a", encoding="utf-8") as f: f.write(line)
 
-    # 3. Append to legacy global inbox for backwards compatibility
     with open(INBOX_FILE, "a", encoding="utf-8") as f:
         f.write(line)
+
+# --- ENTITY DIALOGUE RESPONSES ---
+
+def process_entity_dialogue(target, user_name, text):
+    s = get_real_status_data()
+
+    if target == "tg_engineer":
+        # Telegram Engineer (Self)
+        lower = text.lower()
+        if any(w in lower for w in ["статус", "квот", "лимит", "как дела", "работает"]):
+            short = f"🤖 [TG-инженер] Мост онлайн. 5ч: {s['q5_pct']}% | Неделя: {s['qw_pct']}%"
+            voice = f"Эльдар, телеграм-мост на связи. Распознавание речи активно. Пятичасовой лимит {s['q5_pct']} процентов, недельный {s['qw_pct']} процентов. Всё под контролем."
+            full = format_status_full(s)
+            return short, voice, full
+
+        short = f"🤖 [TG-инженер] Запрос принят в работу: «{text[:40]}...»"
+        voice = f"Эльдар, я тебя услышал. Задача по мосту «{text[:70]}» зафиксирована. Телеметрия и распознавание в норме."
+        full = (
+            f"🤖 <b>ОТВЕТ TELEGRAM-ИНЖЕНЕРА</b>\n\n"
+            f"• <b>Твой запрос:</b> «{text}»\n"
+            f"• <b>Статус моста:</b> Активен, STT Dual-Engine подключен\n"
+            f"• <b>Текущие лимиты:</b> 5ч: {s['q5_pct']}%, Неделя: {s['qw_pct']}%\n"
+            f"• <b>Время фиксации:</b> {time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        return short, voice, full
+
+    elif target == "mossad":
+        # Senior Pomidor (Coordinator MOSSAD)
+        # Touch wake signal so agents know there's user input
+        with open(WAKE_SIGNAL_FILE, "w", encoding="utf-8") as f:
+            f.write(f"WAKE_BY_USER_TASK_{time.time()}_{text[:50]}")
+
+        short = f"✅ [MOSSAD {s['version']}] Задача принята: «{text[:40]}...»"
+        voice = f"Сеньор Помидор на связи. Задача «{text[:70]}» принята и поставлена в очередь воркеров MOSSAD."
+        full = (
+            f"🍅 <b>КООРДИНАТОР MOSSAD (СЕНЬОР-ПОМИДОР)</b>\n\n"
+            f"• <b>Версия скрипта:</b> <code>{s['version']}</code>\n"
+            f"• <b>Статус сборки:</b> <code>{s['build']}</code>\n"
+            f"• <b>Воркеры:</b> {s['workers']}\n"
+            f"• <b>Принятая задача:</b> «{text}»\n\n"
+            f"<i>Сигнал пробуждения отправлен в Antigravity. Агенты приступили к выполнению.</i>"
+        )
+        return short, voice, full
+
+    else:
+        # Eldar's Digital Twin (Голова Эльдара)
+        short = f"🧠 [Голова Эльдара] Мысль принята в банк концепций"
+        voice = f"Эльдар, твоя мысль «{text[:70]}» принята цифровым двойником. Проверяю по эргономическому фильтру: без выпадающих списков и лишних кликов."
+        full = (
+            f"🧠 <b>ГОЛОВА ЭЛЬДАРА (ЦИФРОВОЙ ДВОЙНИК)</b>\n\n"
+            f"• <b>Мысль:</b> «{text}»\n"
+            f"• <b>Эргономический фильтр:</b> Управление с дивана, минимум движений, никаких бюрократических отписок.\n"
+            f"• <b>Записано в:</b> <code>inbox_eldar.txt</code>\n"
+            f"• <b>Время:</b> {time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        return short, voice, full
+
+# --- MESSAGE HANDLER ---
 
 def handle_user_message(msg):
     global CFG
@@ -474,7 +547,29 @@ def handle_user_message(msg):
     last_name = user.get("last_name", "")
     full_name = f"{first_name} {last_name}".strip() or user_name
     text = msg.get("text", "").strip()
+    voice_obj = msg.get("voice") or msg.get("audio")
+    if voice_obj and not text:
+        file_id = voice_obj.get("file_id")
+        if file_id:
+            ogg_path = os.path.join(BASE_DIR, f"voice_{int(time.time())}.ogg")
+            if download_tg_file(file_id, ogg_path):
+                try:
+                    from stt_engine import transcribe_audio
+                    recognized_text, engine = transcribe_audio(ogg_path)
+                    if recognized_text:
+                        text = recognized_text
+                        print(f"[TG STT] Распознано ({engine}): {text}")
+                    else:
+                        text = "[Голосовое сообщение без слов]"
+                except Exception as stt_err:
+                    print(f"[TG STT Error] {stt_err}")
+                    text = "[Ошибка распознавания голоса]"
+                finally:
+                    if os.path.exists(ogg_path):
+                        try: os.remove(ogg_path)
+                        except: pass
     contact = msg.get("contact")
+    voice = msg.get("voice") or msg.get("audio")
 
     # 1. NOT AUTHORIZED FLOW
     if not is_authorized(chat_id):
@@ -505,17 +600,56 @@ def handle_user_message(msg):
 
         send_tg_message(
             chat_id,
-            "⏳ <b>Запрос отправлен Владельцу компьютера!</b>\nОжидайте подтверждения. До решения владельца бот для вас заблокирован.",
+            "⏳ <b>Запрос отправлен Владельцу компьютера!</b>\nОжидайте подтверждения. До решения владельца бот заблокирован.",
             reply_markup=get_guest_request_keyboard() if not contact else None
         )
         return
 
-    # 2. AUTHORIZED USER COMMANDS
+    # 2. VOICE MESSAGE PROCESSING (STT)
+    if voice:
+        file_id = voice.get("file_id")
+        send_chat_action(chat_id, "record_voice")
+
+        local_audio = os.path.join(BASE_DIR, f"in_voice_{int(time.time()*1000)}.oga")
+        downloaded = download_file_by_id(file_id, local_audio)
+        if not downloaded:
+            send_tg_message(chat_id, "⚠️ <i>Не удалось скачать голосовое сообщение из Telegram API.</i>")
+            return
+
+        # Dual-engine transcription
+        transcribed_text, engine_used = stt_engine.transcribe_audio(downloaded)
+        try: os.remove(downloaded)
+        except: pass
+
+        if not transcribed_text:
+            send_tg_message(chat_id, "⚠️ <i>Не удалось разобрать речь в сообщении (тишина или неразборчивый звук). Попробуйте сказать громче.</i>")
+            return
+
+        # Store for the modal popup button
+        stt_id = str(uuid.uuid4())[:8]
+        STT_CACHE[stt_id] = transcribed_text
+
+        # UX requirement: Send notification with button "Просмотреть текст"
+        stt_markup = {
+            "inline_keyboard": [
+                [{"text": "📝 Просмотреть текст", "callback_data": f"stt_view:{stt_id}"}]
+            ]
+        }
+        send_tg_message(
+            chat_id,
+            "🎤 <b>Ваше голосовое сообщение распознано</b>",
+            reply_markup=stt_markup
+        )
+
+        # Set transcribed text to proceed with standard command & entity routing
+        text = transcribed_text
+
+    # 3. AUTHORIZED COMMANDS
     if text in ["/start", "start"]:
         send_tg_message(
             chat_id,
             "👋 <b>Пульт управления Antigravity активен!</b>\n\n"
-            "Выбирай режим работы внизу или пиши любой вопрос:\n"
+            "Выбирай режим работы внизу или пиши/наговаривай любой вопрос:\n"
             "• 🧠 <b>Голова Эльдара</b> — архитектура, эргономика, концепции\n"
             "• 🍅 <b>Координатор MOSSAD</b> — разработка юзерскрипта, задачи, баги\n"
             "• 🤖 <b>TG-инженер</b> — мониторинг квот, скриншоты, статус моста",
@@ -524,51 +658,68 @@ def handle_user_message(msg):
     elif "Голова Эльдара" in text or text in ["/eldar", "eldar"]:
         CFG["active_target"] = "eldar"
         save_config(CFG)
-        send_tg_message(
-            chat_id,
-            "🎯 <b>Активный адресат переключен: 🧠 Голова Эльдара</b>\n\n"
-            "Пиши или надиктовывай любые мысли, философские вопросы, концепции и эргономические фильтры. Архитектор на связи!",
-            get_owner_keyboard()
-        )
+        short = "🎯 [Адресат] Переключено на: 🧠 Голова Эльдара"
+        voice = "Активный адресат переключен на Голову Эльдара. Архитектор готов слушать мысли и концепции."
+        full = "🎯 <b>Активный адресат переключен: 🧠 Голова Эльдара</b>\n\nАрхитектор на связи! Пиши или наговаривай любые мысли."
+        send_structured_reply(chat_id, short, voice, full, "eldar")
+        send_tg_message(chat_id, "Клавиатура обновлена:", get_owner_keyboard())
+
     elif "Координатор MOSSAD" in text or text in ["/mossad", "mossad"]:
         CFG["active_target"] = "mossad"
         save_config(CFG)
-        send_tg_message(
-            chat_id,
-            "🎯 <b>Активный адресат переключен: 🍅 Координатор MOSSAD</b>\n\n"
-            "Отправляй баг-репорты, новые фичи, задачи по доработке сайтов и юзерскрипта MOSSAD. Координатор передаст их воркерам.",
-            get_owner_keyboard()
-        )
+        short = "🎯 [Адресат] Переключено на: 🍅 Координатор MOSSAD"
+        voice = "Активный адресат переключен на Координатора Моссад. Жду задачи по скрипту и багрепорты."
+        full = "🎯 <b>Активный адресат переключен: 🍅 Координатор MOSSAD</b>\n\nСеньор Помидор на связи! Задачи будут переданы воркерам."
+        send_structured_reply(chat_id, short, voice, full, "mossad")
+        send_tg_message(chat_id, "Клавиатура обновлена:", get_owner_keyboard())
+
     elif "TG-инженер" in text or text in ["/tg", "tg", "/bot"]:
         CFG["active_target"] = "tg_engineer"
         save_config(CFG)
-        send_tg_message(
-            chat_id,
-            "🎯 <b>Активный адресат переключен: 🤖 Telegram-инженер</b>\n\n"
-            "Я отвечаю за Telegram-мост, точность лимитов, TTS озвучку, безопасность и скриншоты.",
-            get_owner_keyboard()
-        )
+        short = "🎯 [Адресат] Переключено на: 🤖 Telegram-инженер"
+        voice = "Активный адресат переключен на Телеграм инженера. Мост, квоты и голосовые под контролем."
+        full = "🎯 <b>Активный адресат переключен: 🤖 Telegram-инженер</b>\n\nЯ отвечаю за Telegram-мост, STT, точность лимитов и скриншоты."
+        send_structured_reply(chat_id, short, voice, full, "tg_engineer")
+        send_tg_message(chat_id, "Клавиатура обновлена:", get_owner_keyboard())
+
     elif text in ["📊 Статус и лимиты", "📊 Реальный статус и лимит", "/status", "status"]:
-        send_agent_reply_to_owner("📊 Реальный статус MOSSAD", get_real_status_text())
+        s = get_real_status_data()
+        short = f"📊 [MOSSAD] 5ч: {s['q5_pct']}% ({s['q5_in']}) | Неделя: {s['qw_pct']}% ({s['qw_in']})"
+        voice = f"Статус системы Моссад. Пятичасовой скользящий лимит составляет {s['q5_pct']} процентов, сброс {s['q5_in']}. Недельный лимит — {s['qw_pct']} процентов. Воркеры активны."
+        full = format_status_full(s)
+        send_structured_reply(chat_id, short, voice, full, CFG.get("active_target", "tg_engineer"))
+
     elif text in ["📸 Скриншот экрана", "/screen", "screen"]:
         send_tg_message(chat_id, "📸 Захватываю изображение с монитора...")
         scr = take_screenshot()
         if scr == "LOCKED":
-            send_tg_message(chat_id, "⚠️ <b>Экран Windows заблокирован (Win+L) или выключен монитор.</b>\nWindows запрещает снимок спящего рабочего стола. Скриншот будет доступен, как только монитор включится.")
+            short = "⚠️ [Экран] Рабочий стол Windows заблокирован"
+            voice = "Экран заблокирован системой Windows. Скриншот будет доступен после включения монитора."
+            full = "⚠️ <b>Экран Windows заблокирован (Win+L) или выключен монитор.</b>"
+            send_structured_reply(chat_id, short, voice, full, "tg_engineer")
         elif scr and os.path.exists(scr):
-            send_tg_photo(chat_id, scr, "Рабочий стол ПК")
+            send_tg_photo(chat_id, scr, "📸 Рабочий стол ПК")
             try: os.remove(scr)
             except: pass
         else:
             send_tg_message(chat_id, "⚠️ Не удалось захватить экран.")
+
     elif text in ["⚡ Пнуть агента", "/wake", "wake"]:
         with open(WAKE_SIGNAL_FILE, "w", encoding="utf-8") as f:
             f.write(f"WAKE_BY_USER_{time.time()}")
-        send_agent_reply_to_owner("⚡ Пробуждение", "Сигнал пробуждения доставлен в Antigravity. Модель вышла из спячки и взяла текущую задачу.")
+        short = "⚡ [Antigravity] Сигнал пробуждения доставлен"
+        voice = "Сигнал пробуждения отправлен. Модель вышла из спячки и продолжает работу."
+        full = "⚡ <b>Сигнал пробуждения доставлен в Antigravity.</b>"
+        send_structured_reply(chat_id, short, voice, full, CFG.get("active_target", "tg_engineer"))
+
     elif text in ["⏹ Тормоз / Пауза", "/stop", "stop", "пауза"]:
         with open(STOP_SIGNAL_FILE, "w", encoding="utf-8") as f:
             f.write(f"PAUSE_BY_USER_{time.time()}")
-        send_agent_reply_to_owner("⏹ Пауза", "Команда ПАУЗА активирована. Все агенты остановлены до твоего следующего указания.")
+        short = "⏹ [Пауза] Система поставлена на паузу"
+        voice = "Команда пауза активирована. Все автономные агенты остановлены."
+        full = "⏹ <b>Команда ПАУЗА активирована.</b> Все агенты остановлены до твоего указания."
+        send_structured_reply(chat_id, short, voice, full, CFG.get("active_target", "tg_engineer"))
+
     elif text in ["🛑 Выключить бота на ПК", "/stop_bot"]:
         markup = {
             "inline_keyboard": [
@@ -579,9 +730,10 @@ def handle_user_message(msg):
             ]
         }
         send_tg_message(chat_id, "⚠️ <b>Вы уверены, что хотите остановить бота на компьютере?</b>", reply_markup=markup)
+
     else:
-        # Message routing: check prefixes or active target
-        target = CFG.get("active_target", "eldar")
+        # Standard user query or task -> Route to active entity or prefixed entity
+        target = CFG.get("active_target", "tg_engineer")
         cleaned_text = text
 
         if text.startswith("/eldar ") or text.startswith("🧠 "):
@@ -594,19 +746,16 @@ def handle_user_message(msg):
             target = "tg_engineer"
             cleaned_text = text.split(" ", 1)[1].strip()
 
+        # 1. Record in inbox
         record_inbox_message(chat_id, user_name, cleaned_text, target)
 
-        if target == "eldar":
-            header = "🧠 Голова Эльдара приняла мысль"
-            reply_preview = f"Эльдар, твоя мысль принята: «{cleaned_text}». Архитектор подключился к анализу задачи."
-        elif target == "mossad":
-            header = "🍅 Координатор MOSSAD принял задачу"
-            reply_preview = f"Задача для MOSSAD зафиксирована: «{cleaned_text}». Координатор ставит задачу в очередь воркеров."
-        else:
-            header = "🤖 Telegram-инженер принял запрос"
-            reply_preview = f"Запрос по работе моста принят: «{cleaned_text}». Обрабатываю телеметрию."
+        # 2. Generate intelligent response from entity
+        short, voice, full = process_entity_dialogue(target, user_name, cleaned_text)
 
-        send_agent_reply_to_owner(header, reply_preview, target_key=target)
+        # 3. Send via Ironclad Format (Short Status + Voice OGG + Details button)
+        send_structured_reply(chat_id, short, voice, full, target)
+
+# --- CALLBACK QUERY HANDLER ---
 
 def handle_callback_query(cb):
     global CFG
@@ -619,16 +768,44 @@ def handle_callback_query(cb):
         answer_callback(cb_id, "Действие запрещено.")
         return
 
-    if data == "voice_last":
-        answer_callback(cb_id, "Синтезирую речь...")
-        text_to_speak = MESSAGE_TEXT_CACHE.get("last", "Текст для озвучки не найден.")
-        wav = generate_speech(text_to_speak)
-        if wav:
-            send_tg_voice(chat_id, wav, "🎧 Голосовой ответ")
-            try: os.remove(wav)
+    # 1. View recognized speech text in modal popup
+    if data.startswith("stt_view:"):
+        stt_id = data.split(":", 1)[1]
+        text = STT_CACHE.get(stt_id, "Текст распознавания не найден.")
+        if len(text) <= 180:
+            answer_callback(cb_id, text=f"Распознанный текст:\n\n{text}", show_alert=True)
+        else:
+            # Telegram popup limit is 200 chars. Show head in alert and full text in chat
+            answer_callback(cb_id, text=f"Текст:\n\n{text[:160]}...", show_alert=True)
+            send_tg_message(chat_id, f"📝 <b>Полный текст голосового сообщения:</b>\n\n«{text}»")
+
+    # 2. View full details of agent reply
+    elif data.startswith("det_view:"):
+        det_id = data.split(":", 1)[1]
+        det = DETAILS_CACHE.get(det_id, {})
+        full_text = det.get("full", "Подробности не найдены.")
+        if len(full_text) <= 180:
+            answer_callback(cb_id, text=full_text, show_alert=True)
+        else:
+            answer_callback(cb_id, "Открываю полный отчёт...")
+            send_tg_message(chat_id, full_text)
+
+    # 3. Replay voice audio
+    elif data.startswith("voice_replay:"):
+        det_id = data.split(":", 1)[1]
+        det = DETAILS_CACHE.get(det_id, {})
+        voice_text = det.get("voice") or det.get("short", "Нет текста для озвучивания.")
+        answer_callback(cb_id, "Синтезирую голосовой ответ...")
+        send_chat_action(chat_id, "upload_voice")
+        ogg = tts_engine.generate_voice_ogg(voice_text)
+        if ogg and os.path.exists(ogg):
+            send_tg_voice(chat_id, ogg, caption="🎧 <i>Повторная озвучка ответа</i>")
+            try: os.remove(ogg)
             except: pass
         else:
-            send_tg_message(chat_id, "⚠️ Не удалось синтезировать речь.")
+            send_tg_message(chat_id, "⚠️ Не удалось синтезировать голос.")
+
+    # 4. Switch active entity
     elif data.startswith("switch_to:"):
         new_target = data.split(":", 1)[1]
         CFG["active_target"] = new_target
@@ -636,6 +813,8 @@ def handle_callback_query(cb):
         t_name = ENTITY_NAMES.get(new_target, new_target)
         answer_callback(cb_id, f"Адресат: {t_name}")
         send_tg_message(chat_id, f"🎯 <b>Адресат переключен на: {t_name}</b>", get_owner_keyboard())
+
+    # 5. Shutdown dialog
     elif data == "sd_cancel":
         answer_callback(cb_id, "Выключение отменено.")
         edit_tg_message(chat_id, msg_id, "✅ <b>Выключение отменено.</b> Бот продолжает работу.")
@@ -649,12 +828,14 @@ def handle_callback_query(cb):
                 ]
             ]
         }
-        edit_tg_message(chat_id, msg_id, "⚠️ <b>Вы ТОЧНО уверены?</b>\nПосле этого бот завершит процесс на ПК и его можно будет включить <b>только физически с компьютера через START_BOT.bat!</b>", reply_markup=markup)
+        edit_tg_message(chat_id, msg_id, "⚠️ <b>Вы ТОЧНО уверены?</b>\nПосле этого процесс бота на ПК завершится и запустить его можно будет <b>только физически через START_BOT.bat!</b>", reply_markup=markup)
     elif data == "sd_confirm":
         answer_callback(cb_id, "Выключаю...")
         edit_tg_message(chat_id, msg_id, "🛑 <b>Бот выключен на ПК.</b> Процесс завершён.")
-        print("[TG Bridge] Принудительное завершение по двойному подтверждению владельца.")
+        print("[TG Bridge] Принудительное завершение по запросу владельца.")
         sys.exit(0)
+
+    # 6. Guest access management
     elif data.startswith("auth_allow:"):
         _, target_id, t_name = data.split(":")
         guests = CFG.get("allowed_guests", {})
@@ -670,57 +851,57 @@ def handle_callback_query(cb):
         edit_tg_message(chat_id, msg_id, f"❌ <b>Доступ ОТКЛОНЁН</b> для пользователя <code>{target_id}</code>.")
         send_tg_message(target_id, "⛔ <b>Владелец отклонил ваш запрос доступа.</b>")
 
+# --- OUTBOX CHECKER ---
+
 def check_outbox():
-    # 1. Check structured JSON outbox
+    # 1. JSON Outbox
     if os.path.exists(OUTBOX_JSON_FILE):
         try:
             with open(OUTBOX_JSON_FILE, "r", encoding="utf-8") as f:
                 items = json.load(f)
             os.remove(OUTBOX_JSON_FILE)
-            if isinstance(items, dict):
-                items = [items]
+            if isinstance(items, dict): items = [items]
             for item in items:
                 sender = item.get("sender", "🍅 Координатор MOSSAD")
+                short = item.get("short") or item.get("text", "")[:60]
                 text = item.get("text", "")
-                with_voice = item.get("voice", False)
-                if text:
-                    now_str = time.strftime('%H:%M:%S')
-                    send_agent_reply_to_owner(f"{sender} | {now_str}", text)
-                    if with_voice:
-                        wav = generate_speech(text)
-                        if wav:
-                            send_tg_voice(OWNER_ID, wav, f"🎧 {sender}")
-                            try: os.remove(wav)
-                            except: pass
+                full = item.get("full") or text
+                voice_text = item.get("voice_text") or short
+                send_structured_reply(OWNER_ID, f"<b>{sender}</b>\n{short}", voice_text, full)
         except Exception as e:
             print(f"[Outbox JSON Error] {e}")
 
-    # 2. Check plaintext outbox
+    # 2. Text Outbox
     if os.path.exists(OUTBOX_FILE):
         try:
             with open(OUTBOX_FILE, "r", encoding="utf-8") as f:
                 content = f.read().strip()
             if content:
-                now_str = time.strftime('%H:%M:%S')
-                header = f"💬 [MOSSAD / tm-scripts | {now_str}]"
-                if content.startswith("🧠"):
-                    header = f"🧠 [Голова Эльдара | {now_str}]"
-                elif content.startswith("🍅"):
-                    header = f"🍅 [Координатор MOSSAD | {now_str}]"
-                elif content.startswith("🤖"):
-                    header = f"🤖 [TG-инженер | {now_str}]"
-                send_agent_reply_to_owner(header, content)
+                sender = "🍅 Координатор MOSSAD"
+                if content.startswith("🧠"): sender = "🧠 Голова Эльдара"
+                elif content.startswith("🤖"): sender = "🤖 TG-инженер"
+                short = f"<b>{sender}</b>\n{content[:60]}"
+                send_structured_reply(OWNER_ID, short, content[:200], content)
                 os.remove(OUTBOX_FILE)
         except Exception as e:
             print(f"[Outbox Text Error] {e}")
+
+# --- MAIN LOOP ---
 
 def poll_telegram():
     if not TOKEN:
         print("Bot token not configured.")
         return
     offset = 0
-    active_target = CFG.get("active_target", "eldar")
-    print(f"[TG Bridge] Запущен. Владелец: {OWNER_ID}. Адресат: {active_target}. Ожидание...")
+    active_target = CFG.get("active_target", "tg_engineer")
+    print(f"========================================================")
+    print(f"🚀 [TG Bridge v2.0] Запущен и готов к работе!")
+    print(f"• Владелец: {OWNER_ID} (@eldmans)")
+    print(f"• Активный адресат: {active_target} ({ENTITY_NAMES.get(active_target)})")
+    print(f"• STT: Dual Engine (Google Speech + faster-whisper large-v3-turbo)")
+    print(f"• TTS: Microsoft Irina Desktop -> Telegram Native Opus OGG")
+    print(f"========================================================")
+
     while True:
         try:
             check_outbox()

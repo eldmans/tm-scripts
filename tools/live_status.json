@@ -1,6 +1,6 @@
 {
   "model": "Gemini 3.8 Flash (High)",
-  "script_version": "v1.4.24",
+  "script_version": "v1.4.26",
   "quota_5h": {
     "remaining_pct": 81,
     "resets_at": "17:19:22 UTC",
@@ -18,8 +18,8 @@
   "weekly_quota_remaining": "77%",
   "weekly_quota_resets": "через 3 дня 7 часов",
   "claude_quota_remaining": "56%",
-  "watchdog_timer": "task-110 (АКТИВЕН, сторож на 1 час)",
-  "build_status": "SYNTAX OK, VERIFY OK (863 КБ, 54 модуля)",
-  "workers_state": "Воркеры активны (Этап 1)",
-  "last_updated": "2026-11-18 16:15"
+  "watchdog_timer": "task-562 (АКТИВЕН, сторож на 1 час)",
+  "build_status": "SYNTAX OK, VERIFY OK (897 КБ, 55 модулей)",
+  "workers_state": "Все этапы HANDOFF завершены успешно",
+  "last_updated": "2026-11-18 16:42"
 }

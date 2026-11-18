@@ -5,8 +5,15 @@
     "2068829104",
     "8149729924"
   ],
-  "active_target": "eldar",
-  "alert_thresholds": [75, 50, 25, 15, 10, 5],
+  "active_target": "tg_engineer",
+  "alert_thresholds": [
+    75,
+    50,
+    25,
+    15,
+    10,
+    5
+  ],
   "last_alert_5h": 100,
   "last_alert_weekly": 100,
   "is_active": true,
