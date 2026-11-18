@@ -114,10 +114,15 @@
                     const st = document.createElement('style');
                     st.id = 'mossad-fh-theater-style';
                     st.textContent = `
+                        body:has(.mossad-theater-active) main,
+                        body:has(.mossad-theater-active) .container,
+                        body:has(.mossad-theater-active) [class*="layout"] {
+                            overflow: visible !important;
+                        }
                         .mossad-theater-active {
-                            width: 100vw !important;
-                            max-width: 100vw !important;
-                            margin-left: calc(-50vw + 50%) !important;
+                            width: 98vw !important;
+                            max-width: 98vw !important;
+                            margin-left: calc(-49vw + 50%) !important;
                             height: min(85vh, 56.25vw) !important;
                             z-index: 9999 !important;
                             position: relative !important;

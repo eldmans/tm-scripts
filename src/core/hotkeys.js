@@ -129,6 +129,52 @@
         return handled;
     }
 
+    /**
+     * v1.4.23: Закрепление видеоплеера в углу экрана (Sticky Player / PiP)
+     * Позволяет продолжать просмотр видео при скролле вниз для выбора похожих превью.
+     */
+    function mossadToggleStickyPlayer() {
+        const v = (typeof getActiveVideo === 'function' ? getActiveVideo() : null) || document.querySelector('video');
+        if (!v) {
+            showToast('⚠️ Видеоплеер не найден на странице', true);
+            return false;
+        }
+
+        const container = v.closest('#html5video_base, #video-player-bg, #player-container, .player-container, [data-role="player-container"], .player_wrap, .video-player, .player-holder, #player, [data-player]') || v;
+
+        if (!document.getElementById('mossad-sticky-player-style')) {
+            const st = document.createElement('style');
+            st.id = 'mossad-sticky-player-style';
+            st.textContent = `
+                .mossad-sticky-player {
+                    position: fixed !important;
+                    top: 18px !important;
+                    right: 18px !important;
+                    width: 480px !important;
+                    height: 270px !important;
+                    max-width: 42vw !important;
+                    max-height: 42vh !important;
+                    z-index: 2147483640 !important;
+                    box-shadow: 0 12px 36px rgba(0,0,0,0.85), 0 0 0 2px rgba(56, 189, 248, 0.5) !important;
+                    border-radius: 10px !important;
+                    overflow: hidden !important;
+                    background: #000 !important;
+                    transition: transform 0.2s ease, opacity 0.2s ease !important;
+                }
+                .mossad-sticky-player video {
+                    width: 100% !important;
+                    height: 100% !important;
+                    object-fit: contain !important;
+                }
+            `;
+            (document.head || document.documentElement).appendChild(st);
+        }
+
+        const isSticky = container.classList.toggle('mossad-sticky-player');
+        showToast(isSticky ? '📌 Видео закреплено в углу (Shift+V для сброса)' : '▫️ Видео возвращено на место');
+        return true;
+    }
+
     function mossadLargePlayerMatch(e) {
         const hk = config.hk && (config.hk.largePlayer || config.hk.xvDoubleSize);
         if (hk && hk.key) {
@@ -743,6 +789,14 @@
             e.preventDefault();
             e.stopImmediatePropagation();
             mossadPlayInWindow();
+            return;
+        }
+
+        // v1.4.23: «📌 Sticky Player» — закрепить видео в углу (Shift+V)
+        if (config.hk.stickyPlayer && hotkeyMatches(e, config.hk.stickyPlayer)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            mossadToggleStickyPlayer();
             return;
         }
 

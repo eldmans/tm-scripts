@@ -93,3 +93,60 @@
             return true;
         } catch (e) { return false; } // AudioContext может быть заблокирован до первого клика
     }
+
+    /**
+     * v1.4.23: Воспроизведение коротких узнаваемых мелодий хитов (5-6 нот) по завершении задач
+     */
+    function mossadPlayChime(melodyName) {
+        const MELODIES = {
+            titanic: [
+                { hz: 349.23, ms: 300 }, { hz: 392.00, ms: 300 }, { hz: 392.00, ms: 300 },
+                { hz: 440.00, ms: 350 }, { hz: 392.00, ms: 300 }, { hz: 349.23, ms: 500 }
+            ],
+            starwars: [
+                { hz: 392.00, ms: 350 }, { hz: 392.00, ms: 350 }, { hz: 392.00, ms: 350 },
+                { hz: 311.13, ms: 250 }, { hz: 466.16, ms: 150 }, { hz: 392.00, ms: 500 }
+            ],
+            terminator: [
+                { hz: 130.81, ms: 120 }, { hz: 130.81, ms: 120 }, { hz: 130.81, ms: 200 },
+                { hz: 155.56, ms: 250 }, { hz: 146.83, ms: 350 }
+            ],
+            godfather: [
+                { hz: 261.63, ms: 250 }, { hz: 311.13, ms: 250 }, { hz: 392.00, ms: 350 },
+                { hz: 369.99, ms: 250 }, { hz: 392.00, ms: 250 }, { hz: 311.13, ms: 450 }
+            ],
+            mission: [
+                { hz: 392.00, ms: 200 }, { hz: 392.00, ms: 200 }, { hz: 466.16, ms: 200 },
+                { hz: 523.25, ms: 250 }, { hz: 392.00, ms: 350 }
+            ]
+        };
+
+        const keys = Object.keys(MELODIES);
+        const chosen = MELODIES[melodyName] || MELODIES[keys[Math.floor(Math.random() * keys.length)]];
+        try {
+            const ctx = getCircleAudioCtx();
+            if (!ctx) return false;
+            if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+                try { ctx.resume().catch(() => {}); } catch (_) {}
+            }
+            let curTime = ctx.currentTime + 0.05;
+            chosen.forEach(note => {
+                const osc = ctx.createOscillator();
+                const g = ctx.createGain();
+                osc.connect(g);
+                g.connect(ctx.destination);
+                osc.type = 'triangle';
+                osc.frequency.value = note.hz;
+                const dur = note.ms / 1000;
+                g.gain.setValueAtTime(0.0001, curTime);
+                g.gain.exponentialRampToValueAtTime(0.2, curTime + 0.02);
+                g.gain.exponentialRampToValueAtTime(0.0001, curTime + dur);
+                osc.start(curTime);
+                osc.stop(curTime + dur + 0.05);
+                osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch (_) {} };
+                curTime += dur + 0.04;
+            });
+            return true;
+        } catch (_) { return false; }
+    }
+    window.mossadPlayChime = mossadPlayChime;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.22
+// @version      1.4.23
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.22';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.23';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1146,6 +1146,7 @@ grokHistFwd: { key: '3', ctrl: false, alt: true, shift: false },
 grokLastSlide: { key: '4', ctrl: false, alt: true, shift: false },
 updateScript: { key: 'F5', ctrl: true, alt: false, shift: true, meta: false },
 playInWindow: { key: '', ctrl: false, alt: false, shift: false },
+stickyPlayer: { key: 'V', ctrl: false, alt: false, shift: true },
 }
 };
 let config = {};
@@ -4181,6 +4182,58 @@ osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch (e) {} };
 return true;
 } catch (e) { return false; }
 }
+function mossadPlayChime(melodyName) {
+const MELODIES = {
+titanic: [
+{ hz: 349.23, ms: 300 }, { hz: 392.00, ms: 300 }, { hz: 392.00, ms: 300 },
+{ hz: 440.00, ms: 350 }, { hz: 392.00, ms: 300 }, { hz: 349.23, ms: 500 }
+],
+starwars: [
+{ hz: 392.00, ms: 350 }, { hz: 392.00, ms: 350 }, { hz: 392.00, ms: 350 },
+{ hz: 311.13, ms: 250 }, { hz: 466.16, ms: 150 }, { hz: 392.00, ms: 500 }
+],
+terminator: [
+{ hz: 130.81, ms: 120 }, { hz: 130.81, ms: 120 }, { hz: 130.81, ms: 200 },
+{ hz: 155.56, ms: 250 }, { hz: 146.83, ms: 350 }
+],
+godfather: [
+{ hz: 261.63, ms: 250 }, { hz: 311.13, ms: 250 }, { hz: 392.00, ms: 350 },
+{ hz: 369.99, ms: 250 }, { hz: 392.00, ms: 250 }, { hz: 311.13, ms: 450 }
+],
+mission: [
+{ hz: 392.00, ms: 200 }, { hz: 392.00, ms: 200 }, { hz: 466.16, ms: 200 },
+{ hz: 523.25, ms: 250 }, { hz: 392.00, ms: 350 }
+]
+};
+const keys = Object.keys(MELODIES);
+const chosen = MELODIES[melodyName] || MELODIES[keys[Math.floor(Math.random() * keys.length)]];
+try {
+const ctx = getCircleAudioCtx();
+if (!ctx) return false;
+if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+try { ctx.resume().catch(() => {}); } catch (_) {}
+}
+let curTime = ctx.currentTime + 0.05;
+chosen.forEach(note => {
+const osc = ctx.createOscillator();
+const g = ctx.createGain();
+osc.connect(g);
+g.connect(ctx.destination);
+osc.type = 'triangle';
+osc.frequency.value = note.hz;
+const dur = note.ms / 1000;
+g.gain.setValueAtTime(0.0001, curTime);
+g.gain.exponentialRampToValueAtTime(0.2, curTime + 0.02);
+g.gain.exponentialRampToValueAtTime(0.0001, curTime + dur);
+osc.start(curTime);
+osc.stop(curTime + dur + 0.05);
+osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch (_) {} };
+curTime += dur + 0.04;
+});
+return true;
+} catch (_) { return false; }
+}
+window.mossadPlayChime = mossadPlayChime;
 
 // ── src/download/metadata.js ──
 let _crcTable = null;
@@ -10705,27 +10758,149 @@ console.log('[MOSSAD HF] Тайм-аут ожидания генерации');
 }
 }, 600);
 }
+let _warnModal = null;
+function showUnsavedResultWarning(media, proceedCallback) {
+if (_warnModal && _warnModal.parentNode) _warnModal.remove();
+const modal = document.createElement('div');
+modal.id = 'mossad-hf-unsaved-modal';
+modal.style.cssText = `
+                position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+                z-index: 2147483647; background: rgba(20, 18, 24, 0.96); backdrop-filter: blur(16px);
+                border: 1px solid #f59e0b; border-radius: 12px; padding: 12px 16px;
+                box-shadow: 0 12px 36px rgba(0,0,0,0.8), 0 0 15px rgba(245, 158, 11, 0.25);
+                font-family: system-ui, -apple-system, sans-serif; color: #fff;
+                display: flex; flex-direction: column; gap: 8px; animation: mossadFadeIn 0.2s ease;
+                min-width: 320px;
+            `;
+modal.innerHTML = `
+                <div style="font-weight:bold; color:#fbbf24; font-size:13px; display:flex; align-items:center; gap:6px;">
+                    ⚠️ Предыдущий результат ещё не скачан!
+                </div>
+                <div style="font-size:11px; color:#d1d5db; line-height:1.4;">
+                    Запуск новой генерации сотрёт текущее медиа без сохранения.
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
+                    <button id="mossad-hf-save-and-gen" style="background:#10b981; color:#fff; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-weight:bold; font-size:11px;">💾 Скачать и запустить</button>
+                    <button id="mossad-hf-ignore-and-gen" style="background:#374151; color:#e5e7eb; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:11px;">Всё равно запустить</button>
+                    <button id="mossad-hf-cancel" style="background:transparent; color:#9ca3af; border:1px solid #4b5563; border-radius:6px; padding:5px 8px; cursor:pointer; font-size:11px;">Отмена</button>
+                </div>
+            `;
+document.body.appendChild(modal);
+_warnModal = modal;
+const close = () => { if (modal && modal.parentNode) modal.remove(); _warnModal = null; };
+modal.querySelector('#mossad-hf-save-and-gen').onclick = () => {
+close();
+if (typeof triggerDownload === 'function') {
+triggerDownload(false, null, null, media);
+}
+const src = media ? (media.urls && media.urls[0] || media.url) : null;
+if (src) _lastDownloadedSrc = src;
+if (typeof proceedCallback === 'function') proceedCallback();
+};
+modal.querySelector('#mossad-hf-ignore-and-gen').onclick = () => {
+close();
+const src = media ? (media.urls && media.urls[0] || media.url) : null;
+if (src) _lastDownloadedSrc = src;
+if (typeof proceedCallback === 'function') proceedCallback();
+};
+modal.querySelector('#mossad-hf-cancel').onclick = () => {
+close();
+};
+}
+let _hfCycleStep = 0;
+function cycleHfSections() {
+const targets = [
+{
+name: 'Промпт',
+el: document.querySelector('textarea[data-testid="textbox"], textarea, input[type="text"]')
+},
+{
+name: 'Пресеты качества',
+el: document.querySelector('.gradio-dropdown input, select, fieldset, div[data-testid="radio-group"]')
+},
+{
+name: 'Продолжительность',
+el: document.querySelector('input[type="range"], div[data-testid="slider"] input, input[type="number"]')
+},
+{
+name: '2input (в инпут)',
+el: Array.from(document.querySelectorAll('button, a')).find(b => /2input|to\s*input|send\s*to|image\s*to|результат\s*в\s*инпут/i.test((b.textContent || '') + (b.id || '')))
+}
+].filter(t => t.el && t.el.isConnected && t.el.offsetWidth > 0);
+if (!targets.length) {
+showToast('ℹ️ Поля ввода для слэша не найдены', true);
+return;
+}
+_hfCycleStep = (_hfCycleStep + 1) % targets.length;
+const cur = targets[_hfCycleStep];
+try {
+cur.el.focus();
+cur.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+const prevOutline = cur.el.style.outline;
+cur.el.style.outline = '2px solid #38bdf8';
+cur.el.style.boxShadow = '0 0 10px rgba(56, 189, 248, 0.6)';
+setTimeout(() => {
+cur.el.style.outline = prevOutline;
+cur.el.style.boxShadow = '';
+}, 1200);
+showToast(`🎯 Фокус: ${cur.name}`);
+} catch (_) {}
+}
 let _hfAutoDlHooked = false;
 function initAutoDlListeners() {
 if (_hfAutoDlHooked || !isSupported()) return;
 _hfAutoDlHooked = true;
 document.addEventListener('click', (e) => {
-if (!isAutoSaveEnabled()) return;
 const target = e.target;
 if (!target) return;
 const btn = target.closest('button, input[type="submit"], input[type="button"], [role="button"]');
 if (!btn) return;
 const submitBtn = findSubmitButton();
-if (btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''))) {
+const isGenBtn = btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''));
+if (!isGenBtn) return;
+const curMedia = findMedia();
+const curSrc = curMedia ? (curMedia.urls && curMedia.urls[0] || curMedia.url) : null;
+if (curSrc && curSrc !== _lastDownloadedSrc && !btn.dataset.mossadConfirmed) {
+e.preventDefault();
+e.stopPropagation();
+e.stopImmediatePropagation();
+showUnsavedResultWarning(curMedia, () => {
+btn.dataset.mossadConfirmed = 'true';
+btn.click();
+setTimeout(() => { delete btn.dataset.mossadConfirmed; }, 500);
+});
+return;
+}
+if (isAutoSaveEnabled()) {
 setTimeout(() => startWatcher(), 200);
 }
 }, true);
 document.addEventListener('keydown', (e) => {
-if (!isAutoSaveEnabled()) return;
-if (e.key === 'Enter' && !e.shiftKey) {
+if ((e.code === 'Backslash' || e.key === '\\') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+const tag = (e.target && e.target.tagName || '').toLowerCase();
+if (tag !== 'textarea' && tag !== 'input') {
+e.preventDefault();
+e.stopPropagation();
+cycleHfSections();
+return;
+}
+}
+if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
 const tag = (e.target && e.target.tagName || '').toLowerCase();
 if (tag === 'textarea' || tag === 'input') {
+const curMedia = findMedia();
+const curSrc = curMedia ? (curMedia.urls && curMedia.urls[0] || curMedia.url) : null;
+if (curSrc && curSrc !== _lastDownloadedSrc) {
+e.preventDefault();
+e.stopPropagation();
+showUnsavedResultWarning(curMedia, () => {
+triggerGenerate();
+});
+return;
+}
+if (isAutoSaveEnabled()) {
 setTimeout(() => startWatcher(), 300);
+}
 }
 }
 }, true);
@@ -10774,7 +10949,30 @@ window.MOSSAD_ENGINES.xvideos = (() => {
 function isSupported() {
 return /(?:xv-ru\.com|xvideos\d*\.com|xnxx\d*\.com)/i.test(rootDomain);
 }
+function _ensureXvideosStyles() {
+if (document.getElementById('mossad-xv-large-style')) return;
+const st = document.createElement('style');
+st.id = 'mossad-xv-large-style';
+st.textContent = `
+                #content.player-enlarged #video-player-bg,
+                #video-player-bg.player-enlarged,
+                .player-enlarged #html5video,
+                .player-enlarged #html5video_base {
+                    width: 100% !important;
+                    max-width: 100vw !important;
+                    height: 75vh !important;
+                    max-height: 75vh !important;
+                }
+                #content.player-enlarged {
+                    max-width: 98% !important;
+                    width: 98% !important;
+                    margin: 0 auto !important;
+                }
+            `;
+(document.head || document.documentElement).appendChild(st);
+}
 function toggleDoubleSize() {
+_ensureXvideosStyles();
 let handled = false;
 try {
 const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -10958,10 +11156,15 @@ if (!document.getElementById('mossad-fh-theater-style')) {
 const st = document.createElement('style');
 st.id = 'mossad-fh-theater-style';
 st.textContent = `
+                        body:has(.mossad-theater-active) main,
+                        body:has(.mossad-theater-active) .container,
+                        body:has(.mossad-theater-active) [class*="layout"] {
+                            overflow: visible !important;
+                        }
                         .mossad-theater-active {
-                            width: 100vw !important;
-                            max-width: 100vw !important;
-                            margin-left: calc(-50vw + 50%) !important;
+                            width: 98vw !important;
+                            max-width: 98vw !important;
+                            margin-left: calc(-49vw + 50%) !important;
                             height: min(85vh, 56.25vw) !important;
                             z-index: 9999 !important;
                             position: relative !important;
@@ -11202,7 +11405,28 @@ function isSupported() {
 return /(?:xhamster\d*|xh\d*)\.(?:com|desi|one|red|tube|gold)/i.test(rootDomain) ||
 /(?:xhamster|xh\d*)/i.test(location.hostname);
 }
+function _ensureXhamsterStyles() {
+if (document.getElementById('mossad-xh-large-style')) return;
+const st = document.createElement('style');
+st.id = 'mossad-xh-large-style';
+st.textContent = `
+                .page-container--wide,
+                .page-container--wide main,
+                .page-container--wide [data-role="player-container"],
+                .page-container--wide #player-container {
+                    max-width: 98% !important;
+                    width: 98% !important;
+                    margin: 0 auto !important;
+                }
+                .page-container--wide video {
+                    max-height: 80vh !important;
+                    width: 100% !important;
+                }
+            `;
+(document.head || document.documentElement).appendChild(st);
+}
 function toggleLargeMode() {
+_ensureXhamsterStyles();
 let handled = false;
 try {
 const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -13691,10 +13915,29 @@ const preset = config.relatedNavPreset || 'cycle';
 const items = getCandidateItems();
 if (!items.length) return false;
 if (_currentIndex >= 0 && _currentIndex < items.length) {
-if (e.key === 'Enter') {
+if (e.key === 'Enter' || e.code === 'Space' || e.key === ' ') {
 e.preventDefault(); e.stopPropagation();
 const inBg = !!e.ctrlKey || !!e.metaKey;
+if (!inBg) {
+const curVid = document.querySelector('video');
+if (curVid) { try { curVid.pause(); } catch (_) {} }
+}
 focusItem(_currentIndex, true, inBg);
+return true;
+}
+if (e.key === 'Escape') {
+e.preventDefault(); e.stopPropagation();
+_currentIndex = -1;
+document.querySelectorAll('.mossad-related-focused').forEach(c => {
+c.classList.remove('mossad-related-focused');
+c.style.outline = '';
+c.style.boxShadow = '';
+});
+if (_activeHoverVideo) {
+try { _activeHoverVideo.pause(); } catch (_) {}
+_activeHoverVideo = null;
+}
+showToast('▫️ Выбор превью отменён');
 return true;
 }
 }
@@ -17094,7 +17337,7 @@ return `
         `;
 const list = modal.querySelector('#mossad-hk-list');
 const HOTKEY_CATEGORIES = [
-{ id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize'] },
+{ id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize', 'stickyPlayer'] },
 { id: 'cat-nav', title: '🎞 Листание и навигация по кадрам', keys: ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'rewind', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide'] },
 { id: 'cat-dl', title: '💾 Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate', 'playInWindow'] },
 { id: 'cat-ui', title: '🛠 Меню, окна и утилиты', keys: ['updateScript', 'slideshowPanel', 'help', 'history', 'snapWidget', 'openTodos', 'grokCycle'] }
@@ -17107,6 +17350,7 @@ playPause: 'Пауза/Плей видео',
 sound: 'Звук вкл/выкл',
 expand: '⛶ Развернуть / полный экран',
 xvDoubleSize: '🔲 Большой режим плеера / Large Mode',
+stickyPlayer: '📌 Закрепить видео в углу (Sticky Player)',
 nextSlide: 'Следующий слайд',
 prevSlide: 'Предыдущий слайд',
 nextGroup: 'Следующая группа',
@@ -17998,6 +18242,44 @@ showToast(handled ? '🔲 Большой режим (Large Mode)' : '⚠️ Кн
 }, 60);
 return handled;
 }
+function mossadToggleStickyPlayer() {
+const v = (typeof getActiveVideo === 'function' ? getActiveVideo() : null) || document.querySelector('video');
+if (!v) {
+showToast('⚠️ Видеоплеер не найден на странице', true);
+return false;
+}
+const container = v.closest('#html5video_base, #video-player-bg, #player-container, .player-container, [data-role="player-container"], .player_wrap, .video-player, .player-holder, #player, [data-player]') || v;
+if (!document.getElementById('mossad-sticky-player-style')) {
+const st = document.createElement('style');
+st.id = 'mossad-sticky-player-style';
+st.textContent = `
+                .mossad-sticky-player {
+                    position: fixed !important;
+                    top: 18px !important;
+                    right: 18px !important;
+                    width: 480px !important;
+                    height: 270px !important;
+                    max-width: 42vw !important;
+                    max-height: 42vh !important;
+                    z-index: 2147483640 !important;
+                    box-shadow: 0 12px 36px rgba(0,0,0,0.85), 0 0 0 2px rgba(56, 189, 248, 0.5) !important;
+                    border-radius: 10px !important;
+                    overflow: hidden !important;
+                    background: #000 !important;
+                    transition: transform 0.2s ease, opacity 0.2s ease !important;
+                }
+                .mossad-sticky-player video {
+                    width: 100% !important;
+                    height: 100% !important;
+                    object-fit: contain !important;
+                }
+            `;
+(document.head || document.documentElement).appendChild(st);
+}
+const isSticky = container.classList.toggle('mossad-sticky-player');
+showToast(isSticky ? '📌 Видео закреплено в углу (Shift+V для сброса)' : '▫️ Видео возвращено на место');
+return true;
+}
 function mossadLargePlayerMatch(e) {
 const hk = config.hk && (config.hk.largePlayer || config.hk.xvDoubleSize);
 if (hk && hk.key) {
@@ -18485,6 +18767,12 @@ if (config.hk.playInWindow && config.hk.playInWindow.key && hotkeyMatches(e, con
 e.preventDefault();
 e.stopImmediatePropagation();
 mossadPlayInWindow();
+return;
+}
+if (config.hk.stickyPlayer && hotkeyMatches(e, config.hk.stickyPlayer)) {
+e.preventDefault();
+e.stopImmediatePropagation();
+mossadToggleStickyPlayer();
 return;
 }
 if (hotkeyMatches(e, config.hk.snapWidget)) {

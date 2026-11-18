@@ -337,6 +337,116 @@
         }
 
         /**
+         * v1.4.23: Защита от потери результатов генерации на Hugging Face Spaces
+         * Предупреждает пользователя, если он запускает новую генерацию при нескачанном результате.
+         */
+        let _warnModal = null;
+        function showUnsavedResultWarning(media, proceedCallback) {
+            if (_warnModal && _warnModal.parentNode) _warnModal.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'mossad-hf-unsaved-modal';
+            modal.style.cssText = `
+                position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+                z-index: 2147483647; background: rgba(20, 18, 24, 0.96); backdrop-filter: blur(16px);
+                border: 1px solid #f59e0b; border-radius: 12px; padding: 12px 16px;
+                box-shadow: 0 12px 36px rgba(0,0,0,0.8), 0 0 15px rgba(245, 158, 11, 0.25);
+                font-family: system-ui, -apple-system, sans-serif; color: #fff;
+                display: flex; flex-direction: column; gap: 8px; animation: mossadFadeIn 0.2s ease;
+                min-width: 320px;
+            `;
+
+            modal.innerHTML = `
+                <div style="font-weight:bold; color:#fbbf24; font-size:13px; display:flex; align-items:center; gap:6px;">
+                    ⚠️ Предыдущий результат ещё не скачан!
+                </div>
+                <div style="font-size:11px; color:#d1d5db; line-height:1.4;">
+                    Запуск новой генерации сотрёт текущее медиа без сохранения.
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
+                    <button id="mossad-hf-save-and-gen" style="background:#10b981; color:#fff; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-weight:bold; font-size:11px;">💾 Скачать и запустить</button>
+                    <button id="mossad-hf-ignore-and-gen" style="background:#374151; color:#e5e7eb; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:11px;">Всё равно запустить</button>
+                    <button id="mossad-hf-cancel" style="background:transparent; color:#9ca3af; border:1px solid #4b5563; border-radius:6px; padding:5px 8px; cursor:pointer; font-size:11px;">Отмена</button>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+            _warnModal = modal;
+
+            const close = () => { if (modal && modal.parentNode) modal.remove(); _warnModal = null; };
+
+            modal.querySelector('#mossad-hf-save-and-gen').onclick = () => {
+                close();
+                if (typeof triggerDownload === 'function') {
+                    triggerDownload(false, null, null, media);
+                }
+                const src = media ? (media.urls && media.urls[0] || media.url) : null;
+                if (src) _lastDownloadedSrc = src;
+                if (typeof proceedCallback === 'function') proceedCallback();
+            };
+
+            modal.querySelector('#mossad-hf-ignore-and-gen').onclick = () => {
+                close();
+                const src = media ? (media.urls && media.urls[0] || media.url) : null;
+                if (src) _lastDownloadedSrc = src;
+                if (typeof proceedCallback === 'function') proceedCallback();
+            };
+
+            modal.querySelector('#mossad-hf-cancel').onclick = () => {
+                close();
+            };
+        }
+
+        /**
+         * Быстрый переход по слэшу (\) между ключевыми блоками спейса:
+         * 1) Поле ввода промпта
+         * 2) Пресеты качества / разрешения
+         * 3) Продолжительность / слайдер
+         * 4) Кнопка «2input»
+         */
+        let _hfCycleStep = 0;
+        function cycleHfSections() {
+            const targets = [
+                {
+                    name: 'Промпт',
+                    el: document.querySelector('textarea[data-testid="textbox"], textarea, input[type="text"]')
+                },
+                {
+                    name: 'Пресеты качества',
+                    el: document.querySelector('.gradio-dropdown input, select, fieldset, div[data-testid="radio-group"]')
+                },
+                {
+                    name: 'Продолжительность',
+                    el: document.querySelector('input[type="range"], div[data-testid="slider"] input, input[type="number"]')
+                },
+                {
+                    name: '2input (в инпут)',
+                    el: Array.from(document.querySelectorAll('button, a')).find(b => /2input|to\s*input|send\s*to|image\s*to|результат\s*в\s*инпут/i.test((b.textContent || '') + (b.id || '')))
+                }
+            ].filter(t => t.el && t.el.isConnected && t.el.offsetWidth > 0);
+
+            if (!targets.length) {
+                showToast('ℹ️ Поля ввода для слэша не найдены', true);
+                return;
+            }
+
+            _hfCycleStep = (_hfCycleStep + 1) % targets.length;
+            const cur = targets[_hfCycleStep];
+            try {
+                cur.el.focus();
+                cur.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const prevOutline = cur.el.style.outline;
+                cur.el.style.outline = '2px solid #38bdf8';
+                cur.el.style.boxShadow = '0 0 10px rgba(56, 189, 248, 0.6)';
+                setTimeout(() => {
+                    cur.el.style.outline = prevOutline;
+                    cur.el.style.boxShadow = '';
+                }, 1200);
+                showToast(`🎯 Фокус: ${cur.name}`);
+            } catch (_) {}
+        }
+
+        /**
          * v1.4.7: Автоматическое отслеживание клика «Generate/Submit» и нажатия Enter
          * для гарантированного запуска «ждуна» при включенном Авто-DL.
          */
@@ -345,26 +455,65 @@
             if (_hfAutoDlHooked || !isSupported()) return;
             _hfAutoDlHooked = true;
 
-            // 1. Клик по кнопке генерации на странице
+            // 1. Клик по кнопке генерации на странице (с защитой от стирания нескачанного медиа)
             document.addEventListener('click', (e) => {
-                if (!isAutoSaveEnabled()) return;
                 const target = e.target;
                 if (!target) return;
                 const btn = target.closest('button, input[type="submit"], input[type="button"], [role="button"]');
                 if (!btn) return;
                 const submitBtn = findSubmitButton();
-                if (btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''))) {
+                const isGenBtn = btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''));
+                if (!isGenBtn) return;
+
+                const curMedia = findMedia();
+                const curSrc = curMedia ? (curMedia.urls && curMedia.urls[0] || curMedia.url) : null;
+                if (curSrc && curSrc !== _lastDownloadedSrc && !btn.dataset.mossadConfirmed) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    showUnsavedResultWarning(curMedia, () => {
+                        btn.dataset.mossadConfirmed = 'true';
+                        btn.click();
+                        setTimeout(() => { delete btn.dataset.mossadConfirmed; }, 500);
+                    });
+                    return;
+                }
+
+                if (isAutoSaveEnabled()) {
                     setTimeout(() => startWatcher(), 200);
                 }
             }, true);
 
-            // 2. Нажатие Enter в поле промпта
+            // 2. Нажатия клавиш: слэш (\) для навигации, Enter для генерации с защитой
             document.addEventListener('keydown', (e) => {
-                if (!isAutoSaveEnabled()) return;
-                if (e.key === 'Enter' && !e.shiftKey) {
+                // Переход по слэшу (\)
+                if ((e.code === 'Backslash' || e.key === '\\') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                    const tag = (e.target && e.target.tagName || '').toLowerCase();
+                    // Если курсор не внутри обычного набора текста
+                    if (tag !== 'textarea' && tag !== 'input') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        cycleHfSections();
+                        return;
+                    }
+                }
+
+                if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
                     const tag = (e.target && e.target.tagName || '').toLowerCase();
                     if (tag === 'textarea' || tag === 'input') {
-                        setTimeout(() => startWatcher(), 300);
+                        const curMedia = findMedia();
+                        const curSrc = curMedia ? (curMedia.urls && curMedia.urls[0] || curMedia.url) : null;
+                        if (curSrc && curSrc !== _lastDownloadedSrc) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            showUnsavedResultWarning(curMedia, () => {
+                                triggerGenerate();
+                            });
+                            return;
+                        }
+                        if (isAutoSaveEnabled()) {
+                            setTimeout(() => startWatcher(), 300);
+                        }
                     }
                 }
             }, true);

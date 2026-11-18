@@ -8,10 +8,32 @@
                    /(?:xhamster|xh\d*)/i.test(location.hostname);
         }
 
+        function _ensureXhamsterStyles() {
+            if (document.getElementById('mossad-xh-large-style')) return;
+            const st = document.createElement('style');
+            st.id = 'mossad-xh-large-style';
+            st.textContent = `
+                .page-container--wide,
+                .page-container--wide main,
+                .page-container--wide [data-role="player-container"],
+                .page-container--wide #player-container {
+                    max-width: 98% !important;
+                    width: 98% !important;
+                    margin: 0 auto !important;
+                }
+                .page-container--wide video {
+                    max-height: 80vh !important;
+                    width: 100% !important;
+                }
+            `;
+            (document.head || document.documentElement).appendChild(st);
+        }
+
         /**
          * Переключение Большого режима / Large Mode (Theater mode) на xHamster
          */
         function toggleLargeMode() {
+            _ensureXhamsterStyles();
             let handled = false;
 
             // 1. Через API плеера (unsafeWindow)

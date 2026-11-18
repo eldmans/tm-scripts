@@ -7,10 +7,34 @@
             return /(?:xv-ru\.com|xvideos\d*\.com|xnxx\d*\.com)/i.test(rootDomain);
         }
 
+        function _ensureXvideosStyles() {
+            if (document.getElementById('mossad-xv-large-style')) return;
+            const st = document.createElement('style');
+            st.id = 'mossad-xv-large-style';
+            st.textContent = `
+                #content.player-enlarged #video-player-bg,
+                #video-player-bg.player-enlarged,
+                .player-enlarged #html5video,
+                .player-enlarged #html5video_base {
+                    width: 100% !important;
+                    max-width: 100vw !important;
+                    height: 75vh !important;
+                    max-height: 75vh !important;
+                }
+                #content.player-enlarged {
+                    max-width: 98% !important;
+                    width: 98% !important;
+                    margin: 0 auto !important;
+                }
+            `;
+            (document.head || document.documentElement).appendChild(st);
+        }
+
         /**
          * Переключение размера плеера: обычный <-> двойной размер (Double player size)
          */
         function toggleDoubleSize() {
+            _ensureXvideosStyles();
             let handled = false;
 
             // 1. Через API встроенного плеера (unsafeWindow)

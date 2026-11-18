@@ -220,12 +220,32 @@
             const items = getCandidateItems();
             if (!items.length) return false;
 
-            // 1. Enter и Пробел при активном фокусе на карточке
+            // 1. Enter, Пробел и Ctrl+Пробел при активном фокусе на карточке
             if (_currentIndex >= 0 && _currentIndex < items.length) {
-                if (e.key === 'Enter') {
+                if (e.key === 'Enter' || e.code === 'Space' || e.key === ' ') {
                     e.preventDefault(); e.stopPropagation();
                     const inBg = !!e.ctrlKey || !!e.metaKey;
+                    if (!inBg) {
+                        // При переходе на новую страницу ставим текущее воспроизведение на паузу
+                        const curVid = document.querySelector('video');
+                        if (curVid) { try { curVid.pause(); } catch (_) {} }
+                    }
                     focusItem(_currentIndex, true, inBg);
+                    return true;
+                }
+                if (e.key === 'Escape') {
+                    e.preventDefault(); e.stopPropagation();
+                    _currentIndex = -1;
+                    document.querySelectorAll('.mossad-related-focused').forEach(c => {
+                        c.classList.remove('mossad-related-focused');
+                        c.style.outline = '';
+                        c.style.boxShadow = '';
+                    });
+                    if (_activeHoverVideo) {
+                        try { _activeHoverVideo.pause(); } catch (_) {}
+                        _activeHoverVideo = null;
+                    }
+                    showToast('▫️ Выбор превью отменён');
                     return true;
                 }
             }

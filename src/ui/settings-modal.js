@@ -973,7 +973,7 @@
         
         const list = modal.querySelector('#mossad-hk-list');
         const HOTKEY_CATEGORIES = [
-            { id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize'] },
+            { id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize', 'stickyPlayer'] },
             { id: 'cat-nav', title: '🎞 Листание и навигация по кадрам', keys: ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'rewind', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide'] },
             { id: 'cat-dl', title: '💾 Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate', 'playInWindow'] },
             { id: 'cat-ui', title: '🛠 Меню, окна и утилиты', keys: ['updateScript', 'slideshowPanel', 'help', 'history', 'snapWidget', 'openTodos', 'grokCycle'] }
@@ -988,6 +988,7 @@
             sound:            'Звук вкл/выкл',
             expand:           '⛶ Развернуть / полный экран',
             xvDoubleSize:     '🔲 Большой режим плеера / Large Mode',
+            stickyPlayer:     '📌 Закрепить видео в углу (Sticky Player)',
 
             // Листание и навигация по кадрам
             nextSlide:        'Следующий слайд',

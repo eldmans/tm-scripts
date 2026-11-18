@@ -92,6 +92,7 @@
             grokLastSlide:    { key: '4',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+4 — Grok: последний слайд диалога
             updateScript:     { key: 'F5',         ctrl: true,  alt: false, shift: true,  meta: false }, // v1.4.22: Ctrl+Shift+F5 — обновить скрипт с GitHub
             playInWindow:     { key: '',           ctrl: false, alt: false, shift: false }, // v1.4.12: открыть видео в отдельной вкладке (📺)
+            stickyPlayer:     { key: 'V',          ctrl: false, alt: false, shift: true  }, // v1.4.23: Shift+V — закрепить видео в углу (Sticky Player)
         }
     };
 
