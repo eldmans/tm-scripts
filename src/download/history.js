@@ -421,8 +421,9 @@
      * @param {Function} onConfirmDownload - коллбек, замыкающий URL/media момента нажатия
      * @param {string} [lockedPostUrl] - URL поста в момент нажатия (фиксируется!)
      * @param {string} [lockedMediaUrl] - URL медиа в момент нажатия (фиксируется!)
+     * @param {Function} [onTimeout]   - коллбек по истечении таймера (для безопасного пост-действия)
      */
-    function showDuplicateDownloadNotice(record, onConfirmDownload, lockedPostUrl, lockedMediaUrl) {
+    function showDuplicateDownloadNotice(record, onConfirmDownload, lockedPostUrl, lockedMediaUrl, onTimeout) {
         // Если включена галочка «Качать дубли»: качаем сразу и показываем укороченное уведомление без таймера
         try { mossadBeep('dup'); } catch (e) {} // v1.3.82: двойной низкий сигнал «уже скачивали»
         if (config.allowDuplicates) {
@@ -438,26 +439,20 @@
         if (existing) existing.remove();
         if (_dupTimerInterval) clearInterval(_dupTimerInterval);
 
-        // v1.3.82: уведомление было внутри виджета — при скрытом виджете (состояние «hidden») или в полноэкранном
-        // плеере его не было видно («не всегда появляется»). Тогда — отдельной плашкой поверх страницы.
-        const widget = document.getElementById('mossad-widget-container');
-        const widgetVisible = !!(widget && !document.fullscreenElement && widget.style.display !== 'none'
-            && (typeof getComputedStyle !== 'function' || (getComputedStyle(widget).display !== 'none' && getComputedStyle(widget).visibility !== 'hidden')));
-        const container = widgetVisible ? widget : (document.fullscreenElement || document.body);
+        // v1.4.22: Окно предупреждения о дубликате ВСЕГДА монтируется в центр экрана поверх всего
+        const container = document.fullscreenElement || document.body;
 
         const notice = document.createElement('div');
         notice.id = 'mossad-dup-warning';
         notice.style.cssText = `
-            background: rgba(25, 20, 20, 0.95); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-            border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 10px; padding: 8px 12px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.6); font-family: system-ui, -apple-system, sans-serif;
-            color: #e5e7eb; font-size: 12px; display: flex; flex-direction: column; gap: 4px;
-            animation: mossadFadeIn 0.2s ease; margin-top: 6px; z-index: 999999; pointer-events: auto;
+            position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+            z-index: 2147483647; pointer-events: auto;
+            background: rgba(20, 18, 24, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(239, 68, 68, 0.55); border-radius: 12px; padding: 10px 14px;
+            box-shadow: 0 12px 36px rgba(0,0,0,0.75), 0 0 15px rgba(239, 68, 68, 0.25);
+            font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; font-size: 12px;
+            display: flex; flex-direction: column; gap: 6px; animation: mossadFadeIn 0.2s ease;
         `;
-        if (!widgetVisible) {
-            notice.style.position = 'fixed'; notice.style.top = '16px'; notice.style.left = '50%';
-            notice.style.transform = 'translateX(-50%)'; notice.style.zIndex = '2147483646'; notice.style.marginTop = '0';
-        }
 
         let secondsLeft = 6;
         // v1.4.16: вычисление dupInfo ДО генерации разметки (исправление TDZ ReferenceError)
@@ -527,6 +522,9 @@
             if (timerTxt) timerTxt.textContent = `⏱ Нажмите «Скачать» за ${secondsLeft}с для повтора`;
             if (secondsLeft <= 0) {
                 closeNotice();
+                if (typeof onTimeout === 'function') {
+                    try { onTimeout(); } catch (err) {}
+                }
             }
         }, 1000);
     }

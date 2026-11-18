@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.21
+// @version      1.4.22
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.21';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.22';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1144,7 +1144,7 @@ grokFirstSlide: { key: '1', ctrl: false, alt: true, shift: false },
 grokHistBack: { key: '2', ctrl: false, alt: true, shift: false },
 grokHistFwd: { key: '3', ctrl: false, alt: true, shift: false },
 grokLastSlide: { key: '4', ctrl: false, alt: true, shift: false },
-updateScript: { key: 'r', ctrl: false, alt: true, shift: false, meta: true },
+updateScript: { key: 'F5', ctrl: true, alt: false, shift: true, meta: false },
 playInWindow: { key: '', ctrl: false, alt: false, shift: false },
 }
 };
@@ -1804,26 +1804,10 @@ onerror: reject
 });
 }
 function scheduleSyncPush() {
-if (!config.githubToken) return;
-if (_syncTimer) clearTimeout(_syncTimer);
-showSyncStatus('🔄 Синхронизация...', '#f59e0b');
-_syncTimer = setTimeout(async () => {
-try {
-await pushConfigToGitHub();
-showSyncStatus('✅ Синхронизировано', '#10b981', true);
-} catch (e) {
-showSyncStatus('⚠️ Ошибка синхронизации', '#ef4444');
-console.error('[MOSSAD Sync] Push failed:', e);
-}
-}, 2000);
+return;
 }
 async function checkAndPullOnStartup() {
-if (!config.githubToken) return;
-try {
-const pulled = await pullConfigFromGitHub();
-if (pulled) showSyncStatus('✅ Конфиг обновлён', '#10b981', true);
-} catch (e) {
-}
+return;
 }
 window.addEventListener('storage', (ev) => {
 if (ev.key !== STORAGE_KEY || window.capturingFor !== null) return;
@@ -2841,6 +2825,66 @@ mode: 'cors'
 }
 window.sendPromptToVault = sendPromptToVault;
 
+// ── src/core/tracker.js ──
+(function initMossadTracker() {
+const TRACKER_STORAGE_KEY = 'mossad_usage_stats';
+let _statsCache = null;
+let _saveTimer = null;
+function getStats() {
+if (!_statsCache) {
+try {
+if (typeof GM_getValue === 'function') {
+_statsCache = GM_getValue(TRACKER_STORAGE_KEY, {});
+} else {
+const raw = localStorage.getItem(TRACKER_STORAGE_KEY);
+_statsCache = raw ? JSON.parse(raw) : {};
+}
+} catch (e) {
+_statsCache = {};
+}
+}
+return _statsCache;
+}
+function saveStats() {
+if (!_statsCache) return;
+try {
+if (typeof GM_setValue === 'function') {
+GM_setValue(TRACKER_STORAGE_KEY, _statsCache);
+} else {
+localStorage.setItem(TRACKER_STORAGE_KEY, JSON.stringify(_statsCache));
+}
+} catch (e) {}
+}
+function scheduleSave() {
+if (_saveTimer) return;
+_saveTimer = setTimeout(() => {
+_saveTimer = null;
+saveStats();
+}, 5000);
+}
+window.mossadTrackEvent = function(category, id) {
+if (!category || !id) return;
+const stats = getStats();
+if (!stats[category]) stats[category] = {};
+if (!stats[category][id]) stats[category][id] = { count: 0, firstUsed: Date.now() };
+stats[category][id].count = (stats[category][id].count || 0) + 1;
+stats[category][id].lastUsed = Date.now();
+scheduleSave();
+};
+window.mossadGetStats = function() {
+return getStats();
+};
+document.addEventListener('click', (e) => {
+const btn = e.target.closest('button, [data-mossad-track], .mossad-trackable');
+if (!btn) return;
+const id = btn.id || btn.getAttribute('data-mossad-label') || btn.title || btn.textContent.trim().slice(0, 20);
+if (id && (btn.closest('#mossad-widget-container') || btn.closest('#mossad-hk-modal') || (btn.id && btn.id.startsWith('mossad-')))) {
+window.mossadTrackEvent('click', id);
+}
+}, true);
+window.addEventListener('beforeunload', saveStats);
+})();
+
 // ── src/engines/registry.js ──
 window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
 const MossadEngineRegistry = {
@@ -3796,7 +3840,7 @@ console.error('[MOSSAD DB] Ошибка сохранения в IndexedDB:', e);
 return false;
 }
 }
-function showDuplicateDownloadNotice(record, onConfirmDownload, lockedPostUrl, lockedMediaUrl) {
+function showDuplicateDownloadNotice(record, onConfirmDownload, lockedPostUrl, lockedMediaUrl, onTimeout) {
 try { mossadBeep('dup'); } catch (e) {}
 if (config.allowDuplicates) {
 showToast(`⚠️ Дубликат: ${record.filename || 'файл'} (${record.date || 'ранее'})`, false, 3000);
@@ -3808,23 +3852,18 @@ return;
 const existing = document.getElementById('mossad-dup-warning');
 if (existing) existing.remove();
 if (_dupTimerInterval) clearInterval(_dupTimerInterval);
-const widget = document.getElementById('mossad-widget-container');
-const widgetVisible = !!(widget && !document.fullscreenElement && widget.style.display !== 'none'
-&& (typeof getComputedStyle !== 'function' || (getComputedStyle(widget).display !== 'none' && getComputedStyle(widget).visibility !== 'hidden')));
-const container = widgetVisible ? widget : (document.fullscreenElement || document.body);
+const container = document.fullscreenElement || document.body;
 const notice = document.createElement('div');
 notice.id = 'mossad-dup-warning';
 notice.style.cssText = `
-            background: rgba(25, 20, 20, 0.95); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-            border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 10px; padding: 8px 12px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.6); font-family: system-ui, -apple-system, sans-serif;
-            color: #e5e7eb; font-size: 12px; display: flex; flex-direction: column; gap: 4px;
-            animation: mossadFadeIn 0.2s ease; margin-top: 6px; z-index: 999999; pointer-events: auto;
+            position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+            z-index: 2147483647; pointer-events: auto;
+            background: rgba(20, 18, 24, 0.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(239, 68, 68, 0.55); border-radius: 12px; padding: 10px 14px;
+            box-shadow: 0 12px 36px rgba(0,0,0,0.75), 0 0 15px rgba(239, 68, 68, 0.25);
+            font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb; font-size: 12px;
+            display: flex; flex-direction: column; gap: 6px; animation: mossadFadeIn 0.2s ease;
         `;
-if (!widgetVisible) {
-notice.style.position = 'fixed'; notice.style.top = '16px'; notice.style.left = '50%';
-notice.style.transform = 'translateX(-50%)'; notice.style.zIndex = '2147483646'; notice.style.marginTop = '0';
-}
 let secondsLeft = 6;
 const dupInfo = findOriginalRecordInfo(record);
 const previewUrl = lockedMediaUrl || record.url;
@@ -3884,6 +3923,9 @@ const timerTxt = notice.querySelector('#mossad-dup-timer-txt');
 if (timerTxt) timerTxt.textContent = `⏱ Нажмите «Скачать» за ${secondsLeft}с для повтора`;
 if (secondsLeft <= 0) {
 closeNotice();
+if (typeof onTimeout === 'function') {
+try { onTimeout(); } catch (err) {}
+}
 }
 }, 1000);
 }
@@ -5169,13 +5211,15 @@ const lockedMediaUrl = media ? media.url : null;
 if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl) && !isDuplicateConfirmed(lockedMediaUrl)) {
 checkFileInHistory(null, lockedMediaUrl, currentPostUrl, currentMediaType).then(record => {
 if (record) {
-showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback), currentPostUrl, lockedMediaUrl);
+const onTimeout = () => {
 if (!config.allowDuplicates) {
 const act = mossadPdAction();
 if (act === 'upns' || act === 'always') {
 performPostDownloadAction();
 }
 }
+};
+showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback), currentPostUrl, lockedMediaUrl, onTimeout);
 } else {
 triggerGrokDownload(true, null, onDoneCallback);
 }
@@ -11619,13 +11663,15 @@ if (!bypassDuplicateCheck && !isDuplicateConfirmed(primaryUrl) && !isDuplicateCo
 checkFileInHistory(null, primaryUrl, canonicalPostUrl, media.type).then(record => {
 if (record) {
 _activeDuplicateRecord = record;
-showDuplicateDownloadNotice(record, () => triggerDownload(true, record, null, presetMedia), canonicalPostUrl, primaryUrl);
+const onTimeout = () => {
 if (!config.allowDuplicates) {
 const act = mossadPdAction();
 if (act === 'upns' || act === 'always') {
 performPostDownloadAction();
 }
 }
+};
+showDuplicateDownloadNotice(record, () => triggerDownload(true, record, null, presetMedia), canonicalPostUrl, primaryUrl, onTimeout);
 } else {
 _activeDuplicateRecord = null;
 triggerDownload(true, null, onDoneCallback, presetMedia);
@@ -14177,37 +14223,53 @@ mossadLabelEl(btnUpdate, 'update');
 btnUpdate.style.cssText = `background: #18202f; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; color: #64748b; opacity: 0.55; cursor: pointer; font-size: 13px; padding: 4px 10px; min-width: 32px; transition: all 0.3s ease; text-align: center;`;
 let _turboUpdateCheck = false;
 let _turboTimeoutId = null;
-let _turboIntervalId = null;
 let _updateCheckInProgress = false;
+let _progressiveStep = 0;
+const PROGRESSIVE_DELAYS = [5000, 10000, 15000, 20000, 30000, 45000, 60000, 90000, 120000];
 function stopTurboMode(notify = false) {
 _turboUpdateCheck = false;
+_progressiveStep = 0;
 if (_turboTimeoutId) {
 clearTimeout(_turboTimeoutId);
 _turboTimeoutId = null;
 }
-if (_turboIntervalId) {
-clearInterval(_turboIntervalId);
-_turboIntervalId = null;
-}
 setUpdateBtnState('idle');
 if (notify) {
-showToast('⚪ Ожидание обновления завершено (2 мин истекли).');
+showToast('⚪ Ожидание обновления завершено.');
 }
+}
+function scheduleNextProgressiveCheck() {
+if (!_turboUpdateCheck) return;
+if (_progressiveStep >= PROGRESSIVE_DELAYS.length) {
+stopTurboMode(true);
+return;
+}
+const delay = PROGRESSIVE_DELAYS[_progressiveStep];
+const sec = Math.round(delay / 1000);
+_turboTimeoutId = setTimeout(() => {
+if (!_turboUpdateCheck) return;
+checkRemoteVersion((hasUpdate) => {
+if (!hasUpdate && _turboUpdateCheck) {
+_progressiveStep++;
+scheduleNextProgressiveCheck();
+}
+});
+}, delay);
+showToast(`⏳ Ждём релиз на GitHub (проверка через ${sec}с, шаг ${_progressiveStep + 1}/${PROGRESSIVE_DELAYS.length})...`);
 }
 function startTurboMode() {
 if (_turboUpdateCheck) {
 stopTurboMode(false);
 }
 _turboUpdateCheck = true;
-_turboTimeoutId = setTimeout(() => {
-stopTurboMode(true);
-}, 120000);
-_turboIntervalId = setInterval(() => {
-if (_turboUpdateCheck) checkRemoteVersion();
-}, 5000);
+_progressiveStep = 0;
 setUpdateBtnState('turbo');
-showToast('🟢 Ожидание обновления активно (2 мин, каждые 5 с). Как только выйдет новая версия — откроется окно установки.');
-checkRemoteVersion();
+showToast('🟢 Ожидание обновления: 5с, 10с, 15с... до 2 мин. При выходе релиза сразу откроется установка.');
+checkRemoteVersion((hasUpdate) => {
+if (!hasUpdate && _turboUpdateCheck) {
+scheduleNextProgressiveCheck();
+}
+});
 }
 function openUpdateTab() {
 const updateUrl = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
@@ -14219,9 +14281,21 @@ return;
 }
 window.open(updateUrl, '_blank');
 }
+window.mossadCheckOrWaitUpdate = function() {
+showToast('🔍 Проверяем обновления на GitHub...');
+checkRemoteVersion((hasUpdate) => {
+if (hasUpdate) {
+showToast('🚀 Найдено обновление! Открываем установку в новой вкладке...');
+openUpdateTab();
+} else {
+showToast('ℹ️ Новой версии на GitHub пока нет. Включаем режим ожидания...');
+startTurboMode();
+}
+});
+};
 btnUpdate.onclick = () => {
 if (_turboUpdateCheck) stopTurboMode(false);
-showToast('🚀 Открываем обновление скрипта...');
+showToast('🚀 Открываем обновление скрипта в новой вкладке...');
 openUpdateTab();
 };
 btnUpdate.oncontextmenu = (e) => {
@@ -14242,14 +14316,14 @@ btnUpdate.style.color = '#10b981';
 btnUpdate.style.border = '1px solid #10b981';
 btnUpdate.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.4)';
 btnUpdate.style.opacity = '1';
-btnUpdate.title = '🟢 Ожидание обновления (2 мин, каждые 5 с). ПКМ — отменить, ЛКМ — открыть скрипт сейчас';
+btnUpdate.title = '🟢 Ожидание обновления (прогрессивный интервал). ПКМ — отменить, ЛКМ — открыть скрипт сейчас';
 } else {
 btnUpdate.style.background = '#18202f';
 btnUpdate.style.color = '#64748b';
 btnUpdate.style.border = '1px solid rgba(255, 255, 255, 0.06)';
 btnUpdate.style.boxShadow = 'none';
 btnUpdate.style.opacity = '0.55';
-btnUpdate.title = `MOSSAD v${SCRIPT_VERSION}\nЛКМ — сразу обновить (открыть скрипт)\nПКМ — ждать релиз (2 мин опрос)`;
+btnUpdate.title = `MOSSAD v${SCRIPT_VERSION}\nЛКМ — сразу обновить (в новой вкладке)\nПКМ / Ctrl+Shift+F5 — ждать релиз (5с..120с)`;
 }
 }
 setUpdateBtnState('idle');
@@ -14265,25 +14339,25 @@ if (rv < lv) return false;
 }
 return false;
 }
-function checkRemoteVersion() {
-if (!_turboUpdateCheck) return;
+function checkRemoteVersion(callback) {
 if (_updateCheckInProgress) return;
 _updateCheckInProgress = true;
 const now = Date.now();
 const url = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/src/banner.js?t=' + now;
 const onText = (txt) => {
 _updateCheckInProgress = false;
-if (!_turboUpdateCheck) return;
 const m = txt && txt.match(/\/\/\s*@version\s+([0-9.]+)/i);
+let hasUpdate = false;
 if (m && m[1]) {
 const remoteVer = m[1].trim();
-const hasUpdate = isNewerVersion(remoteVer, SCRIPT_VERSION);
+hasUpdate = isNewerVersion(remoteVer, SCRIPT_VERSION);
 if (hasUpdate) {
 stopTurboMode(false);
-showToast(`🎉 Найдена v${remoteVer}! Открываем окно установки...`);
+showToast(`🎉 Найдена v${remoteVer}! Открываем установку в новой вкладке...`);
 openUpdateTab();
 }
 }
+if (typeof callback === 'function') callback(hasUpdate);
 };
 if (typeof GM_xmlhttpRequest === 'function') {
 try {
@@ -14292,8 +14366,8 @@ method: 'GET',
 url: url,
 timeout: 5000,
 onload: (res) => onText(res.responseText),
-onerror: () => { _updateCheckInProgress = false; },
-ontimeout: () => { _updateCheckInProgress = false; }
+onerror: () => { _updateCheckInProgress = false; if (typeof callback === 'function') callback(false); },
+ontimeout: () => { _updateCheckInProgress = false; if (typeof callback === 'function') callback(false); }
 });
 return;
 } catch(e) {}
@@ -14301,7 +14375,7 @@ return;
 fetch(url, { cache: 'no-store' })
 .then(r => r.text())
 .then(onText)
-.catch(() => { _updateCheckInProgress = false; });
+.catch(() => { _updateCheckInProgress = false; if (typeof callback === 'function') callback(false); });
 }
 const btnTodo = document.createElement('button');
 btnTodo.id = 'mossad-btn-todo';
@@ -14603,12 +14677,10 @@ panel.innerHTML = `
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 ` : ''}
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <select id="mossad-sel-dl" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
-                        <option value="none" ${config.downloadType === 'none' ? 'selected' : ''}>Не скачивать</option>
-                        <option value="all" ${config.downloadType === 'all' ? 'selected' : ''}>Качать Всё</option>
-                        <option value="photo" ${config.downloadType === 'photo' ? 'selected' : ''}>Качать Фото</option>
-                        <option value="video" ${config.downloadType === 'video' ? 'selected' : ''}>Качать Видео</option>
-                    </select>
+                    <div id="mossad-dl-toggle-group" style="display:inline-flex; align-items:center; gap:3px; background:#111827; padding:2px 4px; border-radius:6px; border:1px solid #374151;">
+                        <button type="button" id="mossad-btn-dl-photo" title="Скачивание фото (клик — вкл/выкл)" style="background:${(config.downloadType==='photo'||config.downloadType==='all')?'rgba(244,114,182,0.2)':'transparent'}; border:${(config.downloadType==='photo'||config.downloadType==='all')?'1px solid #f472b6':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='photo'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">📷</button>
+                        <button type="button" id="mossad-btn-dl-video" title="Скачивание видео (клик — вкл/выкл)" style="background:${(config.downloadType==='video'||config.downloadType==='all')?'rgba(56,189,248,0.2)':'transparent'}; border:${(config.downloadType==='video'||config.downloadType==='all')?'1px solid #38bdf8':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='video'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">🎬</button>
+                    </div>
                     <span style="display:flex; align-items:center; gap:4px;" title="Что делать после скачивания. «Не СШ +1» — перейти к следующему, только если слайдшоу не запущено (на паузе — считается запущенным). «+1 всегда» — всегда (кроме скачивания самим слайдшоу: оно шагает само). Delete — только Grok">
                     <span data-mossad-label="pdLabel" style="white-space:nowrap;">${LH('pdLabel')}</span>
                     <select id="mossad-sel-pd" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
@@ -14733,7 +14805,53 @@ const numOr = (v, fallback) => { const n = parseFloat(v); return isFinite(n) ? n
 panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, Math.round(numOr(e.target.value, config.videoLoops)))), 300);
 panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(0, numOr(e.target.value, config.slideshowDelay))), 300);
 panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, numOr(e.target.value, config.delayAfterVideo))), 300);
-panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
+const btnDlPhoto = panel.querySelector('#mossad-btn-dl-photo');
+const btnDlVideo = panel.querySelector('#mossad-btn-dl-video');
+const updateDlButtonsUI = () => {
+const dt = config.downloadType || 'video';
+const hasPhoto = dt === 'photo' || dt === 'all';
+const hasVideo = dt === 'video' || dt === 'all';
+if (btnDlPhoto) {
+btnDlPhoto.style.background = hasPhoto ? 'rgba(244,114,182,0.2)' : 'transparent';
+btnDlPhoto.style.border = hasPhoto ? '1px solid #f472b6' : '1px solid transparent';
+btnDlPhoto.style.boxShadow = hasPhoto ? '0 0 6px rgba(244,114,182,0.35)' : 'none';
+btnDlPhoto.style.opacity = hasPhoto ? '1' : '0.45';
+}
+if (btnDlVideo) {
+btnDlVideo.style.background = hasVideo ? 'rgba(56,189,248,0.2)' : 'transparent';
+btnDlVideo.style.border = hasVideo ? '1px solid #38bdf8' : '1px solid transparent';
+btnDlVideo.style.boxShadow = hasVideo ? '0 0 6px rgba(56,189,248,0.35)' : 'none';
+btnDlVideo.style.opacity = hasVideo ? '1' : '0.45';
+}
+};
+if (btnDlPhoto) {
+btnDlPhoto.onclick = () => {
+const dt = config.downloadType || 'video';
+let next = 'none';
+if (dt === 'all') next = 'video';
+else if (dt === 'photo') next = 'none';
+else if (dt === 'video') next = 'all';
+else next = 'photo';
+Settings.set('downloadType', next);
+updateDlButtonsUI();
+if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+showToast(`📷 Скачивание фото: ${next === 'photo' || next === 'all' ? 'ВКЛ' : 'ВЫКЛ'}`);
+};
+}
+if (btnDlVideo) {
+btnDlVideo.onclick = () => {
+const dt = config.downloadType || 'video';
+let next = 'none';
+if (dt === 'all') next = 'photo';
+else if (dt === 'video') next = 'none';
+else if (dt === 'photo') next = 'all';
+else next = 'video';
+Settings.set('downloadType', next);
+updateDlButtonsUI();
+if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+showToast(`🎬 Скачивание видео: ${next === 'video' || next === 'all' ? 'ВКЛ' : 'ВЫКЛ'}`);
+};
+}
 panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
 const selHfAutoSave = panel.querySelector('#mossad-sel-hf-autosave');
 if (selHfAutoSave) {
@@ -16982,35 +17100,35 @@ const HOTKEY_CATEGORIES = [
 { id: 'cat-ui', title: '🛠 Меню, окна и утилиты', keys: ['updateScript', 'slideshowPanel', 'help', 'history', 'snapWidget', 'openTodos', 'grokCycle'] }
 ];
 const keysMap = {
-galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert; без ссылок — 1-е нажатие собирает)',
-slideshowStart: 'Малое слайдшоу / ракета (Shift+Insert)',
+galleryPlayPause: 'Большое слайдшоу: Плей/Пауза',
+slideshowStart: 'Малое слайдшоу / ракета',
 galleryStop: 'Стоп большого слайдшоу',
-playPause: 'Пауза/Плей видео (Pause)',
-sound: 'Звук вкл/выкл (ScrollLock)',
-expand: '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
-xvDoubleSize: '🔲 Большой режим плеера / Large Mode (T или L — xHamster, XVideos, Faphouse и др.)',
-nextSlide: 'Следующий слайд (ArrowRight)',
-prevSlide: 'Предыдущий слайд (ArrowLeft)',
-nextGroup: 'Следующая группа (Alt+PageDown)',
-prevGroup: 'Предыдущая группа (Alt+PageUp)',
-rewind: 'Мотать в начало / шаг назад (Alt+R)',
-grokFirstSlide: 'Grok — первый кадр/слайд диалога (Alt+1)',
-grokHistBack: 'Grok — назад по истории слайдов (Alt+2)',
-grokHistFwd: 'Grok — вперёд по истории слайдов (Alt+3)',
-grokLastSlide: 'Grok — последний кадр/слайд диалога (Alt+4)',
-download: 'Скачать медиа (PageDown)',
-upscale: 'Улучшить (Shift+«+» / Shift+Num+)',
-deleteVid: 'Удалить видео/пост (Delete)',
-duplicateNext: 'Дублировать в фоне + Слайд (Ctrl+Пробел)',
-generate: 'Генерация Space / Отправка Grok (Ctrl+Enter)',
-playInWindow: '📺 Открыть видео в новой вкладке (по умолчанию не назначено)',
-updateScript: 'Обновить скрипт с GitHub (Win+Alt+R / клик 🔄)',
-slideshowPanel: 'Меню: полное / краткое / скрыть (Ctrl+Insert)',
-help: 'Настройки клавиш (Ctrl+F1)',
-history: 'Переход в Saved Grok (Home)',
-snapWidget: 'Привязать к левому верхнему краю (F8)',
-openTodos: 'Открыть «📝 Тудушки» (по умолчанию не назначено)',
-grokCycle: 'Grok — цикл: промт → фото/видео → длина/соотношение (\\)'
+playPause: 'Пауза/Плей видео',
+sound: 'Звук вкл/выкл',
+expand: '⛶ Развернуть / полный экран',
+xvDoubleSize: '🔲 Большой режим плеера / Large Mode',
+nextSlide: 'Следующий слайд',
+prevSlide: 'Предыдущий слайд',
+nextGroup: 'Следующая группа',
+prevGroup: 'Предыдущая группа',
+rewind: 'Мотать в начало / шаг назад',
+grokFirstSlide: 'Grok — первый кадр/слайд диалога',
+grokHistBack: 'Grok — назад по истории слайдов',
+grokHistFwd: 'Grok — вперёд по истории слайдов',
+grokLastSlide: 'Grok — последний кадр/слайд диалога',
+download: 'Скачать медиа',
+upscale: 'Улучшить качество',
+deleteVid: 'Удалить видео/пост',
+duplicateNext: 'Дублировать в фоне + Слайд',
+generate: 'Генерация Space / Отправка Grok',
+playInWindow: '📺 Открыть видео в новой вкладке',
+updateScript: 'Обновить скрипт с GitHub',
+slideshowPanel: 'Меню: полное / краткое / скрыть',
+help: 'Настройки клавиш',
+history: 'Переход в Saved Grok',
+snapWidget: 'Привязать виджет к верхнему краю',
+openTodos: 'Открыть «📝 Тудушки»',
+grokCycle: 'Grok — цикл промпта'
 };
 const renderHotkeyRow = (k) => {
 const row = document.createElement('div');
@@ -18251,7 +18369,7 @@ return;
 }
 if (isEditing && !/^F\d+$/.test(e.key) && !(e.ctrlKey || e.altKey || e.metaKey) && !mossadPromptHotkeyPass(e)) return;
 const ssKey = mossadMatchSlideshowHotkey(e);
-const isUpdateCombo = hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR'));
+const isUpdateCombo = hotkeyMatches(e, config.hk.updateScript);
 if (ssKey && !isUpdateCombo && !mossadSlideshowHotkeysEnabled()) {
 const other = ['help', 'slideshowPanel', 'galleryPlayPause', 'slideshowStart', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'snapWidget', 'history']
 .some(k => config.hk[k] && hotkeyMatches(e, config.hk[k]));
@@ -18375,9 +18493,18 @@ if (typeof window.snapWidgetToCorner === 'function') {
 window.snapWidgetToCorner();
 }
 }
-if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR'))) {
+if (hotkeyMatches(e, config.hk.updateScript)) {
 e.preventDefault();
-window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
+if (typeof window.mossadCheckOrWaitUpdate === 'function') {
+window.mossadCheckOrWaitUpdate();
+} else {
+const updateUrl = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
+if (typeof GM_openInTab === 'function') {
+GM_openInTab(updateUrl, { active: true, insert: true });
+} else {
+window.open(updateUrl, '_blank');
+}
+}
 } else if (hotkeyMatches(e, config.hk.rewind) && !e.metaKey && mossadSlideshowHotkeysEnabled()) {
 e.preventDefault();
 doRewind();

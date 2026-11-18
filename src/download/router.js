@@ -214,14 +214,16 @@
             checkFileInHistory(null, primaryUrl, canonicalPostUrl, media.type).then(record => {
                 if (record) {
                     _activeDuplicateRecord = record;
-                    showDuplicateDownloadNotice(record, () => triggerDownload(true, record, null, presetMedia), canonicalPostUrl, primaryUrl);
-                    // v1.3.85: если файл уже скачивался и включено +1, перескакиваем на следующий
-                    if (!config.allowDuplicates) {
-                        const act = mossadPdAction();
-                        if (act === 'upns' || act === 'always') {
-                            performPostDownloadAction();
+                    // v1.4.22: НЕ перелистывать слайд сразу при дубликате! Даем 6 секунд на повторное скачивание
+                    const onTimeout = () => {
+                        if (!config.allowDuplicates) {
+                            const act = mossadPdAction();
+                            if (act === 'upns' || act === 'always') {
+                                performPostDownloadAction();
+                            }
                         }
-                    }
+                    };
+                    showDuplicateDownloadNotice(record, () => triggerDownload(true, record, null, presetMedia), canonicalPostUrl, primaryUrl, onTimeout);
                 } else {
                     _activeDuplicateRecord = null;
                     triggerDownload(true, null, onDoneCallback, presetMedia);

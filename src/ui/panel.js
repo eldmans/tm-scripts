@@ -180,23 +180,42 @@
 
         let _turboUpdateCheck = false;
         let _turboTimeoutId = null;
-        let _turboIntervalId = null;
         let _updateCheckInProgress = false;
+        let _progressiveStep = 0;
+        // Прогрессивные интервалы проверки: 5с, 10с, 15с, 20с, 30с, 45с, 60с, 90с, 120с
+        const PROGRESSIVE_DELAYS = [5000, 10000, 15000, 20000, 30000, 45000, 60000, 90000, 120000];
 
         function stopTurboMode(notify = false) {
             _turboUpdateCheck = false;
+            _progressiveStep = 0;
             if (_turboTimeoutId) {
                 clearTimeout(_turboTimeoutId);
                 _turboTimeoutId = null;
             }
-            if (_turboIntervalId) {
-                clearInterval(_turboIntervalId);
-                _turboIntervalId = null;
-            }
             setUpdateBtnState('idle');
             if (notify) {
-                showToast('⚪ Ожидание обновления завершено (2 мин истекли).');
+                showToast('⚪ Ожидание обновления завершено.');
             }
+        }
+
+        function scheduleNextProgressiveCheck() {
+            if (!_turboUpdateCheck) return;
+            if (_progressiveStep >= PROGRESSIVE_DELAYS.length) {
+                stopTurboMode(true);
+                return;
+            }
+            const delay = PROGRESSIVE_DELAYS[_progressiveStep];
+            const sec = Math.round(delay / 1000);
+            _turboTimeoutId = setTimeout(() => {
+                if (!_turboUpdateCheck) return;
+                checkRemoteVersion((hasUpdate) => {
+                    if (!hasUpdate && _turboUpdateCheck) {
+                        _progressiveStep++;
+                        scheduleNextProgressiveCheck();
+                    }
+                });
+            }, delay);
+            showToast(`⏳ Ждём релиз на GitHub (проверка через ${sec}с, шаг ${_progressiveStep + 1}/${PROGRESSIVE_DELAYS.length})...`);
         }
 
         function startTurboMode() {
@@ -204,16 +223,14 @@
                 stopTurboMode(false);
             }
             _turboUpdateCheck = true;
-            // Лимит турбо-режима: 2 минуты (120 секунд), затем авто-отключение
-            _turboTimeoutId = setTimeout(() => {
-                stopTurboMode(true);
-            }, 120000);
-            _turboIntervalId = setInterval(() => {
-                if (_turboUpdateCheck) checkRemoteVersion();
-            }, 5000);
+            _progressiveStep = 0;
             setUpdateBtnState('turbo');
-            showToast('🟢 Ожидание обновления активно (2 мин, каждые 5 с). Как только выйдет новая версия — откроется окно установки.');
-            checkRemoteVersion();
+            showToast('🟢 Ожидание обновления: 5с, 10с, 15с... до 2 мин. При выходе релиза сразу откроется установка.');
+            checkRemoteVersion((hasUpdate) => {
+                if (!hasUpdate && _turboUpdateCheck) {
+                    scheduleNextProgressiveCheck();
+                }
+            });
         }
 
         function openUpdateTab() {
@@ -227,10 +244,22 @@
             window.open(updateUrl, '_blank');
         }
 
+        window.mossadCheckOrWaitUpdate = function() {
+            showToast('🔍 Проверяем обновления на GitHub...');
+            checkRemoteVersion((hasUpdate) => {
+                if (hasUpdate) {
+                    showToast('🚀 Найдено обновление! Открываем установку в новой вкладке...');
+                    openUpdateTab();
+                } else {
+                    showToast('ℹ️ Новой версии на GitHub пока нет. Включаем режим ожидания...');
+                    startTurboMode();
+                }
+            });
+        };
+
         btnUpdate.onclick = () => {
-            // ЛКМ: сразу пытается обновить
             if (_turboUpdateCheck) stopTurboMode(false);
-            showToast('🚀 Открываем обновление скрипта...');
+            showToast('🚀 Открываем обновление скрипта в новой вкладке...');
             openUpdateTab();
         };
 
@@ -253,14 +282,14 @@
                 btnUpdate.style.border = '1px solid #10b981';
                 btnUpdate.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.4)';
                 btnUpdate.style.opacity = '1';
-                btnUpdate.title = '🟢 Ожидание обновления (2 мин, каждые 5 с). ПКМ — отменить, ЛКМ — открыть скрипт сейчас';
+                btnUpdate.title = '🟢 Ожидание обновления (прогрессивный интервал). ПКМ — отменить, ЛКМ — открыть скрипт сейчас';
             } else {
                 btnUpdate.style.background = '#18202f';
                 btnUpdate.style.color = '#64748b';
                 btnUpdate.style.border = '1px solid rgba(255, 255, 255, 0.06)';
                 btnUpdate.style.boxShadow = 'none';
                 btnUpdate.style.opacity = '0.55';
-                btnUpdate.title = `MOSSAD v${SCRIPT_VERSION}\nЛКМ — сразу обновить (открыть скрипт)\nПКМ — ждать релиз (2 мин опрос)`;
+                btnUpdate.title = `MOSSAD v${SCRIPT_VERSION}\nЛКМ — сразу обновить (в новой вкладке)\nПКМ / Ctrl+Shift+F5 — ждать релиз (5с..120с)`;
             }
         }
         setUpdateBtnState('idle');
@@ -278,8 +307,7 @@
             return false;
         }
 
-        function checkRemoteVersion() {
-            if (!_turboUpdateCheck) return;
+        function checkRemoteVersion(callback) {
             if (_updateCheckInProgress) return;
             _updateCheckInProgress = true;
 
@@ -287,17 +315,18 @@
             const url = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/src/banner.js?t=' + now;
             const onText = (txt) => {
                 _updateCheckInProgress = false;
-                if (!_turboUpdateCheck) return;
                 const m = txt && txt.match(/\/\/\s*@version\s+([0-9.]+)/i);
+                let hasUpdate = false;
                 if (m && m[1]) {
                     const remoteVer = m[1].trim();
-                    const hasUpdate = isNewerVersion(remoteVer, SCRIPT_VERSION);
+                    hasUpdate = isNewerVersion(remoteVer, SCRIPT_VERSION);
                     if (hasUpdate) {
                         stopTurboMode(false);
-                        showToast(`🎉 Найдена v${remoteVer}! Открываем окно установки...`);
+                        showToast(`🎉 Найдена v${remoteVer}! Открываем установку в новой вкладке...`);
                         openUpdateTab();
                     }
                 }
+                if (typeof callback === 'function') callback(hasUpdate);
             };
 
             if (typeof GM_xmlhttpRequest === 'function') {
@@ -307,8 +336,8 @@
                         url: url,
                         timeout: 5000,
                         onload: (res) => onText(res.responseText),
-                        onerror: () => { _updateCheckInProgress = false; },
-                        ontimeout: () => { _updateCheckInProgress = false; }
+                        onerror: () => { _updateCheckInProgress = false; if (typeof callback === 'function') callback(false); },
+                        ontimeout: () => { _updateCheckInProgress = false; if (typeof callback === 'function') callback(false); }
                     });
                     return;
                 } catch(e) {}
@@ -316,7 +345,7 @@
             fetch(url, { cache: 'no-store' })
                 .then(r => r.text())
                 .then(onText)
-                .catch(() => { _updateCheckInProgress = false; });
+                .catch(() => { _updateCheckInProgress = false; if (typeof callback === 'function') callback(false); });
         }
 
         // «2DO» тудушки (шире на 30%)
@@ -664,12 +693,10 @@
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 ` : ''}
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <select id="mossad-sel-dl" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
-                        <option value="none" ${config.downloadType === 'none' ? 'selected' : ''}>Не скачивать</option>
-                        <option value="all" ${config.downloadType === 'all' ? 'selected' : ''}>Качать Всё</option>
-                        <option value="photo" ${config.downloadType === 'photo' ? 'selected' : ''}>Качать Фото</option>
-                        <option value="video" ${config.downloadType === 'video' ? 'selected' : ''}>Качать Видео</option>
-                    </select>
+                    <div id="mossad-dl-toggle-group" style="display:inline-flex; align-items:center; gap:3px; background:#111827; padding:2px 4px; border-radius:6px; border:1px solid #374151;">
+                        <button type="button" id="mossad-btn-dl-photo" title="Скачивание фото (клик — вкл/выкл)" style="background:${(config.downloadType==='photo'||config.downloadType==='all')?'rgba(244,114,182,0.2)':'transparent'}; border:${(config.downloadType==='photo'||config.downloadType==='all')?'1px solid #f472b6':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='photo'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">📷</button>
+                        <button type="button" id="mossad-btn-dl-video" title="Скачивание видео (клик — вкл/выкл)" style="background:${(config.downloadType==='video'||config.downloadType==='all')?'rgba(56,189,248,0.2)':'transparent'}; border:${(config.downloadType==='video'||config.downloadType==='all')?'1px solid #38bdf8':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='video'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">🎬</button>
+                    </div>
                     <span style="display:flex; align-items:center; gap:4px;" title="Что делать после скачивания. «Не СШ +1» — перейти к следующему, только если слайдшоу не запущено (на паузе — считается запущенным). «+1 всегда» — всегда (кроме скачивания самим слайдшоу: оно шагает само). Delete — только Grok">
                     <span data-mossad-label="pdLabel" style="white-space:nowrap;">${LH('pdLabel')}</span>
                     <select id="mossad-sel-pd" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:2px;">
@@ -802,7 +829,53 @@
             panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, Math.round(numOr(e.target.value, config.videoLoops)))), 300);
             panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(0, numOr(e.target.value, config.slideshowDelay))), 300);
             panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, numOr(e.target.value, config.delayAfterVideo))), 300);
-            panel.querySelector('#mossad-sel-dl').onchange = (e) => Settings.set('downloadType', e.target.value);
+            const btnDlPhoto = panel.querySelector('#mossad-btn-dl-photo');
+            const btnDlVideo = panel.querySelector('#mossad-btn-dl-video');
+            const updateDlButtonsUI = () => {
+                const dt = config.downloadType || 'video';
+                const hasPhoto = dt === 'photo' || dt === 'all';
+                const hasVideo = dt === 'video' || dt === 'all';
+                if (btnDlPhoto) {
+                    btnDlPhoto.style.background = hasPhoto ? 'rgba(244,114,182,0.2)' : 'transparent';
+                    btnDlPhoto.style.border = hasPhoto ? '1px solid #f472b6' : '1px solid transparent';
+                    btnDlPhoto.style.boxShadow = hasPhoto ? '0 0 6px rgba(244,114,182,0.35)' : 'none';
+                    btnDlPhoto.style.opacity = hasPhoto ? '1' : '0.45';
+                }
+                if (btnDlVideo) {
+                    btnDlVideo.style.background = hasVideo ? 'rgba(56,189,248,0.2)' : 'transparent';
+                    btnDlVideo.style.border = hasVideo ? '1px solid #38bdf8' : '1px solid transparent';
+                    btnDlVideo.style.boxShadow = hasVideo ? '0 0 6px rgba(56,189,248,0.35)' : 'none';
+                    btnDlVideo.style.opacity = hasVideo ? '1' : '0.45';
+                }
+            };
+            if (btnDlPhoto) {
+                btnDlPhoto.onclick = () => {
+                    const dt = config.downloadType || 'video';
+                    let next = 'none';
+                    if (dt === 'all') next = 'video';
+                    else if (dt === 'photo') next = 'none';
+                    else if (dt === 'video') next = 'all';
+                    else next = 'photo';
+                    Settings.set('downloadType', next);
+                    updateDlButtonsUI();
+                    if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+                    showToast(`📷 Скачивание фото: ${next === 'photo' || next === 'all' ? 'ВКЛ' : 'ВЫКЛ'}`);
+                };
+            }
+            if (btnDlVideo) {
+                btnDlVideo.onclick = () => {
+                    const dt = config.downloadType || 'video';
+                    let next = 'none';
+                    if (dt === 'all') next = 'photo';
+                    else if (dt === 'video') next = 'none';
+                    else if (dt === 'photo') next = 'all';
+                    else next = 'video';
+                    Settings.set('downloadType', next);
+                    updateDlButtonsUI();
+                    if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+                    showToast(`🎬 Скачивание видео: ${next === 'video' || next === 'all' ? 'ВКЛ' : 'ВЫКЛ'}`);
+                };
+            }
             panel.querySelector('#mossad-sel-pd').onchange = (e) => Settings.set('pdAction', e.target.value);
             const selHfAutoSave = panel.querySelector('#mossad-sel-hf-autosave');
             if (selHfAutoSave) {

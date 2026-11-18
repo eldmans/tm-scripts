@@ -121,15 +121,17 @@
         if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl) && !isDuplicateConfirmed(lockedMediaUrl)) {
             checkFileInHistory(null, lockedMediaUrl, currentPostUrl, currentMediaType).then(record => {
                 if (record) {
-                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback), currentPostUrl, lockedMediaUrl);
-                    // v1.3.85: если файл уже скачивался и включено +1 («Не СШ +1» или «+1 всегда»),
-                    // всё равно перескакиваем на следующий элемент, не зависая на дубликате
-                    if (!config.allowDuplicates) {
-                        const act = mossadPdAction();
-                        if (act === 'upns' || act === 'always') {
-                            performPostDownloadAction();
+                    // v1.4.22: НЕ срывать слайд сразу при обнаружении дубликата!
+                    // Даем пользователю 6 секунд на решение. Если не скачал — перелистываем только по таймауту.
+                    const onTimeout = () => {
+                        if (!config.allowDuplicates) {
+                            const act = mossadPdAction();
+                            if (act === 'upns' || act === 'always') {
+                                performPostDownloadAction();
+                            }
                         }
-                    }
+                    };
+                    showDuplicateDownloadNotice(record, () => triggerGrokDownload(true, record, onDoneCallback), currentPostUrl, lockedMediaUrl, onTimeout);
                 } else {
                     triggerGrokDownload(true, null, onDoneCallback);
                 }

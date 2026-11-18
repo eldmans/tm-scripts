@@ -981,41 +981,41 @@
 
         const keysMap = {
             // Слайд-шоу и медиаплеер
-            galleryPlayPause: 'Большое слайдшоу: Плей/Пауза (Insert; без ссылок — 1-е нажатие собирает)',
-            slideshowStart:   'Малое слайдшоу / ракета (Shift+Insert)',
+            galleryPlayPause: 'Большое слайдшоу: Плей/Пауза',
+            slideshowStart:   'Малое слайдшоу / ракета',
             galleryStop:      'Стоп большого слайдшоу',
-            playPause:        'Пауза/Плей видео (Pause)',
-            sound:            'Звук вкл/выкл (ScrollLock)',
-            expand:           '⛶ Развернуть / полный экран (F — плееры, видео, Grok, Pinterest)',
-            xvDoubleSize:     '🔲 Большой режим плеера / Large Mode (T или L — xHamster, XVideos, Faphouse и др.)',
+            playPause:        'Пауза/Плей видео',
+            sound:            'Звук вкл/выкл',
+            expand:           '⛶ Развернуть / полный экран',
+            xvDoubleSize:     '🔲 Большой режим плеера / Large Mode',
 
             // Листание и навигация по кадрам
-            nextSlide:        'Следующий слайд (ArrowRight)',
-            prevSlide:        'Предыдущий слайд (ArrowLeft)',
-            nextGroup:        'Следующая группа (Alt+PageDown)',
-            prevGroup:        'Предыдущая группа (Alt+PageUp)',
-            rewind:           'Мотать в начало / шаг назад (Alt+R)',
-            grokFirstSlide:   'Grok — первый кадр/слайд диалога (Alt+1)',
-            grokHistBack:     'Grok — назад по истории слайдов (Alt+2)',
-            grokHistFwd:      'Grok — вперёд по истории слайдов (Alt+3)',
-            grokLastSlide:    'Grok — последний кадр/слайд диалога (Alt+4)',
+            nextSlide:        'Следующий слайд',
+            prevSlide:        'Предыдущий слайд',
+            nextGroup:        'Следующая группа',
+            prevGroup:        'Предыдущая группа',
+            rewind:           'Мотать в начало / шаг назад',
+            grokFirstSlide:   'Grok — первый кадр/слайд диалога',
+            grokHistBack:     'Grok — назад по истории слайдов',
+            grokHistFwd:      'Grok — вперёд по истории слайдов',
+            grokLastSlide:    'Grok — последний кадр/слайд диалога',
 
             // Скачивание, апскейл и удаление
-            download:         'Скачать медиа (PageDown)',
-            upscale:          'Улучшить (Shift+«+» / Shift+Num+)',
-            deleteVid:        'Удалить видео/пост (Delete)',
-            duplicateNext:    'Дублировать в фоне + Слайд (Ctrl+Пробел)',
-            generate:         'Генерация Space / Отправка Grok (Ctrl+Enter)',
-            playInWindow:     '📺 Открыть видео в новой вкладке (по умолчанию не назначено)',
+            download:         'Скачать медиа',
+            upscale:          'Улучшить качество',
+            deleteVid:        'Удалить видео/пост',
+            duplicateNext:    'Дублировать в фоне + Слайд',
+            generate:         'Генерация Space / Отправка Grok',
+            playInWindow:     '📺 Открыть видео в новой вкладке',
 
             // Меню, окна и утилиты
-            updateScript:     'Обновить скрипт с GitHub (Win+Alt+R / клик 🔄)',
-            slideshowPanel:   'Меню: полное / краткое / скрыть (Ctrl+Insert)',
-            help:             'Настройки клавиш (Ctrl+F1)',
-            history:          'Переход в Saved Grok (Home)', 
-            snapWidget:       'Привязать к левому верхнему краю (F8)',
-            openTodos:        'Открыть «📝 Тудушки» (по умолчанию не назначено)',
-            grokCycle:        'Grok — цикл: промт → фото/видео → длина/соотношение (\\)'
+            updateScript:     'Обновить скрипт с GitHub',
+            slideshowPanel:   'Меню: полное / краткое / скрыть',
+            help:             'Настройки клавиш',
+            history:          'Переход в Saved Grok', 
+            snapWidget:       'Привязать виджет к верхнему краю',
+            openTodos:        'Открыть «📝 Тудушки»',
+            grokCycle:        'Grok — цикл промпта'
         };
         
         const renderHotkeyRow = (k) => {

@@ -592,7 +592,7 @@
 
         // v1.3.47: хоткеи слайдшоу (стоп, перемотка, дубль+слайд) без слайдшоу — не наши: отдаём сайту
         const ssKey = mossadMatchSlideshowHotkey(e);
-        const isUpdateCombo = hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR'));
+        const isUpdateCombo = hotkeyMatches(e, config.hk.updateScript);
         if (ssKey && !isUpdateCombo && !mossadSlideshowHotkeysEnabled()) {
             // …кроме сочетаний, которые одновременно назначены на «не-слайдшоу» действие
             const other = ['help', 'slideshowPanel', 'galleryPlayPause', 'slideshowStart', 'download', 'upscale', 'deleteVid', 'sound', 'playPause', 'snapWidget', 'history']
@@ -754,10 +754,19 @@
             }
         }
 
-        // Обновить скрипт (Win+Alt+R) / Мотать в начало (Alt+R по умолчанию)
-        if (hotkeyMatches(e, config.hk.updateScript) || (e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR'))) {
+        // Обновить скрипт (Ctrl+Shift+F5 по умолчанию, проверка и ожидание в фоне) / Мотать в начало (Alt+R)
+        if (hotkeyMatches(e, config.hk.updateScript)) {
             e.preventDefault();
-            window.location.href = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
+            if (typeof window.mossadCheckOrWaitUpdate === 'function') {
+                window.mossadCheckOrWaitUpdate();
+            } else {
+                const updateUrl = 'https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js?t=' + Date.now();
+                if (typeof GM_openInTab === 'function') {
+                    GM_openInTab(updateUrl, { active: true, insert: true });
+                } else {
+                    window.open(updateUrl, '_blank');
+                }
+            }
         } else if (hotkeyMatches(e, config.hk.rewind) && !e.metaKey && mossadSlideshowHotkeysEnabled()) {
             e.preventDefault();
             doRewind();

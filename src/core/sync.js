@@ -122,32 +122,14 @@
         });
     }
 
-    // Отложенный батч-пуш
+    // Отложенный батч-пуш (v1.4.22: фоновая синхронизация полностью отключена)
     function scheduleSyncPush() {
-        if (!config.githubToken) return;
-        if (_syncTimer) clearTimeout(_syncTimer);
-        showSyncStatus('🔄 Синхронизация...', '#f59e0b');
-        
-        _syncTimer = setTimeout(async () => {
-            try {
-                await pushConfigToGitHub();
-                showSyncStatus('✅ Синхронизировано', '#10b981', true);
-            } catch (e) {
-                showSyncStatus('⚠️ Ошибка синхронизации', '#ef4444');
-                console.error('[MOSSAD Sync] Push failed:', e);
-            }
-        }, 2000); // Батчим: ждём 2 секунды после последнего изменения
+        return;
     }
 
-    // Проверка при старте
+    // Проверка при старте (v1.4.22: фоновая синхронизация полностью отключена)
     async function checkAndPullOnStartup() {
-        if (!config.githubToken) return;
-        try {
-            const pulled = await pullConfigFromGitHub();
-            if (pulled) showSyncStatus('✅ Конфиг обновлён', '#10b981', true);
-        } catch (e) {
-            // Тихо — возможно нет файла ещё
-        }
+        return;
     }
 
     window.addEventListener('storage', (ev) => {
