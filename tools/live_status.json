@@ -1,25 +1,25 @@
 {
-  "model": "Gemini 3.8 Flash (Medium)",
-  "script_version": "v1.4.31",
+  "model": "Gemini 3.8 Flash (High)",
+  "script_version": "v1.4.32",
   "quota_5h": {
-    "remaining_pct": 60,
-    "resets_at": "17:19:22 UTC",
-    "reset_timestamp": 1795022362,
-    "resets_in": "20 мин"
+    "remaining_pct": 96,
+    "resets_at": "22:19:22 UTC",
+    "reset_timestamp": 1795040362,
+    "resets_in": "3 часа 13 мин"
   },
   "quota_weekly": {
     "remaining_pct": 77,
     "resets_at": "2026-11-22 00:00:00 UTC",
     "reset_timestamp": 1795305600,
-    "resets_in": "3 дня 7 часов"
+    "resets_in": "3 дня 5 часов"
   },
-  "quota_remaining": "60%",
-  "quota_resets": "17:19:22 UTC (через 20 мин)",
+  "quota_remaining": "96%",
+  "quota_resets": "22:19:22 UTC (через 3 часа 13 мин)",
   "weekly_quota_remaining": "77%",
-  "weekly_quota_resets": "через 3 дня 7 часов",
-  "claude_quota_remaining": "56%",
+  "weekly_quota_resets": "через 3 дня 5 часов",
+  "claude_quota_remaining": "1% (лимит исчерпан)",
   "watchdog_timer": "АКТИВЕН (автопроверка очереди каждые 60 сек)",
-  "build_status": "SYNTAX OK, VERIFY OK (897 КБ, 55 модулей)",
+  "build_status": "SYNTAX OK, VERIFY OK (914 КБ, 55 модулей)",
   "workers_state": "Все этапы HANDOFF завершены успешно",
-  "last_updated": "2026-11-18 17:05"
+  "last_updated": "2026-11-18 20:03"
 }

@@ -847,6 +847,30 @@
                   </div>
                 </div>
 
+                <div style="margin-top:8px; background:#111827; border:1px solid #374151; border-radius:6px; padding:8px; display:flex; flex-direction:column; gap:6px;">
+                  <div style="font-size:12px; font-weight:bold; color:#10b981;">🛡 Проверка истории и дедупликация:</div>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;" title="Отключите, если хотите всегда качать файл повторно без проверок и вопросов">
+                    <input id="mossad-cursite-check-history" type="checkbox" style="accent-color:#10b981;" ${config.checkHistory !== false ? 'checked' : ''}>
+                    <span><b>Проверять историю скачиваний</b> (дедупликация включена)</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;" title="Качать дубликат сразу без запроса подтверждения (добавляет метку DBL)">
+                    <input id="mossad-cursite-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}>
+                    <span>Качать дубликаты сразу без подтверждения (метка DBL)</span>
+                  </label>
+                  ${(window.MOSSAD_ENGINES?.huggingface?.isSupported() || rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) ? `
+                  <div style="border-top:1px solid #374151; margin-top:4px; padding-top:6px; display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-size:12px; font-weight:bold; color:#f59e0b;">🤖 Hugging Face Spaces (Генерация):</div>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;">
+                      <input id="mossad-cursite-hf-warn-unsaved" type="checkbox" style="accent-color:#f59e0b;" ${config.hfWarnUnsaved !== false ? 'checked' : ''}>
+                      <span>Предупреждать перед генерацией, если предыдущий результат ещё не скачан</span>
+                    </label>
+                    <div style="font-size:10px; color:#9ca3af; line-height:1.3; background:rgba(255,255,255,0.03); padding:4px 6px; border-radius:4px;">
+                      ⌨ <b>Enter</b> — Скачать и запустить &bull; <b>Ctrl+Enter</b> — Запуск без скачивания &bull; <b>Esc</b> — Отмена &bull; <b>Ctrl+Shift+Enter</b> — Прямой запуск в обход любых проверок
+                    </div>
+                  </div>
+                  ` : ''}
+                </div>
+
                 <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
                   <span style="font-size:11px;color:#9ca3af;">Сброс настроек сайта:</span>
                   <button id="mossad-btn-reset-cursite-all" type="button" style="background:#1f2937;border:1px solid #f87171;color:#f87171;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;font-weight:bold;" title="Сбросить все индивидуальные настройки и клавиши этого сайта">↺ Сбросить настройки сайта</button>
@@ -1555,6 +1579,28 @@
                 btnSaveNotes.onclick = () => {
                     mossadSetSiteNotes(txtNotes.value, rootDomain);
                     showToast(`📝 Заметки для ${rootDomain} сохранены!`);
+                };
+            }
+
+            const cbCheckHist = pane.querySelector('#mossad-cursite-check-history');
+            if (cbCheckHist) {
+                cbCheckHist.onchange = (e) => {
+                    Settings.set('checkHistory', e.target.checked);
+                    showToast(e.target.checked ? '✅ Проверка истории: ВКЛ' : '🚫 Проверка истории: ВЫКЛ (качать всё)');
+                };
+            }
+            const cbAllowDup = pane.querySelector('#mossad-cursite-allow-dup');
+            if (cbAllowDup) {
+                cbAllowDup.onchange = (e) => {
+                    Settings.set('allowDuplicates', e.target.checked);
+                    showToast(e.target.checked ? '✅ Дубли без подтверждения: ВКЛ' : 'Дубли без подтверждения: ВЫКЛ');
+                };
+            }
+            const cbHfWarn = pane.querySelector('#mossad-cursite-hf-warn-unsaved');
+            if (cbHfWarn) {
+                cbHfWarn.onchange = (e) => {
+                    Settings.set('hfWarnUnsaved', e.target.checked);
+                    showToast(e.target.checked ? '🛡 Предупреждение о нескачанном: ВКЛ' : '⚡ Предупреждение о нескачанном: ВЫКЛ');
                 };
             }
 

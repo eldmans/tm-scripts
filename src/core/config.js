@@ -19,6 +19,8 @@
         deleteAutoconfirm: true,      // hold post включён (один чекбокс управляет обоими флагами, ANTI_PATTERNS §2)
         deleteHoldpost: true,
         allowDuplicates: false,       // Дубли: качать дубликаты сразу без подтверждения
+        checkHistory: true,           // v1.4.32: Проверка истории скачиваний (дедупликация: true = проверять, false = не проверять)
+        hfWarnUnsaved: true,          // v1.4.32: Предупреждать перед новой генерацией, если результат ещё не скачан
         dblPosition: 'end',           // Пометка дубликата DBL: 'end' (в конце) | 'middle' (в середине)
         // v1.3.50: allowedDomains убран — список сайтов в GM `mossad_sites` (domain.js, вкладка «🌍 Сайты»)
         githubToken: '',
@@ -111,7 +113,7 @@
     const GLOBAL_DEFAULT_KEYS = [
         'slideshowDelay', 'videoLoops', 'videoAutoAdvanceOnEnd', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
         'downloadType', 'pdAction', 'filenameTemplateEnabled',
-        'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'dblPosition',
+        'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'checkHistory', 'hfWarnUnsaved', 'dblPosition',
         'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
         'playlistRows', 'playlistWidth', 'collectWatchSec',
         'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',

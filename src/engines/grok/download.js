@@ -107,6 +107,9 @@
     function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
         if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
         blurActiveInput();
+        if (config && config.checkHistory === false) {
+            bypassDuplicateCheck = true;
+        }
 
         const currentPostUrl = location.href;
         const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';

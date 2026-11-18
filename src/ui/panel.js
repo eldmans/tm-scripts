@@ -592,6 +592,7 @@
             const dirs = config.slideshowDirections || [];
             const isPinterest = rootDomain.includes('pinterest.');
             const isRatio = (config.pinterestFilterType || 'ratio') === 'ratio';
+            const isAi = (window.MOSSAD_ENGINES?.huggingface?.isSupported() || rootDomain.includes('huggingface') || rootDomain.includes('hf.space') || rootDomain.includes('civitai'));
 
             panel.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
@@ -640,6 +641,11 @@
                             </label>
                         </div>
                     </div>
+                    ` : (isAi ? `
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid #374151; border-radius:8px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center; flex:1;">
+                        <span style="font-weight:bold; color:#38bdf8;">🤖 Генератор Space</span>
+                        <span style="font-size:10px; color:#9ca3af;">Enter: Запуск | \\: Фокус полей</span>
+                    </div>
                     ` : `
                     <div style="display: grid; grid-template-columns: 24px 24px 24px; grid-template-rows: 24px 24px 24px; gap: 2px; align-items: center; justify-items: center;">
                         <div></div>
@@ -652,7 +658,8 @@
                         <button class="mossad-dpad" data-dir="down" title="Листать вниз" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadDown">${LH('dpadDown')}</button>
                         <div></div>
                     </div>
-                    `}
+                    `)}
+                    ${!isAi ? `
                     <div style="display: flex; flex-direction: column; gap: 4px; min-width: 95px;">
                         <label title="Круги видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
                             <span data-mossad-label="loopsLabel">${LH('loopsLabel')}</span> <input id="mossad-in-loops" type="number" min="1" max="100" value="${config.videoLoops}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
@@ -664,7 +671,9 @@
                             <span data-mossad-label="pauseLabel">${LH('pauseLabel')}</span> <input id="mossad-in-vdelay" type="number" min="0" max="999" value="${config.delayAfterVideo}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                     </div>
+                    ` : ''}
                 </div>
+                ${!isAi ? `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; gap: 6px;">
                     <button id="mossad-btn-export-list" style="background:#1f2937; border:1px solid #374151; border-radius:4px; padding:2px 8px; color:#fbbf24; cursor:pointer; font-weight:bold; font-size:11px; display:flex; align-items:center; gap:4px;" title="Скачать список собранных ссылок (.txt)" data-mossad-label="exportList">${LH('exportList')}</button>
                     <div style="display:flex; align-items:center; gap:3px; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:1px 5px;">
@@ -674,6 +683,7 @@
                         <button id="mossad-btn-zoom-inc" style="background:transparent; border:none; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px; padding:0 3px;" title="Увеличить масштаб виджета" data-mossad-label="zoomInc">${LH('zoomInc')}</button>
                     </div>
                 </div>
+                ` : ''}
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
@@ -686,18 +696,22 @@
                     <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="saveTplGlobal">${LH('saveTplGlobal')}</button>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
-                ${(window.MOSSAD_ENGINES?.huggingface?.isSupported() || rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) ? `
-                <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
-                    <span style="font-size:11px; color:#cbd5e1;" title="Автосохранение сгенерированных результатов Space">🤖 HF Авто-DL:</span>
+                ${isAi ? `
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
+                    <span style="font-size:11px; color:#cbd5e1; white-space:nowrap;" title="Автосохранение сгенерированных результатов Space">🤖 HF Авто-DL:</span>
                     <select id="mossad-sel-hf-autosave" style="background:#1f2937; border:1px solid #374151; color:#38bdf8; border-radius:4px; padding:2px; font-size:11px; flex:1;">
                         <option value="off" ${config.hfAutoSave === 'off' ? 'selected' : ''}>Не сохранять</option>
                         <option value="page" ${config.hfAutoSave === 'page' ? 'selected' : ''}>На этой странице</option>
-                        <option value="space" ${config.hfAutoSave === 'space' ? 'selected' : ''}>Для этого Space всегда</option>
+                        <option value="space" ${config.hfAutoSave === 'space' ? 'selected' : ''}>Для этого Space</option>
                         <option value="always" ${config.hfAutoSave === 'always' ? 'selected' : ''}>Для всех Space всегда</option>
                     </select>
+                    <div id="mossad-dl-toggle-group" style="display:inline-flex; align-items:center; gap:2px; background:#111827; padding:2px 4px; border-radius:6px; border:1px solid #374151;">
+                        <button type="button" id="mossad-btn-dl-photo" title="Скачивание фото (клик — вкл/выкл)" style="background:${(config.downloadType==='photo'||config.downloadType==='all')?'rgba(244,114,182,0.2)':'transparent'}; border:${(config.downloadType==='photo'||config.downloadType==='all')?'1px solid #f472b6':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='photo'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">📷</button>
+                        <button type="button" id="mossad-btn-dl-video" title="Скачивание видео (клик — вкл/выкл)" style="background:${(config.downloadType==='video'||config.downloadType==='all')?'rgba(56,189,248,0.2)':'transparent'}; border:${(config.downloadType==='video'||config.downloadType==='all')?'1px solid #38bdf8':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='video'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">🎬</button>
+                    </div>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
-                ` : ''}
+                ` : `
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div id="mossad-dl-toggle-group" style="display:inline-flex; align-items:center; gap:3px; background:#111827; padding:2px 4px; border-radius:6px; border:1px solid #374151;">
                         <button type="button" id="mossad-btn-dl-photo" title="Скачивание фото (клик — вкл/выкл)" style="background:${(config.downloadType==='photo'||config.downloadType==='all')?'rgba(244,114,182,0.2)':'transparent'}; border:${(config.downloadType==='photo'||config.downloadType==='all')?'1px solid #f472b6':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='photo'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">📷</button>
@@ -715,11 +729,17 @@
                     </span>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                `}
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
+                    <label title="Проверять историю скачиваний (дедупликация: отключите, чтобы качать всегда без проверок)"><input id="mossad-cb-check-history" type="checkbox" style="accent-color:#10b981;" ${config.checkHistory !== false ? 'checked' : ''}> Проверка</label>
+                    <label title="Качать дубликаты сразу без подтверждения"><input id="mossad-cb-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}> Дубли</label>
+                    ${isAi ? `
+                    <label title="Предупреждать перед генерацией, если предыдущий результат ещё не скачан"><input id="mossad-cb-hf-warn-unsaved" type="checkbox" style="accent-color:#f59e0b;" ${config.hfWarnUnsaved !== false ? 'checked' : ''}> Защита нескачанного</label>
+                    ` : `
                     <label title="Пауза при переключении вкладки"><input id="mossad-cb-tab" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnTabSwitch ? 'checked' : ''}> Tab</label>
                     <label title="Пауза при потере фокуса браузера"><input id="mossad-cb-brsr" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnBrsrSwitch ? 'checked' : ''}> Brsr</label>
                     <label title="Авто Full Screen при переходе"><input id="mossad-cb-universal-fs" type="checkbox" style="accent-color:#3b82f6;" ${(config.autoFS !== undefined ? config.autoFS : config.pinterestAutoFS) ? 'checked' : ''}> FS</label>
-                    <label title="Качать дубликаты сразу без подтверждения"><input id="mossad-cb-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}> Дубли</label>
+                    `}
                     <label title="Позиция пометки дубликата (DBL): в конце или в середине имени файла" style="display:flex; align-items:center; gap:2px; font-size:11px;">
                         DBL:
                         <select id="mossad-sel-dbl-pos" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:1px 2px; font-size:10px;">
@@ -737,9 +757,14 @@
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
+                    ${isAi ? `
+                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:13px; transition:all 0.2s; display:flex; align-items:center; justify-content:center; gap:6px;" title="⚙ Окно настроек (Ctrl+F1)"><span>⚙</span> <span>Настройки</span></button>
+                    <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 14px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
+                    ` : `
                     <button id="mossad-btn-hk" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:14px; transition:all 0.2s;" title="⚙ Окно настроек (Ctrl+F1)" data-mossad-label="settings">${LH('settings')}</button>
                     <button id="mossad-btn-rewind-bar" style="flex:1; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:6px 8px; color:#38bdf8; cursor:pointer; font-weight:bold; font-size:12px; transition:all 0.2s;" title="↺ Перемотать видео назад / к началу" data-mossad-label="rewind">${LH('rewind')}</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
+                    `}
                 </div>
             `;
             
@@ -949,8 +974,24 @@
                     if (window.applyWidgetZoom) window.applyWidgetZoom();
                 };
             }
-            panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
-            panel.querySelector('#mossad-cb-brsr').onchange = (e) => Settings.set('stopOnBrsrSwitch', e.target.checked);
+            const cbTab = panel.querySelector('#mossad-cb-tab');
+            if (cbTab) cbTab.onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
+            const cbBrsr = panel.querySelector('#mossad-cb-brsr');
+            if (cbBrsr) cbBrsr.onchange = (e) => Settings.set('stopOnBrsrSwitch', e.target.checked);
+            const cbCheckHist = panel.querySelector('#mossad-cb-check-history');
+            if (cbCheckHist) {
+                cbCheckHist.onchange = (e) => {
+                    Settings.set('checkHistory', e.target.checked);
+                    showToast(e.target.checked ? '✅ Проверка истории (дедупликация): ВКЛ' : '🚫 Проверка истории: ВЫКЛ (качать всё)');
+                };
+            }
+            const cbHfWarn = panel.querySelector('#mossad-cb-hf-warn-unsaved');
+            if (cbHfWarn) {
+                cbHfWarn.onchange = (e) => {
+                    Settings.set('hfWarnUnsaved', e.target.checked);
+                    showToast(e.target.checked ? '🛡 Защита нескачанного: ВКЛ' : '⚡ Защита нескачанного: ВЫКЛ (без пауз)');
+                };
+            }
             const cbUniFS = panel.querySelector('#mossad-cb-universal-fs');
             if (cbUniFS) {
                 cbUniFS.onchange = (e) => {

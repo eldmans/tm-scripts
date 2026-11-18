@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.31
+// @version      1.4.32
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.31';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.32';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1078,6 +1078,8 @@ stopOnBrsrSwitch: false,
 deleteAutoconfirm: true,
 deleteHoldpost: true,
 allowDuplicates: false,
+checkHistory: true,
+hfWarnUnsaved: true,
 dblPosition: 'end',
 githubToken: '',
 githubConfigPath: 'mossad-config.json',
@@ -1160,7 +1162,7 @@ const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
 const GLOBAL_DEFAULT_KEYS = [
 'slideshowDelay', 'videoLoops', 'videoAutoAdvanceOnEnd', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
 'downloadType', 'pdAction', 'filenameTemplateEnabled',
-'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'dblPosition',
+'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'checkHistory', 'hfWarnUnsaved', 'dblPosition',
 'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
 'playlistRows', 'playlistWidth', 'collectWatchSec',
 'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',
@@ -3701,7 +3703,8 @@ _videoHashes.add(record.hash);
 _photoHashes.add(record.hash);
 }
 }
-if (record.url) {
+const isHfDomain = (d) => d && (d.includes('huggingface') || d.includes('hf.space'));
+if (record.url && !isHfDomain(record.domain)) {
 _cachedUrls.set(record.url, record);
 const cu = cleanMediaUrl(record.url);
 if (cu) _cachedCleanUrls.set(cu, record);
@@ -3784,7 +3787,8 @@ if (mediaType === 'video' && _videoHashes.has(hash)) return _cachedHashes.get(ha
 if (mediaType === 'photo' && _photoHashes.has(hash)) return _cachedHashes.get(hash);
 if (!mediaType && _cachedHashes.has(hash)) return _cachedHashes.get(hash);
 }
-if (mediaUrl) {
+const isHf = rootDomain.includes('huggingface') || rootDomain.includes('hf.space');
+if (mediaUrl && !isHf) {
 if (_cachedUrls.has(mediaUrl)) return _cachedUrls.get(mediaUrl);
 const cu = cleanMediaUrl(mediaUrl);
 if (cu && _cachedCleanUrls.has(cu)) return _cachedCleanUrls.get(cu);
@@ -3829,7 +3833,7 @@ checkUrls();
 }
 function checkUrls() {
 const urlIdx = store.index('url');
-const targetUrl = mediaUrl || (isPostUrlSpecific(postUrl) ? postUrl : null);
+const targetUrl = (!isHf && mediaUrl) || (isPostUrlSpecific(postUrl) ? postUrl : null);
 if (targetUrl) {
 const urlReq = urlIdx.get(targetUrl);
 urlReq.onsuccess = () => {
@@ -5325,6 +5329,9 @@ account: grokAccountEmail(),
 function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
 if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
 blurActiveInput();
+if (config && config.checkHistory === false) {
+bypassDuplicateCheck = true;
+}
 const currentPostUrl = location.href;
 const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
 const currentConvId = grokCurrentConvId(currentPostId);
@@ -10566,8 +10573,77 @@ MossadEngineRegistry.register('redgifs', window.MOSSAD_ENGINES.redgifs);
 window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
 window.MOSSAD_ENGINES.huggingface = (() => {
 let _lastDownloadedSrc = null;
+let _downloadedContentHashes = new Set();
+let _downloadedSignatures = new Set();
 let _autoSaveTimer = null;
 let _isWaitingForGeneration = false;
+function getMediaContentHash(media) {
+if (!media) return null;
+const el = media.element;
+if (el && el.tagName === 'IMG' && (el.naturalWidth > 0 || el.offsetWidth > 0)) {
+try {
+const canvas = document.createElement('canvas');
+const w = Math.min(el.naturalWidth || el.offsetWidth || 64, 64);
+const h = Math.min(el.naturalHeight || el.offsetHeight || 64, 64);
+canvas.width = w;
+canvas.height = h;
+const ctx = canvas.getContext('2d');
+ctx.drawImage(el, 0, 0, w, h);
+const data = ctx.getImageData(0, 0, w, h).data;
+let hash = 0;
+for (let i = 0; i < data.length; i += 4) {
+hash = ((hash << 5) - hash + data[i] + (data[i+1] << 8) + (data[i+2] << 16)) | 0;
+}
+return 'img_' + (hash >>> 0).toString(16) + `_${el.naturalWidth || el.offsetWidth}x${el.naturalHeight || el.offsetHeight}`;
+} catch (_) {
+}
+}
+if (el && el.tagName === 'VIDEO') {
+const dur = Math.round((el.duration || 0) * 10) / 10;
+const vw = el.videoWidth || el.offsetWidth || 0;
+const vh = el.videoHeight || el.offsetHeight || 0;
+if (dur > 0 || vw > 0) {
+return `vid_${vw}x${vh}_${dur}s`;
+}
+}
+const u = (media.urls && media.urls[0]) || '';
+const itemId = media.itemId || '';
+return 'media_' + itemId + '_' + u.slice(-30);
+}
+function getMediaSignature(media) {
+if (!media) return '';
+const u = (media.urls && media.urls[0]) || '';
+const el = media.element;
+const w = el ? (el.naturalWidth || el.videoWidth || el.offsetWidth || 0) : 0;
+const h = el ? (el.naturalHeight || el.videoHeight || el.offsetHeight || 0) : 0;
+return `${u}#${w}x${h}#${media.itemId || ''}`;
+}
+function markMediaDownloaded(media) {
+if (!media) return;
+const ch = getMediaContentHash(media);
+if (ch) _downloadedContentHashes.add(ch);
+if (media.element) {
+try {
+media.element.dataset.mossadDownloaded = 'true';
+if (ch) media.element.dataset.mossadHash = ch;
+} catch (_) {}
+}
+const sig = getMediaSignature(media);
+if (sig) _downloadedSignatures.add(sig);
+const src = (media.urls && media.urls[0]) || '';
+if (src) _lastDownloadedSrc = src;
+}
+function isMediaDownloaded(media) {
+if (!media) return true;
+const ch = getMediaContentHash(media);
+if (media.element && media.element.dataset && media.element.dataset.mossadHash && ch) {
+if (media.element.dataset.mossadHash === ch) return true;
+}
+if (ch && _downloadedContentHashes.has(ch)) return true;
+const sig = getMediaSignature(media);
+if (sig && _downloadedSignatures.has(sig)) return true;
+return false;
+}
 function isSupported() {
 return hostname.includes('huggingface.co') || hostname.includes('hf.space');
 }
@@ -10624,7 +10700,48 @@ subtype: subtype || 'model'
 };
 }
 function findSubmitButton() {
-const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]'));
+const docRoots = [document];
+try {
+document.querySelectorAll('iframe').forEach(f => {
+try {
+if (f.contentDocument && f.contentDocument.body) docRoots.push(f.contentDocument);
+} catch (_) {}
+});
+} catch (_) {}
+for (const doc of docRoots) {
+const buttons = Array.from(doc.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]'));
+const byGradioId = buttons.find(b => {
+if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+const id = (b.id || '').toLowerCase();
+const cls = (b.className || '').toLowerCase();
+const variant = (b.getAttribute('variant') || '').toLowerCase();
+return id === 'submit' || id === 'generate' || id === 'run' ||
+variant === 'primary' || cls.includes('primary') || cls.includes('generate-btn');
+});
+if (byGradioId) return byGradioId;
+const submitKeywords = [
+'generate', 'submit', 'run', 'queue', 'render', 'start', 'create',
+'сгенерировать', 'запуск', 'создать', 'отправить', 'старт'
+];
+const byText = buttons.find(b => {
+if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+const txt = (b.textContent || '').trim().toLowerCase();
+const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+const title = (b.getAttribute('title') || '').toLowerCase();
+return submitKeywords.some(kw => txt === kw || aria === kw || title === kw || txt.startsWith(kw + ' '));
+});
+if (byText) return byText;
+const partial = buttons.find(b => {
+if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+const txt = (b.textContent || '').trim().toLowerCase();
+return submitKeywords.some(kw => txt.includes(kw));
+});
+if (partial) return partial;
+}
+return null;
+}
+function _legacyFindSubmitButton_UNUSED() {
+const buttons = [];
 const byGradioId = buttons.find(b => {
 if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
 const id = (b.id || '').toLowerCase();
@@ -10665,7 +10782,16 @@ return String(Date.now()).slice(-8);
 }
 function findMedia() {
 if (!isSupported()) return null;
-const videos = Array.from(document.querySelectorAll('.gradio-video video, .output-video video, div[data-testid="video"] video, video'));
+const docRoots = [document];
+try {
+document.querySelectorAll('iframe').forEach(f => {
+try {
+if (f.contentDocument && f.contentDocument.body) docRoots.push(f.contentDocument);
+} catch (_) {}
+});
+} catch (_) {}
+for (const doc of docRoots) {
+const videos = Array.from(doc.querySelectorAll('.gradio-video video, .output-video video, div[data-testid="video"] video, video'));
 const validVideo = videos.find(v => {
 const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
 return src && !src.startsWith('blob:http') && !src.includes('tampermonkey') && !isSvgMedia(src) && (v.videoWidth > 100 || v.offsetWidth > 150);
@@ -10676,6 +10802,7 @@ if (src) {
 const meta = getSpaceMetadata();
 return {
 urls: [src],
+element: validVideo,
 type: 'video',
 userName: meta.author,
 spaceName: meta.space,
@@ -10685,7 +10812,7 @@ postUrl: location.href
 };
 }
 }
-const dlLinks = Array.from(document.querySelectorAll('a[download], a.download-button, a[title*="Download" i]'));
+const dlLinks = Array.from(doc.querySelectorAll('a[download], a.download-button, a[title*="Download" i]'));
 for (const a of dlLinks) {
 const href = a.href || '';
 const dlAttr = a.getAttribute('download') || '';
@@ -10696,6 +10823,7 @@ const isVid = /\.(mp4|webm)(\?|$)/i.test(href) || /\.(mp4|webm)$/i.test(dlAttr);
 const meta = getSpaceMetadata();
 return {
 urls: [href],
+element: a,
 type: isVid ? 'video' : 'image',
 userName: meta.author,
 spaceName: meta.space,
@@ -10715,7 +10843,7 @@ const imgSelectors = [
 'div.image-container img'
 ];
 for (const sel of imgSelectors) {
-const imgs = Array.from(document.querySelectorAll(sel));
+const imgs = Array.from(doc.querySelectorAll(sel));
 const goodImg = imgs.find(i => {
 const src = i.currentSrc || i.src || '';
 if (!src || isSvgMedia(src)) return false;
@@ -10731,6 +10859,7 @@ if (src) {
 const meta = getSpaceMetadata();
 return {
 urls: [src],
+element: goodImg,
 type: 'image',
 userName: meta.author,
 spaceName: meta.space,
@@ -10741,7 +10870,7 @@ postUrl: location.href
 }
 }
 }
-const allImgs = Array.from(document.querySelectorAll('img')).filter(i => {
+const allImgs = Array.from(doc.querySelectorAll('img')).filter(i => {
 if (i.naturalWidth < 200 && i.width < 200) return false;
 const src = i.currentSrc || i.src || '';
 if (!src || isSvgMedia(src)) return false;
@@ -10756,6 +10885,7 @@ if (src && !isSvgMedia(src)) {
 const meta = getSpaceMetadata();
 return {
 urls: [src],
+element: targetImg,
 type: 'image',
 userName: meta.author,
 spaceName: meta.space,
@@ -10763,6 +10893,7 @@ subtype: meta.subtype,
 itemId: extractItemId(src),
 postUrl: location.href
 };
+}
 }
 }
 return null;
@@ -10809,14 +10940,14 @@ const maxChecks = 500;
 if (_autoSaveTimer) clearInterval(_autoSaveTimer);
 _autoSaveTimer = setInterval(() => {
 checkCount++;
-const isGenerating = Boolean(document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"], [aria-busy="true"]'));
+const isGenerating = Boolean(document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"].generating, div[data-testid="status-tracker"] .progress-bar, div[data-testid="status-tracker"] .loading, [aria-busy="true"]'));
 const curMedia = findMedia();
 const curSrc = curMedia && curMedia.urls ? curMedia.urls[0] : null;
-if (curSrc && curSrc !== initialSrc && curSrc !== _lastDownloadedSrc && !isGenerating) {
+if (curMedia && (!isMediaDownloaded(curMedia) || (curSrc && curSrc !== initialSrc)) && !isGenerating) {
 clearInterval(_autoSaveTimer);
 _autoSaveTimer = null;
 _isWaitingForGeneration = false;
-_lastDownloadedSrc = curSrc;
+markMediaDownloaded(curMedia);
 showToast('🎉 Генерация завершена! HF Авто-DL...');
 triggerDownload(true, null, null, curMedia);
 return;
@@ -10831,9 +10962,18 @@ console.log('[MOSSAD HF] Тайм-аут ожидания генерации');
 }
 let _warnModal = null;
 function showUnsavedResultWarning(media, proceedCallback) {
+if (config && config.hfWarnUnsaved === false) {
+if (typeof proceedCallback === 'function') proceedCallback();
+return;
+}
+if (isMediaDownloaded(media)) {
+if (typeof proceedCallback === 'function') proceedCallback();
+return;
+}
 if (_warnModal && _warnModal.parentNode) _warnModal.remove();
 const modal = document.createElement('div');
 modal.id = 'mossad-hf-unsaved-modal';
+modal.tabIndex = -1;
 modal.style.cssText = `
                 position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
                 z-index: 2147483647; background: rgba(20, 18, 24, 0.96); backdrop-filter: blur(16px);
@@ -10841,7 +10981,7 @@ modal.style.cssText = `
                 box-shadow: 0 12px 36px rgba(0,0,0,0.8), 0 0 15px rgba(245, 158, 11, 0.25);
                 font-family: system-ui, -apple-system, sans-serif; color: #fff;
                 display: flex; flex-direction: column; gap: 8px; animation: mossadFadeIn 0.2s ease;
-                min-width: 320px;
+                min-width: 330px;
             `;
 modal.innerHTML = `
                 <div style="font-weight:bold; color:#fbbf24; font-size:13px; display:flex; align-items:center; gap:6px;">
@@ -10850,32 +10990,88 @@ modal.innerHTML = `
                 <div style="font-size:11px; color:#d1d5db; line-height:1.4;">
                     Запуск новой генерации сотрёт текущее медиа без сохранения.
                 </div>
-                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
-                    <button id="mossad-hf-save-and-gen" style="background:#10b981; color:#fff; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-weight:bold; font-size:11px;">💾 Скачать и запустить</button>
-                    <button id="mossad-hf-ignore-and-gen" style="background:#374151; color:#e5e7eb; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:11px;">Всё равно запустить</button>
-                    <button id="mossad-hf-cancel" style="background:transparent; color:#9ca3af; border:1px solid #4b5563; border-radius:6px; padding:5px 8px; cursor:pointer; font-size:11px;">Отмена</button>
+                <div style="font-size:10px; color:#9ca3af; line-height:1.3; background:rgba(255,255,255,0.05); padding:4px 8px; border-radius:6px;">
+                    ⌨ <b>Enter</b> — Скачать и запустить &nbsp;|&nbsp; <b>Ctrl+Enter</b> — Всё равно запустить &nbsp;|&nbsp; <b>Esc</b> — Отмена
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; flex-wrap:wrap; gap:6px;">
+                    <label style="display:flex; align-items:center; gap:5px; font-size:10px; color:#9ca3af; cursor:pointer;" title="Отключить предупреждения о нескачанном результате на этом сайте">
+                        <input id="mossad-hf-dont-warn" type="checkbox" style="accent-color:#f59e0b;">
+                        <span>Больше не спрашивать</span>
+                    </label>
+                    <div style="display:flex; gap:6px;">
+                        <button id="mossad-hf-save-and-gen" style="background:#10b981; color:#fff; border:2px solid #34d399; box-shadow:0 0 10px rgba(16,185,129,0.5); border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:bold; font-size:11px; transition:all 0.2s;">💾 Скачать и запустить</button>
+                        <button id="mossad-hf-ignore-and-gen" style="background:#374151; color:#e5e7eb; border:1px solid #4b5563; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px;">Всё равно запустить</button>
+                        <button id="mossad-hf-cancel" style="background:transparent; color:#9ca3af; border:1px solid #4b5563; border-radius:6px; padding:6px 8px; cursor:pointer; font-size:11px;">Отмена (Esc)</button>
+                    </div>
                 </div>
             `;
 document.body.appendChild(modal);
 _warnModal = modal;
-const close = () => { if (modal && modal.parentNode) modal.remove(); _warnModal = null; };
-modal.querySelector('#mossad-hf-save-and-gen').onclick = () => {
+const btnSave = modal.querySelector('#mossad-hf-save-and-gen');
+const btnIgnore = modal.querySelector('#mossad-hf-ignore-and-gen');
+const btnCancel = modal.querySelector('#mossad-hf-cancel');
+setTimeout(() => {
+if (btnSave) {
+btnSave.focus();
+btnSave.style.outline = '2px solid #34d399';
+btnSave.style.boxShadow = '0 0 14px rgba(16,185,129,0.8)';
+}
+}, 30);
+const close = () => {
+window.removeEventListener('keydown', keyHandler, true);
+document.removeEventListener('keydown', keyHandler, true);
+if (modal && modal.parentNode) modal.remove();
+_warnModal = null;
+};
+const keyHandler = (ke) => {
+if (!_warnModal) return;
+if (ke.key === 'Escape') {
+ke.preventDefault();
+ke.stopPropagation();
 close();
+const ta = document.querySelector('textarea, input[type="text"]');
+if (ta) ta.focus();
+return;
+}
+if (ke.key === 'Enter') {
+ke.preventDefault();
+ke.stopPropagation();
+if (ke.ctrlKey) {
+btnIgnore.click();
+} else {
+btnSave.click();
+}
+}
+};
+window.addEventListener('keydown', keyHandler, true);
+document.addEventListener('keydown', keyHandler, true);
+btnSave.onclick = () => {
+const cbDontWarn = modal.querySelector('#mossad-hf-dont-warn');
+if (cbDontWarn && cbDontWarn.checked) {
+Settings.set('hfWarnUnsaved', false);
+showToast('⚡ Защита нескачанного отключена');
+}
+close();
+markMediaDownloaded(media);
 if (typeof triggerDownload === 'function') {
 triggerDownload(false, null, null, media);
 }
-const src = media ? (media.urls && media.urls[0] || media.url) : null;
-if (src) _lastDownloadedSrc = src;
 if (typeof proceedCallback === 'function') proceedCallback();
 };
-modal.querySelector('#mossad-hf-ignore-and-gen').onclick = () => {
+btnIgnore.onclick = () => {
+const cbDontWarn = modal.querySelector('#mossad-hf-dont-warn');
+if (cbDontWarn && cbDontWarn.checked) {
+Settings.set('hfWarnUnsaved', false);
+showToast('⚡ Защита нескачанного отключена');
+}
 close();
-const src = media ? (media.urls && media.urls[0] || media.url) : null;
-if (src) _lastDownloadedSrc = src;
+markMediaDownloaded(media);
 if (typeof proceedCallback === 'function') proceedCallback();
 };
-modal.querySelector('#mossad-hf-cancel').onclick = () => {
+btnCancel.onclick = () => {
 close();
+const ta = document.querySelector('textarea, input[type="text"]');
+if (ta) ta.focus();
 };
 }
 let _hfCycleStep = 0;
@@ -10930,8 +11126,7 @@ const submitBtn = findSubmitButton();
 const isGenBtn = btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''));
 if (!isGenBtn) return;
 const curMedia = findMedia();
-const curSrc = curMedia ? (curMedia.urls && curMedia.urls[0] || curMedia.url) : null;
-if (curSrc && curSrc !== _lastDownloadedSrc && !btn.dataset.mossadConfirmed) {
+if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia) && !btn.dataset.mossadConfirmed) {
 e.preventDefault();
 e.stopPropagation();
 e.stopImmediatePropagation();
@@ -10956,12 +11151,21 @@ cycleHfSections();
 return;
 }
 }
+if (e.key === 'Enter' && e.ctrlKey && e.shiftKey) {
+e.preventDefault();
+e.stopPropagation();
+showToast('⚡ Прямой запуск генерации (Ctrl+Shift+Enter)...');
+triggerGenerate();
+if (isAutoSaveEnabled()) {
+setTimeout(() => startWatcher(), 200);
+}
+return;
+}
 if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
 const tag = (e.target && e.target.tagName || '').toLowerCase();
 if (tag === 'textarea' || tag === 'input') {
 const curMedia = findMedia();
-const curSrc = curMedia ? (curMedia.urls && curMedia.urls[0] || curMedia.url) : null;
-if (curSrc && curSrc !== _lastDownloadedSrc) {
+if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia)) {
 e.preventDefault();
 e.stopPropagation();
 showUnsavedResultWarning(curMedia, () => {
@@ -10980,7 +11184,7 @@ const observer = new MutationObserver((mutations) => {
 if (!isAutoSaveEnabled() || _isWaitingForGeneration) return;
 for (const m of mutations) {
 if (m.type === 'childList' || m.type === 'attributes') {
-const isGen = document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"]');
+const isGen = document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"].generating, div[data-testid="status-tracker"] .progress-bar, div[data-testid="status-tracker"] .loading, [aria-busy="true"]');
 if (isGen) {
 startWatcher();
 break;
@@ -11926,6 +12130,9 @@ account: rootDomain === 'grok.com' && typeof grokAccountEmail === 'function' ? g
 }
 let _activeDuplicateRecord = null;
 function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null, presetMedia = null) {
+if (config && config.checkHistory === false) {
+bypassDuplicateCheck = true;
+}
 if (rootDomain.includes('pinterest.') && !presetMedia) {
 const pinUrlAtStart = location.href;
 pinterestResolveMedia().then(m => {
@@ -11975,7 +12182,7 @@ triggerDownload(true, null, onDoneCallback, presetMedia);
 return;
 }
 const now = Date.now();
-if (primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
+if (config.checkHistory !== false && primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
 console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, запрос подтверждения дубликата.');
 try { mossadBeep('dup'); } catch (e) {}
 const rec = (typeof _cachedUrls !== 'undefined' && _cachedUrls.get(primaryUrl))
@@ -14927,6 +15134,7 @@ const renderPanel = () => {
 const dirs = config.slideshowDirections || [];
 const isPinterest = rootDomain.includes('pinterest.');
 const isRatio = (config.pinterestFilterType || 'ratio') === 'ratio';
+const isAi = (window.MOSSAD_ENGINES?.huggingface?.isSupported() || rootDomain.includes('huggingface') || rootDomain.includes('hf.space') || rootDomain.includes('civitai'));
 panel.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                     ${isPinterest ? `
@@ -14974,6 +15182,11 @@ panel.innerHTML = `
                             </label>
                         </div>
                     </div>
+                    ` : (isAi ? `
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid #374151; border-radius:8px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center; flex:1;">
+                        <span style="font-weight:bold; color:#38bdf8;">🤖 Генератор Space</span>
+                        <span style="font-size:10px; color:#9ca3af;">Enter: Запуск | \\: Фокус полей</span>
+                    </div>
                     ` : `
                     <div style="display: grid; grid-template-columns: 24px 24px 24px; grid-template-rows: 24px 24px 24px; gap: 2px; align-items: center; justify-items: center;">
                         <div></div>
@@ -14986,7 +15199,8 @@ panel.innerHTML = `
                         <button class="mossad-dpad" data-dir="down" title="Листать вниз" style="background: ${dirs.includes('down') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadDown">${LH('dpadDown')}</button>
                         <div></div>
                     </div>
-                    `}
+                    `)}
+                    ${!isAi ? `
                     <div style="display: flex; flex-direction: column; gap: 4px; min-width: 95px;">
                         <label title="Круги видео" style="display:flex; justify-content:space-between; align-items:center; width:95px;">
                             <span data-mossad-label="loopsLabel">${LH('loopsLabel')}</span> <input id="mossad-in-loops" type="number" min="1" max="100" value="${config.videoLoops}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
@@ -14998,7 +15212,9 @@ panel.innerHTML = `
                             <span data-mossad-label="pauseLabel">${LH('pauseLabel')}</span> <input id="mossad-in-vdelay" type="number" min="0" max="999" value="${config.delayAfterVideo}" style="width:36px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center;">
                         </label>
                     </div>
+                    ` : ''}
                 </div>
+                ${!isAi ? `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; gap: 6px;">
                     <button id="mossad-btn-export-list" style="background:#1f2937; border:1px solid #374151; border-radius:4px; padding:2px 8px; color:#fbbf24; cursor:pointer; font-weight:bold; font-size:11px; display:flex; align-items:center; gap:4px;" title="Скачать список собранных ссылок (.txt)" data-mossad-label="exportList">${LH('exportList')}</button>
                     <div style="display:flex; align-items:center; gap:3px; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:1px 5px;">
@@ -15008,6 +15224,7 @@ panel.innerHTML = `
                         <button id="mossad-btn-zoom-inc" style="background:transparent; border:none; color:#e5e7eb; cursor:pointer; font-weight:bold; font-size:12px; padding:0 3px;" title="Увеличить масштаб виджета" data-mossad-label="zoomInc">${LH('zoomInc')}</button>
                     </div>
                 </div>
+                ` : ''}
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <label title="Использовать шаблон имени файла при скачивании" style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;">
@@ -15020,18 +15237,22 @@ panel.innerHTML = `
                     <button id="mossad-btn-save-tpl-global" title="Сохранить шаблон глобально для ${rootDomain} (во всех вкладках)" style="background:#1f2937; border:1px solid #374151; color:#60a5fa; border-radius:4px; padding:2px 6px; cursor:pointer; font-size:11px;" data-mossad-label="saveTplGlobal">${LH('saveTplGlobal')}</button>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
-                ${(window.MOSSAD_ENGINES?.huggingface?.isSupported() || rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) ? `
-                <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
-                    <span style="font-size:11px; color:#cbd5e1;" title="Автосохранение сгенерированных результатов Space">🤖 HF Авто-DL:</span>
+                ${isAi ? `
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
+                    <span style="font-size:11px; color:#cbd5e1; white-space:nowrap;" title="Автосохранение сгенерированных результатов Space">🤖 HF Авто-DL:</span>
                     <select id="mossad-sel-hf-autosave" style="background:#1f2937; border:1px solid #374151; color:#38bdf8; border-radius:4px; padding:2px; font-size:11px; flex:1;">
                         <option value="off" ${config.hfAutoSave === 'off' ? 'selected' : ''}>Не сохранять</option>
                         <option value="page" ${config.hfAutoSave === 'page' ? 'selected' : ''}>На этой странице</option>
-                        <option value="space" ${config.hfAutoSave === 'space' ? 'selected' : ''}>Для этого Space всегда</option>
+                        <option value="space" ${config.hfAutoSave === 'space' ? 'selected' : ''}>Для этого Space</option>
                         <option value="always" ${config.hfAutoSave === 'always' ? 'selected' : ''}>Для всех Space всегда</option>
                     </select>
+                    <div id="mossad-dl-toggle-group" style="display:inline-flex; align-items:center; gap:2px; background:#111827; padding:2px 4px; border-radius:6px; border:1px solid #374151;">
+                        <button type="button" id="mossad-btn-dl-photo" title="Скачивание фото (клик — вкл/выкл)" style="background:${(config.downloadType==='photo'||config.downloadType==='all')?'rgba(244,114,182,0.2)':'transparent'}; border:${(config.downloadType==='photo'||config.downloadType==='all')?'1px solid #f472b6':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='photo'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">📷</button>
+                        <button type="button" id="mossad-btn-dl-video" title="Скачивание видео (клик — вкл/выкл)" style="background:${(config.downloadType==='video'||config.downloadType==='all')?'rgba(56,189,248,0.2)':'transparent'}; border:${(config.downloadType==='video'||config.downloadType==='all')?'1px solid #38bdf8':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='video'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">🎬</button>
+                    </div>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
-                ` : ''}
+                ` : `
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div id="mossad-dl-toggle-group" style="display:inline-flex; align-items:center; gap:3px; background:#111827; padding:2px 4px; border-radius:6px; border:1px solid #374151;">
                         <button type="button" id="mossad-btn-dl-photo" title="Скачивание фото (клик — вкл/выкл)" style="background:${(config.downloadType==='photo'||config.downloadType==='all')?'rgba(244,114,182,0.2)':'transparent'}; border:${(config.downloadType==='photo'||config.downloadType==='all')?'1px solid #f472b6':'1px solid transparent'}; border-radius:4px; cursor:pointer; font-size:12px; padding:1px 5px; opacity:${(config.downloadType==='photo'||config.downloadType==='all')?'1':'0.45'}; transition:all 0.2s;">📷</button>
@@ -15049,11 +15270,17 @@ panel.innerHTML = `
                     </span>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
+                `}
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
+                    <label title="Проверять историю скачиваний (дедупликация: отключите, чтобы качать всегда без проверок)"><input id="mossad-cb-check-history" type="checkbox" style="accent-color:#10b981;" ${config.checkHistory !== false ? 'checked' : ''}> Проверка</label>
+                    <label title="Качать дубликаты сразу без подтверждения"><input id="mossad-cb-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}> Дубли</label>
+                    ${isAi ? `
+                    <label title="Предупреждать перед генерацией, если предыдущий результат ещё не скачан"><input id="mossad-cb-hf-warn-unsaved" type="checkbox" style="accent-color:#f59e0b;" ${config.hfWarnUnsaved !== false ? 'checked' : ''}> Защита нескачанного</label>
+                    ` : `
                     <label title="Пауза при переключении вкладки"><input id="mossad-cb-tab" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnTabSwitch ? 'checked' : ''}> Tab</label>
                     <label title="Пауза при потере фокуса браузера"><input id="mossad-cb-brsr" type="checkbox" style="accent-color:#3b82f6;" ${config.stopOnBrsrSwitch ? 'checked' : ''}> Brsr</label>
                     <label title="Авто Full Screen при переходе"><input id="mossad-cb-universal-fs" type="checkbox" style="accent-color:#3b82f6;" ${(config.autoFS !== undefined ? config.autoFS : config.pinterestAutoFS) ? 'checked' : ''}> FS</label>
-                    <label title="Качать дубликаты сразу без подтверждения"><input id="mossad-cb-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}> Дубли</label>
+                    `}
                     <label title="Позиция пометки дубликата (DBL): в конце или в середине имени файла" style="display:flex; align-items:center; gap:2px; font-size:11px;">
                         DBL:
                         <select id="mossad-sel-dbl-pos" style="background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; padding:1px 2px; font-size:10px;">
@@ -15071,9 +15298,14 @@ panel.innerHTML = `
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
+                    ${isAi ? `
+                    <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:13px; transition:all 0.2s; display:flex; align-items:center; justify-content:center; gap:6px;" title="⚙ Окно настроек (Ctrl+F1)"><span>⚙</span> <span>Настройки</span></button>
+                    <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 14px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
+                    ` : `
                     <button id="mossad-btn-hk" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:14px; transition:all 0.2s;" title="⚙ Окно настроек (Ctrl+F1)" data-mossad-label="settings">${LH('settings')}</button>
                     <button id="mossad-btn-rewind-bar" style="flex:1; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:6px 8px; color:#38bdf8; cursor:pointer; font-weight:bold; font-size:12px; transition:all 0.2s;" title="↺ Перемотать видео назад / к началу" data-mossad-label="rewind">${LH('rewind')}</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
+                    `}
                 </div>
             `;
 panel.querySelectorAll('.mossad-dpad').forEach(btn => {
@@ -15272,8 +15504,24 @@ lblZoomVal.textContent = '100%';
 if (window.applyWidgetZoom) window.applyWidgetZoom();
 };
 }
-panel.querySelector('#mossad-cb-tab').onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
-panel.querySelector('#mossad-cb-brsr').onchange = (e) => Settings.set('stopOnBrsrSwitch', e.target.checked);
+const cbTab = panel.querySelector('#mossad-cb-tab');
+if (cbTab) cbTab.onchange = (e) => Settings.set('stopOnTabSwitch', e.target.checked);
+const cbBrsr = panel.querySelector('#mossad-cb-brsr');
+if (cbBrsr) cbBrsr.onchange = (e) => Settings.set('stopOnBrsrSwitch', e.target.checked);
+const cbCheckHist = panel.querySelector('#mossad-cb-check-history');
+if (cbCheckHist) {
+cbCheckHist.onchange = (e) => {
+Settings.set('checkHistory', e.target.checked);
+showToast(e.target.checked ? '✅ Проверка истории (дедупликация): ВКЛ' : '🚫 Проверка истории: ВЫКЛ (качать всё)');
+};
+}
+const cbHfWarn = panel.querySelector('#mossad-cb-hf-warn-unsaved');
+if (cbHfWarn) {
+cbHfWarn.onchange = (e) => {
+Settings.set('hfWarnUnsaved', e.target.checked);
+showToast(e.target.checked ? '🛡 Защита нескачанного: ВКЛ' : '⚡ Защита нескачанного: ВЫКЛ (без пауз)');
+};
+}
 const cbUniFS = panel.querySelector('#mossad-cb-universal-fs');
 if (cbUniFS) {
 cbUniFS.onchange = (e) => {
@@ -17327,6 +17575,30 @@ modal.innerHTML = `
                   </div>
                 </div>
 
+                <div style="margin-top:8px; background:#111827; border:1px solid #374151; border-radius:6px; padding:8px; display:flex; flex-direction:column; gap:6px;">
+                  <div style="font-size:12px; font-weight:bold; color:#10b981;">🛡 Проверка истории и дедупликация:</div>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;" title="Отключите, если хотите всегда качать файл повторно без проверок и вопросов">
+                    <input id="mossad-cursite-check-history" type="checkbox" style="accent-color:#10b981;" ${config.checkHistory !== false ? 'checked' : ''}>
+                    <span><b>Проверять историю скачиваний</b> (дедупликация включена)</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;" title="Качать дубликат сразу без запроса подтверждения (добавляет метку DBL)">
+                    <input id="mossad-cursite-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}>
+                    <span>Качать дубликаты сразу без подтверждения (метка DBL)</span>
+                  </label>
+                  ${(window.MOSSAD_ENGINES?.huggingface?.isSupported() || rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) ? `
+                  <div style="border-top:1px solid #374151; margin-top:4px; padding-top:6px; display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-size:12px; font-weight:bold; color:#f59e0b;">🤖 Hugging Face Spaces (Генерация):</div>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;">
+                      <input id="mossad-cursite-hf-warn-unsaved" type="checkbox" style="accent-color:#f59e0b;" ${config.hfWarnUnsaved !== false ? 'checked' : ''}>
+                      <span>Предупреждать перед генерацией, если предыдущий результат ещё не скачан</span>
+                    </label>
+                    <div style="font-size:10px; color:#9ca3af; line-height:1.3; background:rgba(255,255,255,0.03); padding:4px 6px; border-radius:4px;">
+                      ⌨ <b>Enter</b> — Скачать и запустить &bull; <b>Ctrl+Enter</b> — Запуск без скачивания &bull; <b>Esc</b> — Отмена &bull; <b>Ctrl+Shift+Enter</b> — Прямой запуск в обход любых проверок
+                    </div>
+                  </div>
+                  ` : ''}
+                </div>
+
                 <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
                   <span style="font-size:11px;color:#9ca3af;">Сброс настроек сайта:</span>
                   <button id="mossad-btn-reset-cursite-all" type="button" style="background:#1f2937;border:1px solid #f87171;color:#f87171;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;font-weight:bold;" title="Сбросить все индивидуальные настройки и клавиши этого сайта">↺ Сбросить настройки сайта</button>
@@ -17969,6 +18241,27 @@ if (btnSaveNotes && txtNotes) {
 btnSaveNotes.onclick = () => {
 mossadSetSiteNotes(txtNotes.value, rootDomain);
 showToast(`📝 Заметки для ${rootDomain} сохранены!`);
+};
+}
+const cbCheckHist = pane.querySelector('#mossad-cursite-check-history');
+if (cbCheckHist) {
+cbCheckHist.onchange = (e) => {
+Settings.set('checkHistory', e.target.checked);
+showToast(e.target.checked ? '✅ Проверка истории: ВКЛ' : '🚫 Проверка истории: ВЫКЛ (качать всё)');
+};
+}
+const cbAllowDup = pane.querySelector('#mossad-cursite-allow-dup');
+if (cbAllowDup) {
+cbAllowDup.onchange = (e) => {
+Settings.set('allowDuplicates', e.target.checked);
+showToast(e.target.checked ? '✅ Дубли без подтверждения: ВКЛ' : 'Дубли без подтверждения: ВЫКЛ');
+};
+}
+const cbHfWarn = pane.querySelector('#mossad-cursite-hf-warn-unsaved');
+if (cbHfWarn) {
+cbHfWarn.onchange = (e) => {
+Settings.set('hfWarnUnsaved', e.target.checked);
+showToast(e.target.checked ? '🛡 Предупреждение о нескачанном: ВКЛ' : '⚡ Предупреждение о нескачанном: ВЫКЛ');
 };
 }
 const btnResetSiteAll = pane.querySelector('#mossad-btn-reset-cursite-all');

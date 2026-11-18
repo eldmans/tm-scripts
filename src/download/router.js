@@ -176,6 +176,10 @@
     let _activeDuplicateRecord = null;
 
     function triggerDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null, presetMedia = null) {
+        // v1.4.32: Если проверка истории отключена пользователем — всегда обходим проверку дубликатов
+        if (config && config.checkHistory === false) {
+            bypassDuplicateCheck = true;
+        }
         // v1.3.52: Pinterest — медиа главного пина из PinResource API (асинхронно, кэш по id пина)
         if (rootDomain.includes('pinterest.') && !presetMedia) {
             const pinUrlAtStart = location.href;
@@ -234,7 +238,7 @@
 
         // Защита от повторного скачивания одного файла за короткое время
         const now = Date.now();
-        if (primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
+        if (config.checkHistory !== false && primaryUrl === _lastDownloadUrl && (now - _lastDownloadTime) < 5000) {
             console.warn('[MOSSAD] Повторное скачивание того же файла за 5сек, запрос подтверждения дубликата.');
             try { mossadBeep('dup'); } catch (e) {}
             const rec = (typeof _cachedUrls !== 'undefined' && _cachedUrls.get(primaryUrl))

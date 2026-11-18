@@ -9,8 +9,85 @@
     window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
     window.MOSSAD_ENGINES.huggingface = (() => {
         let _lastDownloadedSrc = null;
+        let _downloadedContentHashes = new Set(); // v1.4.32: кеш хешей содержимого скачанных медиа
+        let _downloadedSignatures = new Set();
         let _autoSaveTimer = null;
         let _isWaitingForGeneration = false;
+
+        function getMediaContentHash(media) {
+            if (!media) return null;
+            const el = media.element;
+            if (el && el.tagName === 'IMG' && (el.naturalWidth > 0 || el.offsetWidth > 0)) {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const w = Math.min(el.naturalWidth || el.offsetWidth || 64, 64);
+                    const h = Math.min(el.naturalHeight || el.offsetHeight || 64, 64);
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(el, 0, 0, w, h);
+                    const data = ctx.getImageData(0, 0, w, h).data;
+                    let hash = 0;
+                    for (let i = 0; i < data.length; i += 4) {
+                        hash = ((hash << 5) - hash + data[i] + (data[i+1] << 8) + (data[i+2] << 16)) | 0;
+                    }
+                    return 'img_' + (hash >>> 0).toString(16) + `_${el.naturalWidth || el.offsetWidth}x${el.naturalHeight || el.offsetHeight}`;
+                } catch (_) {
+                    // CORS tainted canvas fallback
+                }
+            }
+            if (el && el.tagName === 'VIDEO') {
+                const dur = Math.round((el.duration || 0) * 10) / 10;
+                const vw = el.videoWidth || el.offsetWidth || 0;
+                const vh = el.videoHeight || el.offsetHeight || 0;
+                if (dur > 0 || vw > 0) {
+                    return `vid_${vw}x${vh}_${dur}s`;
+                }
+            }
+            const u = (media.urls && media.urls[0]) || '';
+            const itemId = media.itemId || '';
+            return 'media_' + itemId + '_' + u.slice(-30);
+        }
+
+        function getMediaSignature(media) {
+            if (!media) return '';
+            const u = (media.urls && media.urls[0]) || '';
+            const el = media.element;
+            const w = el ? (el.naturalWidth || el.videoWidth || el.offsetWidth || 0) : 0;
+            const h = el ? (el.naturalHeight || el.videoHeight || el.offsetHeight || 0) : 0;
+            return `${u}#${w}x${h}#${media.itemId || ''}`;
+        }
+
+        function markMediaDownloaded(media) {
+            if (!media) return;
+            const ch = getMediaContentHash(media);
+            if (ch) _downloadedContentHashes.add(ch);
+            if (media.element) {
+                try {
+                    media.element.dataset.mossadDownloaded = 'true';
+                    if (ch) media.element.dataset.mossadHash = ch;
+                } catch (_) {}
+            }
+            const sig = getMediaSignature(media);
+            if (sig) _downloadedSignatures.add(sig);
+            const src = (media.urls && media.urls[0]) || '';
+            if (src) _lastDownloadedSrc = src;
+        }
+
+        function isMediaDownloaded(media) {
+            if (!media) return true;
+            const ch = getMediaContentHash(media);
+            // Если на элементе уже сохранён совпавший хеш
+            if (media.element && media.element.dataset && media.element.dataset.mossadHash && ch) {
+                if (media.element.dataset.mossadHash === ch) return true;
+            }
+            // Проверка по кешу хешей содержимого
+            if (ch && _downloadedContentHashes.has(ch)) return true;
+            // Сигнатура (URL + размеры + ID)
+            const sig = getMediaSignature(media);
+            if (sig && _downloadedSignatures.has(sig)) return true;
+            return false;
+        }
 
         function isSupported() {
             return hostname.includes('huggingface.co') || hostname.includes('hf.space');
@@ -86,7 +163,51 @@
          * Поиск кнопки генерации (Generate / Submit / Run) в Gradio / Streamlit
          */
         function findSubmitButton() {
-            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]'));
+            const docRoots = [document];
+            try {
+                document.querySelectorAll('iframe').forEach(f => {
+                    try {
+                        if (f.contentDocument && f.contentDocument.body) docRoots.push(f.contentDocument);
+                    } catch (_) {}
+                });
+            } catch (_) {}
+
+            for (const doc of docRoots) {
+                const buttons = Array.from(doc.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]'));
+                const byGradioId = buttons.find(b => {
+                    if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+                    const id = (b.id || '').toLowerCase();
+                    const cls = (b.className || '').toLowerCase();
+                    const variant = (b.getAttribute('variant') || '').toLowerCase();
+                    return id === 'submit' || id === 'generate' || id === 'run' || 
+                           variant === 'primary' || cls.includes('primary') || cls.includes('generate-btn');
+                });
+                if (byGradioId) return byGradioId;
+
+                const submitKeywords = [
+                    'generate', 'submit', 'run', 'queue', 'render', 'start', 'create',
+                    'сгенерировать', 'запуск', 'создать', 'отправить', 'старт'
+                ];
+                const byText = buttons.find(b => {
+                    if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+                    const txt = (b.textContent || '').trim().toLowerCase();
+                    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                    const title = (b.getAttribute('title') || '').toLowerCase();
+                    return submitKeywords.some(kw => txt === kw || aria === kw || title === kw || txt.startsWith(kw + ' '));
+                });
+                if (byText) return byText;
+
+                const partial = buttons.find(b => {
+                    if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
+                    const txt = (b.textContent || '').trim().toLowerCase();
+                    return submitKeywords.some(kw => txt.includes(kw));
+                });
+                if (partial) return partial;
+            }
+            return null;
+        }
+        function _legacyFindSubmitButton_UNUSED() {
+            const buttons = [];
             
             // 1. По стандартным Gradio ID / классам
             const byGradioId = buttons.find(b => {
@@ -141,79 +262,31 @@
         function findMedia() {
             if (!isSupported()) return null;
 
-            // 1. Проверяем готовое видео в Gradio / Streamlit
-            const videos = Array.from(document.querySelectorAll('.gradio-video video, .output-video video, div[data-testid="video"] video, video'));
-            const validVideo = videos.find(v => {
-                const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
-                return src && !src.startsWith('blob:http') && !src.includes('tampermonkey') && !isSvgMedia(src) && (v.videoWidth > 100 || v.offsetWidth > 150);
-            });
-
-            if (validVideo) {
-                const src = validVideo.src || (validVideo.querySelector('source') && validVideo.querySelector('source').src) || validVideo.currentSrc;
-                if (src) {
-                    const meta = getSpaceMetadata();
-                    return {
-                        urls: [src],
-                        type: 'video',
-                        userName: meta.author,
-                        spaceName: meta.space,
-                        subtype: meta.subtype,
-                        itemId: extractItemId(src),
-                        postUrl: location.href
-                    };
-                }
-            }
-
-            // 2. Ссылки скачивания a[download] (строго исключая .svg файлы и логотипы)
-            const dlLinks = Array.from(document.querySelectorAll('a[download], a.download-button, a[title*="Download" i]'));
-            for (const a of dlLinks) {
-                const href = a.href || '';
-                const dlAttr = a.getAttribute('download') || '';
-                if (isSvgMedia(href) || isSvgMedia(dlAttr)) continue;
-                if (a.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"]')) continue;
-                if (href && (href.startsWith('http') || href.startsWith('blob:'))) {
-                    const isVid = /\.(mp4|webm)(\?|$)/i.test(href) || /\.(mp4|webm)$/i.test(dlAttr);
-                    const meta = getSpaceMetadata();
-                    return {
-                        urls: [href],
-                        type: isVid ? 'video' : 'image',
-                        userName: meta.author,
-                        spaceName: meta.space,
-                        subtype: meta.subtype,
-                        itemId: extractItemId(href) || extractItemId(dlAttr),
-                        postUrl: location.href
-                    };
-                }
-            }
-
-            // 3. Выходные изображения Gradio / Streamlit (строго выходные контейнеры, исключая пустые SVG плейсхолдеры)
-            const imgSelectors = [
-                '.output-image img',
-                'div[data-testid="image"]:not(.input-image) img',
-                '.image-preview img',
-                '.gallery img',
-                'div[data-testid="stImage"] img',
-                '.gradio-image:not(.input-image) img',
-                'div.image-container img'
-            ];
-            for (const sel of imgSelectors) {
-                const imgs = Array.from(document.querySelectorAll(sel));
-                const goodImg = imgs.find(i => {
-                    const src = i.currentSrc || i.src || '';
-                    if (!src || isSvgMedia(src)) return false;
-                    if (src.includes('avatar') || src.includes('icon') || src.includes('logo') || src.includes('badge')) return false;
-                    if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
-                    if (i.naturalWidth > 0 && i.naturalWidth < 120) return false;
-                    if (i.naturalWidth === 0 && (i.offsetWidth < 120 || i.offsetHeight < 120)) return false;
-                    return true;
+            const docRoots = [document];
+            try {
+                document.querySelectorAll('iframe').forEach(f => {
+                    try {
+                        if (f.contentDocument && f.contentDocument.body) docRoots.push(f.contentDocument);
+                    } catch (_) {}
                 });
-                if (goodImg) {
-                    const src = goodImg.currentSrc || goodImg.src;
+            } catch (_) {}
+
+            for (const doc of docRoots) {
+                // 1. Проверяем готовое видео в Gradio / Streamlit
+                const videos = Array.from(doc.querySelectorAll('.gradio-video video, .output-video video, div[data-testid="video"] video, video'));
+                const validVideo = videos.find(v => {
+                    const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
+                    return src && !src.startsWith('blob:http') && !src.includes('tampermonkey') && !isSvgMedia(src) && (v.videoWidth > 100 || v.offsetWidth > 150);
+                });
+
+                if (validVideo) {
+                    const src = validVideo.src || (validVideo.querySelector('source') && validVideo.querySelector('source').src) || validVideo.currentSrc;
                     if (src) {
                         const meta = getSpaceMetadata();
                         return {
                             urls: [src],
-                            type: 'image',
+                            element: validVideo,
+                            type: 'video',
                             userName: meta.author,
                             spaceName: meta.space,
                             subtype: meta.subtype,
@@ -222,31 +295,94 @@
                         };
                     }
                 }
-            }
 
-            // 4. Fallback: крупное растровое изображение (строго без SVG, логотипов и плейсхолдеров)
-            const allImgs = Array.from(document.querySelectorAll('img')).filter(i => {
-                if (i.naturalWidth < 200 && i.width < 200) return false;
-                const src = i.currentSrc || i.src || '';
-                if (!src || isSvgMedia(src)) return false;
-                if (src.includes('logo') || src.includes('avatar') || src.includes('badge') || src.includes('icon')) return false;
-                if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
-                return true;
-            });
-            if (allImgs.length > 0) {
-                const targetImg = allImgs[allImgs.length - 1];
-                const src = targetImg.currentSrc || targetImg.src;
-                if (src && !isSvgMedia(src)) {
-                    const meta = getSpaceMetadata();
-                    return {
-                        urls: [src],
-                        type: 'image',
-                        userName: meta.author,
-                        spaceName: meta.space,
-                        subtype: meta.subtype,
-                        itemId: extractItemId(src),
-                        postUrl: location.href
-                    };
+                // 2. Ссылки скачивания a[download] (строго исключая .svg файлы и логотипы)
+                const dlLinks = Array.from(doc.querySelectorAll('a[download], a.download-button, a[title*="Download" i]'));
+                for (const a of dlLinks) {
+                    const href = a.href || '';
+                    const dlAttr = a.getAttribute('download') || '';
+                    if (isSvgMedia(href) || isSvgMedia(dlAttr)) continue;
+                    if (a.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"]')) continue;
+                    if (href && (href.startsWith('http') || href.startsWith('blob:'))) {
+                        const isVid = /\.(mp4|webm)(\?|$)/i.test(href) || /\.(mp4|webm)$/i.test(dlAttr);
+                        const meta = getSpaceMetadata();
+                        return {
+                            urls: [href],
+                            element: a,
+                            type: isVid ? 'video' : 'image',
+                            userName: meta.author,
+                            spaceName: meta.space,
+                            subtype: meta.subtype,
+                            itemId: extractItemId(href) || extractItemId(dlAttr),
+                            postUrl: location.href
+                        };
+                    }
+                }
+
+                // 3. Выходные изображения Gradio / Streamlit (строго выходные контейнеры, исключая пустые SVG плейсхолдеры)
+                const imgSelectors = [
+                    '.output-image img',
+                    'div[data-testid="image"]:not(.input-image) img',
+                    '.image-preview img',
+                    '.gallery img',
+                    'div[data-testid="stImage"] img',
+                    '.gradio-image:not(.input-image) img',
+                    'div.image-container img'
+                ];
+                for (const sel of imgSelectors) {
+                    const imgs = Array.from(doc.querySelectorAll(sel));
+                    const goodImg = imgs.find(i => {
+                        const src = i.currentSrc || i.src || '';
+                        if (!src || isSvgMedia(src)) return false;
+                        if (src.includes('avatar') || src.includes('icon') || src.includes('logo') || src.includes('badge')) return false;
+                        if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
+                        if (i.naturalWidth > 0 && i.naturalWidth < 120) return false;
+                        if (i.naturalWidth === 0 && (i.offsetWidth < 120 || i.offsetHeight < 120)) return false;
+                        return true;
+                    });
+                    if (goodImg) {
+                        const src = goodImg.currentSrc || goodImg.src;
+                        if (src) {
+                            const meta = getSpaceMetadata();
+                            return {
+                                urls: [src],
+                                element: goodImg,
+                                type: 'image',
+                                userName: meta.author,
+                                spaceName: meta.space,
+                                subtype: meta.subtype,
+                                itemId: extractItemId(src),
+                                postUrl: location.href
+                            };
+                        }
+                    }
+                }
+
+                // 4. Fallback: крупное растровое изображение (строго без SVG, логотипов и плейсхолдеров)
+                const allImgs = Array.from(doc.querySelectorAll('img')).filter(i => {
+                    if (i.naturalWidth < 200 && i.width < 200) return false;
+                    const src = i.currentSrc || i.src || '';
+                    if (!src || isSvgMedia(src)) return false;
+                    if (src.includes('logo') || src.includes('avatar') || src.includes('badge') || src.includes('icon')) return false;
+                    if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
+                    return true;
+                });
+                if (allImgs.length > 0) {
+                    const targetImg = allImgs[allImgs.length - 1];
+                    const src = targetImg.currentSrc || targetImg.src;
+                    if (src && !isSvgMedia(src)) {
+                        const meta = getSpaceMetadata();
+                        return {
+                            urls: [src],
+                            element: targetImg,
+                            type: 'image',
+                            userName: meta.author,
+                            spaceName: meta.space,
+                            subtype: meta.subtype,
+                            itemId: extractItemId(src),
+                            postUrl: location.href
+                        };
+                    }
                 }
             }
 
@@ -311,17 +447,18 @@
 
             _autoSaveTimer = setInterval(() => {
                 checkCount++;
-                const isGenerating = Boolean(document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"], [aria-busy="true"]'));
+                // v1.4.32: точный селектор статуса (не ловить голый div[data-testid="status-tracker"], который всегда есть в DOM)
+                const isGenerating = Boolean(document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"].generating, div[data-testid="status-tracker"] .progress-bar, div[data-testid="status-tracker"] .loading, [aria-busy="true"]'));
 
                 const curMedia = findMedia();
                 const curSrc = curMedia && curMedia.urls ? curMedia.urls[0] : null;
 
                 // Если появилось новое изображение/видео, и генерация завершена
-                if (curSrc && curSrc !== initialSrc && curSrc !== _lastDownloadedSrc && !isGenerating) {
+                if (curMedia && (!isMediaDownloaded(curMedia) || (curSrc && curSrc !== initialSrc)) && !isGenerating) {
                     clearInterval(_autoSaveTimer);
                     _autoSaveTimer = null;
                     _isWaitingForGeneration = false;
-                    _lastDownloadedSrc = curSrc;
+                    markMediaDownloaded(curMedia);
                     showToast('🎉 Генерация завершена! HF Авто-DL...');
                     triggerDownload(true, null, null, curMedia);
                     return;
@@ -337,15 +474,27 @@
         }
 
         /**
-         * v1.4.23: Защита от потери результатов генерации на Hugging Face Spaces
+         * v1.4.23 / v1.4.32: Защита от потери результатов генерации на Hugging Face Spaces
          * Предупреждает пользователя, если он запускает новую генерацию при нескачанном результате.
+         * Полная поддержка хоткеев: Enter (скачать+пуск), Ctrl+Enter (пуск без скачивания), Esc (отмена).
          */
         let _warnModal = null;
         function showUnsavedResultWarning(media, proceedCallback) {
+            // Если предупреждение отключено пользователем в меню или результат уже скачан — сразу продолжаем
+            if (config && config.hfWarnUnsaved === false) {
+                if (typeof proceedCallback === 'function') proceedCallback();
+                return;
+            }
+            if (isMediaDownloaded(media)) {
+                if (typeof proceedCallback === 'function') proceedCallback();
+                return;
+            }
+
             if (_warnModal && _warnModal.parentNode) _warnModal.remove();
 
             const modal = document.createElement('div');
             modal.id = 'mossad-hf-unsaved-modal';
+            modal.tabIndex = -1;
             modal.style.cssText = `
                 position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
                 z-index: 2147483647; background: rgba(20, 18, 24, 0.96); backdrop-filter: blur(16px);
@@ -353,7 +502,7 @@
                 box-shadow: 0 12px 36px rgba(0,0,0,0.8), 0 0 15px rgba(245, 158, 11, 0.25);
                 font-family: system-ui, -apple-system, sans-serif; color: #fff;
                 display: flex; flex-direction: column; gap: 8px; animation: mossadFadeIn 0.2s ease;
-                min-width: 320px;
+                min-width: 330px;
             `;
 
             modal.innerHTML = `
@@ -363,37 +512,97 @@
                 <div style="font-size:11px; color:#d1d5db; line-height:1.4;">
                     Запуск новой генерации сотрёт текущее медиа без сохранения.
                 </div>
-                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
-                    <button id="mossad-hf-save-and-gen" style="background:#10b981; color:#fff; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-weight:bold; font-size:11px;">💾 Скачать и запустить</button>
-                    <button id="mossad-hf-ignore-and-gen" style="background:#374151; color:#e5e7eb; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:11px;">Всё равно запустить</button>
-                    <button id="mossad-hf-cancel" style="background:transparent; color:#9ca3af; border:1px solid #4b5563; border-radius:6px; padding:5px 8px; cursor:pointer; font-size:11px;">Отмена</button>
+                <div style="font-size:10px; color:#9ca3af; line-height:1.3; background:rgba(255,255,255,0.05); padding:4px 8px; border-radius:6px;">
+                    ⌨ <b>Enter</b> — Скачать и запустить &nbsp;|&nbsp; <b>Ctrl+Enter</b> — Всё равно запустить &nbsp;|&nbsp; <b>Esc</b> — Отмена
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; flex-wrap:wrap; gap:6px;">
+                    <label style="display:flex; align-items:center; gap:5px; font-size:10px; color:#9ca3af; cursor:pointer;" title="Отключить предупреждения о нескачанном результате на этом сайте">
+                        <input id="mossad-hf-dont-warn" type="checkbox" style="accent-color:#f59e0b;">
+                        <span>Больше не спрашивать</span>
+                    </label>
+                    <div style="display:flex; gap:6px;">
+                        <button id="mossad-hf-save-and-gen" style="background:#10b981; color:#fff; border:2px solid #34d399; box-shadow:0 0 10px rgba(16,185,129,0.5); border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:bold; font-size:11px; transition:all 0.2s;">💾 Скачать и запустить</button>
+                        <button id="mossad-hf-ignore-and-gen" style="background:#374151; color:#e5e7eb; border:1px solid #4b5563; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px;">Всё равно запустить</button>
+                        <button id="mossad-hf-cancel" style="background:transparent; color:#9ca3af; border:1px solid #4b5563; border-radius:6px; padding:6px 8px; cursor:pointer; font-size:11px;">Отмена (Esc)</button>
+                    </div>
                 </div>
             `;
 
             document.body.appendChild(modal);
             _warnModal = modal;
 
-            const close = () => { if (modal && modal.parentNode) modal.remove(); _warnModal = null; };
+            const btnSave = modal.querySelector('#mossad-hf-save-and-gen');
+            const btnIgnore = modal.querySelector('#mossad-hf-ignore-and-gen');
+            const btnCancel = modal.querySelector('#mossad-hf-cancel');
 
-            modal.querySelector('#mossad-hf-save-and-gen').onclick = () => {
+            // Визуальный фокус СРАЗУ на кнопку «Скачать и запустить»
+            setTimeout(() => {
+                if (btnSave) {
+                    btnSave.focus();
+                    btnSave.style.outline = '2px solid #34d399';
+                    btnSave.style.boxShadow = '0 0 14px rgba(16,185,129,0.8)';
+                }
+            }, 30);
+
+            const close = () => {
+                window.removeEventListener('keydown', keyHandler, true);
+                document.removeEventListener('keydown', keyHandler, true);
+                if (modal && modal.parentNode) modal.remove();
+                _warnModal = null;
+            };
+
+            const keyHandler = (ke) => {
+                if (!_warnModal) return;
+                if (ke.key === 'Escape') {
+                    ke.preventDefault();
+                    ke.stopPropagation();
+                    close();
+                    const ta = document.querySelector('textarea, input[type="text"]');
+                    if (ta) ta.focus();
+                    return;
+                }
+                if (ke.key === 'Enter') {
+                    ke.preventDefault();
+                    ke.stopPropagation();
+                    if (ke.ctrlKey) {
+                        btnIgnore.click();
+                    } else {
+                        btnSave.click();
+                    }
+                }
+            };
+            window.addEventListener('keydown', keyHandler, true);
+            document.addEventListener('keydown', keyHandler, true);
+
+            btnSave.onclick = () => {
+                const cbDontWarn = modal.querySelector('#mossad-hf-dont-warn');
+                if (cbDontWarn && cbDontWarn.checked) {
+                    Settings.set('hfWarnUnsaved', false);
+                    showToast('⚡ Защита нескачанного отключена');
+                }
                 close();
+                markMediaDownloaded(media);
                 if (typeof triggerDownload === 'function') {
                     triggerDownload(false, null, null, media);
                 }
-                const src = media ? (media.urls && media.urls[0] || media.url) : null;
-                if (src) _lastDownloadedSrc = src;
                 if (typeof proceedCallback === 'function') proceedCallback();
             };
 
-            modal.querySelector('#mossad-hf-ignore-and-gen').onclick = () => {
+            btnIgnore.onclick = () => {
+                const cbDontWarn = modal.querySelector('#mossad-hf-dont-warn');
+                if (cbDontWarn && cbDontWarn.checked) {
+                    Settings.set('hfWarnUnsaved', false);
+                    showToast('⚡ Защита нескачанного отключена');
+                }
                 close();
-                const src = media ? (media.urls && media.urls[0] || media.url) : null;
-                if (src) _lastDownloadedSrc = src;
+                markMediaDownloaded(media);
                 if (typeof proceedCallback === 'function') proceedCallback();
             };
 
-            modal.querySelector('#mossad-hf-cancel').onclick = () => {
+            btnCancel.onclick = () => {
                 close();
+                const ta = document.querySelector('textarea, input[type="text"]');
+                if (ta) ta.focus();
             };
         }
 
@@ -466,8 +675,7 @@
                 if (!isGenBtn) return;
 
                 const curMedia = findMedia();
-                const curSrc = curMedia ? (curMedia.urls && curMedia.urls[0] || curMedia.url) : null;
-                if (curSrc && curSrc !== _lastDownloadedSrc && !btn.dataset.mossadConfirmed) {
+                if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia) && !btn.dataset.mossadConfirmed) {
                     e.preventDefault();
                     e.stopPropagation();
                     e.stopImmediatePropagation();
@@ -484,7 +692,7 @@
                 }
             }, true);
 
-            // 2. Нажатия клавиш: слэш (\) для навигации, Enter для генерации с защитой
+            // 2. Нажатия клавиш: слэш (\) для навигации, Enter для генерации с защитой, Ctrl+Shift+Enter для прямого пуска
             document.addEventListener('keydown', (e) => {
                 // Переход по слэшу (\)
                 if ((e.code === 'Backslash' || e.key === '\\') && !e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -498,12 +706,23 @@
                     }
                 }
 
+                // v1.4.32: Сквозной Ctrl+Shift+Enter — запускает генерацию в любом случае в обход проверок нескачанного
+                if (e.key === 'Enter' && e.ctrlKey && e.shiftKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showToast('⚡ Прямой запуск генерации (Ctrl+Shift+Enter)...');
+                    triggerGenerate();
+                    if (isAutoSaveEnabled()) {
+                        setTimeout(() => startWatcher(), 200);
+                    }
+                    return;
+                }
+
                 if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
                     const tag = (e.target && e.target.tagName || '').toLowerCase();
                     if (tag === 'textarea' || tag === 'input') {
                         const curMedia = findMedia();
-                        const curSrc = curMedia ? (curMedia.urls && curMedia.urls[0] || curMedia.url) : null;
-                        if (curSrc && curSrc !== _lastDownloadedSrc) {
+                        if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia)) {
                             e.preventDefault();
                             e.stopPropagation();
                             showUnsavedResultWarning(curMedia, () => {
@@ -524,7 +743,7 @@
                     if (!isAutoSaveEnabled() || _isWaitingForGeneration) return;
                     for (const m of mutations) {
                         if (m.type === 'childList' || m.type === 'attributes') {
-                            const isGen = document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"]');
+                            const isGen = document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"].generating, div[data-testid="status-tracker"] .progress-bar, div[data-testid="status-tracker"] .loading, [aria-busy="true"]');
                             if (isGen) {
                                 startWatcher();
                                 break;

@@ -184,7 +184,10 @@
                 _photoHashes.add(record.hash);
             }
         }
-        if (record.url) {
+        // v1.4.32: На Hugging Face Spaces URL временных файлов часто переиспользуются (/file=/tmp/gradio/image.png)
+        // Для HF Spaces индексируем в кеше ТОЛЬКО по хешу, не по generic URL
+        const isHfDomain = (d) => d && (d.includes('huggingface') || d.includes('hf.space'));
+        if (record.url && !isHfDomain(record.domain)) {
             _cachedUrls.set(record.url, record);
             const cu = cleanMediaUrl(record.url);
             if (cu) _cachedCleanUrls.set(cu, record);
@@ -292,7 +295,8 @@
             if (mediaType === 'photo' && _photoHashes.has(hash)) return _cachedHashes.get(hash);
             if (!mediaType && _cachedHashes.has(hash)) return _cachedHashes.get(hash);
         }
-        if (mediaUrl) {
+        const isHf = rootDomain.includes('huggingface') || rootDomain.includes('hf.space');
+        if (mediaUrl && !isHf) {
             if (_cachedUrls.has(mediaUrl)) return _cachedUrls.get(mediaUrl);
             const cu = cleanMediaUrl(mediaUrl);
             if (cu && _cachedCleanUrls.has(cu)) return _cachedCleanUrls.get(cu);
@@ -345,7 +349,7 @@
 
                 function checkUrls() {
                     const urlIdx = store.index('url');
-                    const targetUrl = mediaUrl || (isPostUrlSpecific(postUrl) ? postUrl : null);
+                    const targetUrl = (!isHf && mediaUrl) || (isPostUrlSpecific(postUrl) ? postUrl : null);
                     if (targetUrl) {
                         const urlReq = urlIdx.get(targetUrl);
                         urlReq.onsuccess = () => {
