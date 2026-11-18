@@ -7,6 +7,7 @@
     "up"
   ],
   "videoLoops": 1,
+  "videoAutoAdvanceOnEnd": true,
   "slideshowDelay": 1,
   "delayAfterVideo": 1,
   "downloadType": "none",
@@ -18,7 +19,6 @@
   "allowDuplicates": false,
   "dblPosition": "end",
   "githubConfigPath": "mossad-config.json",
-  "filenameTemplate": "{conv}~{id}~{domain}",
   "filenameTemplateEnabled": true,
   "hfAutoSave": "always",
   "playlistRows": 30,
@@ -134,13 +134,13 @@
       "shift": false
     },
     "nextSlide": {
-      "key": "",
+      "key": "ArrowRight",
       "ctrl": false,
       "alt": false,
       "shift": false
     },
     "prevSlide": {
-      "key": "",
+      "key": "ArrowLeft",
       "ctrl": false,
       "alt": false,
       "shift": false
