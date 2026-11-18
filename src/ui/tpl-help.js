@@ -111,6 +111,10 @@
         const h = _tplHelp;
         if (!h || !h.vars) return;
         const tpl = _tplCurrent(h.input);
+        const editEl = h.box.querySelector('[data-th="tpl-edit"]');
+        if (editEl && document.activeElement !== editEl && editEl.value !== (h.input.value || '')) {
+            editEl.value = h.input.value || '';
+        }
         const name = renderFilenameTemplate(tpl, h.vars, false, '', h.vars.ext);
         const issues = mossadTemplateTagIssues(tpl, h.vars); // v1.3.74: понимает --минус, [[слова]]
         const bad = (raw) => issues.find(x => x.raw === raw);
@@ -230,9 +234,16 @@
               <span style="color:#9ca3af;" data-mossad-label="tplSepLabel">${LH('tplSepLabel')}</span>
               <input data-th="sep" type="text" maxlength="8" style="width:46px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:1px 4px;font-size:12px;">
             </div>
+            <div style="margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+              <span style="color:#38bdf8;font-weight:bold;white-space:nowrap;">✏️ Шаблон:</span>
+              <input data-th="tpl-edit" type="text" placeholder="например: {id8}-{domain}~{account}" 
+                style="flex:1;min-width:0;background:#111827;border:1px solid #38bdf8;border-radius:4px;color:#fff;padding:3px 8px;font-size:12px;font-family:monospace;outline:none;" 
+                title="Редактируйте шаблон прямо здесь — изменения сохраняются на лету!">
+              <button data-th="tpl-clear" type="button" title="Очистить шаблон" style="background:#1f2937;border:1px solid #374151;color:#9ca3af;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px;">✕</button>
+            </div>
             <div style="margin-bottom:4px;"><span style="color:#9ca3af;" data-mossad-label="tplHelpNow">${LH('tplHelpNow')}</span>
               <code data-th="name" style="color:#34d399;font-weight:700;word-break:break-all;">…</code></div>
-            <div style="margin-bottom:4px;color:#9ca3af;">Шаблон: <code data-th="tpl" style="word-break:break-all;"></code></div>
+            <div style="margin-bottom:4px;color:#9ca3af;font-size:11px;">Подсветка тегов: <code data-th="tpl" style="word-break:break-all;"></code></div>
             <div data-th="warn" style="display:none;color:#f87171;margin-bottom:4px;"></div>
             <div data-th="off" style="display:none;color:#fbbf24;margin-bottom:4px;">Галочка «Шаблон» выключена — сейчас файл сохранится с именем по умолчанию (без шаблона).</div>
             <table style="border-collapse:collapse;width:100%;margin-top:4px;table-layout:fixed;">
@@ -297,15 +308,42 @@
             mossadSetJunkText(junkIn.value);
             if (mine.ctx) { mine.vars = buildFilenameVars(mine.ctx); _tplRenderTable(); _tplRenderDynamic(); }
         };
+        const tplEdit = box.querySelector('[data-th="tpl-edit"]');
+        const tplClear = box.querySelector('[data-th="tpl-clear"]');
+        if (tplEdit) {
+            tplEdit.value = input.value || '';
+            tplEdit.oninput = () => {
+                input.value = tplEdit.value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                mossadSaveSiteTemplate(tplEdit.value);
+            };
+            if (tplClear) {
+                tplClear.onclick = () => {
+                    tplEdit.value = '';
+                    input.value = '';
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    mossadSaveSiteTemplate('');
+                    tplEdit.focus();
+                };
+            }
+        }
         mine.onIns = (e) => {
             const ins = e.target.closest && e.target.closest('[data-th-ins]');
             if (!ins) return;
-            const s0 = input.selectionStart ?? input.value.length, s1 = input.selectionEnd ?? input.value.length;
-            const text = mossadTplInsertText(input.value.slice(0, s0), ins.getAttribute('data-th-ins'), mossadTplSep()); // v1.3.65
-            input.value = input.value.slice(0, s0) + text + input.value.slice(s1);
-            try { input.setSelectionRange(s0 + text.length, s0 + text.length); } catch (err) {}
+            const target = tplEdit || input;
+            const s0 = target.selectionStart ?? target.value.length;
+            const s1 = target.selectionEnd ?? target.value.length;
+            const text = mossadTplInsertText(target.value.slice(0, s0), ins.getAttribute('data-th-ins'), mossadTplSep()); // v1.3.65
+            target.value = target.value.slice(0, s0) + text + target.value.slice(s1);
+            try { target.setSelectionRange(s0 + text.length, s0 + text.length); } catch (err) {}
+            if (target !== input) {
+                input.value = target.value;
+            }
+            target.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
+            mossadSaveSiteTemplate(target.value);
+            target.focus();
         };
         box.addEventListener('click', mine.onIns);
         _tplRenderTable();

@@ -108,7 +108,7 @@
         function focusItem(index, doOpen = false, inBackground = false) {
             const items = getCandidateItems();
             if (!items.length) {
-                showToast('⚠️ Похожие медиа не найдены на странице', true);
+                showToast('⚠️ Похожие не найдены на странице', true);
                 return false;
             }
 

@@ -380,8 +380,8 @@
         { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
         { k: 'pinterestAutoFS',   t: 'bool', label: 'Pinterest: авто «полный масштаб»' },
         { k: 'pinterestJumpKeys', t: 'sel', label: 'Pinterest: похожий пин по клавише', opts: [['off', 'Выкл'], ['focus', 'Фокус'], ['keys', 'Переход'], ['badges', 'Переход + номера'], ['shift', 'Переход, номера по Shift / CapsLock']] },
-        { k: 'relatedNavPreset',  t: 'sel', label: 'Похожие медиа: клавиши выбора', opts: [['cycle', 'Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)'], ['digits', 'Десятки 1..10 (Shift +10, Alt +20)']] },
-        { k: 'relatedNavArrows',  t: 'bool', label: 'Похожие медиа: стрелки ← → ↑ ↓ + предпросмотр' },
+        { k: 'relatedNavPreset',  t: 'sel', label: 'Похожие: клавиши выбора', opts: [['cycle', 'Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)'], ['digits', 'Десятки 1..10 (Shift +10, Alt +20)']] },
+        { k: 'relatedNavArrows',  t: 'bool', label: 'Похожие: стрелки ← → ↑ ↓ + предпросмотр' },
     ];
 
     function initGlobalDefaultsTab(modal) {
@@ -779,6 +779,21 @@
               <h3 style="margin:0; color:#fff; font-size:16px;" data-mossad-label="settingsTitle">${LH('settingsTitle')}</h3>
               <button id="mossad-settings-x" title="Закрыть (настройки сохраняются)" style="background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">×</button>
             </div>
+            <!-- v1.4.25: Поисковая строка по всем настройкам и клавишам -->
+            <div style="display:flex; flex-direction:column; gap:4px; margin-top:2px; margin-bottom:4px;">
+              <div style="position:relative; display:flex; align-items:center;">
+                <span style="position:absolute; left:8px; color:#9ca3af; pointer-events:none; font-size:13px;">🔍</span>
+                <input id="mossad-settings-search" type="text" placeholder="Поиск по настройкам и клавишам (Esc для очистки)..." 
+                  style="width:100%; box-sizing:border-box; background:#111827; border:1px solid #374151; border-radius:6px; color:#fff; font-size:12px; padding:6px 26px 6px 28px; outline:none; transition:border-color 0.2s;"
+                  onfocus="this.style.borderColor='#38bdf8'" onblur="this.style.borderColor='#374151'">
+                <button id="mossad-settings-search-clear" type="button" title="Очистить" 
+                  style="position:absolute; right:6px; background:none; border:none; color:#9ca3af; font-size:15px; cursor:pointer; display:none; padding:0 4px; line-height:1;">×</button>
+              </div>
+              <div id="mossad-search-other-tabs" style="display:none; align-items:center; gap:6px; font-size:11px; color:#9ca3af; flex-wrap:wrap;">
+                <span>Также найдено:</span>
+                <div id="mossad-search-other-chips" style="display:inline-flex; gap:4px; flex-wrap:wrap;"></div>
+              </div>
+            </div>
             <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px; overflow-x:auto;">
               <button data-tab="cursite" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #38bdf8;border-bottom:none;cursor:pointer;font-weight:bold;font-size:13px;line-height:1;color:#38bdf8;" title="🌐 ${rootDomain} — Индивидуальные настройки, папка и заметки для этого сайта">🌐 ${rootDomain}</button>
               <button data-tab="general" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabGeneral')}" data-mossad-label="tabGeneral" data-mossad-icon="1">${mossadLabelIcon(LH('tabGeneral'))}</button>
@@ -852,7 +867,7 @@
             </div>` : ''}
             <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;display:flex;flex-direction:column;gap:4px;" title="Клавиши быстрого выбора карточек из блока похожих/рекомендаций (Faphouse, xHamster, xVideos, Pinterest и др.)">
               <div style="display:flex;align-items:center;gap:6px;">
-                <span>🎯 Похожие медиа:</span>
+                <span>🎯 Похожие:</span>
                 <select id="mossad-related-nav-preset" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
                   <option value="cycle" ${(config.relatedNavPreset || 'cycle') === 'cycle' ? 'selected' : ''}>Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)</option>
                   <option value="digits" ${(config.relatedNavPreset || 'cycle') === 'digits' ? 'selected' : ''}>Десятки 1..10 (Shift +10, Alt +20)</option>
@@ -1572,6 +1587,65 @@
             sites: '🌍 Сайты'
         };
 
+        function clearHighlights(root) {
+            if (!root) return;
+            const marks = root.querySelectorAll('mark.mossad-search-hl');
+            marks.forEach(m => {
+                const parent = m.parentNode;
+                if (parent) {
+                    parent.replaceChild(document.createTextNode(m.textContent), m);
+                    parent.normalize();
+                }
+            });
+        }
+
+        function highlightMatches(root, query) {
+            clearHighlights(root);
+            if (!root || !query || query.length < 2) return;
+            const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+                acceptNode(node) {
+                    if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+                    const parent = node.parentElement;
+                    if (!parent || parent.closest('input, textarea, select, button, script, style, mark.mossad-search-hl')) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    if (parent.closest('[style*="display: none"]')) return NodeFilter.FILTER_REJECT;
+                    return regex.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+                }
+            });
+
+            const nodesToHighlight = [];
+            while (walker.nextNode()) {
+                nodesToHighlight.push(walker.currentNode);
+            }
+
+            nodesToHighlight.forEach(node => {
+                const text = node.nodeValue;
+                regex.lastIndex = 0;
+                let match;
+                const frag = document.createDocumentFragment();
+                let lastIdx = 0;
+                while ((match = regex.exec(text)) !== null) {
+                    if (match.index > lastIdx) {
+                        frag.appendChild(document.createTextNode(text.substring(lastIdx, match.index)));
+                    }
+                    const mark = document.createElement('mark');
+                    mark.className = 'mossad-search-hl';
+                    mark.style.cssText = 'background:rgba(234,179,8,0.35);color:#fef08a;border-radius:2px;padding:0 2px;';
+                    mark.textContent = match[0];
+                    frag.appendChild(mark);
+                    lastIdx = regex.lastIndex;
+                }
+                if (lastIdx < text.length) {
+                    frag.appendChild(document.createTextNode(text.substring(lastIdx)));
+                }
+                if (node.parentNode) {
+                    node.parentNode.replaceChild(frag, node);
+                }
+            });
+        }
+
         function applySearchFilter() {
             const q = (searchInput ? searchInput.value : '').trim().toLowerCase();
             if (searchClear) searchClear.style.display = q ? 'block' : 'none';
@@ -1608,6 +1682,10 @@
                         const matches = !q || text.includes(q);
                         el.style.display = matches ? '' : 'none';
                     });
+                }
+                clearHighlights(activePane);
+                if (q && q.length >= 2) {
+                    highlightMatches(activePane, q);
                 }
             }
 
@@ -1662,6 +1740,16 @@
 
         if (searchInput) {
             searchInput.oninput = () => applySearchFilter();
+            searchInput.onkeydown = (e) => {
+                if (e.key === 'Escape') {
+                    if (searchInput.value) {
+                        searchInput.value = '';
+                        applySearchFilter();
+                        e.stopPropagation();
+                        e.preventDefault();
+                    }
+                }
+            };
         }
         if (searchClear) {
             searchClear.onclick = () => {

@@ -1154,7 +1154,22 @@
         if (!base) base = String(vars.id || '').slice(0, 8) || 'media';
         if (base.length > MOSSAD_NAME_MAX) base = base.slice(0, MOSSAD_NAME_MAX).replace(/[-_~.\s]+$/, '');
 
-        if (isDup && !hasDblVar && dblSuffix) base = (typeof formatDblMark === "function") ? formatDblMark(base, dblSuffix, vars.oldname, vars.dupnum, config.dblPosition || "end") : `${base}${dblSuffix}`;
+        // Гарантированный тег домена (v1.4.25): если домена нет ни в шаблоне, ни в итоговом имени
+        const dom = String(vars.domain || (typeof rootDomain !== 'undefined' ? rootDomain : '')).trim();
+        const hasDomVar = /\{(domain|site|domainfull)\b/i.test(tplStr);
+        if (dom && !hasDomVar && !base.toLowerCase().includes(dom.toLowerCase())) {
+            base = `${dom}-${base}`;
+        }
+
+        // Гарантированная метка дубликата (v1.4.25): если дубликат подтверждён
+        if (isDup) {
+            const effectiveDbl = dblSuffix || ` (${vars.oldname || 'original'}) DBL${vars.dupnum || 1}`;
+            if (!hasDblVar || !/DBL/i.test(base)) {
+                base = (typeof formatDblMark === "function")
+                    ? formatDblMark(base, effectiveDbl, vars.oldname, vars.dupnum, config.dblPosition || "end")
+                    : `${base}${effectiveDbl}`;
+            }
+        }
         return `${base}${extPart}`;
     }
     window.renderFilenameTemplate = renderFilenameTemplate;

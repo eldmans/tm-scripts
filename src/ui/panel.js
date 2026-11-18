@@ -728,15 +728,12 @@
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size:11px; color:#9ca3af;">
                     <span title="Сквозной номер успешных закачек на текущем сайте">📥 Закачек: <b id="mossad-txt-site-dl-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b></span>
-                    <label title="Ширина списка плейлиста в px (0 = авто под ширину меню)" style="display:flex; align-items:center; gap:4px;">
-                        Список px: <input id="mossad-in-playlist-w" type="number" min="0" max="800" step="10" value="${config.playlistWidth || 0}" style="width:44px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="0 = авто под ширину меню">
-                    </label>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="⚙ Открыть окно настроек и горячих клавиш MOSSAD" data-mossad-label="settings">${LH('settings')}</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
-                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="База хешей: ЛКМ — импорт локального JSON, ПКМ — ☁️ Синхронизация с GitHub" data-mossad-label="importDb">${LH('importDb')}</button>
+                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импорт базы хешей дедупликации (.json)" data-mossad-label="importDb">${LH('importDb')}</button>
                     <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию для ${rootDomain}" data-mossad-label="resetCfg">${LH('resetCfg')}</button>
                     <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>

@@ -130,10 +130,10 @@
                 </label>
             </div>
 
-            <!-- Section 3: Навигация по похожим медиа -->
+            <!-- Section 3: Навигация по похожим -->
             <div style="background:#131d31;border:1px solid #1e293b;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;">
-                    <span style="font-size:12px;font-weight:700;color:#cbd5e1;" title="Быстрое переключение фокуса на похожие видео/пины с клавиатуры без мыши">🎯 3. Навигация по похожим медиа / рекомендациям</span>
+                    <span style="font-size:12px;font-weight:700;color:#cbd5e1;" title="Быстрое переключение фокуса на похожие видео/пины с клавиатуры без мыши">🎯 3. Навигация по похожим / рекомендациям</span>
                     <span style="font-size:10px;color:#94a3b8;background:#1e293b;padding:1px 6px;border-radius:4px;" title="Горячие клавиши для похожих">Related Nav</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.24
+// @version      1.4.25
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.24';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.25';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -2825,7 +2825,19 @@ extPart = `.${ext}`;
 }
 if (!base) base = String(vars.id || '').slice(0, 8) || 'media';
 if (base.length > MOSSAD_NAME_MAX) base = base.slice(0, MOSSAD_NAME_MAX).replace(/[-_~.\s]+$/, '');
-if (isDup && !hasDblVar && dblSuffix) base = (typeof formatDblMark === "function") ? formatDblMark(base, dblSuffix, vars.oldname, vars.dupnum, config.dblPosition || "end") : `${base}${dblSuffix}`;
+const dom = String(vars.domain || (typeof rootDomain !== 'undefined' ? rootDomain : '')).trim();
+const hasDomVar = /\{(domain|site|domainfull)\b/i.test(tplStr);
+if (dom && !hasDomVar && !base.toLowerCase().includes(dom.toLowerCase())) {
+base = `${dom}-${base}`;
+}
+if (isDup) {
+const effectiveDbl = dblSuffix || ` (${vars.oldname || 'original'}) DBL${vars.dupnum || 1}`;
+if (!hasDblVar || !/DBL/i.test(base)) {
+base = (typeof formatDblMark === "function")
+? formatDblMark(base, effectiveDbl, vars.oldname, vars.dupnum, config.dblPosition || "end")
+: `${base}${effectiveDbl}`;
+}
+}
 return `${base}${extPart}`;
 }
 window.renderFilenameTemplate = renderFilenameTemplate;
@@ -2993,7 +3005,7 @@ const LABEL_DEFS = [
 ['tplLabel', 'Шаблон:', 'надпись у шаблона имени файла'],
 ['saveTplGlobal', '💾', 'кнопка «Сохранить шаблон для всех вкладок»'],
 ['settings', '⚙ Настройки', 'кнопка открытия окна настроек'],
-['importDb', '📥 База', 'кнопка «Импорт базы хешей»'],
+['importDb', '📥 База', 'кнопка «Импорт базы хешей дедупликации»'],
 ['resetCfg', '↺ Сброс', 'кнопка «Сбросить все настройки»'],
 ['#', 'Список (плейлист)'],
 ['playlistTitle', '📋 Список', 'заголовок списка (к нему добавляется число)'],
@@ -13861,7 +13873,7 @@ return [];
 function focusItem(index, doOpen = false, inBackground = false) {
 const items = getCandidateItems();
 if (!items.length) {
-showToast('⚠️ Похожие медиа не найдены на странице', true);
+showToast('⚠️ Похожие не найдены на странице', true);
 return false;
 }
 const clamped = Math.max(0, Math.min(items.length - 1, index));
@@ -14142,6 +14154,10 @@ function _tplRenderDynamic() {
 const h = _tplHelp;
 if (!h || !h.vars) return;
 const tpl = _tplCurrent(h.input);
+const editEl = h.box.querySelector('[data-th="tpl-edit"]');
+if (editEl && document.activeElement !== editEl && editEl.value !== (h.input.value || '')) {
+editEl.value = h.input.value || '';
+}
 const name = renderFilenameTemplate(tpl, h.vars, false, '', h.vars.ext);
 const issues = mossadTemplateTagIssues(tpl, h.vars);
 const bad = (raw) => issues.find(x => x.raw === raw);
@@ -14251,9 +14267,16 @@ box.innerHTML = `
               <span style="color:#9ca3af;" data-mossad-label="tplSepLabel">${LH('tplSepLabel')}</span>
               <input data-th="sep" type="text" maxlength="8" style="width:46px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:1px 4px;font-size:12px;">
             </div>
+            <div style="margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+              <span style="color:#38bdf8;font-weight:bold;white-space:nowrap;">✏️ Шаблон:</span>
+              <input data-th="tpl-edit" type="text" placeholder="например: {id8}-{domain}~{account}" 
+                style="flex:1;min-width:0;background:#111827;border:1px solid #38bdf8;border-radius:4px;color:#fff;padding:3px 8px;font-size:12px;font-family:monospace;outline:none;" 
+                title="Редактируйте шаблон прямо здесь — изменения сохраняются на лету!">
+              <button data-th="tpl-clear" type="button" title="Очистить шаблон" style="background:#1f2937;border:1px solid #374151;color:#9ca3af;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px;">✕</button>
+            </div>
             <div style="margin-bottom:4px;"><span style="color:#9ca3af;" data-mossad-label="tplHelpNow">${LH('tplHelpNow')}</span>
               <code data-th="name" style="color:#34d399;font-weight:700;word-break:break-all;">…</code></div>
-            <div style="margin-bottom:4px;color:#9ca3af;">Шаблон: <code data-th="tpl" style="word-break:break-all;"></code></div>
+            <div style="margin-bottom:4px;color:#9ca3af;font-size:11px;">Подсветка тегов: <code data-th="tpl" style="word-break:break-all;"></code></div>
             <div data-th="warn" style="display:none;color:#f87171;margin-bottom:4px;"></div>
             <div data-th="off" style="display:none;color:#fbbf24;margin-bottom:4px;">Галочка «Шаблон» выключена — сейчас файл сохранится с именем по умолчанию (без шаблона).</div>
             <table style="border-collapse:collapse;width:100%;margin-top:4px;table-layout:fixed;">
@@ -14316,15 +14339,42 @@ junkIn.oninput = () => {
 mossadSetJunkText(junkIn.value);
 if (mine.ctx) { mine.vars = buildFilenameVars(mine.ctx); _tplRenderTable(); _tplRenderDynamic(); }
 };
+const tplEdit = box.querySelector('[data-th="tpl-edit"]');
+const tplClear = box.querySelector('[data-th="tpl-clear"]');
+if (tplEdit) {
+tplEdit.value = input.value || '';
+tplEdit.oninput = () => {
+input.value = tplEdit.value;
+input.dispatchEvent(new Event('input', { bubbles: true }));
+mossadSaveSiteTemplate(tplEdit.value);
+};
+if (tplClear) {
+tplClear.onclick = () => {
+tplEdit.value = '';
+input.value = '';
+input.dispatchEvent(new Event('input', { bubbles: true }));
+mossadSaveSiteTemplate('');
+tplEdit.focus();
+};
+}
+}
 mine.onIns = (e) => {
 const ins = e.target.closest && e.target.closest('[data-th-ins]');
 if (!ins) return;
-const s0 = input.selectionStart ?? input.value.length, s1 = input.selectionEnd ?? input.value.length;
-const text = mossadTplInsertText(input.value.slice(0, s0), ins.getAttribute('data-th-ins'), mossadTplSep());
-input.value = input.value.slice(0, s0) + text + input.value.slice(s1);
-try { input.setSelectionRange(s0 + text.length, s0 + text.length); } catch (err) {}
+const target = tplEdit || input;
+const s0 = target.selectionStart ?? target.value.length;
+const s1 = target.selectionEnd ?? target.value.length;
+const text = mossadTplInsertText(target.value.slice(0, s0), ins.getAttribute('data-th-ins'), mossadTplSep());
+target.value = target.value.slice(0, s0) + text + target.value.slice(s1);
+try { target.setSelectionRange(s0 + text.length, s0 + text.length); } catch (err) {}
+if (target !== input) {
+input.value = target.value;
+}
+target.dispatchEvent(new Event('input', { bubbles: true }));
 input.dispatchEvent(new Event('input', { bubbles: true }));
 input.dispatchEvent(new Event('change', { bubbles: true }));
+mossadSaveSiteTemplate(target.value);
+target.focus();
 };
 box.addEventListener('click', mine.onIns);
 _tplRenderTable();
@@ -14991,15 +15041,12 @@ panel.innerHTML = `
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size:11px; color:#9ca3af;">
                     <span title="Сквозной номер успешных закачек на текущем сайте">📥 Закачек: <b id="mossad-txt-site-dl-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b></span>
-                    <label title="Ширина списка плейлиста в px (0 = авто под ширину меню)" style="display:flex; align-items:center; gap:4px;">
-                        Список px: <input id="mossad-in-playlist-w" type="number" min="0" max="800" step="10" value="${config.playlistWidth || 0}" style="width:44px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:4px; text-align:center; font-size:11px;" title="0 = авто под ширину меню">
-                    </label>
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
                     <button id="mossad-btn-hk" style="flex:1; background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px; color:#60a5fa; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="⚙ Открыть окно настроек и горячих клавиш MOSSAD" data-mossad-label="settings">${LH('settings')}</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
-                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="База хешей: ЛКМ — импорт локального JSON, ПКМ — ☁️ Синхронизация с GitHub" data-mossad-label="importDb">${LH('importDb')}</button>
+                    <button id="mossad-btn-import-db" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#34d399; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Импорт базы хешей дедупликации (.json)" data-mossad-label="importDb">${LH('importDb')}</button>
                     <button id="mossad-btn-reset-cfg" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 8px; color:#f87171; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="Сбросить все настройки и клавиши по умолчанию для ${rootDomain}" data-mossad-label="resetCfg">${LH('resetCfg')}</button>
                     <input id="mossad-file-db" type="file" accept=".json" style="display:none;">
                 </div>
@@ -16300,10 +16347,10 @@ box.innerHTML = `
                 </label>
             </div>
 
-            <!-- Section 3: Навигация по похожим медиа -->
+            <!-- Section 3: Навигация по похожим -->
             <div style="background:#131d31;border:1px solid #1e293b;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;">
-                    <span style="font-size:12px;font-weight:700;color:#cbd5e1;" title="Быстрое переключение фокуса на похожие видео/пины с клавиатуры без мыши">🎯 3. Навигация по похожим медиа / рекомендациям</span>
+                    <span style="font-size:12px;font-weight:700;color:#cbd5e1;" title="Быстрое переключение фокуса на похожие видео/пины с клавиатуры без мыши">🎯 3. Навигация по похожим / рекомендациям</span>
                     <span style="font-size:10px;color:#94a3b8;background:#1e293b;padding:1px 6px;border-radius:4px;" title="Горячие клавиши для похожих">Related Nav</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
@@ -16823,8 +16870,8 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'pinterestMaxVideoDuration', t: 'num', label: 'Pinterest: макс. видео, сек (0 = ∞)', step: 1, min: 0 },
 { k: 'pinterestAutoFS', t: 'bool', label: 'Pinterest: авто «полный масштаб»' },
 { k: 'pinterestJumpKeys', t: 'sel', label: 'Pinterest: похожий пин по клавише', opts: [['off', 'Выкл'], ['focus', 'Фокус'], ['keys', 'Переход'], ['badges', 'Переход + номера'], ['shift', 'Переход, номера по Shift / CapsLock']] },
-{ k: 'relatedNavPreset', t: 'sel', label: 'Похожие медиа: клавиши выбора', opts: [['cycle', 'Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)'], ['digits', 'Десятки 1..10 (Shift +10, Alt +20)']] },
-{ k: 'relatedNavArrows', t: 'bool', label: 'Похожие медиа: стрелки ← → ↑ ↓ + предпросмотр' },
+{ k: 'relatedNavPreset', t: 'sel', label: 'Похожие: клавиши выбора', opts: [['cycle', 'Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)'], ['digits', 'Десятки 1..10 (Shift +10, Alt +20)']] },
+{ k: 'relatedNavArrows', t: 'bool', label: 'Похожие: стрелки ← → ↑ ↓ + предпросмотр' },
 ];
 function initGlobalDefaultsTab(modal) {
 const form = modal.querySelector('#mossad-def-form');
@@ -17180,6 +17227,21 @@ modal.innerHTML = `
               <h3 style="margin:0; color:#fff; font-size:16px;" data-mossad-label="settingsTitle">${LH('settingsTitle')}</h3>
               <button id="mossad-settings-x" title="Закрыть (настройки сохраняются)" style="background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">×</button>
             </div>
+            <!-- v1.4.25: Поисковая строка по всем настройкам и клавишам -->
+            <div style="display:flex; flex-direction:column; gap:4px; margin-top:2px; margin-bottom:4px;">
+              <div style="position:relative; display:flex; align-items:center;">
+                <span style="position:absolute; left:8px; color:#9ca3af; pointer-events:none; font-size:13px;">🔍</span>
+                <input id="mossad-settings-search" type="text" placeholder="Поиск по настройкам и клавишам (Esc для очистки)..." 
+                  style="width:100%; box-sizing:border-box; background:#111827; border:1px solid #374151; border-radius:6px; color:#fff; font-size:12px; padding:6px 26px 6px 28px; outline:none; transition:border-color 0.2s;"
+                  onfocus="this.style.borderColor='#38bdf8'" onblur="this.style.borderColor='#374151'">
+                <button id="mossad-settings-search-clear" type="button" title="Очистить" 
+                  style="position:absolute; right:6px; background:none; border:none; color:#9ca3af; font-size:15px; cursor:pointer; display:none; padding:0 4px; line-height:1;">×</button>
+              </div>
+              <div id="mossad-search-other-tabs" style="display:none; align-items:center; gap:6px; font-size:11px; color:#9ca3af; flex-wrap:wrap;">
+                <span>Также найдено:</span>
+                <div id="mossad-search-other-chips" style="display:inline-flex; gap:4px; flex-wrap:wrap;"></div>
+              </div>
+            </div>
             <div id="mossad-settings-tabs" style="display:flex; gap:4px; border-bottom:1px solid #374151; margin-bottom:2px; overflow-x:auto;">
               <button data-tab="cursite" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #38bdf8;border-bottom:none;cursor:pointer;font-weight:bold;font-size:13px;line-height:1;color:#38bdf8;" title="🌐 ${rootDomain} — Индивидуальные настройки, папка и заметки для этого сайта">🌐 ${rootDomain}</button>
               <button data-tab="general" style="padding:5px 10px;border-radius:6px 6px 0 0;border:1px solid #374151;border-bottom:none;cursor:pointer;font-weight:bold;font-size:15px;line-height:1;" title="${LH('tabGeneral')}" data-mossad-label="tabGeneral" data-mossad-icon="1">${mossadLabelIcon(LH('tabGeneral'))}</button>
@@ -17253,7 +17315,7 @@ modal.innerHTML = `
             </div>` : ''}
             <div style="font-size:12px;color:#d1d5db;margin-bottom:6px;display:flex;flex-direction:column;gap:4px;" title="Клавиши быстрого выбора карточек из блока похожих/рекомендаций (Faphouse, xHamster, xVideos, Pinterest и др.)">
               <div style="display:flex;align-items:center;gap:6px;">
-                <span>🎯 Похожие медиа:</span>
+                <span>🎯 Похожие:</span>
                 <select id="mossad-related-nav-preset" style="background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">
                   <option value="cycle" ${(config.relatedNavPreset || 'cycle') === 'cycle' ? 'selected' : ''}>Листание 1-4 (1-первый, 4-посл, 2-назад, 3-вперед)</option>
                   <option value="digits" ${(config.relatedNavPreset || 'cycle') === 'digits' ? 'selected' : ''}>Десятки 1..10 (Shift +10, Alt +20)</option>
@@ -17901,6 +17963,61 @@ labels: '🏷️ Подписи',
 todos: '📝 Тудушки',
 sites: '🌍 Сайты'
 };
+function clearHighlights(root) {
+if (!root) return;
+const marks = root.querySelectorAll('mark.mossad-search-hl');
+marks.forEach(m => {
+const parent = m.parentNode;
+if (parent) {
+parent.replaceChild(document.createTextNode(m.textContent), m);
+parent.normalize();
+}
+});
+}
+function highlightMatches(root, query) {
+clearHighlights(root);
+if (!root || !query || query.length < 2) return;
+const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+acceptNode(node) {
+if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+const parent = node.parentElement;
+if (!parent || parent.closest('input, textarea, select, button, script, style, mark.mossad-search-hl')) {
+return NodeFilter.FILTER_REJECT;
+}
+if (parent.closest('[style*="display: none"]')) return NodeFilter.FILTER_REJECT;
+return regex.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+}
+});
+const nodesToHighlight = [];
+while (walker.nextNode()) {
+nodesToHighlight.push(walker.currentNode);
+}
+nodesToHighlight.forEach(node => {
+const text = node.nodeValue;
+regex.lastIndex = 0;
+let match;
+const frag = document.createDocumentFragment();
+let lastIdx = 0;
+while ((match = regex.exec(text)) !== null) {
+if (match.index > lastIdx) {
+frag.appendChild(document.createTextNode(text.substring(lastIdx, match.index)));
+}
+const mark = document.createElement('mark');
+mark.className = 'mossad-search-hl';
+mark.style.cssText = 'background:rgba(234,179,8,0.35);color:#fef08a;border-radius:2px;padding:0 2px;';
+mark.textContent = match[0];
+frag.appendChild(mark);
+lastIdx = regex.lastIndex;
+}
+if (lastIdx < text.length) {
+frag.appendChild(document.createTextNode(text.substring(lastIdx)));
+}
+if (node.parentNode) {
+node.parentNode.replaceChild(frag, node);
+}
+});
+}
 function applySearchFilter() {
 const q = (searchInput ? searchInput.value : '').trim().toLowerCase();
 if (searchClear) searchClear.style.display = q ? 'block' : 'none';
@@ -17933,6 +18050,10 @@ const text = (el.textContent || '').toLowerCase() + ' ' + (el.title || '').toLow
 const matches = !q || text.includes(q);
 el.style.display = matches ? '' : 'none';
 });
+}
+clearHighlights(activePane);
+if (q && q.length >= 2) {
+highlightMatches(activePane, q);
 }
 }
 if (!q) {
@@ -17980,6 +18101,16 @@ otherTabsWrap.style.display = 'none';
 }
 if (searchInput) {
 searchInput.oninput = () => applySearchFilter();
+searchInput.onkeydown = (e) => {
+if (e.key === 'Escape') {
+if (searchInput.value) {
+searchInput.value = '';
+applySearchFilter();
+e.stopPropagation();
+e.preventDefault();
+}
+}
+};
 }
 if (searchClear) {
 searchClear.onclick = () => {
