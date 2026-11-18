@@ -23,7 +23,7 @@
   "hfAutoSave": "always",
   "playlistRows": 30,
   "playlistWidth": 257,
-  "widgetZoom": 0.9,
+  "widgetZoom": 1.1,
   "closePanelOnOutsideClick": true,
   "collectWatchSec": 30,
   "showSoundToast": true,
