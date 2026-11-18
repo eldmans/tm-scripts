@@ -1,6 +1,6 @@
 {
   "model": "Gemini 3.8 Flash (Medium)",
-  "script_version": "v1.4.30",
+  "script_version": "v1.4.31",
   "quota_5h": {
     "remaining_pct": 60,
     "resets_at": "17:19:22 UTC",
