@@ -10,7 +10,7 @@
   "videoAutoAdvanceOnEnd": true,
   "slideshowDelay": 1,
   "delayAfterVideo": 1,
-  "downloadType": "none",
+  "downloadType": "photo",
   "pdAction": "none",
   "stopOnTabSwitch": false,
   "stopOnBrsrSwitch": false,
