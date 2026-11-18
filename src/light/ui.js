@@ -47,7 +47,7 @@
         const modLabel = (k) => ({ ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', 'ctrl+shift': 'Ctrl+Shift', 'alt+shift': 'Alt+Shift', 'ctrl+alt': 'Ctrl+Alt' }[k] || k);
         const _updateDesc = () => {
             const lm = selLeft.value, rm = selRight.value;
-            descEl.textContent = modLabel(lm) + ' + левый клик по картинке/видео — скачать. ' + modLabel(rm) + ' + правый клик — меню: Скачать, Папка…, Копировать кадр. Для подпапок в Tampermonkey: Настройки → «Режим загрузки: Browser API».';
+            descEl.textContent = modLabel(lm) + ' + левый клик по картинке/видео — скачать. ' + modLabel(rm) + ' + правый клик — меню: Скачать, Папка…, Копировать кадр, Улучшить и скопировать. Для подпапок в Tampermonkey: Настройки → «Режим загрузки: Browser API».';
         };
         selLeft.value = c.leftMod || 'ctrl';
         selRight.value = c.rightMod || 'ctrl';

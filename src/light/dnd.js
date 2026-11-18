@@ -5,7 +5,7 @@
     // contextmenu, capture), которые сразу выходят без Ctrl. Тяжёлое (меню, canvas) создаётся по требованию.
     // Код здесь НЕ видит функций mossadMain (только наоборот). ANTI_PATTERNS §44.
     //   Ctrl + левый клик по картинке/видео — скачать в папку загрузок/<папка> (по умолчанию «DND/», GM_download);
-    //   Ctrl + правый клик — меню: Скачать, Папка…, Копировать кадр.
+    //   Ctrl + правый клик — меню: Скачать, Папка…, Копировать кадр, Улучшить и скопировать.
     // ============================================
     const MOSSAD_DND_GM_KEY = 'mossad_dnd';
     function mossadDndCfg() {
@@ -149,31 +149,241 @@
         return true;
     }
 
-    /** Кадр видео / картинка → PNG в буфер обмена. CORS (canvas «испорчен») — понятный тост; нет ClipboardItem — скачать PNG. */
-    function mossadCopyFrame(el) {
-        const w = el.tagName === 'VIDEO' ? el.videoWidth : (el.naturalWidth || el.width);
-        const h = el.tagName === 'VIDEO' ? el.videoHeight : (el.naturalHeight || el.height);
-        if (!w || !h) { mossadLightToast('⚠️ Кадр ещё не загружен', true); return; }
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        try { c.getContext('2d').drawImage(el, 0, 0, w, h); } catch (e) { mossadLightToast('⚠️ Кадр не нарисовать: ' + e.message, true); return; }
-        const base = mossadDndFileName(mossadMediaUrl(el) || 'frame', el).replace(/\.[a-z0-9]+$/i, '') + (el.tagName === 'VIDEO' ? '-' + Math.floor(el.currentTime || 0) + 's' : '') + '.png';
-        let p;
-        try {
-            p = new Promise((res, rej) => { try { c.toBlob(b => b ? res(b) : rej(new Error('пустой кадр')), 'image/png'); } catch (e) { rej(e); } });
-        } catch (e) { p = Promise.reject(e); }
-        p.then(blob => {
-            if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem === 'function') {
-                return navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-                    .then(() => mossadLightToast('📋 Кадр скопирован (' + w + '×' + h + ')'))
-                    .catch(() => { _dndSaveBlob(blob, base); mossadLightToast('📋 Буфер недоступен — кадр сохранён: ' + base); });
+    /**
+     * Повышение резкости (Unsharp Mask), микроконтраста и насыщенности кадра.
+     * Компенсирует артефакты и мыло компрессии H.264/H.265 видео для повторной генерации (Wan, Grok и др.).
+     */
+    function mossadEnhanceImageData(imgData) {
+        const d = imgData.data;
+        const w = imgData.width;
+        const h = imgData.height;
+        const copy = new Uint8ClampedArray(d);
+        const k = 0.32;
+        const center = 1 + 4 * k;
+        const contrast = 1.06;
+        const sat = 1.08;
+
+        for (let y = 1; y < h - 1; y++) {
+            const row = y * w;
+            const rowUp = (y - 1) * w;
+            const rowDown = (y + 1) * w;
+            for (let x = 1; x < w - 1; x++) {
+                const idx = (row + x) << 2;
+                const u = (rowUp + x) << 2;
+                const dn = (rowDown + x) << 2;
+                const l = (row + (x - 1)) << 2;
+                const r = (row + (x + 1)) << 2;
+
+                // Маска нерезкости 3x3
+                let red = copy[idx] * center - (copy[u] + copy[dn] + copy[l] + copy[r]) * k;
+                let grn = copy[idx + 1] * center - (copy[u + 1] + copy[dn + 1] + copy[l + 1] + copy[r + 1]) * k;
+                let blu = copy[idx + 2] * center - (copy[u + 2] + copy[dn + 2] + copy[l + 2] + copy[r + 2]) * k;
+
+                // Контраст
+                red = (red - 128) * contrast + 128;
+                grn = (grn - 128) * contrast + 128;
+                blu = (blu - 128) * contrast + 128;
+
+                // Насыщенность
+                const gray = 0.299 * red + 0.587 * grn + 0.114 * blu;
+                red = gray + (red - gray) * sat;
+                grn = gray + (grn - gray) * sat;
+                blu = gray + (blu - gray) * sat;
+
+                d[idx]     = red < 0 ? 0 : (red > 255 ? 255 : red);
+                d[idx + 1] = grn < 0 ? 0 : (grn > 255 ? 255 : grn);
+                d[idx + 2] = blu < 0 ? 0 : (blu > 255 ? 255 : blu);
             }
-            _dndSaveBlob(blob, base);
-            mossadLightToast('📋 Копирование картинок не поддерживается — кадр сохранён: ' + base);
-        }).catch(err => {
-            if (err && (err.name === 'SecurityError' || /taint|insecure|security/i.test(String(err.message))))
-                mossadLightToast('⚠️ Сайт защищает кадр (CORS) — скопировать нельзя. «Скачать» сохранит оригинал', true);
-            else mossadLightToast('⚠️ Кадр: ' + (err && err.message || err), true);
+        }
+        return imgData;
+    }
+
+    /**
+     * Кадр видео / картинка → PNG в буфер обмена.
+     * При enhance=true выполняет суперсэмплинг (для видео < 1080p), устраняет мыло сжатия (Unsharp Mask),
+     * восстанавливает микроконтраст и насыщенность.
+     * При CORS (холст «испорчен» кросс-доменным CDN, например assets.grok.com) — прозрачно обходит CORS через GM_xmlhttpRequest.
+     */
+    function mossadCopyFrame(el, enhance) {
+        enhance = !!enhance;
+        const origW = el.tagName === 'VIDEO' ? el.videoWidth : (el.naturalWidth || el.width);
+        const origH = el.tagName === 'VIDEO' ? el.videoHeight : (el.naturalHeight || el.height);
+        if (!origW || !origH) { mossadLightToast('⚠️ Медиа ещё не загружено', true); return; }
+
+        const isVideo = el.tagName === 'VIDEO';
+        const curTime = isVideo ? Math.max(0, Math.min(el.currentTime || 0, (el.duration || 9999) - 0.04)) : 0;
+        const base = (enhance ? 'enhanced-' : '') +
+            mossadDndFileName(mossadMediaUrl(el) || 'frame', el).replace(/\.[a-z0-9]+$/i, '') +
+            (isVideo ? '-' + Math.floor(curTime) + 's' : '') + '.png';
+
+        const finishExport = (sourceCanvas, sw, sh) => {
+            let finalCanvas = sourceCanvas;
+            let targetW = sw, targetH = sh;
+
+            if (enhance) {
+                let scale = 1.0;
+                const maxDim = Math.max(sw, sh);
+                if (maxDim <= 640) scale = 2.0;
+                else if (maxDim < 1100) scale = 1.5;
+
+                targetW = Math.round(sw * scale);
+                targetH = Math.round(sh * scale);
+
+                if (targetW !== sw || targetH !== sh) {
+                    finalCanvas = document.createElement('canvas');
+                    finalCanvas.width = targetW;
+                    finalCanvas.height = targetH;
+                    const fCtx = finalCanvas.getContext('2d');
+                    fCtx.imageSmoothingEnabled = true;
+                    fCtx.imageSmoothingQuality = 'high';
+                    fCtx.drawImage(sourceCanvas, 0, 0, targetW, targetH);
+                }
+
+                try {
+                    const fCtx = finalCanvas.getContext('2d');
+                    const imgData = fCtx.getImageData(0, 0, targetW, targetH);
+                    mossadEnhanceImageData(imgData);
+                    fCtx.putImageData(imgData, 0, 0);
+                } catch (e) {
+                    console.warn('[MOSSAD] Enhance filter warning:', e);
+                }
+            }
+
+            finalCanvas.toBlob(blob => {
+                if (!blob) { mossadLightToast('⚠️ Пустой кадр', true); return; }
+                const dimStr = targetW + '×' + targetH;
+                const label = enhance ? '✨ Кадр улучшен и скопирован (' + dimStr + ')' : '📋 Кадр скопирован (' + dimStr + ')';
+
+                if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem === 'function') {
+                    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+                        .then(() => mossadLightToast(label))
+                        .catch(() => {
+                            _dndSaveBlob(blob, base);
+                            mossadLightToast('📋 Буфер недоступен — кадр сохранён: ' + base);
+                        });
+                } else {
+                    _dndSaveBlob(blob, base);
+                    mossadLightToast('📋 Буфер не поддерживается — кадр сохранён: ' + base);
+                }
+            }, 'image/png');
+        };
+
+        // 1. Быстрый путь: пробуем отрисовать напрямую
+        const c = document.createElement('canvas');
+        c.width = origW; c.height = origH;
+        let directOk = false;
+        try {
+            c.getContext('2d').drawImage(el, 0, 0, origW, origH);
+            c.getContext('2d').getImageData(0, 0, 1, 1); // вызовет SecurityError, если холст испорчен CORS
+            directOk = true;
+        } catch (e) {
+            directOk = false;
+        }
+
+        if (directOk) {
+            finishExport(c, origW, origH);
+            return;
+        }
+
+        // 2. Путь обхода CORS через GM_xmlhttpRequest (Grok CDN assets.grok.com, Hugging Face CDN и др.)
+        const mediaUrl = mossadMediaUrl(el);
+        if (!mediaUrl || typeof GM_xmlhttpRequest !== 'function') {
+            mossadLightToast('⚠️ Сайт защищает кадр (CORS) — скопировать нельзя. «Скачать» сохранит оригинал', true);
+            return;
+        }
+
+        mossadLightToast('⏳ Захват кадра (обход CORS)...');
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: mediaUrl,
+            responseType: 'blob',
+            onload: (res) => {
+                if (!res.response || (res.status && res.status >= 400)) {
+                    mossadLightToast('⚠️ Не удалось загрузить медиа (HTTP ' + (res.status || '') + ')', true);
+                    return;
+                }
+                const blob = res.response;
+                const blobUrl = URL.createObjectURL(blob);
+
+                if (!isVideo) {
+                    const img = new Image();
+                    img.onload = () => {
+                        const c2 = document.createElement('canvas');
+                        const iw = img.naturalWidth || origW;
+                        const ih = img.naturalHeight || origH;
+                        c2.width = iw; c2.height = ih;
+                        c2.getContext('2d').drawImage(img, 0, 0, iw, ih);
+                        URL.revokeObjectURL(blobUrl);
+                        finishExport(c2, iw, ih);
+                    };
+                    img.onerror = () => {
+                        URL.revokeObjectURL(blobUrl);
+                        mossadLightToast('⚠️ Ошибка декодирования картинки', true);
+                    };
+                    img.src = blobUrl;
+                } else {
+                    const tempVid = document.createElement('video');
+                    tempVid.muted = true;
+                    tempVid.playsInline = true;
+                    tempVid.preload = 'auto';
+                    let cleaned = false;
+                    const cleanup = () => {
+                        if (cleaned) return;
+                        cleaned = true;
+                        URL.revokeObjectURL(blobUrl);
+                        tempVid.removeAttribute('src');
+                        try { tempVid.load(); } catch (e) {}
+                    };
+
+                    let done = false;
+                    const doCapture = () => {
+                        if (done) return;
+                        done = true;
+                        try {
+                            const c2 = document.createElement('canvas');
+                            const vw = tempVid.videoWidth || origW;
+                            const vh = tempVid.videoHeight || origH;
+                            c2.width = vw; c2.height = vh;
+                            c2.getContext('2d').drawImage(tempVid, 0, 0, vw, vh);
+                            cleanup();
+                            finishExport(c2, vw, vh);
+                        } catch (err) {
+                            cleanup();
+                            mossadLightToast('⚠️ Ошибка захвата: ' + (err && err.message || err), true);
+                        }
+                    };
+
+                    let seekTimer = null;
+                    tempVid.onloadedmetadata = () => {
+                        const dur = tempVid.duration || 9999;
+                        const targetT = Math.max(0, Math.min(curTime, dur - 0.04));
+                        if (targetT > 0.05) {
+                            tempVid.currentTime = targetT;
+                        } else {
+                            if (tempVid.readyState >= 2) doCapture();
+                            else tempVid.onloadeddata = doCapture;
+                        }
+                    };
+                    tempVid.onseeked = () => {
+                        if (seekTimer) clearTimeout(seekTimer);
+                        doCapture();
+                    };
+                    tempVid.onerror = () => {
+                        if (seekTimer) clearTimeout(seekTimer);
+                        cleanup();
+                        mossadLightToast('⚠️ Не удалось воспроизвести видео-кадр', true);
+                    };
+                    seekTimer = setTimeout(() => {
+                        if (!done && tempVid.readyState >= 2) doCapture();
+                    }, 4000);
+
+                    tempVid.src = blobUrl;
+                }
+            },
+            onerror: (err) => {
+                mossadLightToast('⚠️ XHR ошибка: ' + (err && err.error || 'не удалось скачать'), true);
+            }
         });
     }
 
@@ -187,14 +397,19 @@
         const m = document.createElement('div');
         m.id = 'mossad-dnd-menu';
         m.style.cssText = 'position:fixed;z-index:2147483647;background:#111827;border:1px solid #4b5563;border-radius:8px;padding:4px;' +
-            'box-shadow:0 8px 24px rgba(0,0,0,0.6);font:13px system-ui,sans-serif;color:#e5e7eb;min-width:170px;';
+            'box-shadow:0 8px 24px rgba(0,0,0,0.6);font:13px system-ui,sans-serif;color:#e5e7eb;min-width:185px;';
         const folder = mossadDndNormFolder(mossadDndCfg().folder) || '(корень)';
-        const items = [['dl', '⬇ Скачать'], ['folder', '📁 Папка… (' + folder + ')'], ['frame', '📋 Копировать кадр']];
+        const items = [
+            ['dl', '⬇ Скачать'],
+            ['folder', '📁 Папка… (' + folder + ')'],
+            ['frame', '📋 Копировать кадр'],
+            ['enhance', '✨ Улучшить и скопировать']
+        ];
         m.innerHTML = items.map(([k, t]) => `<div data-dnd="${k}" style="padding:6px 10px;border-radius:5px;cursor:pointer;white-space:nowrap;">${t.replace(/</g, '&lt;')}</div>`).join('');
         (document.fullscreenElement || document.body || document.documentElement).appendChild(m);
         const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
-        m.style.left = Math.max(2, Math.min(x, vw - 200)) + 'px';
-        m.style.top = Math.max(2, Math.min(y, vh - 110)) + 'px';
+        m.style.left = Math.max(2, Math.min(x, vw - 215)) + 'px';
+        m.style.top = Math.max(2, Math.min(y, vh - 150)) + 'px';
         m.addEventListener('mouseover', (e) => { const it = e.target.closest('[data-dnd]'); m.querySelectorAll('[data-dnd]').forEach(d => { d.style.background = d === it ? '#1f2937' : ''; }); });
         m.addEventListener('click', (e) => {
             const it = e.target.closest('[data-dnd]');
@@ -203,7 +418,8 @@
             const k = it.getAttribute('data-dnd');
             mossadDndCloseMenu();
             if (k === 'dl') mossadDndDownload(el);
-            else if (k === 'frame') mossadCopyFrame(el);
+            else if (k === 'frame') mossadCopyFrame(el, false);
+            else if (k === 'enhance') mossadCopyFrame(el, true);
             else if (k === 'folder') {
                 const v = prompt('MOSSAD DND: подпапка в «Загрузках» (пусто — корень):', mossadDndCfg().folder);
                 if (v !== null) { const f = mossadDndNormFolder(v); mossadDndSave({ folder: f }); mossadLightToast('📁 Папка: ' + (f || '(корень «Загрузок»)')); }

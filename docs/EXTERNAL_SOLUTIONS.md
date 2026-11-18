@@ -49,3 +49,12 @@
 | :--- | :--- | :--- | :--- |
 | **Telegram Media Downloader (WebA / WebK)** | GreasyFork (Neet-Nestor, classccai, OsoCosmico) | Перехват `window.URL.createObjectURL` для захвата Blob/MediaSource, селекторы лайтбокса (`.media-viewer-moal`, `.MediaViewer`, `.ImageViewer`, `.pswp`), извлечение блоба через `fetch(blobUrl)` и скачивание даже из закрытых/защищенных каналов | Интегрируется в `src/engines/telegram.js` (v1.4.19) |
 
+---
+
+## 6. Захват и улучшение видеокадров (Лёгкий слой / DND)
+
+| Решение / Скрипт | Источник | Что умеет / Ключевые API | Статус в MOSSAD |
+| :--- | :--- | :--- | :--- |
+| **Canvas Frame Grabber & Unsharp Mask Enhancer** | HTML5 Canvas API / WebGL / Tampermonkey | Обход CORS через `GM_xmlhttpRequest(..., responseType: 'blob')` для устранения Tainted Canvas на кросс-доменных CDN (Grok, Hugging Face). Суперсэмплинг низких разрешений (Wan 480p -> 720p), маска нерезкости 3x3 для компенсации артефактов видеосжатия H.264/H.265, копирование в `ClipboardItem({'image/png': blob})` | Интегрировано в `src/light/dnd.js` (v1.4.21) |
+
+
