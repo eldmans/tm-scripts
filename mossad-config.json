@@ -6,11 +6,11 @@
   "slideshowDirections": [
     "up"
   ],
-  "videoLoops": 1,
+  "videoLoops": 2,
   "videoAutoAdvanceOnEnd": true,
   "slideshowDelay": 1,
   "delayAfterVideo": 1,
-  "downloadType": "photo",
+  "downloadType": "none",
   "pdAction": "none",
   "stopOnTabSwitch": false,
   "stopOnBrsrSwitch": false,
@@ -134,13 +134,13 @@
       "shift": false
     },
     "nextSlide": {
-      "key": "ArrowRight",
+      "key": "",
       "ctrl": false,
       "alt": false,
       "shift": false
     },
     "prevSlide": {
-      "key": "ArrowLeft",
+      "key": "",
       "ctrl": false,
       "alt": false,
       "shift": false
@@ -243,6 +243,12 @@
       "ctrl": false,
       "alt": false,
       "shift": false
+    },
+    "stickyPlayer": {
+      "key": "V",
+      "ctrl": false,
+      "alt": false,
+      "shift": true
     }
   },
   "autoUpdateCheck": false,
