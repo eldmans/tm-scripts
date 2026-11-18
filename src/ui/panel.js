@@ -394,7 +394,12 @@
         btnPlayWin.onmouseleave = () => { btnPlayWin.style.background = '#1f2937'; };
         btnPlayWin.onclick = (e) => { e.stopPropagation(); if (typeof mossadPlayInWindow === 'function') mossadPlayInWindow(); };
 
-        topBar.append(btnTogglePills, timerEl, btnStart, btnPlayWin, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+        // На Grok прямое открытие видео в отдельной вкладке заблокировано сервером — не захламляем панель
+        if (rootDomain === 'grok.com') {
+            topBar.append(btnTogglePills, timerEl, btnStart, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+        } else {
+            topBar.append(btnTogglePills, timerEl, btnStart, btnPlayWin, btnTogglePanel, btnUpdate, btnTodo, btnClose);
+        }
         // ── HUD СЛАЙД-ШОУ (v1.3.93): компактная плашка настроек активного показа ──
         // Появляется ТОЛЬКО когда слайд-шоу запущено. Исчезает при остановке.
         hudRow = document.createElement('div');

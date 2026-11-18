@@ -598,6 +598,30 @@
         }
     }
 
+    async function exportDownloadHistoryJSON() {
+        try {
+            const db = await getDownloadDB();
+            const records = await new Promise((resolve) => {
+                const tx = db.transaction(MOSSAD_STORE_NAME, 'readonly');
+                const store = tx.objectStore(MOSSAD_STORE_NAME);
+                const req = store.getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => resolve([]);
+            });
+            const blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `mossad-hashes-${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+            if (typeof showToast === 'function') showToast(`💾 Экспортировано ${records.length} записей базы хешей!`);
+        } catch (e) {
+            console.error('[MOSSAD] Export history error:', e);
+            if (typeof showToast === 'function') showToast('❌ Ошибка экспорта базы', true);
+        }
+    }
+    window.exportDownloadHistoryJSON = exportDownloadHistoryJSON;
+
     /**
      * v1.4.16: Синхронизация базы хешей с GitHub (двустороннее слияние).
      * Читает локальные записи из IndexedDB, скачивает remote 'mossad-hashes.json',

@@ -331,11 +331,12 @@
     }
     window.addEventListener('keydown', mossadSettingsTabsKey, true);
 
-    /** Переключает/закрывает окно настроек: если открыто на той же вкладке — закрыть, иначе показать вкладку. */
-    function toggleSettingsWindow(tab = 'hotkeys') {
+    /** Переключает/закрывает окно настроек: если открыто на той же вкладке — закрыть, иначе показать вкладку (по умолчанию — последняя активная). */
+    function toggleSettingsWindow(tab) {
+        const targetTab = SETTINGS_TABS.includes(tab) ? tab : getLastSettingsTab();
         const modal = document.getElementById('mossad-hk-modal');
-        if (modal && modal.dataset.tab === tab) { closeSettingsWindow(true); return; }
-        openSettingsWindow(tab);
+        if (modal && modal.dataset.tab === targetTab) { closeSettingsWindow(true); return; }
+        openSettingsWindow(targetTab);
     }
 
     function closeSettingsWindow(save = true) {
@@ -368,7 +369,7 @@
         { k: 'stopOnTabSwitch',   t: 'bool', label: 'Tab: стоп при смене вкладки' },
         { k: 'stopOnBrsrSwitch',  t: 'bool', label: 'Brsr: стоп при уходе из браузера' },
         { k: 'autoFS',            t: 'bool', label: 'FS: авто полный экран' },
-        { k: 'widgetZoom',        t: 'num', label: 'Масштаб виджета', step: 0.05, min: 0.5 },
+        { k: 'widgetZoom',        t: 'num', label: 'Масштаб виджета и списка (0.5–1.8)', step: 0.05, min: 0.5 },
         { k: 'closePanelOnOutsideClick', t: 'bool', label: 'Сворачивать меню кликом вне' },
         { k: 'showSoundToast',    t: 'bool', label: 'Тост переключения звука' },
         { k: 'playlistRows',      t: 'num', label: 'Список: видимых строк', step: 1, min: 5 },
@@ -904,15 +905,19 @@
                 <button id="mossad-gen-prompthk-help" title="Выбрать хоткеи (клик — добавить, повторный клик — убрать)" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:4px;" title="Шаблон имени скачиваемых файлов для ${rootDomain} (то же поле, что в меню). Пусто = шаблон сайта по умолчанию">
-              <span data-mossad-label="tplSiteLabel" style="white-space:nowrap;">${LH('tplSiteLabel')}</span>
-              <span style="font-size:10px;padding:1px 5px;border-radius:4px;background:#1e3a8a;color:#93c5fd;border:1px solid #3b82f6;font-weight:600;" title="Шаблон изолирован строго для ${rootDomain}">🎯 Только для ${rootDomain}</span>
-              <input id="mossad-gen-tpl" type="text" placeholder="${getDefaultFilenameTemplate()}" value="${(config.filenameTemplate || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
-                style="flex:1;min-width:0;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:12px;">
-              <button class="mossad-tpl-help-btn" data-for="mossad-gen-tpl" title="Теги шаблона и «как скачается сейчас»" style="${MOSSAD_TPL_HELP_BTN_CSS}" data-mossad-label="tplHelpBtn">${LH('tplHelpBtn')}</button>
-              <button id="mossad-btn-reset-site-tpl" title="Сбросить шаблон на стандартный для ${rootDomain} (${getDefaultFilenameTemplate()})" style="${MOSSAD_TPL_HELP_BTN_CSS}color:#f87171;font-weight:700;">↺</button>
+            <!-- v1.4.26: 1-клик переключатель режима скачивания слайд-шоу -->
+            <div style="background:#111827;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;display:flex;flex-direction:column;gap:5px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;">
+                <span style="font-weight:bold;color:#38bdf8;">🎞️ Скачивание при слайд-шоу:</span>
+                <span id="mossad-gen-dl-mode-hint" style="font-size:11px;color:#9ca3af;">${config.downloadType === 'all' ? 'Качать фото и видео' : config.downloadType === 'photo' ? 'Только фото' : config.downloadType === 'video' ? 'Только видео' : 'Выключено'}</span>
+              </div>
+              <div id="mossad-gen-dl-type-group" style="display:flex;gap:4px;">
+                <button type="button" class="mossad-dl-mode-btn" data-val="none" style="flex:1;background:${config.downloadType === 'none' ? '#374151' : '#1f2937'};border:1px solid ${config.downloadType === 'none' ? '#9ca3af' : '#374151'};border-radius:4px;color:${config.downloadType === 'none' ? '#fff' : '#9ca3af'};padding:5px 6px;cursor:pointer;font-size:11px;font-weight:bold;transition:all 0.2s;">✕ Не качать</button>
+                <button type="button" class="mossad-dl-mode-btn" data-val="photo" style="flex:1;background:${config.downloadType === 'photo' ? '#1e3a8a' : '#1f2937'};border:1px solid ${config.downloadType === 'photo' ? '#3b82f6' : '#374151'};border-radius:4px;color:${config.downloadType === 'photo' ? '#93c5fd' : '#e5e7eb'};padding:5px 6px;cursor:pointer;font-size:11px;font-weight:bold;transition:all 0.2s;">📷 Фото</button>
+                <button type="button" class="mossad-dl-mode-btn" data-val="video" style="flex:1;background:${config.downloadType === 'video' ? '#1e3a8a' : '#1f2937'};border:1px solid ${config.downloadType === 'video' ? '#3b82f6' : '#374151'};border-radius:4px;color:${config.downloadType === 'video' ? '#93c5fd' : '#e5e7eb'};padding:5px 6px;cursor:pointer;font-size:11px;font-weight:bold;transition:all 0.2s;">🎬 Видео</button>
+                <button type="button" class="mossad-dl-mode-btn" data-val="all" style="flex:1;background:${config.downloadType === 'all' ? '#065f46' : '#1f2937'};border:1px solid ${config.downloadType === 'all' ? '#10b981' : '#374151'};border-radius:4px;color:${config.downloadType === 'all' ? '#6ee7b7' : '#e5e7eb'};padding:5px 6px;cursor:pointer;font-size:11px;font-weight:bold;transition:all 0.2s;">★ Всё</button>
+              </div>
             </div>
-            <div style="font-size:10px;color:#94a3b8;padding-left:4px;margin-top:-2px;margin-bottom:6px;">⚠️ Шаблон сохраняется <b>сугубо для ${rootDomain}</b> и никогда не перезаписывает Grok или другие сайты.</div>
             <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;" title="v1.3.74: минус-слова для ${rootDomain} — через запятую, всегда убираются из {title} и {desc} (без учёта регистра). Текст с запятой или пробелами по краям — в кавычках: &quot; - Brave&quot;. В самом шаблоне то же делает {title--слово}">
               <span data-mossad-label="tplJunkLabel" style="white-space:nowrap;">${LH('tplJunkLabel')}</span>
               <input id="mossad-gen-junk" type="text" placeholder="Watch Online, &quot; - Brave&quot;" value="${mossadJunkText().replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
@@ -926,7 +931,9 @@
               </select>
               <span style="font-size:11px;color:#9ca3af;margin-left:auto;display:flex;align-items:center;gap:6px;" title="Сквозной номер успешных закачек для ${rootDomain}">
                 Закачек на сайте: <b id="mossad-gen-site-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b>
-                <button id="mossad-btn-cloud-sync-db" style="background:#1e3a8a;border:1px solid #3b82f6;border-radius:4px;color:#93c5fd;padding:1px 7px;cursor:pointer;font-size:11px;font-weight:bold;" title="Синхронизировать базу хешей скачанных файлов с GitHub">☁️ Облако хешей</button>
+                <button id="mossad-btn-export-db-json" style="background:#1f2937;border:1px solid #4b5563;border-radius:4px;color:#34d399;padding:1px 7px;cursor:pointer;font-size:11px;font-weight:bold;" title="Экспортировать локальную базу хешей дедупликации в JSON-файл">📤 Экспорт</button>
+                <button id="mossad-btn-import-db-json" style="background:#1f2937;border:1px solid #4b5563;border-radius:4px;color:#38bdf8;padding:1px 7px;cursor:pointer;font-size:11px;font-weight:bold;" title="Импортировать базу хешей из JSON-файла">📥 Импорт</button>
+                <input id="mossad-file-db-general" type="file" accept=".json" style="display:none;">
               </span>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#d1d5db;margin-bottom:6px;cursor:pointer;" title="Клик мышью вне окон MOSSAD сворачивает панель настроек виджета до краткого меню">
@@ -1818,26 +1825,66 @@
         };
         modal.querySelector('#mossad-gen-prompthk-help').onclick = openPHkHelp;
         genPHk.onclick = openPHkHelp;
-        // v1.3.53: шаблон имени для этого сайта (то же, что поле в меню)
-        const genTpl = modal.querySelector('#mossad-gen-tpl');
-        if (genTpl) {
-            genTpl.onchange = genTpl.onblur = (e) => mossadSaveSiteTemplate(e.target.value);
-            mossadWireTplHelp(genTpl.parentElement);
+        // v1.4.26: 1-клик переключатель режима скачивания слайд-шоу
+        const dlGroup = modal.querySelector('#mossad-gen-dl-type-group');
+        const dlHint = modal.querySelector('#mossad-gen-dl-mode-hint');
+        if (dlGroup) {
+            dlGroup.querySelectorAll('.mossad-dl-mode-btn').forEach(btn => {
+                btn.onclick = () => {
+                    const val = btn.dataset.val;
+                    Settings.set('downloadType', val);
+                    dlGroup.querySelectorAll('.mossad-dl-mode-btn').forEach(b => {
+                        const act = b.dataset.val === val;
+                        if (b.dataset.val === 'none') {
+                            b.style.background = act ? '#374151' : '#1f2937';
+                            b.style.borderColor = act ? '#9ca3af' : '#374151';
+                            b.style.color = act ? '#fff' : '#9ca3af';
+                        } else if (b.dataset.val === 'all') {
+                            b.style.background = act ? '#065f46' : '#1f2937';
+                            b.style.borderColor = act ? '#10b981' : '#374151';
+                            b.style.color = act ? '#6ee7b7' : '#e5e7eb';
+                        } else {
+                            b.style.background = act ? '#1e3a8a' : '#1f2937';
+                            b.style.borderColor = act ? '#3b82f6' : '#374151';
+                            b.style.color = act ? '#93c5fd' : '#e5e7eb';
+                        }
+                    });
+                    if (dlHint) {
+                        dlHint.textContent = val === 'all' ? 'Качать фото и видео' : val === 'photo' ? 'Только фото' : val === 'video' ? 'Только видео' : 'Выключено';
+                    }
+                    if (typeof window.updateSlideshowHud === 'function') window.updateSlideshowHud();
+                    showToast(`🎞️ Режим слайд-шоу: ${val === 'none' ? '✕ Не качать' : val === 'photo' ? '📷 Фото' : val === 'video' ? '🎬 Видео' : '★ Всё'}`);
+                };
+            });
         }
-        const btnResetSiteTpl = modal.querySelector('#mossad-btn-reset-site-tpl');
-        if (btnResetSiteTpl) {
-            btnResetSiteTpl.onclick = (e) => {
-                e.preventDefault();
-                mossadSaveSiteTemplate('');
-                if (genTpl) genTpl.value = '';
-                if (typeof showToast === 'function') showToast(`↺ Шаблон сброшен на стандартный для ${rootDomain} (${getDefaultFilenameTemplate()})`);
+
+        // v1.4.26: Локальный экспорт/импорт базы хешей дедупликации
+        const btnExpDb = modal.querySelector('#mossad-btn-export-db-json');
+        if (btnExpDb) {
+            btnExpDb.onclick = () => {
+                if (typeof exportDownloadHistoryJSON === 'function') exportDownloadHistoryJSON();
             };
         }
-        const btnCloudSyncDb = modal.querySelector('#mossad-btn-cloud-sync-db');
-        if (btnCloudSyncDb) {
-            btnCloudSyncDb.onclick = (e) => {
-                e.preventDefault();
-                if (typeof syncHashesWithGitHub === 'function') syncHashesWithGitHub();
+        const btnImpDb = modal.querySelector('#mossad-btn-import-db-json');
+        const fileImpDb = modal.querySelector('#mossad-file-db-general');
+        if (btnImpDb && fileImpDb) {
+            btnImpDb.onclick = () => fileImpDb.click();
+            fileImpDb.onchange = (e) => {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (evt) => {
+                    try {
+                        const data = JSON.parse(evt.target.result);
+                        if (typeof importDownloadHistory === 'function') {
+                            const count = await importDownloadHistory(data);
+                            showToast(`✅ Импортировано ${count} записей в базу хешей!`);
+                        }
+                    } catch (err) {
+                        showToast('❌ Ошибка чтения JSON файла базы', true);
+                    }
+                };
+                reader.readAsText(file, 'utf-8');
             };
         }
         const cbAutoAdv = modal.querySelector('#mossad-cb-video-auto-advance');

@@ -1,5 +1,9 @@
     // v1.4.12: «📺 Play in Window» — открыть прямой URL видео (или страницу) в новой вкладке
     function mossadPlayInWindow() {
+        if (rootDomain === 'grok.com') {
+            showToast('⚠️ На Grok прямое открытие видео в отдельной вкладке заблокировано сервером', true);
+            return;
+        }
         let videoUrl = '';
         try {
             if (typeof MossadEngineRegistry !== 'undefined') {
