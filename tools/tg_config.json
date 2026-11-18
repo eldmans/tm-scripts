@@ -14,7 +14,7 @@
     10,
     5
   ],
-  "last_alert_5h": 100,
+  "last_alert_5h": 75,
   "last_alert_weekly": 100,
   "is_active": true,
   "allowed_guests": {

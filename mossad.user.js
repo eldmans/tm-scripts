@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.29
+// @version      1.4.30
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.29';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.30';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -2976,7 +2976,7 @@ const LABELS_GM_KEY = 'mossad_labels';
 const LABEL_DEFS = [
 ['#', 'Верхняя полоса виджета'],
 ['start', '🚀', 'кнопка запуска слайд-шоу (Insert)'],
-['download', '💾', 'кнопка «Скачать»'],
+['download', '⭳', 'кнопка «Скачать»'],
 ['update', '🔄', 'кнопка «Обновить скрипт»'],
 ['togglePanel', '▼', 'кнопка «Меню настроек» (развернуть/свернуть)'],
 ['hideWidget', '✕', 'кнопка «Скрыть виджет»'],
@@ -2999,14 +2999,14 @@ const LABEL_DEFS = [
 ['loopsLabel', 'Видео (↺):', 'надпись у поля «кругов видео»'],
 ['photoLabel', 'Фото (сек):', 'надпись у поля «показ фото»'],
 ['pauseLabel', 'Пауза (сек):', 'надпись у поля «пауза после видео»'],
-['exportList', '💾 Список', 'кнопка «Скачать список ссылок (.txt)»'],
+['exportList', '⭳ Список', 'кнопка «Скачать список ссылок (.txt)»'],
 ['zoomDec', '−', 'кнопка «Уменьшить масштаб»'],
 ['zoomInc', '+', 'кнопка «Увеличить масштаб»'],
 ['tplLabel', 'Шаблон:', 'надпись у шаблона имени файла'],
 ['saveTplGlobal', '💾', 'кнопка «Сохранить шаблон для всех вкладок»'],
-['settings', '⚙ Настройки', 'кнопка открытия окна настроек'],
+['settings', '⚙', 'кнопка открытия окна настроек'],
 ['importDb', '📥 База', 'кнопка «Импорт базы хешей дедупликации»'],
-['resetCfg', '↺ Сброс', 'кнопка «Сбросить все настройки»'],
+['rewind', '↺ Перемотка', 'кнопка перемотки видео / ленты'],
 ['#', 'Список (плейлист)'],
 ['playlistTitle', '📋 Список', 'заголовок списка (к нему добавляется число)'],
 ['fontDec', 'A−', 'кнопка «Шрифт меньше»'],
@@ -15071,8 +15071,8 @@ panel.innerHTML = `
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-btn-hk" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:14px; transition:all 0.2s;" title="⚙ Окно настроек (Ctrl+F1)">⚙</button>
-                    <button id="mossad-btn-rewind-bar" style="flex:1; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:6px 8px; color:#38bdf8; cursor:pointer; font-weight:bold; font-size:12px; transition:all 0.2s;" title="↺ Перемотать видео назад / к началу">↺ Перемотка</button>
+                    <button id="mossad-btn-hk" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:14px; transition:all 0.2s;" title="⚙ Окно настроек (Ctrl+F1)" data-mossad-label="settings">${LH('settings')}</button>
+                    <button id="mossad-btn-rewind-bar" style="flex:1; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:6px 8px; color:#38bdf8; cursor:pointer; font-weight:bold; font-size:12px; transition:all 0.2s;" title="↺ Перемотать видео назад / к началу" data-mossad-label="rewind">${LH('rewind')}</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
                 </div>
             `;
@@ -17524,7 +17524,7 @@ const list = modal.querySelector('#mossad-hk-list');
 const HOTKEY_CATEGORIES = [
 { id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize', 'stickyPlayer'] },
 { id: 'cat-nav', title: '🎞 Листание и навигация по кадрам', keys: ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'rewind', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide'] },
-{ id: 'cat-dl', title: '💾 Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate', 'playInWindow'] },
+{ id: 'cat-dl', title: '⭳ Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate', 'playInWindow'] },
 { id: 'cat-ui', title: '🛠 Меню, окна и утилиты', keys: ['updateScript', 'slideshowPanel', 'help', 'history', 'snapWidget', 'openTodos', 'grokCycle'] }
 ];
 const keysMap = {

@@ -161,6 +161,8 @@ def download_file_by_id(file_id, dest_path):
         print(f"[TG Download Error] {e}")
     return None
 
+download_tg_file = download_file_by_id
+
 def get_user_avatar(user_id):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/getUserProfilePhotos?user_id={user_id}&limit=1"
@@ -547,27 +549,18 @@ def handle_user_message(msg):
     last_name = user.get("last_name", "")
     full_name = f"{first_name} {last_name}".strip() or user_name
     text = msg.get("text", "").strip()
-    voice_obj = msg.get("voice") or msg.get("audio")
-    if voice_obj and not text:
-        file_id = voice_obj.get("file_id")
-        if file_id:
-            ogg_path = os.path.join(BASE_DIR, f"voice_{int(time.time())}.ogg")
-            if download_tg_file(file_id, ogg_path):
-                try:
-                    from stt_engine import transcribe_audio
-                    recognized_text, engine = transcribe_audio(ogg_path)
-                    if recognized_text:
-                        text = recognized_text
-                        print(f"[TG STT] Распознано ({engine}): {text}")
-                    else:
-                        text = "[Голосовое сообщение без слов]"
-                except Exception as stt_err:
-                    print(f"[TG STT Error] {stt_err}")
-                    text = "[Ошибка распознавания голоса]"
-                finally:
-                    if os.path.exists(ogg_path):
-                        try: os.remove(ogg_path)
-                        except: pass
+    photo_list = msg.get("photo")
+    if photo_list:
+        file_id = photo_list[-1]["file_id"]
+        photos_dir = os.path.join(BASE_DIR, "inbox_photos")
+        os.makedirs(photos_dir, exist_ok=True)
+        photo_filename = f"photo_{int(time.time())}_{file_id[:8]}.jpg"
+        photo_path = os.path.join(photos_dir, photo_filename)
+        download_file_by_id(file_id, photo_path)
+        caption = msg.get("caption", "").strip()
+        photo_desc = f"[Фото: {photo_filename}]"
+        text = f"{photo_desc} {caption}" if caption else photo_desc
+
     contact = msg.get("contact")
     voice = msg.get("voice") or msg.get("audio")
 
@@ -775,11 +768,25 @@ def handle_callback_query(cb):
         if len(text) <= 180:
             answer_callback(cb_id, text=f"Распознанный текст:\n\n{text}", show_alert=True)
         else:
-            # Telegram popup limit is 200 chars. Show head in alert and full text in chat
-            answer_callback(cb_id, text=f"Текст:\n\n{text[:160]}...", show_alert=True)
-            send_tg_message(chat_id, f"📝 <b>Полный текст голосового сообщения:</b>\n\n«{text}»")
+            answer_callback(cb_id, "Показываю текст...")
+            collapse_markup = {
+                "inline_keyboard": [
+                    [{"text": "🔙 Свернуть / Закрыть", "callback_data": f"stt_collapse:{stt_id}"}]
+                ]
+            }
+            edit_tg_message(chat_id, msg_id, f"📝 <b>Текст голосового:</b>\n\n{text[:4000]}", reply_markup=collapse_markup)
 
-    # 2. View full details of agent reply
+    elif data.startswith("stt_collapse:"):
+        stt_id = data.split(":", 1)[1]
+        answer_callback(cb_id, "Свернуто.")
+        restore_markup = {
+            "inline_keyboard": [
+                [{"text": "📝 Просмотреть текст", "callback_data": f"stt_view:{stt_id}"}]
+            ]
+        }
+        edit_tg_message(chat_id, msg_id, "🎤 <b>Ваше голосовое сообщение распознано</b>", reply_markup=restore_markup)
+
+    # 2. View full details of agent reply (IN-PLACE EXPAND / COLLAPSE - NO CHAT CLUTTER!)
     elif data.startswith("det_view:"):
         det_id = data.split(":", 1)[1]
         det = DETAILS_CACHE.get(det_id, {})
@@ -787,8 +794,29 @@ def handle_callback_query(cb):
         if len(full_text) <= 180:
             answer_callback(cb_id, text=full_text, show_alert=True)
         else:
-            answer_callback(cb_id, "Открываю полный отчёт...")
-            send_tg_message(chat_id, full_text)
+            answer_callback(cb_id, "Разворачиваю подробности...")
+            collapse_markup = {
+                "inline_keyboard": [
+                    [{"text": "🔙 Свернуть / Закрыть", "callback_data": f"det_collapse:{det_id}"}],
+                    [{"text": "🎧 Повторить аудио", "callback_data": f"voice_replay:{det_id}"}]
+                ]
+            }
+            edit_tg_message(chat_id, msg_id, full_text[:4000], reply_markup=collapse_markup)
+
+    elif data.startswith("det_collapse:"):
+        det_id = data.split(":", 1)[1]
+        det = DETAILS_CACHE.get(det_id, {})
+        short_text = det.get("short", "Статус свернут.")
+        answer_callback(cb_id, "Свернуто.")
+        restore_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "📖 Подробнее", "callback_data": f"det_view:{det_id}"},
+                    {"text": "🎧 Повторить аудио", "callback_data": f"voice_replay:{det_id}"}
+                ]
+            ]
+        }
+        edit_tg_message(chat_id, msg_id, short_text, reply_markup=restore_markup)
 
     # 3. Replay voice audio
     elif data.startswith("voice_replay:"):
@@ -886,6 +914,26 @@ def check_outbox():
         except Exception as e:
             print(f"[Outbox Text Error] {e}")
 
+LAST_QUEUE_CHECK = 0
+def check_queue_watchdog():
+    global LAST_QUEUE_CHECK
+    now = time.time()
+    if now - LAST_QUEUE_CHECK < 60:
+        return
+    LAST_QUEUE_CHECK = now
+    if not os.path.exists(INBOX_JSON_FILE):
+        return
+    try:
+        with open(INBOX_JSON_FILE, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        unhandled = [it for it in items if not it.get("handled")]
+        if unhandled:
+            with open(WAKE_SIGNAL_FILE, "w", encoding="utf-8") as wf:
+                wf.write(f"UNHANDLED_QUEUE_{len(unhandled)}_{int(now)}")
+            print(f"[Queue Watchdog] ⚡ В очереди {len(unhandled)} необработанных сообщений! Расталкиваю систему...")
+    except Exception as e:
+        print(f"[Queue Watchdog Error] {e}")
+
 # --- MAIN LOOP ---
 
 def poll_telegram():
@@ -906,6 +954,7 @@ def poll_telegram():
         try:
             check_outbox()
             check_quota_alerts()
+            check_queue_watchdog()
             url = f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=5"
             r = requests.get(url, timeout=10)
             data = r.json()
@@ -916,6 +965,9 @@ def poll_telegram():
                         handle_user_message(item["message"])
                     elif "callback_query" in item:
                         handle_callback_query(item["callback_query"])
+        except requests.exceptions.Timeout:
+            # Normal long-polling timeout when no new messages arrived
+            continue
         except Exception as e:
             print(f"[Poll loop error] {e}")
             time.sleep(2)

@@ -1045,7 +1045,7 @@
         const HOTKEY_CATEGORIES = [
             { id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize', 'stickyPlayer'] },
             { id: 'cat-nav', title: '🎞 Листание и навигация по кадрам', keys: ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'rewind', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide'] },
-            { id: 'cat-dl', title: '💾 Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate', 'playInWindow'] },
+            { id: 'cat-dl', title: '⭳ Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate', 'playInWindow'] },
             { id: 'cat-ui', title: '🛠 Меню, окна и утилиты', keys: ['updateScript', 'slideshowPanel', 'help', 'history', 'snapWidget', 'openTodos', 'grokCycle'] }
         ];
 

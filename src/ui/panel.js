@@ -737,8 +737,8 @@
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
-                    <button id="mossad-btn-hk" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:14px; transition:all 0.2s;" title="⚙ Окно настроек (Ctrl+F1)">⚙</button>
-                    <button id="mossad-btn-rewind-bar" style="flex:1; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:6px 8px; color:#38bdf8; cursor:pointer; font-weight:bold; font-size:12px; transition:all 0.2s;" title="↺ Перемотать видео назад / к началу">↺ Перемотка</button>
+                    <button id="mossad-btn-hk" style="background:#374151; border:1px solid #4b5563; border-radius:4px; padding:6px 12px; color:#60a5fa; cursor:pointer; font-weight:bold; font-size:14px; transition:all 0.2s;" title="⚙ Окно настроек (Ctrl+F1)" data-mossad-label="settings">${LH('settings')}</button>
+                    <button id="mossad-btn-rewind-bar" style="flex:1; background:#1f2937; border:1px solid #374151; border-radius:4px; padding:6px 8px; color:#38bdf8; cursor:pointer; font-weight:bold; font-size:12px; transition:all 0.2s;" title="↺ Перемотать видео назад / к началу" data-mossad-label="rewind">${LH('rewind')}</button>
                     <button id="mossad-btn-wiz" style="background:#1e3a8a; border:1px solid #3b82f6; border-radius:4px; padding:6px 10px; color:#93c5fd; cursor:pointer; font-weight:bold; transition:all 0.2s;" title="🪄 Мастер первичной настройки для ${rootDomain}">🪄</button>
                 </div>
             `;
