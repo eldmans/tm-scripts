@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.32
+// @version      1.4.33
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.32';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.33';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1080,6 +1080,7 @@ deleteHoldpost: true,
 allowDuplicates: false,
 checkHistory: true,
 hfWarnUnsaved: true,
+hfDownloadInput: false,
 dblPosition: 'end',
 githubToken: '',
 githubConfigPath: 'mossad-config.json',
@@ -1162,7 +1163,7 @@ const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
 const GLOBAL_DEFAULT_KEYS = [
 'slideshowDelay', 'videoLoops', 'videoAutoAdvanceOnEnd', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
 'downloadType', 'pdAction', 'filenameTemplateEnabled',
-'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'checkHistory', 'hfWarnUnsaved', 'dblPosition',
+'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'checkHistory', 'hfWarnUnsaved', 'hfDownloadInput', 'dblPosition',
 'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
 'playlistRows', 'playlistWidth', 'collectWatchSec',
 'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',
@@ -2455,6 +2456,7 @@ const MOSSAD_TPL_TAGS = [
 { k: 'count', aliases: ['sitecount', 'num', 'seq', 'dlcount'], what: 'Порядковый номер успешной закачки на текущем сайте (1, 2, 3...)' },
 { k: 'dbl', aliases: [], what: 'Пометка дубликата « (исходное имя) DBL»; без тега добавляется в конец сама' },
 { k: 'oldname', aliases: ['copy', 'root'], what: 'Имя ранее скачанного файла (только для дубликата, до 50 символов)' },
+{ k: 'input', aliases: ['in'], what: 'Пометка «input» для медиа из формы ввода (если не инпут — пусто)' },
 ];
 const MOSSAD_TPL_ALIAS = {};
 for (const t of MOSSAD_TPL_TAGS) { MOSSAD_TPL_ALIAS[t.k] = t.k; for (const a of t.aliases) MOSSAD_TPL_ALIAS[a] = t.k; }
@@ -2679,6 +2681,7 @@ countraw: String(siteCount),
 dupnum: dupNum,
 dbl: ctx.dblSuffix || '',
 oldname: ctx.rootBase || '',
+input: (ctx.isInput || ctx.input) ? 'input' : '',
 };
 }
 window.buildFilenameVars = buildFilenameVars;
@@ -2831,6 +2834,21 @@ const dom = String(vars.domain || (typeof rootDomain !== 'undefined' ? rootDomai
 const hasDomVar = /\{(domain|site|domainfull)\b/i.test(tplStr);
 if (dom && !hasDomVar && !base.toLowerCase().includes(dom.toLowerCase())) {
 base = `${dom}-${base}`;
+}
+if (vars.input) {
+const hasInputVar = /\{(input|in)\b/i.test(tplStr);
+if (!hasInputVar && !/\binput\b/i.test(base)) {
+if (dom && base.toLowerCase().includes(dom.toLowerCase())) {
+const domRe = new RegExp(`(${dom})([-_~.]|$)`, 'i');
+if (domRe.test(base)) {
+base = base.replace(domRe, '$1-input$2');
+} else {
+base = `${base}-input`;
+}
+} else {
+base = `${base}-input`;
+}
+}
 }
 if (isDup) {
 const effectiveDbl = dblSuffix || ` (${vars.oldname || 'original'}) DBL${vars.dupnum || 1}`;
@@ -10573,6 +10591,7 @@ MossadEngineRegistry.register('redgifs', window.MOSSAD_ENGINES.redgifs);
 window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
 window.MOSSAD_ENGINES.huggingface = (() => {
 let _lastDownloadedSrc = null;
+let _downloadedUrls = new Set();
 let _downloadedContentHashes = new Set();
 let _downloadedSignatures = new Set();
 let _autoSaveTimer = null;
@@ -10620,6 +10639,11 @@ return `${u}#${w}x${h}#${media.itemId || ''}`;
 }
 function markMediaDownloaded(media) {
 if (!media) return;
+const src = (media.urls && media.urls[0]) || '';
+if (src) {
+_lastDownloadedSrc = src;
+_downloadedUrls.add(src);
+}
 const ch = getMediaContentHash(media);
 if (ch) _downloadedContentHashes.add(ch);
 if (media.element) {
@@ -10630,14 +10654,15 @@ if (ch) media.element.dataset.mossadHash = ch;
 }
 const sig = getMediaSignature(media);
 if (sig) _downloadedSignatures.add(sig);
-const src = (media.urls && media.urls[0]) || '';
-if (src) _lastDownloadedSrc = src;
 }
 function isMediaDownloaded(media) {
 if (!media) return true;
+const src = (media.urls && media.urls[0]) || '';
+if (src && (_downloadedUrls.has(src) || src === _lastDownloadedSrc)) return true;
 const ch = getMediaContentHash(media);
-if (media.element && media.element.dataset && media.element.dataset.mossadHash && ch) {
-if (media.element.dataset.mossadHash === ch) return true;
+if (media.element && media.element.dataset) {
+if (media.element.dataset.mossadDownloaded === 'true') return true;
+if (media.element.dataset.mossadHash && ch && media.element.dataset.mossadHash === ch) return true;
 }
 if (ch && _downloadedContentHashes.has(ch)) return true;
 const sig = getMediaSignature(media);
@@ -10780,8 +10805,37 @@ const m = src.match(/\/([a-zA-Z0-9_-]{6,36})\.(?:png|jpe?g|webp|mp4|webm)/i);
 if (m && m[1]) return m[1].slice(0, 12);
 return String(Date.now()).slice(-8);
 }
-function findMedia() {
+function isInputMediaElement(el) {
+if (!el) return false;
+if (el.closest('.input-image, .input-video, .input-container, .drop-area, .dropzone, [data-testid="upload"], [data-testid="dropzone"], [data-testid="empty-image"]')) {
+return true;
+}
+const block = el.closest('.gradio-image, .gradio-video, div[data-testid="image"], div[data-testid="video"], .block');
+if (block) {
+if (block.querySelector('input[type="file"], [data-testid="upload"], .upload-button, button[aria-label*="Clear" i], button[aria-label*="Upload" i], button[title*="Clear" i]')) {
+return true;
+}
+const label = block.querySelector('[data-testid="block-label"], .block-title, label, span');
+if (label) {
+const txt = (label.textContent || '').toLowerCase();
+if (/input|source|upload|prompt\s*image|входн|исходн|загруз/i.test(txt) && !/output|result|выходн/i.test(txt)) {
+return true;
+}
+}
+}
+const submitBtn = findSubmitButton();
+if (submitBtn && submitBtn.compareDocumentPosition) {
+const pos = el.compareDocumentPosition(submitBtn);
+if (pos & Node.DOCUMENT_POSITION_FOLLOWING) {
+const hasOutputCls = el.closest('.output-image, .output-video, [data-testid="gallery"], .gallery, div[id*="output" i], div[class*="output" i]');
+if (!hasOutputCls) return true;
+}
+}
+return false;
+}
+function findMedia(options = {}) {
 if (!isSupported()) return null;
+const allowInput = options.allowInput !== undefined ? options.allowInput : Boolean(config && config.hfDownloadInput);
 const docRoots = [document];
 try {
 document.querySelectorAll('iframe').forEach(f => {
@@ -10790,26 +10844,30 @@ if (f.contentDocument && f.contentDocument.body) docRoots.push(f.contentDocument
 } catch (_) {}
 });
 } catch (_) {}
+let foundInputMedia = null;
 for (const doc of docRoots) {
-const videos = Array.from(doc.querySelectorAll('.gradio-video video, .output-video video, div[data-testid="video"] video, video'));
-const validVideo = videos.find(v => {
+const videos = Array.from(doc.querySelectorAll('.output-video video, .gradio-video video, div[data-testid="video"] video, video'));
+for (const v of videos) {
 const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
-return src && !src.startsWith('blob:http') && !src.includes('tampermonkey') && !isSvgMedia(src) && (v.videoWidth > 100 || v.offsetWidth > 150);
-});
-if (validVideo) {
-const src = validVideo.src || (validVideo.querySelector('source') && validVideo.querySelector('source').src) || validVideo.currentSrc;
-if (src) {
+if (!src || src.startsWith('blob:http') || src.includes('tampermonkey') || isSvgMedia(src)) continue;
+if (v.videoWidth <= 100 && v.offsetWidth <= 150) continue;
+const isInput = isInputMediaElement(v);
 const meta = getSpaceMetadata();
-return {
+const mediaObj = {
 urls: [src],
-element: validVideo,
+element: v,
 type: 'video',
 userName: meta.author,
 spaceName: meta.space,
 subtype: meta.subtype,
 itemId: extractItemId(src),
-postUrl: location.href
+postUrl: location.href,
+isInput
 };
+if (!isInput) {
+return mediaObj;
+} else if (!foundInputMedia) {
+foundInputMedia = mediaObj;
 }
 }
 const dlLinks = Array.from(doc.querySelectorAll('a[download], a.download-button, a[title*="Download" i]'));
@@ -10817,11 +10875,12 @@ for (const a of dlLinks) {
 const href = a.href || '';
 const dlAttr = a.getAttribute('download') || '';
 if (isSvgMedia(href) || isSvgMedia(dlAttr)) continue;
-if (a.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"]')) continue;
+if (a.closest('.empty, .placeholder, [data-testid="empty-image"]')) continue;
 if (href && (href.startsWith('http') || href.startsWith('blob:'))) {
 const isVid = /\.(mp4|webm)(\?|$)/i.test(href) || /\.(mp4|webm)$/i.test(dlAttr);
+const isInput = isInputMediaElement(a);
 const meta = getSpaceMetadata();
-return {
+const mediaObj = {
 urls: [href],
 element: a,
 type: isVid ? 'video' : 'image',
@@ -10829,8 +10888,14 @@ userName: meta.author,
 spaceName: meta.space,
 subtype: meta.subtype,
 itemId: extractItemId(href) || extractItemId(dlAttr),
-postUrl: location.href
+postUrl: location.href,
+isInput
 };
+if (!isInput) {
+return mediaObj;
+} else if (!foundInputMedia) {
+foundInputMedia = mediaObj;
+}
 }
 }
 const imgSelectors = [
@@ -10844,29 +10909,30 @@ const imgSelectors = [
 ];
 for (const sel of imgSelectors) {
 const imgs = Array.from(doc.querySelectorAll(sel));
-const goodImg = imgs.find(i => {
+for (const i of imgs) {
 const src = i.currentSrc || i.src || '';
-if (!src || isSvgMedia(src)) return false;
-if (src.includes('avatar') || src.includes('icon') || src.includes('logo') || src.includes('badge')) return false;
-if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
-if (i.naturalWidth > 0 && i.naturalWidth < 120) return false;
-if (i.naturalWidth === 0 && (i.offsetWidth < 120 || i.offsetHeight < 120)) return false;
-return true;
-});
-if (goodImg) {
-const src = goodImg.currentSrc || goodImg.src;
-if (src) {
+if (!src || isSvgMedia(src)) continue;
+if (src.includes('avatar') || src.includes('icon') || src.includes('logo') || src.includes('badge')) continue;
+if (i.closest('.empty, .placeholder, [data-testid="empty-image"]')) continue;
+if (i.naturalWidth > 0 && i.naturalWidth < 120) continue;
+if (i.naturalWidth === 0 && (i.offsetWidth < 120 || i.offsetHeight < 120)) continue;
+const isInput = isInputMediaElement(i);
 const meta = getSpaceMetadata();
-return {
+const mediaObj = {
 urls: [src],
-element: goodImg,
+element: i,
 type: 'image',
 userName: meta.author,
 spaceName: meta.space,
 subtype: meta.subtype,
 itemId: extractItemId(src),
-postUrl: location.href
+postUrl: location.href,
+isInput
 };
+if (!isInput) {
+return mediaObj;
+} else if (!foundInputMedia) {
+foundInputMedia = mediaObj;
 }
 }
 }
@@ -10875,15 +10941,16 @@ if (i.naturalWidth < 200 && i.width < 200) return false;
 const src = i.currentSrc || i.src || '';
 if (!src || isSvgMedia(src)) return false;
 if (src.includes('logo') || src.includes('avatar') || src.includes('badge') || src.includes('icon')) return false;
-if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
+if (i.closest('.empty, .placeholder, [data-testid="empty-image"]')) return false;
 return true;
 });
-if (allImgs.length > 0) {
-const targetImg = allImgs[allImgs.length - 1];
+for (let idx = allImgs.length - 1; idx >= 0; idx--) {
+const targetImg = allImgs[idx];
 const src = targetImg.currentSrc || targetImg.src;
 if (src && !isSvgMedia(src)) {
+const isInput = isInputMediaElement(targetImg);
 const meta = getSpaceMetadata();
-return {
+const mediaObj = {
 urls: [src],
 element: targetImg,
 type: 'image',
@@ -10891,10 +10958,19 @@ userName: meta.author,
 spaceName: meta.space,
 subtype: meta.subtype,
 itemId: extractItemId(src),
-postUrl: location.href
+postUrl: location.href,
+isInput
 };
+if (!isInput) {
+return mediaObj;
+} else if (!foundInputMedia) {
+foundInputMedia = mediaObj;
 }
 }
+}
+}
+if (allowInput && foundInputMedia) {
+return foundInputMedia;
 }
 return null;
 }
@@ -10933,7 +11009,7 @@ return;
 }
 _isWaitingForGeneration = true;
 showToast('⏳ Ждун HF Авто-DL активен...');
-const startMedia = findMedia();
+const startMedia = findMedia({ allowInput: false });
 const initialSrc = startMedia && startMedia.urls ? startMedia.urls[0] : null;
 let checkCount = 0;
 const maxChecks = 500;
@@ -10941,9 +11017,9 @@ if (_autoSaveTimer) clearInterval(_autoSaveTimer);
 _autoSaveTimer = setInterval(() => {
 checkCount++;
 const isGenerating = Boolean(document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"].generating, div[data-testid="status-tracker"] .progress-bar, div[data-testid="status-tracker"] .loading, [aria-busy="true"]'));
-const curMedia = findMedia();
+const curMedia = findMedia({ allowInput: false });
 const curSrc = curMedia && curMedia.urls ? curMedia.urls[0] : null;
-if (curMedia && (!isMediaDownloaded(curMedia) || (curSrc && curSrc !== initialSrc)) && !isGenerating) {
+if (curMedia && !curMedia.isInput && (!isMediaDownloaded(curMedia) || (curSrc && curSrc !== initialSrc)) && !isGenerating) {
 clearInterval(_autoSaveTimer);
 _autoSaveTimer = null;
 _isWaitingForGeneration = false;
@@ -11125,7 +11201,7 @@ if (!btn) return;
 const submitBtn = findSubmitButton();
 const isGenBtn = btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''));
 if (!isGenBtn) return;
-const curMedia = findMedia();
+const curMedia = findMedia({ allowInput: false });
 if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia) && !btn.dataset.mossadConfirmed) {
 e.preventDefault();
 e.stopPropagation();
@@ -11164,7 +11240,7 @@ return;
 if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
 const tag = (e.target && e.target.tagName || '').toLowerCase();
 if (tag === 'textarea' || tag === 'input') {
-const curMedia = findMedia();
+const curMedia = findMedia({ allowInput: false });
 if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia)) {
 e.preventDefault();
 e.stopPropagation();
@@ -11186,6 +11262,9 @@ for (const m of mutations) {
 if (m.type === 'childList' || m.type === 'attributes') {
 const isGen = document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"].generating, div[data-testid="status-tracker"] .progress-bar, div[data-testid="status-tracker"] .loading, [aria-busy="true"]');
 if (isGen) {
+if (isInputMediaElement(isGen) || (isGen.closest && isGen.closest('.input-image, .input-video, .input-container, [data-testid="upload"], .dropzone'))) {
+continue;
+}
 startWatcher();
 break;
 }
@@ -11194,6 +11273,17 @@ break;
 });
 observer.observe(document.body || document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-testid', 'aria-busy'] });
 } catch(e) {}
+document.addEventListener('click', (e) => {
+const target = e.target;
+if (!target) return;
+const dlBtn = target.closest('a[download], a.download-button, a[title*="Download" i], button[title*="Download" i], button[aria-label*="Download" i]');
+if (dlBtn) {
+const media = findMedia({ allowInput: true });
+if (media) {
+markMediaDownloaded(media);
+}
+}
+}, true);
 }
 if (typeof document !== 'undefined') {
 if (document.readyState === 'loading') {
@@ -12126,6 +12216,7 @@ ext: type === 'video' ? 'mp4' : 'jpg',
 authorName,
 desc: String(desc).slice(0, 300),
 account: rootDomain === 'grok.com' && typeof grokAccountEmail === 'function' ? grokAccountEmail() : '',
+isInput: Boolean(media && media.isInput),
 };
 }
 let _activeDuplicateRecord = null;
@@ -12223,18 +12314,19 @@ const shortId = postId.replace(/^grok-video-/, '').slice(0, 8);
 const domainClean = rootDomain.replace(/[^a-z0-9._-]/gi, '_');
 let filename;
 const ext = media.type === 'video' ? 'mp4' : 'jpg';
+const inMark = media.isInput ? '-input' : '';
 if (rootDomain.includes('redgifs.com') && media.itemId) {
-filename = `${getRedGifsTitleFilename(media.itemId)}`;
+filename = `${getRedGifsTitleFilename(media.itemId)}${inMark}.${ext}`;
 } else if (rootDomain === 'grok.com' && shortId && shortId.length >= 4) {
 const shortConv4 = convId ? convId.slice(0, 4) : '';
 const shortId4 = postId ? postId.slice(0, 4) : '';
 const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : shortId;
-filename = `${defaultPrefix}-${domainClean}.${ext}`;
+filename = `${defaultPrefix}-${domainClean}${inMark}.${ext}`;
 } else if (shortId && shortId.length >= 4) {
-filename = `${shortId}-${domainClean}.${ext}`;
+filename = `${shortId}-${domainClean}${inMark}.${ext}`;
 } else {
 const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
-filename = `${titleClean}.${ext}`;
+filename = `${titleClean}${inMark}.${ext}`;
 }
 if (config.filenameTemplateEnabled) {
 const ext2 = media.type === 'video' ? 'mp4' : 'jpg';
@@ -12251,6 +12343,9 @@ filename = `${formatted}${extPart}`;
 }
 const urls = media.urls;
 let attemptedIndex = 0;
+if (media && window.MOSSAD_ENGINES?.huggingface?.markMediaDownloaded) {
+window.MOSSAD_ENGINES.huggingface.markMediaDownloaded(media);
+}
 let postActionDone = false;
 function tryNext() {
 if (attemptedIndex >= urls.length) {
@@ -17592,6 +17687,10 @@ modal.innerHTML = `
                       <input id="mossad-cursite-hf-warn-unsaved" type="checkbox" style="accent-color:#f59e0b;" ${config.hfWarnUnsaved !== false ? 'checked' : ''}>
                       <span>Предупреждать перед генерацией, если предыдущий результат ещё не скачан</span>
                     </label>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;" title="Разрешить скачивание входных медиа (input) из форм загрузки/вставки на Hugging Face (в имя файла добавляется тег input)">
+                      <input id="mossad-cursite-hf-download-input" type="checkbox" style="accent-color:#38bdf8;" ${config.hfDownloadInput ? 'checked' : ''}>
+                      <span>Скачивать входные медиа (input)</span>
+                    </label>
                     <div style="font-size:10px; color:#9ca3af; line-height:1.3; background:rgba(255,255,255,0.03); padding:4px 6px; border-radius:4px;">
                       ⌨ <b>Enter</b> — Скачать и запустить &bull; <b>Ctrl+Enter</b> — Запуск без скачивания &bull; <b>Esc</b> — Отмена &bull; <b>Ctrl+Shift+Enter</b> — Прямой запуск в обход любых проверок
                     </div>
@@ -17745,7 +17844,7 @@ return `
                 </div>
             </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-18</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-19</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -18262,6 +18361,13 @@ if (cbHfWarn) {
 cbHfWarn.onchange = (e) => {
 Settings.set('hfWarnUnsaved', e.target.checked);
 showToast(e.target.checked ? '🛡 Предупреждение о нескачанном: ВКЛ' : '⚡ Предупреждение о нескачанном: ВЫКЛ');
+};
+}
+const cbHfDlInput = pane.querySelector('#mossad-cursite-hf-download-input');
+if (cbHfDlInput) {
+cbHfDlInput.onchange = (e) => {
+Settings.set('hfDownloadInput', e.target.checked);
+showToast(e.target.checked ? '📥 Скачивание input: ВКЛ' : 'Скачивание input: ВЫКЛ');
 };
 }
 const btnResetSiteAll = pane.querySelector('#mossad-btn-reset-cursite-all');

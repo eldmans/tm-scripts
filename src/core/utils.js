@@ -720,6 +720,7 @@
         { k: 'count',      aliases: ['sitecount', 'num', 'seq', 'dlcount'], what: 'Порядковый номер успешной закачки на текущем сайте (1, 2, 3...)' },
         { k: 'dbl',        aliases: [],                         what: 'Пометка дубликата « (исходное имя) DBL»; без тега добавляется в конец сама' },
         { k: 'oldname',    aliases: ['copy', 'root'],           what: 'Имя ранее скачанного файла (только для дубликата, до 50 символов)' },
+        { k: 'input',      aliases: ['in'],                     what: 'Пометка «input» для медиа из формы ввода (если не инпут — пусто)' },
     ];
     const MOSSAD_TPL_ALIAS = {};
     for (const t of MOSSAD_TPL_TAGS) { MOSSAD_TPL_ALIAS[t.k] = t.k; for (const a of t.aliases) MOSSAD_TPL_ALIAS[a] = t.k; }
@@ -982,6 +983,7 @@
             dupnum:     dupNum,
             dbl:        ctx.dblSuffix || '',
             oldname:    ctx.rootBase || '',
+            input:      (ctx.isInput || ctx.input) ? 'input' : '',
         };
     }
     window.buildFilenameVars = buildFilenameVars;
@@ -1159,6 +1161,23 @@
         const hasDomVar = /\{(domain|site|domainfull)\b/i.test(tplStr);
         if (dom && !hasDomVar && !base.toLowerCase().includes(dom.toLowerCase())) {
             base = `${dom}-${base}`;
+        }
+
+        // v1.4.33: Если медиа из инпута (vars.input === 'input'), гарантируем метку input (после домена/сайта, перед DBL)
+        if (vars.input) {
+            const hasInputVar = /\{(input|in)\b/i.test(tplStr);
+            if (!hasInputVar && !/\binput\b/i.test(base)) {
+                if (dom && base.toLowerCase().includes(dom.toLowerCase())) {
+                    const domRe = new RegExp(`(${dom})([-_~.]|$)`, 'i');
+                    if (domRe.test(base)) {
+                        base = base.replace(domRe, '$1-input$2');
+                    } else {
+                        base = `${base}-input`;
+                    }
+                } else {
+                    base = `${base}-input`;
+                }
+            }
         }
 
         // Гарантированная метка дубликата (v1.4.25): если дубликат подтверждён

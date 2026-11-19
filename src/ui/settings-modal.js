@@ -864,6 +864,10 @@
                       <input id="mossad-cursite-hf-warn-unsaved" type="checkbox" style="accent-color:#f59e0b;" ${config.hfWarnUnsaved !== false ? 'checked' : ''}>
                       <span>Предупреждать перед генерацией, если предыдущий результат ещё не скачан</span>
                     </label>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;" title="Разрешить скачивание входных медиа (input) из форм загрузки/вставки на Hugging Face (в имя файла добавляется тег input)">
+                      <input id="mossad-cursite-hf-download-input" type="checkbox" style="accent-color:#38bdf8;" ${config.hfDownloadInput ? 'checked' : ''}>
+                      <span>Скачивать входные медиа (input)</span>
+                    </label>
                     <div style="font-size:10px; color:#9ca3af; line-height:1.3; background:rgba(255,255,255,0.03); padding:4px 6px; border-radius:4px;">
                       ⌨ <b>Enter</b> — Скачать и запустить &bull; <b>Ctrl+Enter</b> — Запуск без скачивания &bull; <b>Esc</b> — Отмена &bull; <b>Ctrl+Shift+Enter</b> — Прямой запуск в обход любых проверок
                     </div>
@@ -1017,7 +1021,7 @@
                 </div>
             </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-18</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-19</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -1601,6 +1605,13 @@
                 cbHfWarn.onchange = (e) => {
                     Settings.set('hfWarnUnsaved', e.target.checked);
                     showToast(e.target.checked ? '🛡 Предупреждение о нескачанном: ВКЛ' : '⚡ Предупреждение о нескачанном: ВЫКЛ');
+                };
+            }
+            const cbHfDlInput = pane.querySelector('#mossad-cursite-hf-download-input');
+            if (cbHfDlInput) {
+                cbHfDlInput.onchange = (e) => {
+                    Settings.set('hfDownloadInput', e.target.checked);
+                    showToast(e.target.checked ? '📥 Скачивание input: ВКЛ' : 'Скачивание input: ВЫКЛ');
                 };
             }
 

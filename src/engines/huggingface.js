@@ -9,6 +9,7 @@
     window.MOSSAD_ENGINES = window.MOSSAD_ENGINES || {};
     window.MOSSAD_ENGINES.huggingface = (() => {
         let _lastDownloadedSrc = null;
+        let _downloadedUrls = new Set(); // v1.4.33: кеш всех скачанных URL медиа
         let _downloadedContentHashes = new Set(); // v1.4.32: кеш хешей содержимого скачанных медиа
         let _downloadedSignatures = new Set();
         let _autoSaveTimer = null;
@@ -60,6 +61,11 @@
 
         function markMediaDownloaded(media) {
             if (!media) return;
+            const src = (media.urls && media.urls[0]) || '';
+            if (src) {
+                _lastDownloadedSrc = src;
+                _downloadedUrls.add(src);
+            }
             const ch = getMediaContentHash(media);
             if (ch) _downloadedContentHashes.add(ch);
             if (media.element) {
@@ -70,16 +76,17 @@
             }
             const sig = getMediaSignature(media);
             if (sig) _downloadedSignatures.add(sig);
-            const src = (media.urls && media.urls[0]) || '';
-            if (src) _lastDownloadedSrc = src;
         }
 
         function isMediaDownloaded(media) {
             if (!media) return true;
+            const src = (media.urls && media.urls[0]) || '';
+            if (src && (_downloadedUrls.has(src) || src === _lastDownloadedSrc)) return true;
             const ch = getMediaContentHash(media);
-            // Если на элементе уже сохранён совпавший хеш
-            if (media.element && media.element.dataset && media.element.dataset.mossadHash && ch) {
-                if (media.element.dataset.mossadHash === ch) return true;
+            // Если на элементе уже сохранён флаг скачивания или хеш
+            if (media.element && media.element.dataset) {
+                if (media.element.dataset.mossadDownloaded === 'true') return true;
+                if (media.element.dataset.mossadHash && ch && media.element.dataset.mossadHash === ch) return true;
             }
             // Проверка по кешу хешей содержимого
             if (ch && _downloadedContentHashes.has(ch)) return true;
@@ -256,11 +263,50 @@
         }
 
         /**
-         * Поиск готового результата для скачивания (img / video / download button)
-         * Исключает любые SVG-логотипы (включая placeholder Gradio 576x576), иконки и инпуты.
+         * v1.4.33: Определение, принадлежит ли медиа-элемент форме ввода (input)
          */
-        function findMedia() {
+        function isInputMediaElement(el) {
+            if (!el) return false;
+            // 1. Прямые классы и атрибуты входных контейнеров
+            if (el.closest('.input-image, .input-video, .input-container, .drop-area, .dropzone, [data-testid="upload"], [data-testid="dropzone"], [data-testid="empty-image"]')) {
+                return true;
+            }
+            // 2. Родительский Gradio-блок
+            const block = el.closest('.gradio-image, .gradio-video, div[data-testid="image"], div[data-testid="video"], .block');
+            if (block) {
+                // Если внутри блока есть <input type="file"> или кнопки Upload/Clear — это 100% форма ввода
+                if (block.querySelector('input[type="file"], [data-testid="upload"], .upload-button, button[aria-label*="Clear" i], button[aria-label*="Upload" i], button[title*="Clear" i]')) {
+                    return true;
+                }
+                // Проверка подписи блока (label)
+                const label = block.querySelector('[data-testid="block-label"], .block-title, label, span');
+                if (label) {
+                    const txt = (label.textContent || '').toLowerCase();
+                    if (/input|source|upload|prompt\s*image|входн|исходн|загруз/i.test(txt) && !/output|result|выходн/i.test(txt)) {
+                        return true;
+                    }
+                }
+            }
+            // 3. Если элемент расположен до кнопки Generate/Submit в DOM
+            const submitBtn = findSubmitButton();
+            if (submitBtn && submitBtn.compareDocumentPosition) {
+                const pos = el.compareDocumentPosition(submitBtn);
+                // Если кнопка Submit идет ПОСЛЕ элемента (DOCUMENT_POSITION_FOLLOWING = 4)
+                if (pos & Node.DOCUMENT_POSITION_FOLLOWING) {
+                    const hasOutputCls = el.closest('.output-image, .output-video, [data-testid="gallery"], .gallery, div[id*="output" i], div[class*="output" i]');
+                    if (!hasOutputCls) return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Поиск готового результата для скачивания (img / video / download button)
+         * Исключает любые SVG-логотипы (включая placeholder Gradio 576x576), иконки и инпуты (если не разрешены).
+         */
+        function findMedia(options = {}) {
             if (!isSupported()) return null;
+            const allowInput = options.allowInput !== undefined ? options.allowInput : Boolean(config && config.hfDownloadInput);
 
             const docRoots = [document];
             try {
@@ -271,28 +317,32 @@
                 });
             } catch (_) {}
 
-            for (const doc of docRoots) {
-                // 1. Проверяем готовое видео в Gradio / Streamlit
-                const videos = Array.from(doc.querySelectorAll('.gradio-video video, .output-video video, div[data-testid="video"] video, video'));
-                const validVideo = videos.find(v => {
-                    const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
-                    return src && !src.startsWith('blob:http') && !src.includes('tampermonkey') && !isSvgMedia(src) && (v.videoWidth > 100 || v.offsetWidth > 150);
-                });
+            let foundInputMedia = null;
 
-                if (validVideo) {
-                    const src = validVideo.src || (validVideo.querySelector('source') && validVideo.querySelector('source').src) || validVideo.currentSrc;
-                    if (src) {
-                        const meta = getSpaceMetadata();
-                        return {
-                            urls: [src],
-                            element: validVideo,
-                            type: 'video',
-                            userName: meta.author,
-                            spaceName: meta.space,
-                            subtype: meta.subtype,
-                            itemId: extractItemId(src),
-                            postUrl: location.href
-                        };
+            for (const doc of docRoots) {
+                // 1. Проверяем видео в Gradio / Streamlit
+                const videos = Array.from(doc.querySelectorAll('.output-video video, .gradio-video video, div[data-testid="video"] video, video'));
+                for (const v of videos) {
+                    const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
+                    if (!src || src.startsWith('blob:http') || src.includes('tampermonkey') || isSvgMedia(src)) continue;
+                    if (v.videoWidth <= 100 && v.offsetWidth <= 150) continue;
+                    const isInput = isInputMediaElement(v);
+                    const meta = getSpaceMetadata();
+                    const mediaObj = {
+                        urls: [src],
+                        element: v,
+                        type: 'video',
+                        userName: meta.author,
+                        spaceName: meta.space,
+                        subtype: meta.subtype,
+                        itemId: extractItemId(src),
+                        postUrl: location.href,
+                        isInput
+                    };
+                    if (!isInput) {
+                        return mediaObj;
+                    } else if (!foundInputMedia) {
+                        foundInputMedia = mediaObj;
                     }
                 }
 
@@ -302,11 +352,12 @@
                     const href = a.href || '';
                     const dlAttr = a.getAttribute('download') || '';
                     if (isSvgMedia(href) || isSvgMedia(dlAttr)) continue;
-                    if (a.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"]')) continue;
+                    if (a.closest('.empty, .placeholder, [data-testid="empty-image"]')) continue;
                     if (href && (href.startsWith('http') || href.startsWith('blob:'))) {
                         const isVid = /\.(mp4|webm)(\?|$)/i.test(href) || /\.(mp4|webm)$/i.test(dlAttr);
+                        const isInput = isInputMediaElement(a);
                         const meta = getSpaceMetadata();
-                        return {
+                        const mediaObj = {
                             urls: [href],
                             element: a,
                             type: isVid ? 'video' : 'image',
@@ -314,12 +365,18 @@
                             spaceName: meta.space,
                             subtype: meta.subtype,
                             itemId: extractItemId(href) || extractItemId(dlAttr),
-                            postUrl: location.href
+                            postUrl: location.href,
+                            isInput
                         };
+                        if (!isInput) {
+                            return mediaObj;
+                        } else if (!foundInputMedia) {
+                            foundInputMedia = mediaObj;
+                        }
                     }
                 }
 
-                // 3. Выходные изображения Gradio / Streamlit (строго выходные контейнеры, исключая пустые SVG плейсхолдеры)
+                // 3. Выходные изображения Gradio / Streamlit
                 const imgSelectors = [
                     '.output-image img',
                     'div[data-testid="image"]:not(.input-image) img',
@@ -331,48 +388,51 @@
                 ];
                 for (const sel of imgSelectors) {
                     const imgs = Array.from(doc.querySelectorAll(sel));
-                    const goodImg = imgs.find(i => {
+                    for (const i of imgs) {
                         const src = i.currentSrc || i.src || '';
-                        if (!src || isSvgMedia(src)) return false;
-                        if (src.includes('avatar') || src.includes('icon') || src.includes('logo') || src.includes('badge')) return false;
-                        if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
-                        if (i.naturalWidth > 0 && i.naturalWidth < 120) return false;
-                        if (i.naturalWidth === 0 && (i.offsetWidth < 120 || i.offsetHeight < 120)) return false;
-                        return true;
-                    });
-                    if (goodImg) {
-                        const src = goodImg.currentSrc || goodImg.src;
-                        if (src) {
-                            const meta = getSpaceMetadata();
-                            return {
-                                urls: [src],
-                                element: goodImg,
-                                type: 'image',
-                                userName: meta.author,
-                                spaceName: meta.space,
-                                subtype: meta.subtype,
-                                itemId: extractItemId(src),
-                                postUrl: location.href
-                            };
+                        if (!src || isSvgMedia(src)) continue;
+                        if (src.includes('avatar') || src.includes('icon') || src.includes('logo') || src.includes('badge')) continue;
+                        if (i.closest('.empty, .placeholder, [data-testid="empty-image"]')) continue;
+                        if (i.naturalWidth > 0 && i.naturalWidth < 120) continue;
+                        if (i.naturalWidth === 0 && (i.offsetWidth < 120 || i.offsetHeight < 120)) continue;
+
+                        const isInput = isInputMediaElement(i);
+                        const meta = getSpaceMetadata();
+                        const mediaObj = {
+                            urls: [src],
+                            element: i,
+                            type: 'image',
+                            userName: meta.author,
+                            spaceName: meta.space,
+                            subtype: meta.subtype,
+                            itemId: extractItemId(src),
+                            postUrl: location.href,
+                            isInput
+                        };
+                        if (!isInput) {
+                            return mediaObj;
+                        } else if (!foundInputMedia) {
+                            foundInputMedia = mediaObj;
                         }
                     }
                 }
 
-                // 4. Fallback: крупное растровое изображение (строго без SVG, логотипов и плейсхолдеров)
+                // 4. Fallback: крупное растровое изображение
                 const allImgs = Array.from(doc.querySelectorAll('img')).filter(i => {
                     if (i.naturalWidth < 200 && i.width < 200) return false;
                     const src = i.currentSrc || i.src || '';
                     if (!src || isSvgMedia(src)) return false;
                     if (src.includes('logo') || src.includes('avatar') || src.includes('badge') || src.includes('icon')) return false;
-                    if (i.closest('.empty, .placeholder, .input-image, [data-testid="empty-image"], [data-testid="upload"]')) return false;
+                    if (i.closest('.empty, .placeholder, [data-testid="empty-image"]')) return false;
                     return true;
                 });
-                if (allImgs.length > 0) {
-                    const targetImg = allImgs[allImgs.length - 1];
+                for (let idx = allImgs.length - 1; idx >= 0; idx--) {
+                    const targetImg = allImgs[idx];
                     const src = targetImg.currentSrc || targetImg.src;
                     if (src && !isSvgMedia(src)) {
+                        const isInput = isInputMediaElement(targetImg);
                         const meta = getSpaceMetadata();
-                        return {
+                        const mediaObj = {
                             urls: [src],
                             element: targetImg,
                             type: 'image',
@@ -380,10 +440,21 @@
                             spaceName: meta.space,
                             subtype: meta.subtype,
                             itemId: extractItemId(src),
-                            postUrl: location.href
+                            postUrl: location.href,
+                            isInput
                         };
+                        if (!isInput) {
+                            return mediaObj;
+                        } else if (!foundInputMedia) {
+                            foundInputMedia = mediaObj;
+                        }
                     }
                 }
+            }
+
+            // Если выходного медиа нет, но найден input и разрешено скачивание input
+            if (allowInput && foundInputMedia) {
+                return foundInputMedia;
             }
 
             return null;
@@ -438,7 +509,7 @@
             _isWaitingForGeneration = true;
             showToast('⏳ Ждун HF Авто-DL активен...');
 
-            const startMedia = findMedia();
+            const startMedia = findMedia({ allowInput: false });
             const initialSrc = startMedia && startMedia.urls ? startMedia.urls[0] : null;
             let checkCount = 0;
             const maxChecks = 500; // до 5 минут
@@ -450,11 +521,11 @@
                 // v1.4.32: точный селектор статуса (не ловить голый div[data-testid="status-tracker"], который всегда есть в DOM)
                 const isGenerating = Boolean(document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"].generating, div[data-testid="status-tracker"] .progress-bar, div[data-testid="status-tracker"] .loading, [aria-busy="true"]'));
 
-                const curMedia = findMedia();
+                const curMedia = findMedia({ allowInput: false });
                 const curSrc = curMedia && curMedia.urls ? curMedia.urls[0] : null;
 
-                // Если появилось новое изображение/видео, и генерация завершена
-                if (curMedia && (!isMediaDownloaded(curMedia) || (curSrc && curSrc !== initialSrc)) && !isGenerating) {
+                // Если появился готовый результат (строго не input!), и генерация завершена
+                if (curMedia && !curMedia.isInput && (!isMediaDownloaded(curMedia) || (curSrc && curSrc !== initialSrc)) && !isGenerating) {
                     clearInterval(_autoSaveTimer);
                     _autoSaveTimer = null;
                     _isWaitingForGeneration = false;
@@ -674,7 +745,7 @@
                 const isGenBtn = btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''));
                 if (!isGenBtn) return;
 
-                const curMedia = findMedia();
+                const curMedia = findMedia({ allowInput: false });
                 if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia) && !btn.dataset.mossadConfirmed) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -721,7 +792,7 @@
                 if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
                     const tag = (e.target && e.target.tagName || '').toLowerCase();
                     if (tag === 'textarea' || tag === 'input') {
-                        const curMedia = findMedia();
+                        const curMedia = findMedia({ allowInput: false });
                         if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia)) {
                             e.preventDefault();
                             e.stopPropagation();
@@ -745,6 +816,10 @@
                         if (m.type === 'childList' || m.type === 'attributes') {
                             const isGen = document.querySelector('.generating, .loading, .progress-bar, div[data-testid="status-tracker"].generating, div[data-testid="status-tracker"] .progress-bar, div[data-testid="status-tracker"] .loading, [aria-busy="true"]');
                             if (isGen) {
+                                // Игнорируем спиннер загрузки/вставки внутри входных контейнеров
+                                if (isInputMediaElement(isGen) || (isGen.closest && isGen.closest('.input-image, .input-video, .input-container, [data-testid="upload"], .dropzone'))) {
+                                    continue;
+                                }
                                 startWatcher();
                                 break;
                             }
@@ -753,6 +828,19 @@
                 });
                 observer.observe(document.body || document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-testid', 'aria-busy'] });
             } catch(e) {}
+
+            // 4. v1.4.33: Отслеживание кликов по нативным кнопкам скачивания Gradio
+            document.addEventListener('click', (e) => {
+                const target = e.target;
+                if (!target) return;
+                const dlBtn = target.closest('a[download], a.download-button, a[title*="Download" i], button[title*="Download" i], button[aria-label*="Download" i]');
+                if (dlBtn) {
+                    const media = findMedia({ allowInput: true });
+                    if (media) {
+                        markMediaDownloaded(media);
+                    }
+                }
+            }, true);
         }
 
         if (typeof document !== 'undefined') {

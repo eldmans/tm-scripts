@@ -170,6 +170,7 @@
             authorName,
             desc: String(desc).slice(0, 300),
             account: rootDomain === 'grok.com' && typeof grokAccountEmail === 'function' ? grokAccountEmail() : '',
+            isInput: Boolean(media && media.isInput),
         };
     }
 
@@ -284,19 +285,20 @@
         // --- Базовое имя файла (по умолчанию: 8 символов ID + домен) ---
         let filename;
         const ext = media.type === 'video' ? 'mp4' : 'jpg';
+        const inMark = media.isInput ? '-input' : '';
         if (rootDomain.includes('redgifs.com') && media.itemId) {
-            filename = `${getRedGifsTitleFilename(media.itemId)}`;
+            filename = `${getRedGifsTitleFilename(media.itemId)}${inMark}.${ext}`;
         } else if (rootDomain === 'grok.com' && shortId && shortId.length >= 4) {
             const shortConv4 = convId ? convId.slice(0, 4) : '';
             const shortId4 = postId ? postId.slice(0, 4) : '';
             const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : shortId;
-            filename = `${defaultPrefix}-${domainClean}.${ext}`;
+            filename = `${defaultPrefix}-${domainClean}${inMark}.${ext}`;
         } else if (shortId && shortId.length >= 4) {
             // Формат по умолчанию: {8 символов UUID}-{домен}.{ext}
-            filename = `${shortId}-${domainClean}.${ext}`;
+            filename = `${shortId}-${domainClean}${inMark}.${ext}`;
         } else {
             const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
-            filename = `${titleClean}.${ext}`;
+            filename = `${titleClean}${inMark}.${ext}`;
         }
 
         // --- Применяем шаблон имени файла, если включён ---
@@ -317,6 +319,11 @@
 
         const urls = media.urls;
         let attemptedIndex = 0;
+
+        // v1.4.33: Отмечаем медиа скачанным на HF Spaces для защиты от ложных предупреждений
+        if (media && window.MOSSAD_ENGINES?.huggingface?.markMediaDownloaded) {
+            window.MOSSAD_ENGINES.huggingface.markMediaDownloaded(media);
+        }
 
         let postActionDone = false; // v1.3.52: «После DL» — один раз, а не на каждую запасную ссылку (_720w → _360w)
         function tryNext() {
