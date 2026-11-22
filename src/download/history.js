@@ -202,7 +202,25 @@
     /**
      * Предзагрузка всей базы в память при старте (занимает ~1-2 МБ ОЗУ на 18 000 записей)
      */
+    const GM_HISTORY_KEY = 'mossad_recent_history_v1';
+    function loadGmRecentHistory() {
+        if (typeof GM_getValue !== 'function') return;
+        try {
+            const raw = GM_getValue(GM_HISTORY_KEY, null);
+            if (raw) {
+                const arr = (typeof raw === 'string' ? JSON.parse(raw) : raw);
+                if (Array.isArray(arr)) {
+                    for (const r of arr) {
+                        addRecordToMemoryCache(r);
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+    try { loadGmRecentHistory(); } catch (_) {}
+
     async function loadHistoryCache() {
+        loadGmRecentHistory();
         if (_isCacheLoaded) return;
         try {
             const db = await getDownloadDB();
@@ -295,8 +313,7 @@
             if (mediaType === 'photo' && _photoHashes.has(hash)) return _cachedHashes.get(hash);
             if (!mediaType && _cachedHashes.has(hash)) return _cachedHashes.get(hash);
         }
-        const isHf = rootDomain.includes('huggingface') || rootDomain.includes('hf.space');
-        if (mediaUrl && !isHf) {
+        if (mediaUrl) {
             if (_cachedUrls.has(mediaUrl)) return _cachedUrls.get(mediaUrl);
             const cu = cleanMediaUrl(mediaUrl);
             if (cu && _cachedCleanUrls.has(cu)) return _cachedCleanUrls.get(cu);
@@ -397,11 +414,33 @@
                 path: path || '',
                 size: size || 0,
                 date: dateStr,
-                domain: rootDomain
+                domain: (typeof canonicalDomain !== 'undefined' ? canonicalDomain : rootDomain)
             };
 
             // Добавляем в быстрый кеш
             addRecordToMemoryCache(record);
+
+            // v1.4.34: Синхронизация последних скачиваний в GM-хранилище для кросс-доменных iframe спейсов (*.hf.space <-> huggingface.co)
+            if (typeof GM_getValue === 'function' && typeof GM_setValue === 'function') {
+                try {
+                    const raw = GM_getValue(GM_HISTORY_KEY, null);
+                    const list = (raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : []) || [];
+                    list.unshift({
+                        id: record.id,
+                        hash: record.hash,
+                        filename: record.filename,
+                        rootFilename: record.rootFilename,
+                        type: record.type,
+                        url: record.url,
+                        postUrl: record.postUrl,
+                        size: record.size,
+                        date: record.date,
+                        domain: record.domain
+                    });
+                    if (list.length > 500) list.length = 500;
+                    GM_setValue(GM_HISTORY_KEY, JSON.stringify(list));
+                } catch (_) {}
+            }
 
             const tx = db.transaction(MOSSAD_STORE_NAME, 'readwrite');
             tx.objectStore(MOSSAD_STORE_NAME).put(record);

@@ -193,7 +193,9 @@
 
                 const submitKeywords = [
                     'generate', 'submit', 'run', 'queue', 'render', 'start', 'create',
-                    'сгенерировать', 'запуск', 'создать', 'отправить', 'старт'
+                    'edit', 'animate', 'process', 'enhance', 'upscale',
+                    'сгенерировать', 'запуск', 'создать', 'отправить', 'старт',
+                    'изменить', 'обработать', 'анимировать', 'улучшить'
                 ];
                 const byText = buttons.find(b => {
                     if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
@@ -263,7 +265,7 @@
         }
 
         /**
-         * v1.4.33: Определение, принадлежит ли медиа-элемент форме ввода (input)
+         * v1.4.33 / v1.4.34: Надежное определение, принадлежит ли медиа-элемент форме ввода (input)
          */
         function isInputMediaElement(el) {
             if (!el) return false;
@@ -271,30 +273,31 @@
             if (el.closest('.input-image, .input-video, .input-container, .drop-area, .dropzone, [data-testid="upload"], [data-testid="dropzone"], [data-testid="empty-image"]')) {
                 return true;
             }
-            // 2. Родительский Gradio-блок
+            // 2. Прямые классы и атрибуты выходных контейнеров
+            if (el.closest('.output-image, .output-video, [data-testid="gallery"], .gallery, div[id*="output" i], div[class*="output" i], .modern-out-img, .modern-out-video')) {
+                return false;
+            }
+            // 3. Родительский Gradio-блок
             const block = el.closest('.gradio-image, .gradio-video, div[data-testid="image"], div[data-testid="video"], .block');
             if (block) {
-                // Если внутри блока есть <input type="file"> или кнопки Upload/Clear — это 100% форма ввода
-                if (block.querySelector('input[type="file"], [data-testid="upload"], .upload-button, button[aria-label*="Clear" i], button[aria-label*="Upload" i], button[title*="Clear" i]')) {
-                    return true;
-                }
                 // Проверка подписи блока (label)
                 const label = block.querySelector('[data-testid="block-label"], .block-title, label, span');
                 if (label) {
                     const txt = (label.textContent || '').toLowerCase();
-                    if (/input|source|upload|prompt\s*image|входн|исходн|загруз/i.test(txt) && !/output|result|выходн/i.test(txt)) {
+                    if (/output|result|generated|сгенерир|выходн|результат/i.test(txt)) {
+                        return false;
+                    }
+                    if (/input|source|upload|prompt\s*image|prompt\s*video|входн|исходн|загруз/i.test(txt)) {
                         return true;
                     }
                 }
-            }
-            // 3. Если элемент расположен до кнопки Generate/Submit в DOM
-            const submitBtn = findSubmitButton();
-            if (submitBtn && submitBtn.compareDocumentPosition) {
-                const pos = el.compareDocumentPosition(submitBtn);
-                // Если кнопка Submit идет ПОСЛЕ элемента (DOCUMENT_POSITION_FOLLOWING = 4)
-                if (pos & Node.DOCUMENT_POSITION_FOLLOWING) {
-                    const hasOutputCls = el.closest('.output-image, .output-video, [data-testid="gallery"], .gallery, div[id*="output" i], div[class*="output" i]');
-                    if (!hasOutputCls) return true;
+                // Если внутри блока есть <input type="file"> или кнопки Upload/Clear — это 100% форма ввода
+                if (block.querySelector('input[type="file"], [data-testid="upload"], .upload-button, button[aria-label*="Clear" i], button[aria-label*="Upload" i], button[title*="Clear" i]')) {
+                    return true;
+                }
+                // Если есть кнопки скачивания внутри блока — это результат (output)
+                if (block.querySelector('a[download], button[aria-label*="Download" i], button[title*="Download" i]')) {
+                    return false;
                 }
             }
             return false;
@@ -321,7 +324,7 @@
 
             for (const doc of docRoots) {
                 // 1. Проверяем видео в Gradio / Streamlit
-                const videos = Array.from(doc.querySelectorAll('.output-video video, .gradio-video video, div[data-testid="video"] video, video'));
+                const videos = Array.from(doc.querySelectorAll('.output-video video, #output-video-container video, .modern-out-video, .gradio-video video, div[data-testid="video"] video, video'));
                 for (const v of videos) {
                     const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
                     if (!src || src.startsWith('blob:http') || src.includes('tampermonkey') || isSvgMedia(src)) continue;
@@ -379,6 +382,8 @@
                 // 3. Выходные изображения Gradio / Streamlit
                 const imgSelectors = [
                     '.output-image img',
+                    '#output-image-container img',
+                    '.modern-out-img',
                     'div[data-testid="image"]:not(.input-image) img',
                     '.image-preview img',
                     '.gallery img',
@@ -531,7 +536,8 @@
                     _isWaitingForGeneration = false;
                     markMediaDownloaded(curMedia);
                     showToast('🎉 Генерация завершена! HF Авто-DL...');
-                    triggerDownload(true, null, null, curMedia);
+                    // v1.4.34: bypassDuplicateCheck = false, чтобы уважалась настройка «Проверять историю скачиваний» (checkHistory)
+                    triggerDownload(false, null, null, curMedia);
                     return;
                 }
 
@@ -742,7 +748,7 @@
                 const btn = target.closest('button, input[type="submit"], input[type="button"], [role="button"]');
                 if (!btn) return;
                 const submitBtn = findSubmitButton();
-                const isGenBtn = btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''));
+                const isGenBtn = btn === submitBtn || /generate|submit|run|queue|render|start|create|edit|animate|process|enhance|upscale|старт|создать|запуск|изменить|обработать|анимировать|улучшить/i.test((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '') + ' ' + (btn.id || '') + ' ' + (btn.className || ''));
                 if (!isGenBtn) return;
 
                 const curMedia = findMedia({ allowInput: false });
@@ -789,9 +795,11 @@
                     return;
                 }
 
-                if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
+                if (e.key === 'Enter') {
                     const tag = (e.target && e.target.tagName || '').toLowerCase();
-                    if (tag === 'textarea' || tag === 'input') {
+                    const isTextEdit = (tag === 'textarea' || tag === 'input');
+                    // Срабатывает по Ctrl+Enter в любом месте, либо по Enter внутри полей ввода
+                    if (e.ctrlKey || isTextEdit) {
                         const curMedia = findMedia({ allowInput: false });
                         if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia)) {
                             e.preventDefault();

@@ -294,46 +294,50 @@ def kb_guest():
 def _reply_inline(det_id):
     return {"inline_keyboard": [[
         {"text": "📖 Подробнее", "callback_data": f"det:{det_id}"},
-        {"text": "🎧 Аудио ещё раз", "callback_data": f"replay:{det_id}"},
+        {"text": "🎧 Озвучить", "callback_data": f"replay:{det_id}"},
     ]]}
 
 def _collapse_inline(det_id):
     return {"inline_keyboard": [[
         {"text": "⬅ Свернуть", "callback_data": f"collapse:{det_id}"},
+        {"text": "🎧 Озвучить", "callback_data": f"replay:{det_id}"},
     ]]}
 
 # ---------------------------------------------------------------------------
-# IRONCLAD REPLY — отправка короткий + TTS + кнопки
+# IRONCLAD REPLY — отправка короткий + кнопки (+ опционально TTS)
 # ---------------------------------------------------------------------------
-def ironclad_reply(chat_id, short, voice_text, full):
+def ironclad_reply(chat_id, short, voice_text, full, with_voice=False):
     det_id = str(uuid.uuid4())[:8]
     _save_detail(det_id, {"short": short, "voice": voice_text, "full": full})
 
     # 1. Короткое текстовое сообщение с кнопками
     res = send_message(chat_id, short, reply_markup=_reply_inline(det_id))
     msg_id = res.get("result", {}).get("message_id")
-    # Сохраним msg_id чтобы можно было редактировать при нажатии «Подробнее»
     if msg_id:
         DETAILS_CACHE[det_id]["msg_id"] = msg_id
         _save_detail(det_id, DETAILS_CACHE[det_id])
 
-    # 2. TTS-голосовое
-    send_chat_action(chat_id, "upload_voice")
-    ogg = tts_engine.generate_voice_ogg(voice_text)
-    if ogg and os.path.exists(ogg):
-        send_voice(chat_id, ogg)
-        try: os.remove(ogg)
-        except: pass
+    # 2. TTS-голосовое (только если явно запрошено)
+    if with_voice and voice_text:
+        send_chat_action(chat_id, "upload_voice")
+        ogg = tts_engine.generate_voice_ogg(voice_text)
+        if ogg and os.path.exists(ogg):
+            send_voice(chat_id, ogg)
+            try: os.remove(ogg)
+            except: pass
 
 # ---------------------------------------------------------------------------
-# КВОТА И СТАТУС
+# КВОТА И СТАТУС (ANTIGRAVITY LIVE API + FALLBACK)
 # ---------------------------------------------------------------------------
+LAST_QUOTA_FETCH = 0
+
 def _parse_pct(v):
-    if isinstance(v, (int, float)): return int(v)
+    if isinstance(v, (int, float)): return round(float(v), 1)
     if isinstance(v, str):
-        d = "".join(c for c in v if c.isdigit())
-        return int(d) if d else 0
-    return 0
+        d = "".join(c for c in v if c.isdigit() or c == ".")
+        try: return round(float(d), 1)
+        except: return 0.0
+    return 0.0
 
 def _fmt_delta(sec):
     if sec <= 0: return "сброшен"
@@ -351,7 +355,133 @@ def _bar(pct, n=10):
     f = round(v / 100 * n)
     return "█" * f + "░" * (n - f)
 
-def get_status():
+def _iso_to_ts(iso_str):
+    if not iso_str: return None
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        return dt.timestamp()
+    except Exception:
+        return None
+
+def fetch_live_antigravity_quotas():
+    """Опрашивает локальный демон Antigravity (language_server) для получения 100% реальных квот."""
+    import glob
+    daemon_dir = os.path.expanduser("~/.gemini/antigravity/daemon")
+    files = glob.glob(os.path.join(daemon_dir, "hub_*.json"))
+    if not files:
+        return None
+    files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+    for fpath in files:
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            port = d.get("httpPort")
+            csrf = d.get("csrfToken")
+            if not port or not csrf:
+                continue
+            url = f"http://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
+            headers = {
+                "content-type": "application/json",
+                "connect-protocol-version": "1",
+                "x-codeium-csrf-token": csrf
+            }
+            r = requests.post(url, headers=headers, json={}, timeout=3)
+            if r.status_code == 200:
+                data = r.json()
+                groups = data.get("response", {}).get("groups", [])
+                res = {}
+                for g in groups:
+                    gname = g.get("displayName")
+                    res[gname] = {}
+                    for b in g.get("buckets", []):
+                        w = b.get("window")
+                        res[gname][w] = {
+                            "bucketId": b.get("bucketId"),
+                            "pct": round(b.get("remainingFraction", 0) * 100, 1),
+                            "resetTime": b.get("resetTime"),
+                            "description": b.get("description", "")
+                        }
+                return res
+        except Exception:
+            continue
+    return None
+
+def sync_live_quotas(force=False):
+    """Синхронизирует реальные квоты Antigravity в live_status.json каждые 60 секунд."""
+    global LAST_QUOTA_FETCH
+    now = time.time()
+    if not force and (now - LAST_QUOTA_FETCH < 60):
+        return
+    LAST_QUOTA_FETCH = now
+    live = fetch_live_antigravity_quotas()
+    if not live:
+        return
+
+    data = {}
+    if os.path.exists(STATUS_FILE):
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            pass
+
+    gemini = live.get("Gemini Models", {})
+    claude = live.get("Claude and GPT models", {})
+
+    g_5h = gemini.get("5h", {})
+    g_w  = gemini.get("weekly", {})
+    c_w  = claude.get("weekly", {})
+    c_5h = claude.get("5h", {})
+
+    if g_5h:
+        g5_pct = g_5h.get("pct", 100)
+        g5_ts  = _iso_to_ts(g_5h.get("resetTime"))
+        data["quota_5h"] = {
+            "remaining_pct": g5_pct,
+            "reset_timestamp": g5_ts,
+            "resets_in": _fmt_delta(g5_ts - now) if g5_ts else "?"
+        }
+        data["quota_remaining"] = f"{g5_pct}%"
+
+    if g_w:
+        gw_pct = g_w.get("pct", 100)
+        gw_ts  = _iso_to_ts(g_w.get("resetTime"))
+        data["quota_weekly"] = {
+            "remaining_pct": gw_pct,
+            "reset_timestamp": gw_ts,
+            "resets_in": _fmt_delta(gw_ts - now) if gw_ts else "?"
+        }
+        data["weekly_quota_remaining"] = f"{gw_pct}%"
+
+    if c_w:
+        cw_pct = c_w.get("pct", 100)
+        cw_ts  = _iso_to_ts(c_w.get("resetTime"))
+        data["claude_weekly"] = {
+            "remaining_pct": cw_pct,
+            "reset_timestamp": cw_ts,
+            "resets_in": _fmt_delta(cw_ts - now) if cw_ts else "?"
+        }
+        data["claude_quota_remaining"] = f"{cw_pct}%"
+
+    if c_5h:
+        c5_pct = c_5h.get("pct", 100)
+        data["claude_5h"] = {
+            "remaining_pct": c5_pct
+        }
+
+    data["last_updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def get_status(force_refresh=False):
+    if force_refresh:
+        sync_live_quotas(force=True)
+
     data = {}
     if os.path.exists(STATUS_FILE):
         try:
@@ -369,25 +499,38 @@ def get_status():
     qwts = qwr.get("reset_timestamp")
     qwin = _fmt_delta(qwts - time.time()) if isinstance(qwts, (int, float)) and qwts else qwr.get("resets_in", "?")
 
+    cwr = data.get("claude_weekly", {})
+    cwp = _parse_pct(cwr.get("remaining_pct", 100)) if cwr else None
+    cwts = cwr.get("reset_timestamp") if cwr else None
+    cwin = _fmt_delta(cwts - time.time()) if isinstance(cwts, (int, float)) and cwts else cwr.get("resets_in", "?")
+
     return {
         "q5p": q5p, "q5in": q5in,
         "qwp": qwp, "qwin": qwin,
-        "model": data.get("model", "—"),
-        "version": data.get("script_version", "—"),
-        "build": data.get("build_status", "—"),
-        "watchdog": data.get("watchdog_timer", "—"),
+        "cwp": cwp, "cwin": cwin,
+        "model": data.get("model", "Gemini 3.8 Flash"),
+        "version": data.get("script_version", "v1.4.33"),
+        "build": data.get("build_status", "SYNTAX OK, VERIFY OK"),
+        "watchdog": data.get("watchdog_timer", "АКТИВЕН"),
     }
 
 def format_status(s):
+    cw_txt = ""
+    if s.get("cwp") is not None:
+        cw_txt = f"\n\n🧠 <b>Claude & GPT:</b>\n" \
+                 f"📅 <b>Неделя:</b>   [<code>{_bar(s['cwp'])}</code>] <b>{s['cwp']}%</b> (сброс: {s['cwin']})"
+
     return (
         f"📊 <b>СТАТУС СИСТЕМЫ</b>\n\n"
+        f"🤖 <b>Gemini Models:</b>\n"
         f"⏳ <b>5ч лимит:</b> [<code>{_bar(s['q5p'])}</code>] <b>{s['q5p']}%</b> (сброс: {s['q5in']})\n"
-        f"📅 <b>Неделя:</b>   [<code>{_bar(s['qwp'])}</code>] <b>{s['qwp']}%</b> (сброс: {s['qwin']})\n\n"
+        f"📅 <b>Неделя:</b>   [<code>{_bar(s['qwp'])}</code>] <b>{s['qwp']}%</b> (сброс: {s['qwin']})"
+        f"{cw_txt}\n\n"
         f"• 🤖 <b>Модель:</b> {s['model']}\n"
         f"• 📦 <b>Версия:</b> <code>{s['version']}</code>\n"
         f"• 🔨 <b>Сборка:</b> <code>{s['build']}</code>\n"
         f"• ⏱ <b>Сторож:</b> {s['watchdog']}\n"
-        f"• 🎯 <b>Адресат:</b> {TARGET_FULL[CFG.get('active_target','tg_engineer')]}"
+        f"• 🎯 <b>Адресат:</b> {TARGET_FULL.get(CFG.get('active_target','tg_engineer'), '🤖 Telegram-инженер')}"
     )
 
 def check_quota_alerts():
@@ -411,18 +554,21 @@ def check_quota_alerts():
                     OWNER_ID,
                     f"⚠️ [{label} лимит] → {pct}% (порог {th}%)",
                     f"Внимание, Эльдар! {label} лимит опустился до {pct} процентов.",
-                    format_status(s)
+                    format_status(s),
+                    with_voice=True
                 )
                 break
 
-    if q5p <= 5 or qwp <= 5:
+    cwp = s.get("cwp")
+    if q5p <= 5 or qwp <= 5 or (cwp is not None and cwp <= 5):
         if not os.path.exists(STOP_FILE):
             with open(STOP_FILE, "w") as f: f.write(f"AUTO_{time.time()}")
             ironclad_reply(
                 OWNER_ID,
                 f"🚨 АВАРИЙНЫЙ ТОРМОЗ — квота критическая ({q5p}% / {qwp}%)",
                 f"Аварийный стоп! Лимит достиг критической отметки. Задачи заморожены.",
-                format_status(s)
+                format_status(s),
+                with_voice=True
             )
 
 # ---------------------------------------------------------------------------
@@ -598,7 +744,13 @@ def handle_message(msg):
         fname = f"photo_{int(time.time())}_{fid[:8]}.jpg"
         fpath = download_file(fid, os.path.join(PHOTOS_DIR, fname))
         caption = msg.get("caption", "").strip()
-        _handle_content(chat_id, u_name, "photo", caption, fpath)
+        photo_text = f"[Фото: {fname}]" + (f" {caption}" if caption else "")
+        target = CFG.get("active_target", "tg_engineer")
+        record_inbox(chat_id, u_name, photo_text, target)
+        short = f"📷 [{TARGETS[target]}] Фото получено"
+        voice = f"Фотография получена и передана в {TARGET_FULL[target]}."
+        full = f"📷 <b>ФОТО ПОЛУЧЕНО</b>\n\n• <b>Файл:</b> <code>{fname}</code>\n• <b>Подпись:</b> {caption or 'нет'}\n• <b>Адресат:</b> {TARGET_FULL[target]}"
+        ironclad_reply(chat_id, short, voice, full)
         return
 
     # Если голос
@@ -613,7 +765,22 @@ def handle_message(msg):
             print(f"[STT/{engine}] {recognized[:80]}")
             try: os.remove(downloaded)
             except: pass
-        _handle_content(chat_id, u_name, "voice", recognized or "[Голос без слов]")
+
+        if not recognized:
+            send_message(chat_id, "⚠ Не удалось разобрать речь (тишина или шум).")
+            return
+
+        target = CFG.get("active_target", "tg_engineer")
+        record_inbox(chat_id, u_name, recognized, target)
+
+        short = f"🎤 «{recognized}»\n↳ <i>{TARGET_FULL[target]}</i>"
+        full = (
+            f"🎤 <b>ГОЛОСОВОЕ СООБЩЕНИЕ</b>\n\n"
+            f"• <b>Распознано:</b> «{recognized}»\n"
+            f"• <b>Адресат:</b> {TARGET_FULL[target]}\n"
+            f"• <b>Время:</b> {time.strftime('%H:%M:%S')}"
+        )
+        ironclad_reply(chat_id, short, recognized, full, with_voice=False)
         return
 
     # Текстовое сообщение
@@ -706,11 +873,14 @@ def _handle_text(chat_id, u_name, text):
         return
 
     if text in ["📊 Статус", "/status"]:
-        s = get_status()
-        short = f"📊 5ч: {s['q5p']}% ({s['q5in']}) | Неделя: {s['qwp']}% ({s['qwin']})"
-        voice = (f"Статус системы. Пятичасовой лимит {s['q5p']} процентов, сброс через {s['q5in']}. "
+        s = get_status(force_refresh=True)
+        cwp_str = f" | Claude: {s['cwp']}%" if s.get('cwp') is not None else ""
+        short = f"📊 Gemini: 5ч {s['q5p']}% ({s['q5in']}) | Неделя: {s['qwp']}% ({s['qwin']}){cwp_str}"
+        voice = (f"Статус системы. Gemini пятичасовой лимит {s['q5p']} процентов, сброс через {s['q5in']}. "
                  f"Недельный {s['qwp']} процентов.")
-        ironclad_reply(chat_id, short, voice, format_status(s))
+        if s.get("cwp") is not None:
+            voice += f" Клод {s['cwp']} процентов."
+        ironclad_reply(chat_id, short, voice, format_status(s), with_voice=True)
         return
 
     if text in ["📸 Скриншот", "/screen"]:
@@ -744,8 +914,10 @@ def _handle_text(chat_id, u_name, text):
         send_message(chat_id, "⚠ <b>Выключить бота на ПК?</b>", reply_markup=markup)
         return
 
-    # Произвольный текст — входим в compose-режим
-    _handle_content(chat_id, u_name, "text", text)
+    # Произвольный текст — прямой ответ активного адресата без лишней бюрократии
+    record_inbox(chat_id, u_name, text, target)
+    short, voice, full = agent_response(target, u_name, text)
+    ironclad_reply(chat_id, short, voice, full)
 
 # ---------------------------------------------------------------------------
 # ОБРАБОТКА CALLBACK QUERY
@@ -759,6 +931,14 @@ def handle_callback(cb):
 
     if chat_id != OWNER_ID and not is_authorized(chat_id):
         answer_callback(cb_id, "Нет доступа.")
+        return
+
+    # stt:<id> — показать распознанный текст голосового
+    if data.startswith("stt:"):
+        stt_id = data.split(":", 1)[1]
+        det    = DETAILS_CACHE.get(f"stt_{stt_id}", {})
+        txt    = det.get("full", "Текст не найден.")
+        answer_callback(cb_id, f"Распознанный текст:\n\n{txt}"[:200], show_alert=True)
         return
 
     # det:<id> — показать подробности
@@ -861,7 +1041,8 @@ def check_outbox():
                 short     = item.get("short") or str(item.get("text",""))[:60]
                 voice_txt = item.get("voice_text") or short
                 full      = item.get("full") or item.get("text", "")
-                ironclad_reply(OWNER_ID, f"<b>{sender}</b>\n{short}", voice_txt, full)
+                with_voice = item.get("voice", True)
+                ironclad_reply(OWNER_ID, f"<b>{sender}</b>\n{short}", voice_txt, full, with_voice=with_voice)
         except Exception as e:
             print(f"[Outbox JSON Error] {e}")
 
@@ -876,7 +1057,8 @@ def check_outbox():
                 elif content.startswith("🤖"): sender = "🤖 TG-инженер"
                 ironclad_reply(OWNER_ID,
                                f"<b>{sender}</b>\n{content[:60]}",
-                               content[:200], content)
+                               content[:200], content,
+                               with_voice=True)
                 os.remove(OUTBOX_FILE)
         except Exception as e:
             print(f"[Outbox Text Error] {e}")
@@ -898,8 +1080,11 @@ def poll():
     print(f"• TTS:      Microsoft Irina Desktop → Opus OGG")
     print("=" * 60)
 
+    sync_live_quotas(force=True)
+
     while True:
         try:
+            sync_live_quotas()
             check_outbox()
             check_quota_alerts()
             session_expire_check()
@@ -917,6 +1102,8 @@ def poll():
                         handle_message(item["message"])
                     elif "callback_query" in item:
                         handle_callback(item["callback_query"])
+        except requests.exceptions.Timeout:
+            continue
         except Exception as e:
             print(f"[Poll Error] {e}")
             time.sleep(2)

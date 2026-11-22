@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.33
+// @version      1.4.34
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.33';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.34';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -845,7 +845,17 @@ if (parts.length <= 2) return host;
 return parts.slice(-2).join('.');
 }
 const rootDomain = getRootDomain(hostname);
-const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
+function mossadCanonicalSite(host) {
+const h = String(host || '').toLowerCase();
+if (h.includes('huggingface.co') || h.includes('hf.space')) return 'huggingface.co';
+if (h.includes('pinterest.ru') || h.includes('pinterest.com')) return 'pinterest.com';
+if (h.includes('vk.video') || h.includes('vkvideo.ru')) return 'vkvideo.ru';
+if (h.includes('xv-ru.com') || h.includes('xvideos.com') || h.includes('xvideos2.com') || h.includes('xnxx.com')) return 'xvideos.com';
+if (h.includes('xhamster.com') || h.includes('xhamster.desi') || h.includes('xhamster2.com')) return 'xhamster.com';
+return getRootDomain(h);
+}
+const canonicalDomain = mossadCanonicalSite(hostname);
+const STORAGE_KEY = `mossad_${canonicalDomain.replace(/[^a-z0-9]/g, '_')}_config`;
 const MOSSAD_BUILTIN_SITES = ['grok.com', 'redgifs.com', 'pinterest.com', 'pinterest.ru', 'civitai.red', 'vkvideo.ru', 'vk.video', 'noodlemagazine.com', 'instagram.com', 'huggingface.co', 'hf.space', 'xv-ru.com', 'xvideos.com', 'faphouse.com', 'xhamster.com', 'xhamster.desi', 'xhamster2.com', 'telegram.org'];
 const MOSSAD_SITES_GM_KEY = 'mossad_sites';
 function mossadNormSite(s) {
@@ -1152,12 +1162,28 @@ playInWindow: { key: '', ctrl: false, alt: false, shift: false },
 stickyPlayer: { key: 'V', ctrl: false, alt: false, shift: true },
 }
 };
+const activeSiteKey = (typeof canonicalDomain !== 'undefined' ? canonicalDomain : rootDomain);
+const SITE_CONFIG_GM_KEY = `mossad_site_${activeSiteKey.replace(/[^a-z0-9]/g, '_')}_config`;
 let config = {};
 let siteHasSavedConfig = false;
 try {
-const stored = localStorage.getItem(STORAGE_KEY);
-siteHasSavedConfig = !!stored;
-config = stored ? JSON.parse(stored) : {};
+let gmStored = null;
+if (typeof GM_getValue === 'function') {
+const raw = GM_getValue(SITE_CONFIG_GM_KEY, null);
+if (raw) gmStored = (typeof raw === 'string' ? JSON.parse(raw) : raw);
+}
+const localRaw = localStorage.getItem(STORAGE_KEY);
+const localStored = localRaw ? JSON.parse(localRaw) : null;
+if (gmStored && typeof gmStored === 'object') {
+config = gmStored;
+siteHasSavedConfig = true;
+} else if (localStored && typeof localStored === 'object') {
+config = localStored;
+siteHasSavedConfig = true;
+if (typeof GM_setValue === 'function') {
+try { GM_setValue(SITE_CONFIG_GM_KEY, JSON.stringify(config)); } catch (_) {}
+}
+}
 } catch (e) {}
 const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
 const GLOBAL_DEFAULT_KEYS = [
@@ -1276,7 +1302,11 @@ delete copy.githubToken;
 return JSON.stringify(copy);
 }
 function persistLocalConfig() {
-localStorage.setItem(STORAGE_KEY, serializeLocalConfig());
+const serialized = serializeLocalConfig();
+try { localStorage.setItem(STORAGE_KEY, serialized); } catch (_) {}
+if (typeof GM_setValue === 'function') {
+try { GM_setValue(SITE_CONFIG_GM_KEY, serialized); } catch (_) {}
+}
 }
 function normalizeHotkeyBinding(v) {
 const clean = (h) => {
@@ -1563,6 +1593,17 @@ try { mossadApplySiteHotkeys(); } catch (e) {}
 try { GlobalDefaults.applyStampIfNew(); } catch (e) {}
 if (typeof GM_addValueChangeListener === 'function') {
 try {
+GM_addValueChangeListener(SITE_CONFIG_GM_KEY, (name, oldVal, newVal) => {
+if (!newVal) return;
+try {
+const parsed = typeof newVal === 'string' ? JSON.parse(newVal) : newVal;
+if (parsed && typeof parsed === 'object') {
+Object.assign(config, parsed);
+siteHasSavedConfig = true;
+if (window.updateWidgetUI) window.updateWidgetUI();
+}
+} catch (_) {}
+});
 GM_addValueChangeListener(GLOBAL_DEFAULTS_GM_KEY, () => {
 if (GlobalDefaults.siteHasSavedConfig()) return;
 const gd = GlobalDefaults.effective();
@@ -1595,10 +1636,10 @@ if (gd0 && gd0.pdAction === 'up') { gd0.pdAction = 'upns'; GM_setValue(GLOBAL_DE
 } catch (e) {}
 }
 if (typeof GM_getValue === 'function') {
-let gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
+let gmTpl = GM_getValue('mossad_tpl_' + activeSiteKey, null);
 if (gmTpl === OLD_DEFAULT_TPL_V1336) {
 gmTpl = '';
-try { GM_setValue('mossad_tpl_' + rootDomain, ''); } catch (e) {}
+try { GM_setValue('mossad_tpl_' + activeSiteKey, ''); } catch (e) {}
 }
 if (gmTpl && typeof gmTpl === 'string') {
 config.filenameTemplate = gmTpl;
@@ -1616,7 +1657,7 @@ if (config.filenameTemplate === OLD_DEFAULT_TPL_V1336) {
 config.filenameTemplate = '';
 try { if (GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
 }
-function mossadGetSiteSubfolder(domain = rootDomain) {
+function mossadGetSiteSubfolder(domain = activeSiteKey) {
 try {
 if (typeof GM_getValue === 'function') {
 const v = GM_getValue('mossad_subfolder_' + domain, null);
@@ -1625,7 +1666,7 @@ if (v != null) return String(v).trim();
 } catch (_) {}
 return (config && config.subfolder) ? String(config.subfolder).trim() : '';
 }
-function mossadSetSiteSubfolder(folder, domain = rootDomain) {
+function mossadSetSiteSubfolder(folder, domain = activeSiteKey) {
 const clean = String(folder || '').trim().replace(/^\/+|\/+$/g, '');
 try {
 if (typeof GM_setValue === 'function') {
@@ -1636,7 +1677,7 @@ if (config) config.subfolder = clean;
 if (typeof Settings !== 'undefined' && Settings.save) Settings.save();
 return clean;
 }
-function mossadGetSiteNotes(domain = rootDomain) {
+function mossadGetSiteNotes(domain = activeSiteKey) {
 try {
 if (typeof GM_getValue === 'function') {
 return GM_getValue('mossad_site_notes_' + domain, '') || '';
@@ -1644,7 +1685,7 @@ return GM_getValue('mossad_site_notes_' + domain, '') || '';
 } catch (_) {}
 return localStorage.getItem('mossad_site_notes_' + domain) || '';
 }
-function mossadSetSiteNotes(notes, domain = rootDomain) {
+function mossadSetSiteNotes(notes, domain = activeSiteKey) {
 const text = String(notes || '').trim();
 try {
 if (typeof GM_setValue === 'function') {
@@ -1731,6 +1772,14 @@ persistLocalConfig();
 }
 }
 config.githubToken = GM_getValue(GITHUB_TOKEN_GM_KEY, '') || '';
+const freshSiteCfg = GM_getValue(SITE_CONFIG_GM_KEY, null);
+if (freshSiteCfg) {
+const parsed = typeof freshSiteCfg === 'string' ? JSON.parse(freshSiteCfg) : freshSiteCfg;
+if (parsed && typeof parsed === 'object') {
+Object.assign(config, parsed);
+siteHasSavedConfig = true;
+}
+}
 } catch(e) {}
 }
 });
@@ -3538,8 +3587,9 @@ if (onSuccess) { try { onSuccess(); } catch (e) {} }
 });
 }
 function saveBlobToDisk(blob, filename, directUrl = null, postUrl = null) {
+const activeDom = (typeof canonicalDomain !== 'undefined' ? canonicalDomain : rootDomain);
 if (typeof computeSHA256 === 'function' && typeof saveFileToHistory === 'function') {
-const sliceBlob = blob.slice(0, 1048576);
+const sliceBlob = blob.slice(0, 65536);
 computeSHA256(sliceBlob).then(hash => {
 saveFileToHistory({
 hash,
@@ -3548,18 +3598,20 @@ rootFilename: extractRootFilename(filename),
 url: directUrl || location.href,
 postUrl: postUrl || location.href,
 size: blob.size,
-domain: rootDomain
+domain: activeDom
 });
-if (typeof mossadRecordSiteDownload === 'function') mossadRecordSiteDownload(rootDomain);
+if (typeof mossadRecordSiteDownload === 'function') mossadRecordSiteDownload(activeDom);
 });
 }
+const subfolder = (typeof mossadGetSiteSubfolder === 'function' ? mossadGetSiteSubfolder() : '') || (config && config.subfolder) || '';
+const finalName = subfolder ? (subfolder.replace(/^\/+|\/+$/g, '') + '/' + filename) : filename;
 const blobUrl = URL.createObjectURL(blob);
 const a = document.createElement('a');
-a.href = blobUrl; a.download = filename;
+a.href = blobUrl; a.download = finalName;
 document.body.appendChild(a); a.click();
 setTimeout(() => { a.remove(); URL.revokeObjectURL(blobUrl); }, 2000);
 const siteCount = (typeof mossadGetSiteDlCount === 'function') ? mossadGetSiteDlCount() : 0;
-showToast(siteCount ? `✅ Сохранено! [№${siteCount} на ${rootDomain}]` : '✅ Сохранено!');
+showToast(siteCount ? `✅ Сохранено! [№${siteCount} на ${activeDom}]` : '✅ Сохранено!');
 }
 
 // ── src/download/history.js ──
@@ -3733,7 +3785,24 @@ const cpu = cleanMediaUrl(record.postUrl);
 if (cpu) _cachedCleanUrls.set(cpu, record);
 }
 }
+const GM_HISTORY_KEY = 'mossad_recent_history_v1';
+function loadGmRecentHistory() {
+if (typeof GM_getValue !== 'function') return;
+try {
+const raw = GM_getValue(GM_HISTORY_KEY, null);
+if (raw) {
+const arr = (typeof raw === 'string' ? JSON.parse(raw) : raw);
+if (Array.isArray(arr)) {
+for (const r of arr) {
+addRecordToMemoryCache(r);
+}
+}
+}
+} catch (_) {}
+}
+try { loadGmRecentHistory(); } catch (_) {}
 async function loadHistoryCache() {
+loadGmRecentHistory();
 if (_isCacheLoaded) return;
 try {
 const db = await getDownloadDB();
@@ -3805,8 +3874,7 @@ if (mediaType === 'video' && _videoHashes.has(hash)) return _cachedHashes.get(ha
 if (mediaType === 'photo' && _photoHashes.has(hash)) return _cachedHashes.get(hash);
 if (!mediaType && _cachedHashes.has(hash)) return _cachedHashes.get(hash);
 }
-const isHf = rootDomain.includes('huggingface') || rootDomain.includes('hf.space');
-if (mediaUrl && !isHf) {
+if (mediaUrl) {
 if (_cachedUrls.has(mediaUrl)) return _cachedUrls.get(mediaUrl);
 const cu = cleanMediaUrl(mediaUrl);
 if (cu && _cachedCleanUrls.has(cu)) return _cachedCleanUrls.get(cu);
@@ -3894,9 +3962,29 @@ postUrl: postUrl || location.href,
 path: path || '',
 size: size || 0,
 date: dateStr,
-domain: rootDomain
+domain: (typeof canonicalDomain !== 'undefined' ? canonicalDomain : rootDomain)
 };
 addRecordToMemoryCache(record);
+if (typeof GM_getValue === 'function' && typeof GM_setValue === 'function') {
+try {
+const raw = GM_getValue(GM_HISTORY_KEY, null);
+const list = (raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : []) || [];
+list.unshift({
+id: record.id,
+hash: record.hash,
+filename: record.filename,
+rootFilename: record.rootFilename,
+type: record.type,
+url: record.url,
+postUrl: record.postUrl,
+size: record.size,
+date: record.date,
+domain: record.domain
+});
+if (list.length > 500) list.length = 500;
+GM_setValue(GM_HISTORY_KEY, JSON.stringify(list));
+} catch (_) {}
+}
 const tx = db.transaction(MOSSAD_STORE_NAME, 'readwrite');
 tx.objectStore(MOSSAD_STORE_NAME).put(record);
 return new Promise((resolve) => {
@@ -10746,7 +10834,9 @@ variant === 'primary' || cls.includes('primary') || cls.includes('generate-btn')
 if (byGradioId) return byGradioId;
 const submitKeywords = [
 'generate', 'submit', 'run', 'queue', 'render', 'start', 'create',
-'сгенерировать', 'запуск', 'создать', 'отправить', 'старт'
+'edit', 'animate', 'process', 'enhance', 'upscale',
+'сгенерировать', 'запуск', 'создать', 'отправить', 'старт',
+'изменить', 'обработать', 'анимировать', 'улучшить'
 ];
 const byText = buttons.find(b => {
 if (b.offsetWidth === 0 && b.offsetHeight === 0 && (!b.getClientRects || !b.getClientRects().length)) return false;
@@ -10810,25 +10900,26 @@ if (!el) return false;
 if (el.closest('.input-image, .input-video, .input-container, .drop-area, .dropzone, [data-testid="upload"], [data-testid="dropzone"], [data-testid="empty-image"]')) {
 return true;
 }
+if (el.closest('.output-image, .output-video, [data-testid="gallery"], .gallery, div[id*="output" i], div[class*="output" i], .modern-out-img, .modern-out-video')) {
+return false;
+}
 const block = el.closest('.gradio-image, .gradio-video, div[data-testid="image"], div[data-testid="video"], .block');
 if (block) {
-if (block.querySelector('input[type="file"], [data-testid="upload"], .upload-button, button[aria-label*="Clear" i], button[aria-label*="Upload" i], button[title*="Clear" i]')) {
-return true;
-}
 const label = block.querySelector('[data-testid="block-label"], .block-title, label, span');
 if (label) {
 const txt = (label.textContent || '').toLowerCase();
-if (/input|source|upload|prompt\s*image|входн|исходн|загруз/i.test(txt) && !/output|result|выходн/i.test(txt)) {
+if (/output|result|generated|сгенерир|выходн|результат/i.test(txt)) {
+return false;
+}
+if (/input|source|upload|prompt\s*image|prompt\s*video|входн|исходн|загруз/i.test(txt)) {
 return true;
 }
 }
+if (block.querySelector('input[type="file"], [data-testid="upload"], .upload-button, button[aria-label*="Clear" i], button[aria-label*="Upload" i], button[title*="Clear" i]')) {
+return true;
 }
-const submitBtn = findSubmitButton();
-if (submitBtn && submitBtn.compareDocumentPosition) {
-const pos = el.compareDocumentPosition(submitBtn);
-if (pos & Node.DOCUMENT_POSITION_FOLLOWING) {
-const hasOutputCls = el.closest('.output-image, .output-video, [data-testid="gallery"], .gallery, div[id*="output" i], div[class*="output" i]');
-if (!hasOutputCls) return true;
+if (block.querySelector('a[download], button[aria-label*="Download" i], button[title*="Download" i]')) {
+return false;
 }
 }
 return false;
@@ -10846,7 +10937,7 @@ if (f.contentDocument && f.contentDocument.body) docRoots.push(f.contentDocument
 } catch (_) {}
 let foundInputMedia = null;
 for (const doc of docRoots) {
-const videos = Array.from(doc.querySelectorAll('.output-video video, .gradio-video video, div[data-testid="video"] video, video'));
+const videos = Array.from(doc.querySelectorAll('.output-video video, #output-video-container video, .modern-out-video, .gradio-video video, div[data-testid="video"] video, video'));
 for (const v of videos) {
 const src = v.src || (v.querySelector('source') && v.querySelector('source').src) || v.currentSrc;
 if (!src || src.startsWith('blob:http') || src.includes('tampermonkey') || isSvgMedia(src)) continue;
@@ -10900,6 +10991,8 @@ foundInputMedia = mediaObj;
 }
 const imgSelectors = [
 '.output-image img',
+'#output-image-container img',
+'.modern-out-img',
 'div[data-testid="image"]:not(.input-image) img',
 '.image-preview img',
 '.gallery img',
@@ -11025,7 +11118,7 @@ _autoSaveTimer = null;
 _isWaitingForGeneration = false;
 markMediaDownloaded(curMedia);
 showToast('🎉 Генерация завершена! HF Авто-DL...');
-triggerDownload(true, null, null, curMedia);
+triggerDownload(false, null, null, curMedia);
 return;
 }
 if (checkCount >= maxChecks) {
@@ -11199,7 +11292,7 @@ if (!target) return;
 const btn = target.closest('button, input[type="submit"], input[type="button"], [role="button"]');
 if (!btn) return;
 const submitBtn = findSubmitButton();
-const isGenBtn = btn === submitBtn || /generate|submit|run|старт|создать/i.test((btn.textContent || '') + (btn.getAttribute('aria-label') || '') + (btn.id || ''));
+const isGenBtn = btn === submitBtn || /generate|submit|run|queue|render|start|create|edit|animate|process|enhance|upscale|старт|создать|запуск|изменить|обработать|анимировать|улучшить/i.test((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '') + ' ' + (btn.id || '') + ' ' + (btn.className || ''));
 if (!isGenBtn) return;
 const curMedia = findMedia({ allowInput: false });
 if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia) && !btn.dataset.mossadConfirmed) {
@@ -11237,9 +11330,10 @@ setTimeout(() => startWatcher(), 200);
 }
 return;
 }
-if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
+if (e.key === 'Enter') {
 const tag = (e.target && e.target.tagName || '').toLowerCase();
-if (tag === 'textarea' || tag === 'input') {
+const isTextEdit = (tag === 'textarea' || tag === 'input');
+if (e.ctrlKey || isTextEdit) {
 const curMedia = findMedia({ allowInput: false });
 if (config && config.hfWarnUnsaved !== false && curMedia && !isMediaDownloaded(curMedia)) {
 e.preventDefault();
@@ -17844,7 +17938,7 @@ return `
                 </div>
             </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-19</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-22</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -18377,8 +18471,16 @@ if (!confirm(`Сбросить все настройки и горячие кл�
 localStorage.removeItem(STORAGE_KEY);
 localStorage.removeItem('mossad_playlist_width');
 if (typeof GM_deleteValue === 'function') {
+const targetKey = (typeof canonicalDomain !== 'undefined' ? canonicalDomain : rootDomain);
+try { GM_deleteValue('mossad_tpl_' + targetKey); } catch(e){}
 try { GM_deleteValue('mossad_tpl_' + rootDomain); } catch(e){}
+try { GM_deleteValue('mossad_subfolder_' + targetKey); } catch(e){}
+try { GM_deleteValue('mossad_subfolder_' + rootDomain); } catch(e){}
+try { GM_deleteValue('mossad_site_subfolder_' + targetKey); } catch(e){}
 try { GM_deleteValue('mossad_site_subfolder_' + rootDomain); } catch(e){}
+try { GM_deleteValue('mossad_site_notes_' + targetKey); } catch(e){}
+try { GM_deleteValue('mossad_site_notes_' + rootDomain); } catch(e){}
+try { GM_deleteValue(`mossad_site_${targetKey.replace(/[^a-z0-9]/g, '_')}_config`); } catch(e){}
 }
 showToast(`↺ Настройки для ${rootDomain} сброшены!`);
 setTimeout(() => location.reload(), 500);

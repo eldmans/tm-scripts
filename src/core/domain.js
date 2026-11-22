@@ -1,4 +1,4 @@
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.33';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.34';
     console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 
     const hostname = location.hostname.toLowerCase();
@@ -9,7 +9,19 @@
         return parts.slice(-2).join('.');
     }
     const rootDomain = getRootDomain(hostname);
-    const STORAGE_KEY = `mossad_${rootDomain.replace(/[^a-z0-9]/g, '_')}_config`;
+
+    // v1.4.34: Канонический домен для объединения алиасов и iframe-спейсов (*.hf.space <-> huggingface.co)
+    function mossadCanonicalSite(host) {
+        const h = String(host || '').toLowerCase();
+        if (h.includes('huggingface.co') || h.includes('hf.space')) return 'huggingface.co';
+        if (h.includes('pinterest.ru') || h.includes('pinterest.com')) return 'pinterest.com';
+        if (h.includes('vk.video') || h.includes('vkvideo.ru')) return 'vkvideo.ru';
+        if (h.includes('xv-ru.com') || h.includes('xvideos.com') || h.includes('xvideos2.com') || h.includes('xnxx.com')) return 'xvideos.com';
+        if (h.includes('xhamster.com') || h.includes('xhamster.desi') || h.includes('xhamster2.com')) return 'xhamster.com';
+        return getRootDomain(h);
+    }
+    const canonicalDomain = mossadCanonicalSite(hostname);
+    const STORAGE_KEY = `mossad_${canonicalDomain.replace(/[^a-z0-9]/g, '_')}_config`;
 
     // ── v1.3.50: список сайтов MOSSAD ──
     // Встроенные сайты + свои сайты пользователя в GM-ключе `mossad_sites` (общий для всех сайтов и

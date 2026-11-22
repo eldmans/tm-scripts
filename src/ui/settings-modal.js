@@ -1021,7 +1021,7 @@
                 </div>
             </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-19</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-22</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -1622,8 +1622,16 @@
                     localStorage.removeItem(STORAGE_KEY);
                     localStorage.removeItem('mossad_playlist_width');
                     if (typeof GM_deleteValue === 'function') {
+                        const targetKey = (typeof canonicalDomain !== 'undefined' ? canonicalDomain : rootDomain);
+                        try { GM_deleteValue('mossad_tpl_' + targetKey); } catch(e){}
                         try { GM_deleteValue('mossad_tpl_' + rootDomain); } catch(e){}
+                        try { GM_deleteValue('mossad_subfolder_' + targetKey); } catch(e){}
+                        try { GM_deleteValue('mossad_subfolder_' + rootDomain); } catch(e){}
+                        try { GM_deleteValue('mossad_site_subfolder_' + targetKey); } catch(e){}
                         try { GM_deleteValue('mossad_site_subfolder_' + rootDomain); } catch(e){}
+                        try { GM_deleteValue('mossad_site_notes_' + targetKey); } catch(e){}
+                        try { GM_deleteValue('mossad_site_notes_' + rootDomain); } catch(e){}
+                        try { GM_deleteValue(`mossad_site_${targetKey.replace(/[^a-z0-9]/g, '_')}_config`); } catch(e){}
                     }
                     showToast(`↺ Настройки для ${rootDomain} сброшены!`);
                     setTimeout(() => location.reload(), 500);

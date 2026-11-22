@@ -112,8 +112,10 @@
     }
 
     function saveBlobToDisk(blob, filename, directUrl = null, postUrl = null) {
+        const activeDom = (typeof canonicalDomain !== 'undefined' ? canonicalDomain : rootDomain);
         if (typeof computeSHA256 === 'function' && typeof saveFileToHistory === 'function') {
-            const sliceBlob = blob.slice(0, 1048576);
+            // v1.4.34: Унификация Fast-Hash среза до 64 КБ (65536 байт) для 100% совпадения с resolveMediaHash
+            const sliceBlob = blob.slice(0, 65536);
             computeSHA256(sliceBlob).then(hash => {
                 saveFileToHistory({
                     hash,
@@ -122,17 +124,19 @@
                     url: directUrl || location.href,
                     postUrl: postUrl || location.href,
                     size: blob.size,
-                    domain: rootDomain
+                    domain: activeDom
                 });
-                if (typeof mossadRecordSiteDownload === 'function') mossadRecordSiteDownload(rootDomain);
+                if (typeof mossadRecordSiteDownload === 'function') mossadRecordSiteDownload(activeDom);
             });
         }
+        const subfolder = (typeof mossadGetSiteSubfolder === 'function' ? mossadGetSiteSubfolder() : '') || (config && config.subfolder) || '';
+        const finalName = subfolder ? (subfolder.replace(/^\/+|\/+$/g, '') + '/' + filename) : filename;
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = blobUrl; a.download = filename;
+        a.href = blobUrl; a.download = finalName;
         document.body.appendChild(a); a.click();
         setTimeout(() => { a.remove(); URL.revokeObjectURL(blobUrl); }, 2000);
         const siteCount = (typeof mossadGetSiteDlCount === 'function') ? mossadGetSiteDlCount() : 0;
-        showToast(siteCount ? `✅ Сохранено! [№${siteCount} на ${rootDomain}]` : '✅ Сохранено!');
+        showToast(siteCount ? `✅ Сохранено! [№${siteCount} на ${activeDom}]` : '✅ Сохранено!');
     }
 

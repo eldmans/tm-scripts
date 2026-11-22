@@ -99,12 +99,28 @@
         }
     };
 
+    const activeSiteKey = (typeof canonicalDomain !== 'undefined' ? canonicalDomain : rootDomain);
+    const SITE_CONFIG_GM_KEY = `mossad_site_${activeSiteKey.replace(/[^a-z0-9]/g, '_')}_config`;
     let config = {};
     let siteHasSavedConfig = false; // v1.3.41: есть ли у этого сайта свои сохранённые настройки
     try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        siteHasSavedConfig = !!stored;
-        config = stored ? JSON.parse(stored) : {};
+        let gmStored = null;
+        if (typeof GM_getValue === 'function') {
+            const raw = GM_getValue(SITE_CONFIG_GM_KEY, null);
+            if (raw) gmStored = (typeof raw === 'string' ? JSON.parse(raw) : raw);
+        }
+        const localRaw = localStorage.getItem(STORAGE_KEY);
+        const localStored = localRaw ? JSON.parse(localRaw) : null;
+        if (gmStored && typeof gmStored === 'object') {
+            config = gmStored;
+            siteHasSavedConfig = true;
+        } else if (localStored && typeof localStored === 'object') {
+            config = localStored;
+            siteHasSavedConfig = true;
+            if (typeof GM_setValue === 'function') {
+                try { GM_setValue(SITE_CONFIG_GM_KEY, JSON.stringify(config)); } catch (_) {}
+            }
+        }
     } catch (e) {}
 
     // ── v1.3.41: общие «умолчания» для всех сайтов (GM-хранилище Tampermonkey) ──
@@ -249,7 +265,11 @@
         return JSON.stringify(copy);
     }
     function persistLocalConfig() {
-        localStorage.setItem(STORAGE_KEY, serializeLocalConfig());
+        const serialized = serializeLocalConfig();
+        try { localStorage.setItem(STORAGE_KEY, serialized); } catch (_) {}
+        if (typeof GM_setValue === 'function') {
+            try { GM_setValue(SITE_CONFIG_GM_KEY, serialized); } catch (_) {}
+        }
     }
     /**
      * v1.3.45: одна привязка на действие. Старый формат — массив слотов [основная, резерв] (или объект
@@ -609,6 +629,18 @@
     // …и живьём для уже открытых вкладок (Tampermonkey: GM_addValueChangeListener)
     if (typeof GM_addValueChangeListener === 'function') {
         try {
+            // v1.4.34: Живая синхронизация настроек сайта между iframe (*.hf.space), вкладками и родительским окном
+            GM_addValueChangeListener(SITE_CONFIG_GM_KEY, (name, oldVal, newVal) => {
+                if (!newVal) return;
+                try {
+                    const parsed = typeof newVal === 'string' ? JSON.parse(newVal) : newVal;
+                    if (parsed && typeof parsed === 'object') {
+                        Object.assign(config, parsed);
+                        siteHasSavedConfig = true;
+                        if (window.updateWidgetUI) window.updateWidgetUI();
+                    }
+                } catch (_) {}
+            });
             GM_addValueChangeListener(GLOBAL_DEFAULTS_GM_KEY, () => {
                 // Сайт без своих настроек сразу переходит на новые общие умолчания
                 if (GlobalDefaults.siteHasSavedConfig()) return;
@@ -648,10 +680,10 @@
         } catch (e) {}
     }
     if (typeof GM_getValue === 'function') {
-        let gmTpl = GM_getValue('mossad_tpl_' + rootDomain, null);
+        let gmTpl = GM_getValue('mossad_tpl_' + activeSiteKey, null);
         if (gmTpl === OLD_DEFAULT_TPL_V1336) {
             gmTpl = '';
-            try { GM_setValue('mossad_tpl_' + rootDomain, ''); } catch (e) {}
+            try { GM_setValue('mossad_tpl_' + activeSiteKey, ''); } catch (e) {}
         }
         if (gmTpl && typeof gmTpl === 'string') {
             config.filenameTemplate = gmTpl;
@@ -669,8 +701,8 @@
         config.filenameTemplate = '';
         try { if (GlobalDefaults.siteHasSavedConfig()) persistLocalConfig(); } catch (e) {}
     }
-    // v1.4.24: Управление подпапкой сохранения и заметками для текущего домена (Вкладка «Этот сайт»)
-    function mossadGetSiteSubfolder(domain = rootDomain) {
+    // v1.4.24 / v1.4.34: Управление подпапкой сохранения и заметками для текущего домена (Вкладка «Этот сайт»)
+    function mossadGetSiteSubfolder(domain = activeSiteKey) {
         try {
             if (typeof GM_getValue === 'function') {
                 const v = GM_getValue('mossad_subfolder_' + domain, null);
@@ -680,7 +712,7 @@
         return (config && config.subfolder) ? String(config.subfolder).trim() : '';
     }
 
-    function mossadSetSiteSubfolder(folder, domain = rootDomain) {
+    function mossadSetSiteSubfolder(folder, domain = activeSiteKey) {
         const clean = String(folder || '').trim().replace(/^\/+|\/+$/g, '');
         try {
             if (typeof GM_setValue === 'function') {
@@ -692,7 +724,7 @@
         return clean;
     }
 
-    function mossadGetSiteNotes(domain = rootDomain) {
+    function mossadGetSiteNotes(domain = activeSiteKey) {
         try {
             if (typeof GM_getValue === 'function') {
                 return GM_getValue('mossad_site_notes_' + domain, '') || '';
@@ -701,7 +733,7 @@
         return localStorage.getItem('mossad_site_notes_' + domain) || '';
     }
 
-    function mossadSetSiteNotes(notes, domain = rootDomain) {
+    function mossadSetSiteNotes(notes, domain = activeSiteKey) {
         const text = String(notes || '').trim();
         try {
             if (typeof GM_setValue === 'function') {
@@ -802,6 +834,15 @@
                 }
                 // Подхватываем токен, сохранённый на другом сайте
                 config.githubToken = GM_getValue(GITHUB_TOKEN_GM_KEY, '') || '';
+                // v1.4.34: Подхват настроек сайта, сохранённых в другой вкладке/фрейме
+                const freshSiteCfg = GM_getValue(SITE_CONFIG_GM_KEY, null);
+                if (freshSiteCfg) {
+                    const parsed = typeof freshSiteCfg === 'string' ? JSON.parse(freshSiteCfg) : freshSiteCfg;
+                    if (parsed && typeof parsed === 'object') {
+                        Object.assign(config, parsed);
+                        siteHasSavedConfig = true;
+                    }
+                }
             } catch(e) {}
         }
     });
