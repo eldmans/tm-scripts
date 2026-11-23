@@ -17,9 +17,19 @@
                 .player-enlarged #html5video,
                 .player-enlarged #html5video_base {
                     width: 100% !important;
-                    max-width: 100vw !important;
-                    height: 75vh !important;
-                    max-height: 75vh !important;
+                    max-width: 100% !important;
+                    height: min(85vh, 56.25vw) !important;
+                    max-height: 85vh !important;
+                    overflow: visible !important;
+                }
+                #content.player-enlarged #html5video video,
+                #video-player-bg.player-enlarged video,
+                .player-enlarged #html5video video,
+                .player-enlarged #html5video_base video {
+                    width: 100% !important;
+                    height: 100% !important;
+                    max-height: 85vh !important;
+                    object-fit: contain !important;
                 }
                 #content.player-enlarged {
                     max-width: 98% !important;
@@ -70,9 +80,10 @@
                 }
             }
 
-            // Сигнал пользователю
+            // Сигнал пользователю и триггер пересчета внутренних координат плеера
             setTimeout(() => {
-                const isEnlarged = !!document.querySelector('#content.player-enlarged, .player-enlarged');
+                try { window.dispatchEvent(new Event('resize')); } catch (_) {}
+                const isEnlarged = !!document.querySelector('#content.player-enlarged, .player-enlarged, #video-player-bg.player-enlarged');
                 showToast(isEnlarged ? '🔲 Двойной размер плеера' : '▫️ Обычный размер плеера');
             }, 60);
 

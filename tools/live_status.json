@@ -1,31 +1,31 @@
 {
   "model": "Gemini 3.8 Flash (High)",
-  "script_version": "v1.4.34",
+  "script_version": "v1.4.35",
   "quota_5h": {
-    "remaining_pct": 79.5,
-    "reset_timestamp": 1795325060.0,
-    "resets_in": "1ч 58м"
+    "remaining_pct": 89.4,
+    "reset_timestamp": 1795446401.0,
+    "resets_in": "4ч 22м"
   },
   "quota_weekly": {
-    "remaining_pct": 94.2,
+    "remaining_pct": 86.9,
     "reset_timestamp": 1795911860.0,
-    "resets_in": "6д 20ч 58м"
+    "resets_in": "5д 13ч 40м"
   },
   "claude_weekly": {
     "remaining_pct": 50.4,
     "reset_timestamp": 1795611910.0,
-    "resets_in": "3д 9ч 38м"
+    "resets_in": "2д 2ч 20м"
   },
   "claude_5h": {
     "remaining_pct": 100
   },
-  "quota_remaining": "79.5%",
+  "quota_remaining": "89.4%",
   "quota_resets": "08:35:00 UTC (через 2 часа 41 мин)",
-  "weekly_quota_remaining": "94.2%",
+  "weekly_quota_remaining": "86.9%",
   "weekly_quota_resets": "через 5 дней",
   "claude_quota_remaining": "50.4%",
   "watchdog_timer": "АКТИВЕН (автопроверка очереди каждые 60 сек)",
   "build_status": "SYNTAX OK, VERIFY OK (919 КБ, 55 модулей)",
   "workers_state": "Автономный режим активен. Связь через Telegram 24/7.",
-  "last_updated": "2026-11-22 04:26:19"
+  "last_updated": "2026-11-23 11:44:12"
 }

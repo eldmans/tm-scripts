@@ -1,9 +1,39 @@
-    // v1.4.12: «📺 Play in Window» — открыть прямой URL видео (или страницу) в новой вкладке
-    function mossadPlayInWindow() {
+    // v1.4.12/v1.4.35: «📺 Play in Window» — открыть видео в плавающем окне или новой вкладке
+    let _mossadFloatWin = null;
+    let _mossadFloatWinPollTimer = null;
+
+    function _mossadSaveFloatGeometry(x, y, w, h) {
+        if (typeof x !== 'number' || typeof y !== 'number' || typeof w !== 'number' || typeof h !== 'number') return;
+        if (w < 150 || h < 100) return;
+        let changed = false;
+        if (config.floatWinLeft !== x) { config.floatWinLeft = x; changed = true; }
+        if (config.floatWinTop !== y) { config.floatWinTop = y; changed = true; }
+        if (config.floatWinWidth !== w) { config.floatWinWidth = w; changed = true; }
+        if (config.floatWinHeight !== h) { config.floatWinHeight = h; changed = true; }
+        if (changed) {
+            if (typeof Settings !== 'undefined' && typeof Settings.setQuiet === 'function') {
+                Settings.setQuiet('floatWinLeft', x);
+                Settings.setQuiet('floatWinTop', y);
+                Settings.setQuiet('floatWinWidth', w);
+                Settings.setQuiet('floatWinHeight', h);
+            } else if (typeof persistLocalConfig === 'function') {
+                persistLocalConfig();
+            }
+            if (typeof scheduleSyncPush === 'function') {
+                scheduleSyncPush();
+            }
+        }
+    }
+
+    function mossadPlayInWindow(opts = {}) {
         if (rootDomain === 'grok.com') {
             showToast('⚠️ На Grok прямое открытие видео в отдельной вкладке заблокировано сервером', true);
             return;
         }
+
+        const activeVid = (typeof getActiveVideo === 'function' ? getActiveVideo() : null) || document.querySelector('video');
+        const startTime = activeVid ? (activeVid.currentTime || 0) : 0;
+
         let videoUrl = '';
         try {
             if (typeof MossadEngineRegistry !== 'undefined') {
@@ -23,20 +53,149 @@
                 }
             }
         } catch (_) {}
-        if (!videoUrl) {
+        if (!videoUrl && activeVid) {
+            const s = activeVid.currentSrc || activeVid.src || '';
+            if (s && !s.startsWith('blob:')) videoUrl = s;
+        }
+
+        const mode = config.playInWindowMode || 'popup';
+        const openUrl = videoUrl || location.href;
+
+        // Если режим 'tab' (новая вкладка)
+        if (mode === 'tab') {
+            const label = videoUrl ? '📺 Видео открыто в новой вкладке' : '🗗 Страница открыта в новой вкладке';
+            if (typeof GM_openInTab === 'function') {
+                GM_openInTab(openUrl, { active: true });
+            } else {
+                window.open(openUrl, '_blank');
+            }
+            showToast(label);
+            return;
+        }
+
+        // Режим 'popup' (плавающее отдельное окно с запоминанием координат и ширины в ПЗУ и GIT)
+        // Если окно уже открыто — просто активируем его
+        if (_mossadFloatWin && !_mossadFloatWin.closed) {
             try {
-                const v = typeof getActiveVideo === 'function' ? getActiveVideo() : document.querySelector('video');
-                if (v) { const s = v.currentSrc || v.src || ''; if (s && !s.startsWith('blob:')) videoUrl = s; }
+                _mossadFloatWin.focus();
+                showToast('📺 Плавающее окно уже открыто');
+                return;
             } catch (_) {}
         }
-        const openUrl = videoUrl || location.href;
-        const label = videoUrl ? '📺 Видео открыто в новой вкладке' : '🗗 Страница открыта в новой вкладке';
-        if (typeof GM_openInTab === 'function') {
-            GM_openInTab(openUrl, { active: true });
-        } else {
-            window.open(openUrl, '_blank');
+
+        const w = Number(config.floatWinWidth) || 854;
+        const h = Number(config.floatWinHeight) || 480;
+        const x = Number(config.floatWinLeft) || 100;
+        const y = Number(config.floatWinTop) || 100;
+        const features = `width=${w},height=${h},left=${x},top=${y},resizable=yes,scrollbars=no,status=no,toolbar=no,menubar=no,location=no`;
+
+        let popup = null;
+        try {
+            if (videoUrl) {
+                // Открываем about:blank (same-origin, полный доступ к геометрии и событиям)
+                popup = window.open('about:blank', 'mossad_player_window', features);
+                if (popup) {
+                    const doc = popup.document;
+                    const pageTitle = (document.querySelector('h1, h2.page-title, .video-title') || {}).textContent || document.title || 'MOSSAD Floating Player';
+                    const cleanTitle = pageTitle.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                    
+                    doc.open();
+                    doc.write(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>${cleanTitle}</title>
+    <style>
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: #000; overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+            font-family: system-ui, -apple-system, sans-serif;
         }
-        showToast(label);
+        video {
+            width: 100%; height: 100%; object-fit: contain; outline: none;
+        }
+    </style>
+</head>
+<body>
+    <video id="mv" src="${videoUrl}" controls autoplay playsinline></video>
+    <script>
+        const v = document.getElementById('mv');
+        if (${startTime} > 0) {
+            try { v.currentTime = ${startTime}; } catch (_) {}
+        }
+        // Управление с клавиатуры внутри плавающего окна
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (v.paused) v.play(); else v.pause();
+            } else if (e.code === 'ArrowRight') {
+                v.currentTime = Math.min(v.duration || 1e6, v.currentTime + 5);
+            } else if (e.code === 'ArrowLeft') {
+                v.currentTime = Math.max(0, v.currentTime - 5);
+            }
+        });
+    </script>
+</body>
+</html>`);
+                    doc.close();
+                }
+            } else {
+                popup = window.open(openUrl, 'mossad_player_window', features);
+            }
+        } catch (err) {
+            console.warn('[MOSSAD] Popup error:', err);
+        }
+
+        if (!popup) {
+            if (!opts.fromTabSwitch) {
+                showToast('⚠️ Всплывающее окно заблокировано браузером. Разрешите всплывающие окна в адресной строке.', true);
+            }
+            return;
+        }
+
+        _mossadFloatWin = popup;
+
+        // Приостанавливаем видео на исходной странице, чтобы звук не двоился
+        if (activeVid && !activeVid.paused) {
+            try {
+                activeVid._mossadUserPaused = true;
+                activeVid.pause();
+            } catch (_) {}
+        }
+
+        // Отслеживание позиции и размеров плавающего окна для сохранения в ПЗУ и GIT
+        const recordGeometry = () => {
+            try {
+                if (!popup || popup.closed) return;
+                const curX = popup.screenX != null ? popup.screenX : popup.screenLeft;
+                const curY = popup.screenY != null ? popup.screenY : popup.screenTop;
+                const curW = popup.outerWidth;
+                const curH = popup.outerHeight;
+                if (typeof curX === 'number' && typeof curY === 'number' && curW > 100 && curH > 100) {
+                    _mossadSaveFloatGeometry(curX, curY, curW, curH);
+                }
+            } catch (_) {}
+        };
+
+        try {
+            popup.addEventListener('resize', recordGeometry);
+            popup.addEventListener('beforeunload', recordGeometry);
+            popup.addEventListener('pagehide', recordGeometry);
+        } catch (_) {}
+
+        if (_mossadFloatWinPollTimer) clearInterval(_mossadFloatWinPollTimer);
+        _mossadFloatWinPollTimer = setInterval(() => {
+            if (!popup || popup.closed) {
+                clearInterval(_mossadFloatWinPollTimer);
+                _mossadFloatWinPollTimer = null;
+                _mossadFloatWin = null;
+                return;
+            }
+            recordGeometry();
+        }, 1500);
+
+        showToast('📺 Открыто плавающее окно (позиция сохраняется в ПЗУ/GIT)');
     }
 
     /**
@@ -843,6 +1002,17 @@
             triggerNextSlide('hotkey:duplicateNext');
         }
     }, true);
+
+    // v1.4.35: авто-открытие плавающего окна при переключении на другую вкладку
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && config.floatOnTabSwitch) {
+            if (_mossadFloatWin && !_mossadFloatWin.closed) return;
+            const v = (typeof getActiveVideo === 'function' ? getActiveVideo() : null) || document.querySelector('video');
+            if (v && !v.paused && !v.ended && v.readyState >= 2) {
+                mossadPlayInWindow({ fromTabSwitch: true });
+            }
+        }
+    });
 
     // Авто кликер FullScreen при старте страницы
     if (document.readyState === 'loading') {

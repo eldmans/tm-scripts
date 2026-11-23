@@ -16,6 +16,12 @@
         pdAction: 'upns',             // v1.3.56: «После скачивания»: none | upns (+1, только когда слайдшоу нет) | always (+1 всегда) | del (Grok)
         stopOnTabSwitch: false,       // Tab — выключена
         stopOnBrsrSwitch: false,      // Brsr — выключена
+        playInWindowMode: 'popup',    // v1.4.35: 'popup' (плавающее окно с геометрией) | 'tab' (новая вкладка)
+        floatOnTabSwitch: false,      // v1.4.35: открывать плавающее окно при переключении на другую вкладку
+        floatWinWidth: 854,           // v1.4.35: ширина плавающего окна (px)
+        floatWinHeight: 480,          // v1.4.35: высота плавающего окна (px)
+        floatWinLeft: 100,            // v1.4.35: левая координата X окна (px)
+        floatWinTop: 100,             // v1.4.35: верхняя координата Y окна (px)
         deleteAutoconfirm: true,      // hold post включён (один чекбокс управляет обоими флагами, ANTI_PATTERNS §2)
         deleteHoldpost: true,
         allowDuplicates: false,       // Дубли: качать дубликаты сразу без подтверждения
@@ -94,7 +100,7 @@
             grokHistFwd:      { key: '3',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+3 — Grok: вперёд по истории слайдов
             grokLastSlide:    { key: '4',          ctrl: false, alt: true,  shift: false }, // v1.3.91: Alt+4 — Grok: последний слайд диалога
             updateScript:     { key: 'F5',         ctrl: true,  alt: false, shift: true,  meta: false }, // v1.4.22: Ctrl+Shift+F5 — обновить скрипт с GitHub
-            playInWindow:     { key: '',           ctrl: false, alt: false, shift: false }, // v1.4.12: открыть видео в отдельной вкладке (📺)
+            playInWindow:     { key: '',           ctrl: false, alt: false, shift: false }, // v1.4.12/v1.4.35: открыть видео в плавающем окне (📺)
             stickyPlayer:     { key: 'V',          ctrl: false, alt: false, shift: true  }, // v1.4.23: Shift+V — закрепить видео в углу (Sticky Player)
         }
     };
@@ -130,7 +136,8 @@
     const GLOBAL_DEFAULT_KEYS = [
         'slideshowDelay', 'videoLoops', 'videoAutoAdvanceOnEnd', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
         'downloadType', 'pdAction', 'filenameTemplateEnabled',
-        'stopOnTabSwitch', 'stopOnBrsrSwitch', 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'checkHistory', 'hfWarnUnsaved', 'hfDownloadInput', 'dblPosition',
+        'stopOnTabSwitch', 'stopOnBrsrSwitch', 'playInWindowMode', 'floatOnTabSwitch', 'floatWinWidth', 'floatWinHeight', 'floatWinLeft', 'floatWinTop',
+        'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'checkHistory', 'hfWarnUnsaved', 'hfDownloadInput', 'dblPosition',
         'autoFS', 'widgetZoom', 'closePanelOnOutsideClick', 'showSoundToast',
         'playlistRows', 'playlistWidth', 'collectWatchSec',
         'grokQuotaEnabled', 'grokHistPillEnabled', 'grokPillsCompact', 'grokQuotaSep', 'grokQuotaTimeMode',

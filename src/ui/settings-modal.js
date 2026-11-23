@@ -848,7 +848,7 @@
                 </div>
 
                 <div style="margin-top:8px; background:#111827; border:1px solid #374151; border-radius:6px; padding:8px; display:flex; flex-direction:column; gap:6px;">
-                  <div style="font-size:12px; font-weight:bold; color:#10b981;">🛡 Проверка истории и дедупликация:</div>
+                  <div style="font-size:12px; font-weight:bold; color:#10b981;">🛡 Проверка истории и медиаплеер:</div>
                   <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;" title="Отключите, если хотите всегда качать файл повторно без проверок и вопросов">
                     <input id="mossad-cursite-check-history" type="checkbox" style="accent-color:#10b981;" ${config.checkHistory !== false ? 'checked' : ''}>
                     <span><b>Проверять историю скачиваний</b> (дедупликация включена)</span>
@@ -856,6 +856,10 @@
                   <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;" title="Качать дубликат сразу без запроса подтверждения (добавляет метку DBL)">
                     <input id="mossad-cursite-allow-dup" type="checkbox" style="accent-color:#3b82f6;" ${config.allowDuplicates ? 'checked' : ''}>
                     <span>Качать дубликаты сразу без подтверждения (метка DBL)</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e5e7eb; cursor:pointer;" title="Автоматически открывать воспроизводимое видео в плавающем окне при переключении на другую вкладку браузера">
+                    <input id="mossad-cursite-float-tab-switch" type="checkbox" style="accent-color:#38bdf8;" ${config.floatOnTabSwitch ? 'checked' : ''}>
+                    <span>📺 <b>Плавающее окно при переключении вкладки</b></span>
                   </label>
                   ${(window.MOSSAD_ENGINES?.huggingface?.isSupported() || rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) ? `
                   <div style="border-top:1px solid #374151; margin-top:4px; padding-top:6px; display:flex; flex-direction:column; gap:6px;">
@@ -977,6 +981,30 @@
               <input id="mossad-cb-sound-toast" type="checkbox" style="accent-color:#3b82f6;" ${config.showSoundToast !== false ? 'checked' : ''}>
               Показывать тост переключения звука
             </label>
+            <!-- v1.4.35: 📺 Плавающее окно и медиаплеер (Play in Window) -->
+            <div style="background:#111827;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px;">
+              <div style="font-size:12px;font-weight:bold;color:#38bdf8;display:flex;align-items:center;justify-content:space-between;">
+                <span>📺 Плавающее окно (Play in Window):</span>
+                <select id="mossad-gen-play-win-mode" style="background:#1f2937;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 6px;font-size:11px;">
+                  <option value="popup" ${config.playInWindowMode !== 'tab' ? 'selected' : ''}>Плавающее окно (Popup)</option>
+                  <option value="tab" ${config.playInWindowMode === 'tab' ? 'selected' : ''}>Новая вкладка (Tab)</option>
+                </select>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#e5e7eb;cursor:pointer;" title="Автоматически открывать воспроизводимое видео в плавающем окне при переходе на другую вкладку браузера">
+                <input id="mossad-gen-float-tab-switch" type="checkbox" style="accent-color:#38bdf8;" ${config.floatOnTabSwitch ? 'checked' : ''}>
+                <span>Открывать в плавающем окне при переключении на другую вкладку</span>
+              </label>
+              <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#9ca3af;flex-wrap:wrap;">
+                <span>Размер (px):</span>
+                <label style="display:flex;align-items:center;gap:2px;">Ш: <input id="mossad-gen-float-w" type="number" min="200" max="3840" step="10" value="${config.floatWinWidth || 854}" style="width:55px;background:#1f2937;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:11px;"></label>
+                <label style="display:flex;align-items:center;gap:2px;">В: <input id="mossad-gen-float-h" type="number" min="150" max="2160" step="10" value="${config.floatWinHeight || 480}" style="width:55px;background:#1f2937;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:11px;"></label>
+                <span>Позиция (px):</span>
+                <label style="display:flex;align-items:center;gap:2px;">X: <input id="mossad-gen-float-x" type="number" min="0" max="3840" step="10" value="${config.floatWinLeft || 100}" style="width:50px;background:#1f2937;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:11px;"></label>
+                <label style="display:flex;align-items:center;gap:2px;">Y: <input id="mossad-gen-float-y" type="number" min="0" max="2160" step="10" value="${config.floatWinTop || 100}" style="width:50px;background:#1f2937;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:11px;"></label>
+                <button id="mossad-btn-test-float-win" type="button" style="background:#1f2937;border:1px solid #4b5563;border-radius:4px;color:#38bdf8;padding:2px 6px;cursor:pointer;font-size:11px;font-weight:bold;" title="Открыть окно для проверки геометрии">🎯 Проверить окно</button>
+              </div>
+              <div style="font-size:10px;color:#6b7280;">Координаты X/Y и размеры окна автоматически сохраняются в ПЗУ (GM) и GIT при перемещении окна мышью.</div>
+            </div>
             ${(() => { // v1.3.82: 🔔 Сигналы скачивания (issue #2, п.5)
                 const B = mossadBeepsRead();
                 const tf = (id, v, w, tip) => `<input id="${id}" type="text" inputmode="numeric" value="${v}" title="${tip}" style="width:${w}px;background:#111827;border:1px solid #374151;border-radius:4px;color:#e5e7eb;padding:2px 4px;font-size:12px;">`;
@@ -1021,7 +1049,7 @@
                 </div>
             </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-22</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-23</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -1071,9 +1099,9 @@
         
         const list = modal.querySelector('#mossad-hk-list');
         const HOTKEY_CATEGORIES = [
-            { id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize', 'stickyPlayer'] },
+            { id: 'cat-player', title: '🎬 Слайд-шоу и медиаплеер', keys: ['galleryPlayPause', 'slideshowStart', 'galleryStop', 'playPause', 'sound', 'expand', 'xvDoubleSize', 'stickyPlayer', 'playInWindow'] },
             { id: 'cat-nav', title: '🎞 Листание и навигация по кадрам', keys: ['nextSlide', 'prevSlide', 'nextGroup', 'prevGroup', 'rewind', 'grokFirstSlide', 'grokHistBack', 'grokHistFwd', 'grokLastSlide'] },
-            { id: 'cat-dl', title: '⭳ Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate', 'playInWindow'] },
+            { id: 'cat-dl', title: '⭳ Скачивание, апскейл и удаление', keys: ['download', 'upscale', 'deleteVid', 'duplicateNext', 'generate'] },
             { id: 'cat-ui', title: '🛠 Меню, окна и утилиты', keys: ['updateScript', 'slideshowPanel', 'help', 'history', 'snapWidget', 'openTodos', 'grokCycle'] }
         ];
 
@@ -1087,6 +1115,7 @@
             expand:           '⛶ Развернуть / полный экран',
             xvDoubleSize:     '🔲 Большой режим плеера / Large Mode',
             stickyPlayer:     '📌 Закрепить видео в углу (Sticky Player)',
+            playInWindow:     '📺 Плавающее окно (Play in Window)',
 
             // Листание и навигация по кадрам
             nextSlide:        'Следующий слайд',
@@ -1105,7 +1134,6 @@
             deleteVid:        'Удалить видео/пост',
             duplicateNext:    'Дублировать в фоне + Слайд',
             generate:         'Генерация Space / Отправка Grok',
-            playInWindow:     '📺 Открыть видео в новой вкладке',
 
             // Меню, окна и утилиты
             updateScript:     'Обновить скрипт с GitHub',
@@ -1614,6 +1642,15 @@
                     showToast(e.target.checked ? '📥 Скачивание input: ВКЛ' : 'Скачивание input: ВЫКЛ');
                 };
             }
+            const cbCursiteFloatTab = pane.querySelector('#mossad-cursite-float-tab-switch');
+            if (cbCursiteFloatTab) {
+                cbCursiteFloatTab.onchange = (e) => {
+                    Settings.set('floatOnTabSwitch', e.target.checked);
+                    const g = modal.querySelector('#mossad-gen-float-tab-switch');
+                    if (g) g.checked = e.target.checked;
+                    showToast(e.target.checked ? '📺 Плавающее окно при смене вкладки: ВКЛ' : '📺 Авто-окно при смене вкладки: ВЫКЛ');
+                };
+            }
 
             const btnResetSiteAll = pane.querySelector('#mossad-btn-reset-cursite-all');
             if (btnResetSiteAll) {
@@ -1997,6 +2034,55 @@
         modal.querySelector('#mossad-cb-sound-toast').onchange = (e) => {
             Settings.setQuiet('showSoundToast', e.target.checked);
         };
+        // v1.4.35: Настройки плавающего окна
+        const selPlayMode = modal.querySelector('#mossad-gen-play-win-mode');
+        if (selPlayMode) {
+            selPlayMode.onchange = (e) => {
+                Settings.setQuiet('playInWindowMode', e.target.value);
+                showToast('Режим: ' + (e.target.value === 'popup' ? '📺 Плавающее окно' : '🗗 Новая вкладка'));
+            };
+        }
+        const cbGenFloatTab = modal.querySelector('#mossad-gen-float-tab-switch');
+        if (cbGenFloatTab) {
+            cbGenFloatTab.onchange = (e) => {
+                Settings.set('floatOnTabSwitch', e.target.checked);
+                const c = modal.querySelector('#mossad-cursite-float-tab-switch');
+                if (c) c.checked = e.target.checked;
+                showToast(e.target.checked ? '📺 Плавающее окно при смене вкладки: ВКЛ' : '📺 Авто-окно при смене вкладки: ВЫКЛ');
+            };
+        }
+        const inpFloatW = modal.querySelector('#mossad-gen-float-w');
+        if (inpFloatW) inpFloatW.onchange = (e) => {
+            const v = Math.max(200, Math.min(3840, parseInt(e.target.value, 10) || 854));
+            e.target.value = String(v);
+            Settings.setQuiet('floatWinWidth', v);
+        };
+        const inpFloatH = modal.querySelector('#mossad-gen-float-h');
+        if (inpFloatH) inpFloatH.onchange = (e) => {
+            const v = Math.max(150, Math.min(2160, parseInt(e.target.value, 10) || 480));
+            e.target.value = String(v);
+            Settings.setQuiet('floatWinHeight', v);
+        };
+        const inpFloatX = modal.querySelector('#mossad-gen-float-x');
+        if (inpFloatX) inpFloatX.onchange = (e) => {
+            const v = Math.max(0, Math.min(3840, parseInt(e.target.value, 10) || 100));
+            e.target.value = String(v);
+            Settings.setQuiet('floatWinLeft', v);
+        };
+        const inpFloatY = modal.querySelector('#mossad-gen-float-y');
+        if (inpFloatY) inpFloatY.onchange = (e) => {
+            const v = Math.max(0, Math.min(2160, parseInt(e.target.value, 10) || 100));
+            e.target.value = String(v);
+            Settings.setQuiet('floatWinTop', v);
+        };
+        const btnTestFloat = modal.querySelector('#mossad-btn-test-float-win');
+        if (btnTestFloat) {
+            btnTestFloat.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof mossadPlayInWindow === 'function') mossadPlayInWindow();
+            };
+        }
         // v1.3.82: 🔔 Сигналы — читаем поля, нормализуем, сохраняем (GM, общее для всех сайтов)
         const beepsFromForm = () => {
             const q = (id) => modal.querySelector('#' + id);

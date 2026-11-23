@@ -256,5 +256,11 @@
   "npkExpandAdded": true,
   "npkHistNavAdded": true,
   "photoDuration": 1,
-  "pauseDuration": 2
+  "pauseDuration": 2,
+  "playInWindowMode": "popup",
+  "floatOnTabSwitch": false,
+  "floatWinWidth": 854,
+  "floatWinHeight": 480,
+  "floatWinLeft": 100,
+  "floatWinTop": 100
 }

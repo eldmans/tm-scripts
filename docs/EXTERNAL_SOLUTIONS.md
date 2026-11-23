@@ -40,6 +40,8 @@
 | :--- | :--- | :--- | :--- |
 | **HLS / Direct MP4 Parser** | HTML5 Video API | Извлечение прямых mp4 ссылок из плееров и hls.m3u8 потоков | Интегрировано в `src/download/router.js` и `src/engines/xvideos.js` (v1.3.86) |
 | **Universal Fullscreen Toggle** | DOM Fullscreen API | Нажатие нативного `video.requestFullscreen()` или кнопок плеера | Интегрировано в клавишу `F` (v1.3.88) |
+| **Double Player Size Responsive** | CSS Aspect-Ratio / XVideos Player API | Расширение плеера до 98vw с пропорциональной высотой `min(85vh, 56.25vw)` и `resize` диспетчеризацией | Интегрировано в `src/engines/xvideos.js` (v1.4.35) |
+| **Floating Player Popup & Tab Switch** | Window.open / Visibility API / GM Storage | Отдельное плавающее окно плеера с автосохранением X/Y и ширины в ПЗУ/GIT и авто-переводом при смене вкладки | Интегрировано в `src/core/hotkeys.js` (v1.4.35) |
 
 ---
 
