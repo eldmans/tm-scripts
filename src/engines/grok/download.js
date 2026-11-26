@@ -30,10 +30,8 @@
         return convId;
     }
 
-    // {account}: e-mail вошедшего аккаунта Grok. Источник — GET /rest/user (тот же сайт, куки сессии), один раз за
-    // сессию вкладки и только если шаблон использует {account}/{email}; результат — в localStorage grok.com (у
-    // каждого контейнера свой аккаунт, поэтому НЕ в общем GM). Запасной путь — e-mail в aria-label/title/alt страницы.
-    const GROK_ACCOUNT_LS_KEY = 'mossad_grok_account';
+    // {account}: e-mail/имя вошедшего аккаунта Grok. Источник — GET /rest/user (тот же сайт, куки сессии)
+    // + общие per-container хелперы mossadGetAccount / mossadSetAccount (localStorage).
     const GROK_ACCOUNT_SS_FLAG = 'mossad_grok_account_checked';
     const _emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
     function _grokFindEmailDeep(obj, depth = 0) {
@@ -47,21 +45,12 @@
         return '';
     }
     function grokAccountFromDom() {
-        const el = document.querySelector('[aria-label*="@"], [title*="@"], img[alt*="@"]');
-        if (!el) return '';
-        const m = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('alt')].join(' ').match(_emailRe);
-        return m ? m[0] : '';
+        return typeof mossadAccountFromDom === 'function' ? mossadAccountFromDom() : '';
     }
-    /** Синхронно: известный e-mail аккаунта Grok или ''. */
+    /** Синхронно: известный e-mail / аккаунт Grok или ''. */
     function grokAccountEmail() {
         if (rootDomain !== 'grok.com') return '';
-        let v = '';
-        try { v = localStorage.getItem(GROK_ACCOUNT_LS_KEY) || ''; } catch (e) {}
-        if (!v) {
-            v = grokAccountFromDom();
-            if (v) { try { localStorage.setItem(GROK_ACCOUNT_LS_KEY, v); } catch (e) {} }
-        }
-        return v;
+        return typeof mossadGetAccount === 'function' ? mossadGetAccount() : '';
     }
     /** Один запрос /rest/user за сессию вкладки; обновляет кэш. force — для окна «?». */
     function grokRefreshAccount(force = false) {
@@ -72,54 +61,99 @@
             .then(r => r.ok ? r.json() : null)
             .then(j => {
                 const email = _grokFindEmailDeep(j);
-                if (email) { try { localStorage.setItem(GROK_ACCOUNT_LS_KEY, email); } catch (e) {} }
+                if (email && typeof mossadSetAccount === 'function') mossadSetAccount(email);
                 return email || grokAccountEmail();
             })
             .catch(() => grokAccountEmail());
     }
     window.grokRefreshAccount = grokRefreshAccount;
-    // Лёгкий префетч: только если действующий шаблон использует {account}/{email}, через 4 с после загрузки
+    // Лёгкий префетч: один раз за сессию на grok.com, через 4 с после загрузки (если аккаунт ещё неизвестен)
     if (rootDomain === 'grok.com') {
         setTimeout(() => {
-            const tpl = (config.filenameTemplate && config.filenameTemplate.trim()) || getDefaultFilenameTemplate();
-            if (config.filenameTemplateEnabled && /\{(account|email)/i.test(tpl)) grokRefreshAccount(false);
+            if (!grokAccountEmail()) grokRefreshAccount(false);
         }, 4000);
     }
 
-    /** Контекст для buildFilenameVars на посте Grok (без пометки дубликата). */
+    /** Извлекает устойчивый ID генерации из media.url для /library (где URL страницы не меняется). */
+    function grokDeriveIdFromMediaUrl(url) {
+        if (!url || typeof url !== 'string') return '';
+        const genM = url.match(/\/(?:generated|post)\/([a-f0-9-]{36})/i);
+        if (genM) return genM[1];
+        const uuids = url.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi);
+        if (uuids && uuids.length > 0) return uuids[uuids.length - 1];
+        if (!url.startsWith('blob:') && !url.startsWith('data:') && typeof mossadHashString12 === 'function') {
+            const cleaned = typeof cleanMediaUrl === 'function' ? cleanMediaUrl(url) : url.split('?')[0];
+            return mossadHashString12(cleaned);
+        }
+        return '';
+    }
+
+    /** Контекст для buildFilenameVars на посте Grok / в Library (без пометки дубликата). */
     function grokFilenameContext(media) {
-        const postId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+        let postId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+        if (!postId && media && media.postId) postId = media.postId;
+        if (!postId && media && media.url) postId = grokDeriveIdFromMediaUrl(media.url);
         const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
         let prompt = '';
         try { prompt = getGrokCurrentPrompt() || ''; } catch (e) {}
+        const srcname = (media && media.url && typeof mossadExtractUrlFilenameStem === 'function')
+            ? mossadExtractUrlFilenameStem(media.url)
+            : '';
+        const inLib = (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
         return {
             postId,
             convId: grokCurrentConvId(postId),
             type: hasVid ? 'video' : 'photo',
             ext: media ? media.ext : (hasVid ? 'mp4' : 'jpg'),
             authorName: 'grok',
-            title: 'Imagine - Grok',
+            title: inLib ? 'Library - Grok' : 'Imagine - Grok',
             desc: prompt,
+            srcname,
             account: grokAccountEmail(),
         };
     }
 
     function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
-        if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
+        if (rootDomain !== 'grok.com') return false;
+        const onPost = isGrokPostPage();
+        const onLib = (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
+        const isNewMode = (typeof grokEffectiveUiMode === 'function' && grokEffectiveUiMode() === 'new');
+        if (!onPost && !onLib && !isNewMode) return false;
+
+        const media = getGrokMedia();
+        if (!onPost && !media) {
+            if (onLib) {
+                showToast('❌ Медиа не найдено', true);
+                if (onDoneCallback) onDoneCallback();
+                return true;
+            }
+            return false;
+        }
+
         blurActiveInput();
+
+        // v1.4.36: Запрос/автоопределение аккаунта контейнера перед первым скачиванием
+        if (typeof mossadEnsureAccountForDownload === 'function' && !mossadGetAccount() && !mossadIsAccountSkipped()) {
+            mossadEnsureAccountForDownload().then(ok => {
+                if (ok) triggerGrokDownload(bypassDuplicateCheck, duplicateRecord, onDoneCallback);
+                else if (onDoneCallback) onDoneCallback();
+            });
+            return true;
+        }
+
         if (config && config.checkHistory === false) {
             bypassDuplicateCheck = true;
         }
 
-        const currentPostUrl = location.href;
-        const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
-        const currentConvId = grokCurrentConvId(currentPostId);
+        const fctxPre = grokFilenameContext(media);
+        const currentPostUrl = (media && media.postUrl) || location.href;
+        const currentPostId = fctxPre.postId || '';
+        const currentConvId = fctxPre.convId || '';
 
-        const media = getGrokMedia();
         const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
         const currentMediaType = hasVid ? 'video' : 'photo';
 
-        // Проверка дубликата в истории
+        // Проверка дубликата в истории (по URL или 64 КБ Fast-Hash контента)
         const lockedMediaUrl = media ? media.url : null;
         if (!bypassDuplicateCheck && !isDuplicateConfirmed(currentPostUrl) && !isDuplicateConfirmed(lockedMediaUrl)) {
             checkFileInHistory(null, lockedMediaUrl, currentPostUrl, currentMediaType).then(record => {
@@ -162,9 +196,10 @@
         const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL${dupNum}` : '';
         const siteCount = (typeof mossadIncSiteDlCount === 'function') ? mossadIncSiteDlCount('grok.com') : 1;
 
-        // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok.mp4 (с учетом dblPosition)
+        // Дефолтное имя без включенного шаблона: {conv4}-{id4}-grok~{account}.mp4 (с учетом dblPosition)
         const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
-        let defaultBase = `${defaultPrefix}-grok`;
+        const accSuffix = fctxPre.account ? `~${typeof mossadSafeNamePart === 'function' ? mossadSafeNamePart(fctxPre.account) : fctxPre.account}` : '';
+        let defaultBase = `${defaultPrefix}-grok${accSuffix}`;
         if (isDup) {
             defaultBase = (typeof formatDblMark === 'function')
                 ? formatDblMark(defaultBase, dblSuffix, rootBase, dupNum, config.dblPosition || 'end')
@@ -208,11 +243,11 @@
                 try {
                     showToast('⏳ Запись метаданных...');
                     const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl, model, promptHash);
-                    saveBlobToDisk(enrichedBlob, grokFilename, media.url, currentPostUrl);
+                    saveBlobToDisk(enrichedBlob, grokFilename, media.url, currentPostUrl, rawBlob);
                     onDownloadFinalized();
                 } catch (err) {
                     console.error('[MOSSAD] Metadata injection failed, saving raw blob:', err);
-                    saveBlobToDisk(rawBlob, grokFilename, media.url, currentPostUrl);
+                    saveBlobToDisk(rawBlob, grokFilename, media.url, currentPostUrl, rawBlob);
                     onDownloadFinalized();
                 }
             };

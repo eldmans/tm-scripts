@@ -162,6 +162,10 @@
             desc = meta ? (meta.getAttribute('content') || '') : '';
         }
         const type = media.type === 'video' ? 'video' : 'photo';
+        const firstUrl = (Array.isArray(media.urls) && media.urls[0]) || media.url || '';
+        const srcname = (firstUrl && typeof mossadExtractUrlFilenameStem === 'function')
+            ? mossadExtractUrlFilenameStem(firstUrl)
+            : '';
         return {
             postId,
             convId: rootDomain === 'grok.com' && typeof grokCurrentConvId === 'function' ? grokCurrentConvId(postId) : '',
@@ -169,7 +173,8 @@
             ext: type === 'video' ? 'mp4' : 'jpg',
             authorName,
             desc: String(desc).slice(0, 300),
-            account: rootDomain === 'grok.com' && typeof grokAccountEmail === 'function' ? grokAccountEmail() : '',
+            srcname,
+            account: typeof mossadGetAccount === 'function' ? mossadGetAccount() : '',
             isInput: Boolean(media && media.isInput),
         };
     }
@@ -210,6 +215,15 @@
 
         const media = presetMedia || findMediaForDownload();
         if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
+
+        // v1.4.36: Запрос/автоопределение аккаунта контейнера перед первым скачиванием (все сайты)
+        if (typeof mossadEnsureAccountForDownload === 'function' && !mossadGetAccount() && !mossadIsAccountSkipped()) {
+            mossadEnsureAccountForDownload().then(ok => {
+                if (ok) triggerDownload(bypassDuplicateCheck, duplicateRecord, onDoneCallback, media);
+                else if (onDoneCallback) onDoneCallback();
+            });
+            return;
+        }
 
         const primaryUrl = media.urls[0];
         const canonicalPostUrl = media.postUrl || location.href;
@@ -299,6 +313,15 @@
         } else {
             const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
             filename = `${titleClean}${inMark}.${ext}`;
+        }
+        if (!config.filenameTemplateEnabled && fctx.account) {
+            const accSafe = typeof mossadSafeNamePart === 'function' ? mossadSafeNamePart(fctx.account) : fctx.account;
+            if (accSafe) {
+                const dotIdx = filename.lastIndexOf('.');
+                filename = dotIdx !== -1
+                    ? `${filename.slice(0, dotIdx)}~${accSafe}${filename.slice(dotIdx)}`
+                    : `${filename}~${accSafe}`;
+            }
         }
 
         // --- Применяем шаблон имени файла, если включён ---

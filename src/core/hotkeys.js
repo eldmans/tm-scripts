@@ -761,7 +761,8 @@
                 // Предупреждение о повторном нажатии в течение 5 секунд
                 if (!_grokHomeWarnActive) {
                     _grokHomeWarnActive = true;
-                    showToast('⚠️ Повторное нажатие Home в течение 5 сек перейдёт в Saved', false, 5000);
+                    const homeDest = (typeof grokEffectiveUiMode === 'function' && grokEffectiveUiMode() === 'new') ? 'Library' : 'Saved';
+                    showToast(`⚠️ Повторное нажатие Home в течение 5 сек перейдёт в ${homeDest}`, false, 5000);
                     if (_grokHomeWarnTimer) clearTimeout(_grokHomeWarnTimer);
                     _grokHomeWarnTimer = setTimeout(() => {
                         _grokHomeWarnActive = false;
@@ -875,7 +876,12 @@
         }
 
         if (hotkeyMatches(e, config.hk.download)) {
-            if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
+            if (rootDomain === 'grok.com') {
+                const canGrokDl = isGrokPostPage()
+                    || (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage())
+                    || (typeof grokEffectiveUiMode === 'function' && grokEffectiveUiMode() === 'new' && typeof getGrokMedia === 'function' && !!getGrokMedia());
+                if (!canGrokDl) return;
+            }
             e.preventDefault();
             triggerDownload();
         }

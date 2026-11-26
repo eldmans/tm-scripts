@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.35
+// @version      1.4.36
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.35';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.36';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -2492,7 +2492,7 @@ unchangedCount = 0;
 }, 120);
 }
 window.doRewind = doRewind;
-const MOSSAD_DEFAULT_TPL = '{id8}-{domain}';
+const MOSSAD_DEFAULT_TPL = '{id8}-{domain}~{account}';
 const MOSSAD_DEFAULT_TPL_GROK = '{id8}-{domain}~{account}';
 const MOSSAD_MEDIA_EXTS = ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'heic', 'mp3', 'm4a', 'txt'];
 const MOSSAD_NAME_MAX = 200;
@@ -2501,7 +2501,8 @@ const MOSSAD_TPL_TAGS = [
 { k: 'conv', aliases: ['conversation'], what: 'Grok: UUID беседы (на других сайтах пусто)' },
 { k: 'domain', aliases: ['site'], what: 'Сайт одним словом: pinterest, grok, redgifs…' },
 { k: 'domainfull', aliases: [], what: 'Домен целиком: pinterest.com, grok.com…' },
-{ k: 'account', aliases: ['email'], what: 'Grok: e-mail вошедшего аккаунта (если удалось узнать); на других сайтах пусто' },
+{ k: 'account', aliases: ['email'], what: 'Аккаунт / e-mail текущего контейнера (для любого сайта; на Grok определяется также автоматически)' },
+{ k: 'srcname', aliases: ['urlname', 'orig'], what: 'Исходное имя файла из ссылки медиа (без расширения, например ovkrah)' },
 { k: 'username', aliases: ['user', 'author'], what: 'Автор (RedGifs, Instagram); иначе — первые 8 символов ID; Grok — grok' },
 { k: 'desc', aliases: ['description'], what: 'Описание: Pinterest — заголовок/описание пина, Grok — промпт; иначе пусто' },
 { k: 'title', aliases: [], what: 'Заголовок вкладки (Grok — «Imagine - Grok»)' },
@@ -2689,7 +2690,7 @@ document.querySelectorAll('#mossad-gen-junk, [data-th="junk"]').forEach(el => { 
 window.mossadSetJunkText = mossadSetJunkText;
 function getDefaultFilenameTemplate() {
 if (rootDomain === 'grok.com') return MOSSAD_DEFAULT_TPL_GROK;
-if (rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) return '{hf}-{space}-{subtype}-{id8}.{ext}';
+if (rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) return '{hf}-{space}-{subtype}-{id8}~{account}.{ext}';
 return MOSSAD_DEFAULT_TPL;
 }
 window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
@@ -2737,6 +2738,7 @@ countraw: String(siteCount),
 dupnum: dupNum,
 dbl: ctx.dblSuffix || '',
 oldname: ctx.rootBase || '',
+srcname: mossadSafeNamePart(ctx.srcname || ''),
 input: (ctx.isInput || ctx.input) ? 'input' : '',
 };
 }
@@ -2947,6 +2949,233 @@ mode: 'cors'
 } catch (e) {}
 }
 window.sendPromptToVault = sendPromptToVault;
+const MOSSAD_ACCOUNT_LS_KEY = 'mossad_account';
+const MOSSAD_ACCOUNT_SKIP_KEY = 'mossad_account_skipped';
+const MOSSAD_LEGACY_GROK_ACCOUNT_KEY = 'mossad_grok_account';
+const _mossadEmailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+function mossadHashString12(str) {
+if (!str) return '';
+let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
+for (let i = 0; i < str.length; i++) {
+const ch = str.charCodeAt(i);
+h1 = Math.imul(h1 ^ ch, 2654435761);
+h2 = Math.imul(h2 ^ ch, 1597334677);
+}
+h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(12, '0').slice(-12);
+}
+function mossadExtractUrlFilenameStem(url) {
+if (!url || typeof url !== 'string' || url.startsWith('blob:') || url.startsWith('data:')) return '';
+try {
+const u = new URL(url, location.origin);
+const seg = u.pathname.split('/').filter(Boolean).pop() || '';
+const decoded = decodeURIComponent(seg);
+return decoded.replace(/\.[a-z0-9]{2,5}$/i, '').trim();
+} catch (e) {
+return '';
+}
+}
+function mossadAccountFromDom() {
+try {
+const nodes = document.querySelectorAll('[aria-label*="@"], [title*="@"], img[alt*="@"], header, nav, aside, [data-testid*="account" i], [data-testid*="user" i]');
+for (const el of nodes) {
+if (el.closest && el.closest('[id^="mossad"]')) continue;
+const probe = [
+el.getAttribute && el.getAttribute('aria-label'),
+el.getAttribute && el.getAttribute('title'),
+el.getAttribute && el.getAttribute('alt'),
+(el.tagName === 'HEADER' || el.tagName === 'NAV' || el.tagName === 'ASIDE') ? (el.textContent || '').slice(0, 400) : ''
+].filter(Boolean).join(' ');
+const m = probe.match(_mossadEmailRe);
+if (m) return m[0];
+}
+} catch (e) {}
+return '';
+}
+function mossadGuessAccountHandle() {
+const email = mossadAccountFromDom();
+if (email) return email;
+try {
+if (rootDomain.includes('instagram.com')) {
+const prof = document.querySelector('nav a[href^="/"][role="link"] span, a[href^="/"][aria-label*="Profile" i]');
+const href = prof && prof.closest ? (prof.closest('a')?.getAttribute('href') || '') : '';
+const m = href.match(/^\/([A-Za-z0-9_.]{2,30})\/?$/);
+if (m && !['explore', 'reels', 'direct', 'accounts', 'stories'].includes(m[1])) return m[1];
+}
+if (rootDomain.includes('huggingface.co')) {
+const a = document.querySelector('header a[href^="/"][title], header img[alt][src*="avatars"]');
+const alt = a ? (a.getAttribute('alt') || a.getAttribute('title') || '').trim() : '';
+if (alt && alt.length < 40) return alt;
+}
+} catch (e) {}
+return '';
+}
+function mossadGetAccount() {
+let v = '';
+try { v = (localStorage.getItem(MOSSAD_ACCOUNT_LS_KEY) || '').trim(); } catch (e) {}
+if (!v && rootDomain === 'grok.com') {
+try {
+const legacy = (localStorage.getItem(MOSSAD_LEGACY_GROK_ACCOUNT_KEY) || '').trim();
+if (legacy) {
+v = legacy;
+localStorage.setItem(MOSSAD_ACCOUNT_LS_KEY, v);
+}
+} catch (e) {}
+}
+if (!v) {
+const domAcc = mossadAccountFromDom();
+if (domAcc) {
+v = domAcc;
+try {
+localStorage.setItem(MOSSAD_ACCOUNT_LS_KEY, v);
+if (rootDomain === 'grok.com') localStorage.setItem(MOSSAD_LEGACY_GROK_ACCOUNT_KEY, v);
+} catch (e) {}
+}
+}
+return v;
+}
+function mossadSetAccount(val) {
+const clean = String(val == null ? '' : val).trim();
+try {
+if (clean) {
+localStorage.setItem(MOSSAD_ACCOUNT_LS_KEY, clean);
+localStorage.removeItem(MOSSAD_ACCOUNT_SKIP_KEY);
+if (rootDomain === 'grok.com') localStorage.setItem(MOSSAD_LEGACY_GROK_ACCOUNT_KEY, clean);
+} else {
+localStorage.removeItem(MOSSAD_ACCOUNT_LS_KEY);
+if (rootDomain === 'grok.com') localStorage.removeItem(MOSSAD_LEGACY_GROK_ACCOUNT_KEY);
+}
+} catch (e) {}
+document.querySelectorAll('#mossad-site-account').forEach(el => {
+if (el !== document.activeElement) el.value = clean;
+});
+document.querySelectorAll('#mossad-panel-account-btn').forEach(btn => {
+btn.textContent = clean ? `👤 ${clean.length > 18 ? clean.slice(0, 17) + '…' : clean}` : '👤 Задать';
+btn.title = clean ? `Аккаунт контейнера ({account}): ${clean} (клик — изменить)` : 'Задать аккаунт контейнера ({account})';
+});
+return clean;
+}
+function mossadIsAccountSkipped() {
+try { return localStorage.getItem(MOSSAD_ACCOUNT_SKIP_KEY) === '1'; } catch (e) { return false; }
+}
+function mossadSetAccountSkipped(skipped) {
+try {
+if (skipped) localStorage.setItem(MOSSAD_ACCOUNT_SKIP_KEY, '1');
+else localStorage.removeItem(MOSSAD_ACCOUNT_SKIP_KEY);
+} catch (e) {}
+}
+async function mossadAutoDetectAccountAsync() {
+const cur = mossadGetAccount();
+if (cur) return cur;
+if (rootDomain === 'grok.com' && typeof grokRefreshAccount === 'function') {
+try {
+const email = await grokRefreshAccount(false);
+if (email) return mossadSetAccount(email);
+} catch (e) {}
+}
+return mossadGetAccount();
+}
+let _mossadAccountPromptPromise = null;
+function mossadOpenAccountPromptModal(opts = {}) {
+const forceAsk = !!opts.force;
+if (!forceAsk && _mossadAccountPromptPromise) return _mossadAccountPromptPromise;
+const existing = document.getElementById('mossad-account-modal');
+if (existing) existing.remove();
+const p = new Promise((resolve) => {
+const current = mossadGetAccount();
+const guess = current || mossadGuessAccountHandle();
+const overlay = document.createElement('div');
+overlay.id = 'mossad-account-modal';
+overlay.style.cssText = `
+                position: fixed; inset: 0; z-index: 2147483647;
+                background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(4px);
+                display: flex; align-items: center; justify-content: center;
+                font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb;
+            `;
+const box = document.createElement('div');
+box.style.cssText = `
+                width: min(390px, calc(100vw - 32px));
+                background: #111827; border: 1px solid #374151; border-radius: 12px;
+                padding: 16px; box-shadow: 0 20px 50px rgba(0,0,0,0.75);
+                display: flex; flex-direction: column; gap: 10px;
+            `;
+box.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-size:14px;font-weight:700;color:#f3f4f6;">👤 Аккаунт для ${rootDomain}</span>
+                    <button id="mossad-acc-close" type="button" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:16px;padding:0 4px;">✕</button>
+                </div>
+                <div style="font-size:12px;color:#9ca3af;line-height:1.4;">
+                    Укажите e-mail или имя аккаунта этого контейнера для тега <code style="color:#93c5fd;">{account}</code> в имени файла. Сохраняется отдельно для текущего контейнера.
+                </div>
+                <input id="mossad-acc-input" type="text" placeholder="например: name@gmail.com"
+                    style="width:100%;box-sizing:border-box;background:#1f2937;border:1px solid #4b5563;border-radius:6px;color:#fff;padding:8px 10px;font-size:13px;outline:none;">
+                <div id="mossad-acc-hint" style="font-size:11px;color:#60a5fa;display:none;"></div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:2px;">
+                    <button id="mossad-acc-skip" type="button" style="background:#1f2937;border:1px solid #374151;border-radius:6px;color:#9ca3af;padding:6px 10px;cursor:pointer;font-size:12px;" title="Не задавать аккаунт и больше не спрашивать в этом контейнере">Пропустить</button>
+                    <button id="mossad-acc-save" type="button" style="background:#10b981;border:none;border-radius:6px;color:#fff;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:700;">💾 Сохранить</button>
+                </div>
+            `;
+overlay.appendChild(box);
+(document.body || document.documentElement).appendChild(overlay);
+const inp = box.querySelector('#mossad-acc-input');
+const hint = box.querySelector('#mossad-acc-hint');
+if (guess) {
+inp.value = guess;
+if (!current) {
+hint.textContent = `Подсказка со страницы: ${guess}`;
+hint.style.display = 'block';
+}
+}
+let settled = false;
+const finish = (status) => {
+if (settled) return;
+settled = true;
+overlay.remove();
+_mossadAccountPromptPromise = null;
+resolve(status);
+};
+const onSave = () => {
+const val = inp.value.trim();
+if (!val) {
+inp.style.borderColor = '#ef4444';
+inp.focus();
+return;
+}
+mossadSetAccount(val);
+showToast(`👤 Аккаунт сохранён: ${val}`);
+finish('saved');
+};
+box.querySelector('#mossad-acc-save').onclick = onSave;
+box.querySelector('#mossad-acc-skip').onclick = () => {
+mossadSetAccount('');
+mossadSetAccountSkipped(true);
+showToast('👤 Без аккаунта для этого контейнера');
+finish('skipped');
+};
+box.querySelector('#mossad-acc-close').onclick = () => finish('cancelled');
+overlay.onclick = (e) => { if (e.target === overlay) finish('cancelled'); };
+inp.addEventListener('keydown', (e) => {
+e.stopPropagation();
+if (e.key === 'Enter') { e.preventDefault(); onSave(); }
+else if (e.key === 'Escape') { e.preventDefault(); finish('cancelled'); }
+});
+setTimeout(() => { try { inp.focus(); inp.select(); } catch (e) {} }, 20);
+});
+if (!forceAsk) _mossadAccountPromptPromise = p;
+return p;
+}
+async function mossadEnsureAccountForDownload() {
+if (mossadGetAccount() || mossadIsAccountSkipped()) return true;
+const detected = await mossadAutoDetectAccountAsync();
+if (detected) return true;
+const res = await mossadOpenAccountPromptModal();
+return res !== 'cancelled';
+}
+window.mossadGetAccount = mossadGetAccount;
+window.mossadSetAccount = mossadSetAccount;
+window.mossadOpenAccountPromptModal = mossadOpenAccountPromptModal;
+window.mossadEnsureAccountForDownload = mossadEnsureAccountForDownload;
 
 // ── src/core/tracker.js ──
 (function initMossadTracker() {
@@ -3593,10 +3822,11 @@ showToast('📥 Скачивание запущено через браузер'
 if (onSuccess) { try { onSuccess(); } catch (e) {} }
 });
 }
-function saveBlobToDisk(blob, filename, directUrl = null, postUrl = null) {
+function saveBlobToDisk(blob, filename, directUrl = null, postUrl = null, rawBlobForHash = null) {
 const activeDom = (typeof canonicalDomain !== 'undefined' ? canonicalDomain : rootDomain);
 if (typeof computeSHA256 === 'function' && typeof saveFileToHistory === 'function') {
-const sliceBlob = blob.slice(0, 65536);
+const hashSrc = rawBlobForHash || blob;
+const sliceBlob = hashSrc.slice(0, 65536);
 computeSHA256(sliceBlob).then(hash => {
 saveFileToHistory({
 hash,
@@ -4816,6 +5046,141 @@ return rootDomain === 'grok.com' && /\/imagine\/post\//.test(location.pathname);
 function isGrokSavedPage() {
 return rootDomain === 'grok.com' && /\/imagine\/saved/.test(location.pathname);
 }
+function isGrokLibraryPage() {
+return rootDomain === 'grok.com' && /^\/library(?:\/|$)/.test(location.pathname);
+}
+const GROK_UI_MODE_LS_KEY = 'mossad_grok_ui_mode';
+const GROK_UI_DETECTED_LS_KEY = 'mossad_grok_ui_detected';
+const GROK_UI_DWELL_MS = 2000;
+let _grokPathTracker = location.pathname;
+let _grokPathEnteredAt = Date.now();
+let _grokDwellTimer = null;
+function _grokTouchPathTracker() {
+if (location.pathname !== _grokPathTracker) {
+_grokPathTracker = location.pathname;
+_grokPathEnteredAt = Date.now();
+if (_grokDwellTimer) { clearTimeout(_grokDwellTimer); _grokDwellTimer = null; }
+if (rootDomain === 'grok.com' && (/^\/library(?:\/|$)/.test(_grokPathTracker) || /^\/imagine(?:\/|$)/.test(_grokPathTracker))) {
+_grokDwellTimer = setTimeout(() => {
+_grokDwellTimer = null;
+grokDetectAutoUiMode();
+grokRefreshUiModeBadges();
+}, GROK_UI_DWELL_MS + 100);
+}
+}
+}
+function grokGetUiMode() {
+try {
+const v = localStorage.getItem(GROK_UI_MODE_LS_KEY);
+if (v === 'old' || v === 'new' || v === 'auto') return v;
+} catch (e) {}
+return 'auto';
+}
+function grokRefreshUiModeBadges() {
+const manual = grokGetUiMode();
+const eff = grokEffectiveUiMode();
+document.querySelectorAll('.mossad-grok-ui-btn').forEach(btn => {
+const on = btn.dataset.mode === manual;
+btn.style.background = on ? (manual === 'new' ? '#059669' : manual === 'old' ? '#d97706' : '#2563eb') : '#1f2937';
+btn.style.color = on ? '#ffffff' : '#9ca3af';
+btn.style.borderColor = on ? '#93c5fd' : '#374151';
+btn.style.fontWeight = on ? '700' : '500';
+});
+document.querySelectorAll('.mossad-grok-ui-eff').forEach(el => {
+el.textContent = eff === 'new' ? 'New (/library)' : 'Old (/imagine)';
+el.style.color = eff === 'new' ? '#34d399' : '#fbbf24';
+});
+}
+function grokSetUiMode(mode) {
+const m = (mode === 'old' || mode === 'new') ? mode : 'auto';
+try { localStorage.setItem(GROK_UI_MODE_LS_KEY, m); } catch (e) {}
+grokRefreshUiModeBadges();
+return m;
+}
+function grokDomNavSignals() {
+let hasImagine = false;
+let hasLibrary = false;
+try {
+const links = document.querySelectorAll('a[href], nav button, aside button, [role="navigation"] button');
+for (const el of links) {
+if (el.closest && el.closest('[id^="mossad"]')) continue;
+if (el.offsetWidth === 0 && el.offsetHeight === 0 && (!el.getClientRects || !el.getClientRects().length)) continue;
+const href = (el.getAttribute('href') || '').trim();
+const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '')).trim();
+if (/^\/imagine(?:\/|$|\?)/.test(href) || /^(?:imagine|воображение)$/i.test(label)) {
+hasImagine = true;
+}
+if (/^\/library(?:\/|$|\?)/.test(href) || /^(?:library|библиотека)$/i.test(label)) {
+hasLibrary = true;
+}
+}
+} catch (e) {}
+return { hasImagine, hasLibrary };
+}
+function _grokCacheDetectedMode(mode) {
+try { localStorage.setItem(GROK_UI_DETECTED_LS_KEY, mode); } catch (e) {}
+}
+function grokDetectAutoUiMode() {
+if (rootDomain !== 'grok.com') return 'old';
+_grokTouchPathTracker();
+const dwellMs = Date.now() - _grokPathEnteredAt;
+const path = location.pathname;
+if (/^\/imagine\/(?:post|saved)/.test(path)) {
+if (dwellMs >= GROK_UI_DWELL_MS) _grokCacheDetectedMode('old');
+return 'old';
+}
+if (/^\/imagine(?:\/|$)/.test(path)) {
+if (dwellMs >= GROK_UI_DWELL_MS) _grokCacheDetectedMode('old');
+return 'old';
+}
+if (/^\/library(?:\/|$)/.test(path)) {
+if (dwellMs >= GROK_UI_DWELL_MS) _grokCacheDetectedMode('new');
+return 'new';
+}
+const sig = grokDomNavSignals();
+if (sig.hasImagine) {
+_grokCacheDetectedMode('old');
+return 'old';
+}
+if (sig.hasLibrary && !sig.hasImagine) {
+_grokCacheDetectedMode('new');
+return 'new';
+}
+try {
+const cached = localStorage.getItem(GROK_UI_DETECTED_LS_KEY);
+if (cached === 'new' || cached === 'old') return cached;
+} catch (e) {}
+return 'old';
+}
+function grokEffectiveUiMode() {
+const manual = grokGetUiMode();
+if (manual === 'old' || manual === 'new') return manual;
+return grokDetectAutoUiMode();
+}
+if (rootDomain === 'grok.com' && typeof window !== 'undefined') {
+if (/^\/library(?:\/|$)/.test(location.pathname) || /^\/imagine(?:\/|$)/.test(location.pathname)) {
+_grokDwellTimer = setTimeout(() => {
+_grokDwellTimer = null;
+grokDetectAutoUiMode();
+grokRefreshUiModeBadges();
+}, GROK_UI_DWELL_MS + 100);
+}
+try {
+const wrapHist = (orig) => function (...args) {
+const res = orig.apply(this, args);
+_grokTouchPathTracker();
+return res;
+};
+if (history && history.pushState) history.pushState = wrapHist(history.pushState);
+if (history && history.replaceState) history.replaceState = wrapHist(history.replaceState);
+window.addEventListener('popstate', _grokTouchPathTracker);
+} catch (e) {}
+}
+window.isGrokLibraryPage = isGrokLibraryPage;
+window.grokGetUiMode = grokGetUiMode;
+window.grokSetUiMode = grokSetUiMode;
+window.grokEffectiveUiMode = grokEffectiveUiMode;
+window.grokRefreshUiModeBadges = grokRefreshUiModeBadges;
 if (typeof MossadEngineRegistry !== 'undefined') {
 MossadEngineRegistry.register('grok', {
 id: 'grok',
@@ -5163,9 +5528,37 @@ return promptBlock.textContent.trim();
 }
 return '';
 }
-function getGrokMedia() {
-const video = getActiveVideo() || document.querySelector('main video, div[role="dialog"] video, video');
-if (video) {
+function _grokIsVisibleEl(el) {
+if (!el || !el.isConnected) return false;
+try {
+const st = getComputedStyle(el);
+if (st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0) return false;
+const r = el.getBoundingClientRect();
+return r.width > 20 && r.height > 20;
+} catch (e) { return false; }
+}
+function _grokViewportArea(el) {
+try {
+const r = el.getBoundingClientRect();
+const vh = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+const vw = Math.max(0, Math.min(r.right, window.innerWidth) - Math.max(r.left, 0));
+return vh * vw;
+} catch (e) { return 0; }
+}
+function _grokCenterProximityBonus(el) {
+try {
+const r = el.getBoundingClientRect();
+const cx = r.left + r.width / 2;
+const cy = r.top + r.height / 2;
+const dx = cx - window.innerWidth / 2;
+const dy = cy - window.innerHeight / 2;
+const maxDist = Math.hypot(window.innerWidth, window.innerHeight) / 2 || 1;
+const norm = Math.min(1, Math.hypot(dx, dy) / maxDist);
+return Math.max(0, 1 - norm);
+} catch (e) { return 0; }
+}
+function _grokExtractVideoSrc(video) {
+if (!video) return '';
 let src = '';
 const sources = Array.from(video.querySelectorAll('source'));
 for (const s of sources) {
@@ -5173,28 +5566,76 @@ if (s.src) { src = s.src; break; }
 }
 if (!src && video.currentSrc) src = video.currentSrc;
 if (!src && video.src) src = video.src;
+return src;
+}
+function _grokIsValidMediaImg(img) {
+if (!img || !img.isConnected) return false;
+if (img.closest(GROK_FILMSTRIP_SEL) || img.closest('#mossad-widget, [id^="mossad-"]')) return false;
+const src = img.currentSrc || img.src || '';
+if (!src) return false;
+const s = src.toLowerCase();
+if (s.includes('avatar') || s.includes('profile') || s.includes('pfp') || s.includes('icon') || s.includes('logo') || s.includes('favicon') || s.endsWith('.svg')) return false;
+const w = img.naturalWidth || img.width || 0;
+const h = img.naturalHeight || img.height || 0;
+return (w >= 150 && h >= 150) || s.includes('share-images') || s.includes('imagine-public') || s.includes('assets.grok.com') || s.includes('/generated/');
+}
+function _grokImgMediaObj(img) {
+const src = img.currentSrc || img.src || '';
+let ext = 'jpg';
+const srcLower = src.toLowerCase();
+if (srcLower.includes('.png')) ext = 'png';
+else if (srcLower.includes('.webp')) ext = 'webp';
+else if (srcLower.includes('.gif')) ext = 'gif';
+return { url: src, type: 'photo', ext };
+}
+function _grokFindActiveMediaInContainer(root, preferVisibleOnly = true) {
+const vids = Array.from(root.querySelectorAll('video')).filter(v =>
+v.isConnected && !v.closest(GROK_FILMSTRIP_SEL) && !v.closest('#mossad-widget, [id^="mossad-"]') && !!_grokExtractVideoSrc(v));
+const imgs = Array.from(root.querySelectorAll('img')).filter(_grokIsValidMediaImg);
+const candidates = [];
+for (const v of vids) {
+if (!_grokIsVisibleEl(v)) continue;
+const area = _grokViewportArea(v);
+if (preferVisibleOnly && area <= 0) continue;
+const prox = _grokCenterProximityBonus(v);
+const score = area * (1 + prox * 0.5) * ((!v.paused && !v.ended) ? 1.35 : 1.2);
+candidates.push({ score, media: { url: _grokExtractVideoSrc(v), type: 'video', ext: 'mp4' } });
+}
+for (const img of imgs) {
+if (!_grokIsVisibleEl(img)) continue;
+const area = _grokViewportArea(img);
+if (preferVisibleOnly && area <= 0) continue;
+const prox = _grokCenterProximityBonus(img);
+const score = area * (1 + prox * 0.5);
+candidates.push({ score, media: _grokImgMediaObj(img) });
+}
+candidates.sort((a, b) => b.score - a.score);
+return candidates.length > 0 ? candidates[0].media : null;
+}
+function getGrokMedia() {
+if (!isGrokPostPage()) {
+const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], [aria-modal="true"]'))
+.filter(d => !d.closest('[id^="mossad"]') && _grokIsVisibleEl(d));
+for (let i = dialogs.length - 1; i >= 0; i--) {
+const inDlg = _grokFindActiveMediaInContainer(dialogs[i], false);
+if (inDlg) return inDlg;
+}
+const inViewport = _grokFindActiveMediaInContainer(document, true);
+if (inViewport) return inViewport;
+}
+const video = getActiveVideo() || document.querySelector('main video, div[role="dialog"] video, video');
+if (video) {
+const src = _grokExtractVideoSrc(video);
 if (src) return { url: src, type: 'video', ext: 'mp4' };
 }
 const candidates = Array.from(document.querySelectorAll('main img, div[role="dialog"] img, [data-filmstrip-item="true"] img, img'));
-const validImgs = candidates.filter(img => {
-if (!img.src) return false;
-const s = img.src.toLowerCase();
-if (s.includes('avatar') || s.includes('profile') || s.includes('pfp') || s.includes('icon')) return false;
-const w = img.naturalWidth || img.width || 0;
-const h = img.naturalHeight || img.height || 0;
-return (w >= 150 && h >= 150) || s.includes('share-images') || s.includes('imagine-public') || s.includes('assets.grok.com');
-}).sort((a, b) => {
+const validImgs = candidates.filter(_grokIsValidMediaImg).sort((a, b) => {
 const areaA = (a.naturalWidth || a.width || 0) * (a.naturalHeight || a.height || 0);
 const areaB = (b.naturalWidth || b.width || 0) * (b.naturalHeight || b.height || 0);
 return areaB - areaA;
 });
 if (validImgs.length > 0) {
-const bestImg = validImgs[0];
-let ext = 'jpg';
-const srcLower = bestImg.src.toLowerCase();
-if (srcLower.includes('.png')) ext = 'png';
-else if (srcLower.includes('.webp')) ext = 'webp';
-return { url: bestImg.src, type: 'photo', ext };
+return _grokImgMediaObj(validImgs[0]);
 }
 return null;
 }
@@ -5281,11 +5722,12 @@ const vw = Math.max(0, Math.min(r.right, window.innerWidth) - Math.max(r.left, 0
 area = vh * vw;
 } catch (e) {}
 let score = 0;
+if (v.closest && v.closest('div[role="dialog"], [aria-modal="true"]') && _grokIsVisibleEl(v)) score += 20;
 if (uuid && src.includes(uuid)) score += 8;
 else if (grokIsForeignVideo(v)) score -= 8;
 if (!v.paused && !v.ended) score += 4;
 if (v.readyState >= 2) score += 1;
-if (area > 0) score += 2;
+if (area > 0) score += 2 + _grokCenterProximityBonus(v) * 2;
 score += Math.min(1, area / Math.max(1, window.innerWidth * window.innerHeight));
 if (score > bestScore) { best = v; bestScore = score; }
 }
@@ -5374,7 +5816,6 @@ try { convId = new URL(a.href, location.origin).searchParams.get('conversation')
 }
 return convId;
 }
-const GROK_ACCOUNT_LS_KEY = 'mossad_grok_account';
 const GROK_ACCOUNT_SS_FLAG = 'mossad_grok_account_checked';
 const _emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 function _grokFindEmailDeep(obj, depth = 0) {
@@ -5388,20 +5829,11 @@ if (v && typeof v === 'object') { const r = _grokFindEmailDeep(v, depth + 1); if
 return '';
 }
 function grokAccountFromDom() {
-const el = document.querySelector('[aria-label*="@"], [title*="@"], img[alt*="@"]');
-if (!el) return '';
-const m = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('alt')].join(' ').match(_emailRe);
-return m ? m[0] : '';
+return typeof mossadAccountFromDom === 'function' ? mossadAccountFromDom() : '';
 }
 function grokAccountEmail() {
 if (rootDomain !== 'grok.com') return '';
-let v = '';
-try { v = localStorage.getItem(GROK_ACCOUNT_LS_KEY) || ''; } catch (e) {}
-if (!v) {
-v = grokAccountFromDom();
-if (v) { try { localStorage.setItem(GROK_ACCOUNT_LS_KEY, v); } catch (e) {} }
-}
-return v;
+return typeof mossadGetAccount === 'function' ? mossadGetAccount() : '';
 }
 function grokRefreshAccount(force = false) {
 if (rootDomain !== 'grok.com' || typeof fetch !== 'function') return Promise.resolve(grokAccountEmail());
@@ -5411,7 +5843,7 @@ return fetch('/rest/user', { credentials: 'same-origin', headers: { 'Accept': 'a
 .then(r => r.ok ? r.json() : null)
 .then(j => {
 const email = _grokFindEmailDeep(j);
-if (email) { try { localStorage.setItem(GROK_ACCOUNT_LS_KEY, email); } catch (e) {} }
+if (email && typeof mossadSetAccount === 'function') mossadSetAccount(email);
 return email || grokAccountEmail();
 })
 .catch(() => grokAccountEmail());
@@ -5419,36 +5851,74 @@ return email || grokAccountEmail();
 window.grokRefreshAccount = grokRefreshAccount;
 if (rootDomain === 'grok.com') {
 setTimeout(() => {
-const tpl = (config.filenameTemplate && config.filenameTemplate.trim()) || getDefaultFilenameTemplate();
-if (config.filenameTemplateEnabled && /\{(account|email)/i.test(tpl)) grokRefreshAccount(false);
+if (!grokAccountEmail()) grokRefreshAccount(false);
 }, 4000);
 }
+function grokDeriveIdFromMediaUrl(url) {
+if (!url || typeof url !== 'string') return '';
+const genM = url.match(/\/(?:generated|post)\/([a-f0-9-]{36})/i);
+if (genM) return genM[1];
+const uuids = url.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi);
+if (uuids && uuids.length > 0) return uuids[uuids.length - 1];
+if (!url.startsWith('blob:') && !url.startsWith('data:') && typeof mossadHashString12 === 'function') {
+const cleaned = typeof cleanMediaUrl === 'function' ? cleanMediaUrl(url) : url.split('?')[0];
+return mossadHashString12(cleaned);
+}
+return '';
+}
 function grokFilenameContext(media) {
-const postId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+let postId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
+if (!postId && media && media.postId) postId = media.postId;
+if (!postId && media && media.url) postId = grokDeriveIdFromMediaUrl(media.url);
 const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
 let prompt = '';
 try { prompt = getGrokCurrentPrompt() || ''; } catch (e) {}
+const srcname = (media && media.url && typeof mossadExtractUrlFilenameStem === 'function')
+? mossadExtractUrlFilenameStem(media.url)
+: '';
+const inLib = (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
 return {
 postId,
 convId: grokCurrentConvId(postId),
 type: hasVid ? 'video' : 'photo',
 ext: media ? media.ext : (hasVid ? 'mp4' : 'jpg'),
 authorName: 'grok',
-title: 'Imagine - Grok',
+title: inLib ? 'Library - Grok' : 'Imagine - Grok',
 desc: prompt,
+srcname,
 account: grokAccountEmail(),
 };
 }
 function triggerGrokDownload(bypassDuplicateCheck = false, duplicateRecord = null, onDoneCallback = null) {
-if (rootDomain !== 'grok.com' || !isGrokPostPage()) return false;
+if (rootDomain !== 'grok.com') return false;
+const onPost = isGrokPostPage();
+const onLib = (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
+const isNewMode = (typeof grokEffectiveUiMode === 'function' && grokEffectiveUiMode() === 'new');
+if (!onPost && !onLib && !isNewMode) return false;
+const media = getGrokMedia();
+if (!onPost && !media) {
+if (onLib) {
+showToast('❌ Медиа не найдено', true);
+if (onDoneCallback) onDoneCallback();
+return true;
+}
+return false;
+}
 blurActiveInput();
+if (typeof mossadEnsureAccountForDownload === 'function' && !mossadGetAccount() && !mossadIsAccountSkipped()) {
+mossadEnsureAccountForDownload().then(ok => {
+if (ok) triggerGrokDownload(bypassDuplicateCheck, duplicateRecord, onDoneCallback);
+else if (onDoneCallback) onDoneCallback();
+});
+return true;
+}
 if (config && config.checkHistory === false) {
 bypassDuplicateCheck = true;
 }
-const currentPostUrl = location.href;
-const currentPostId = (location.pathname.match(/\/imagine\/post\/([^/?#]+)/) || [])[1] || '';
-const currentConvId = grokCurrentConvId(currentPostId);
-const media = getGrokMedia();
+const fctxPre = grokFilenameContext(media);
+const currentPostUrl = (media && media.postUrl) || location.href;
+const currentPostId = fctxPre.postId || '';
+const currentConvId = fctxPre.convId || '';
 const hasVid = media ? (media.type === 'video') : (getActiveVideo() !== null);
 const currentMediaType = hasVid ? 'video' : 'photo';
 const lockedMediaUrl = media ? media.url : null;
@@ -5489,7 +5959,8 @@ const dupNum = dupInfo ? (dupInfo.count || 1) : 1;
 const dblSuffix = isDup ? ` (${rootBase || 'original'}) DBL${dupNum}` : '';
 const siteCount = (typeof mossadIncSiteDlCount === 'function') ? mossadIncSiteDlCount('grok.com') : 1;
 const defaultPrefix = shortConv4 ? `${shortConv4}-${shortId4 || shortId}` : (shortId || 'media');
-let defaultBase = `${defaultPrefix}-grok`;
+const accSuffix = fctxPre.account ? `~${typeof mossadSafeNamePart === 'function' ? mossadSafeNamePart(fctxPre.account) : fctxPre.account}` : '';
+let defaultBase = `${defaultPrefix}-grok${accSuffix}`;
 if (isDup) {
 defaultBase = (typeof formatDblMark === 'function')
 ? formatDblMark(defaultBase, dblSuffix, rootBase, dupNum, config.dblPosition || 'end')
@@ -5524,11 +5995,11 @@ const handleBlobResponse = async (rawBlob) => {
 try {
 showToast('⏳ Запись метаданных...');
 const enrichedBlob = await injectGrokMetadataToBlob(rawBlob, prompt, currentPostUrl, model, promptHash);
-saveBlobToDisk(enrichedBlob, grokFilename, media.url, currentPostUrl);
+saveBlobToDisk(enrichedBlob, grokFilename, media.url, currentPostUrl, rawBlob);
 onDownloadFinalized();
 } catch (err) {
 console.error('[MOSSAD] Metadata injection failed, saving raw blob:', err);
-saveBlobToDisk(rawBlob, grokFilename, media.url, currentPostUrl);
+saveBlobToDisk(rawBlob, grokFilename, media.url, currentPostUrl, rawBlob);
 onDownloadFinalized();
 }
 };
@@ -5695,8 +6166,7 @@ return false;
 }
 
 // ── src/engines/grok/navigation.js ──
-function grokNavigateToSaved() {
-if (isGrokSavedPage()) {
+function _grokScrollTopSmooth() {
 window.scrollTo({ top: 0, behavior: 'smooth' });
 if (document.documentElement) document.documentElement.scrollTo({ top: 0, behavior: 'smooth' });
 if (document.body) document.body.scrollTo({ top: 0, behavior: 'smooth' });
@@ -5704,11 +6174,44 @@ const scrollables = document.querySelectorAll('main, [role="main"], [data-scroll
 scrollables.forEach(el => {
 if (el.scrollTop > 0) el.scrollTo({ top: 0, behavior: 'smooth' });
 });
+}
+function grokNavigateToLibrary() {
+if (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage()) {
+_grokScrollTopSmooth();
+showToast('🔝 В начало Library Grok');
+return;
+}
+showToast('📂 Переход в Library Grok...');
+const libLink = Array.from(document.querySelectorAll('a[href="/library"], a[href^="/library"]'))
+.find(a => !a.closest || !a.closest('[id^="mossad"]'));
+if (libLink) {
+try {
+libLink.click();
+setTimeout(() => {
+if (typeof isGrokLibraryPage === 'function' && !isGrokLibraryPage()) {
+window.location.href = 'https://grok.com/library';
+}
+}, 250);
+return;
+} catch (e) {}
+}
+window.location.href = 'https://grok.com/library';
+}
+window.grokNavigateToLibrary = grokNavigateToLibrary;
+function grokNavigateToSaved() {
+const mode = (typeof grokEffectiveUiMode === 'function') ? grokEffectiveUiMode() : 'old';
+if (mode === 'new') {
+grokNavigateToLibrary();
+return;
+}
+if (isGrokSavedPage()) {
+_grokScrollTopSmooth();
 showToast('🔝 В начало Saved Grok');
 return;
 }
 showToast('📂 Переход в Saved Grok...');
-const savedLink = document.querySelector('a[href="/imagine/saved"], a[href*="/imagine/saved"]');
+const savedLink = Array.from(document.querySelectorAll('a[href="/imagine/saved"], a[href*="/imagine/saved"]'))
+.find(a => !a.closest || !a.closest('[id^="mossad"]'));
 if (savedLink) {
 try {
 savedLink.click();
@@ -12320,6 +12823,10 @@ const meta = document.querySelector('meta[property="og:description"], meta[name=
 desc = meta ? (meta.getAttribute('content') || '') : '';
 }
 const type = media.type === 'video' ? 'video' : 'photo';
+const firstUrl = (Array.isArray(media.urls) && media.urls[0]) || media.url || '';
+const srcname = (firstUrl && typeof mossadExtractUrlFilenameStem === 'function')
+? mossadExtractUrlFilenameStem(firstUrl)
+: '';
 return {
 postId,
 convId: rootDomain === 'grok.com' && typeof grokCurrentConvId === 'function' ? grokCurrentConvId(postId) : '',
@@ -12327,7 +12834,8 @@ type,
 ext: type === 'video' ? 'mp4' : 'jpg',
 authorName,
 desc: String(desc).slice(0, 300),
-account: rootDomain === 'grok.com' && typeof grokAccountEmail === 'function' ? grokAccountEmail() : '',
+srcname,
+account: typeof mossadGetAccount === 'function' ? mossadGetAccount() : '',
 isInput: Boolean(media && media.isInput),
 };
 }
@@ -12362,6 +12870,13 @@ if (triggerGrokDownload(bypassDuplicateCheck, duplicateRecord || _activeDuplicat
 }
 const media = presetMedia || findMediaForDownload();
 if (!media || !media.urls || media.urls.length === 0) { showToast('❌ Медиа не найдено', true); return; }
+if (typeof mossadEnsureAccountForDownload === 'function' && !mossadGetAccount() && !mossadIsAccountSkipped()) {
+mossadEnsureAccountForDownload().then(ok => {
+if (ok) triggerDownload(bypassDuplicateCheck, duplicateRecord, onDoneCallback, media);
+else if (onDoneCallback) onDoneCallback();
+});
+return;
+}
 const primaryUrl = media.urls[0];
 const canonicalPostUrl = media.postUrl || location.href;
 if (!bypassDuplicateCheck && !isDuplicateConfirmed(primaryUrl) && !isDuplicateConfirmed(canonicalPostUrl)) {
@@ -12439,6 +12954,15 @@ filename = `${shortId}-${domainClean}${inMark}.${ext}`;
 } else {
 const titleClean = (document.title || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || `media_${Date.now()}`;
 filename = `${titleClean}${inMark}.${ext}`;
+}
+if (!config.filenameTemplateEnabled && fctx.account) {
+const accSafe = typeof mossadSafeNamePart === 'function' ? mossadSafeNamePart(fctx.account) : fctx.account;
+if (accSafe) {
+const dotIdx = filename.lastIndexOf('.');
+filename = dotIdx !== -1
+? `${filename.slice(0, dotIdx)}~${accSafe}${filename.slice(dotIdx)}`
+: `${filename}~${accSafe}`;
+}
 }
 if (config.filenameTemplateEnabled) {
 const ext2 = media.type === 'video' ? 'mp4' : 'jpg';
@@ -14540,7 +15064,13 @@ async function mossadTplPreviewContext() {
 try {
 if (rootDomain === 'grok.com') {
 if (!grokAccountEmail()) await grokRefreshAccount(true);
-if (typeof isGrokPostPage === 'function' && isGrokPostPage()) return grokFilenameContext(getGrokMedia());
+const onPost = (typeof isGrokPostPage === 'function' && isGrokPostPage());
+const onLib = (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
+const isNew = (typeof grokEffectiveUiMode === 'function' && grokEffectiveUiMode() === 'new');
+if (onPost || onLib || isNew) {
+const gm = typeof getGrokMedia === 'function' ? getGrokMedia() : null;
+if (gm || onPost || onLib) return grokFilenameContext(gm);
+}
 return mossadFilenameContext({});
 }
 if (rootDomain.includes('pinterest.')) {
@@ -15500,9 +16030,20 @@ panel.innerHTML = `
                     ` : ''}
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size:11px; color:#9ca3af;">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size:11px; color:#9ca3af; gap:6px;">
                     <span title="Сквозной номер успешных закачек на текущем сайте">📥 Закачек: <b id="mossad-txt-site-dl-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b></span>
+                    <button id="mossad-panel-account-btn" type="button" style="background:#1f2937; border:1px solid #374151; border-radius:4px; color:#93c5fd; padding:1px 6px; cursor:pointer; font-size:10px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(typeof mossadGetAccount === 'function' && mossadGetAccount()) ? `Аккаунт контейнера ({account}): ${mossadGetAccount()} (клик — изменить)` : 'Задать аккаунт контейнера ({account})'}">${(typeof mossadGetAccount === 'function' && mossadGetAccount()) ? `👤 ${mossadGetAccount().length > 18 ? mossadGetAccount().slice(0, 17) + '…' : mossadGetAccount()}` : '👤 Задать'}</button>
                 </div>
+                ${rootDomain === 'grok.com' ? `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:11px; margin-top:2px;">
+                    <span style="color:#9ca3af;" title="Режим интерфейса Grok для этого контейнера (хранится локально в контейнере)">🤖 UI: <b class="mossad-grok-ui-eff" style="font-size:10px;"></b></span>
+                    <div role="group" style="display:inline-flex; border:1px solid #374151; border-radius:5px; overflow:hidden;">
+                        <button type="button" class="mossad-grok-ui-btn" data-mode="auto" title="Автоопределение (Library / Imagine)" style="border:none; border-right:1px solid #374151; padding:2px 7px; cursor:pointer; font-size:10px;">Auto</button>
+                        <button type="button" class="mossad-grok-ui-btn" data-mode="old" title="Старый интерфейс (/imagine/saved, слайдшоу)" style="border:none; border-right:1px solid #374151; padding:2px 7px; cursor:pointer; font-size:10px;">Old</button>
+                        <button type="button" class="mossad-grok-ui-btn" data-mode="new" title="Новый интерфейс (/library)" style="border:none; padding:2px 7px; cursor:pointer; font-size:10px;">New</button>
+                    </div>
+                </div>
+                ` : ''}
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
                     ${isAi ? `
@@ -15755,6 +16296,21 @@ Settings.set('deleteHoldpost', e.target.checked);
 Settings.set('deleteAutoconfirm', e.target.checked);
 };
 }
+panel.querySelectorAll('.mossad-grok-ui-btn').forEach(btn => {
+btn.onclick = () => {
+if (typeof grokSetUiMode === 'function') {
+const m = grokSetUiMode(btn.dataset.mode);
+showToast(`🤖 Grok UI: ${m === 'auto' ? `Auto (${grokEffectiveUiMode()})` : m.toUpperCase()}`);
+}
+};
+});
+if (typeof grokRefreshUiModeBadges === 'function') grokRefreshUiModeBadges();
+}
+const btnPanelAcc = panel.querySelector('#mossad-panel-account-btn');
+if (btnPanelAcc) {
+btnPanelAcc.onclick = () => {
+if (typeof mossadOpenAccountPromptModal === 'function') mossadOpenAccountPromptModal({ force: true });
+};
 }
 const inPlW = panel.querySelector('#mossad-in-playlist-w');
 if (inPlW) {
@@ -17761,6 +18317,34 @@ modal.innerHTML = `
 
                 <div style="margin-top:6px;">
                   <div style="font-size:11px; color:#9ca3af; margin-bottom:3px; display:flex; justify-content:space-between;">
+                    <span>👤 Аккаунт этого контейнера (<code style="color:#93c5fd;">{account}</code>):</span>
+                    <span style="font-size:10px; color:#6b7280;">локально в контейнере</span>
+                  </div>
+                  <div style="display:flex; gap:6px;">
+                    <input id="mossad-site-account" type="text" placeholder="name@gmail.com или имя аккаунта (пусто = спросит при скачивании)"
+                      style="flex:1; background:#111827; border:1px solid #374151; border-radius:4px; color:#e5e7eb; padding:4px 8px; font-size:12px;"
+                      value="${String(typeof mossadGetAccount === 'function' ? mossadGetAccount() : '').replace(/"/g, '&quot;')}">
+                    <button id="mossad-btn-save-site-account" type="button" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:4px 10px; cursor:pointer; font-size:12px; font-weight:bold;" title="Сохранить аккаунт для этого контейнера">💾</button>
+                    <button id="mossad-btn-clear-site-account" type="button" style="background:#374151; border:1px solid #4b5563; border-radius:4px; color:#f87171; padding:4px 8px; cursor:pointer; font-size:12px;" title="Сбросить аккаунт (спросит снова при следующем скачивании)">↺</button>
+                  </div>
+                </div>
+
+                ${rootDomain === 'grok.com' ? `
+                <div style="margin-top:6px; background:#111827; border:1px solid #374151; border-radius:6px; padding:8px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                  <div style="display:flex; flex-direction:column; gap:2px;">
+                    <span style="font-size:12px; font-weight:bold; color:#38bdf8;">🤖 Интерфейс Grok (контейнер):</span>
+                    <span style="font-size:10px; color:#9ca3af;">Сейчас активно: <b class="mossad-grok-ui-eff"></b> · Ручной выбор имеет приоритет над Auto</span>
+                  </div>
+                  <div role="group" style="display:inline-flex; border:1px solid #4b5563; border-radius:6px; overflow:hidden; flex-shrink:0;">
+                    <button type="button" class="mossad-grok-ui-btn" data-mode="auto" style="border:none; border-right:1px solid #4b5563; padding:4px 10px; cursor:pointer; font-size:11px;">Auto</button>
+                    <button type="button" class="mossad-grok-ui-btn" data-mode="old" style="border:none; border-right:1px solid #4b5563; padding:4px 10px; cursor:pointer; font-size:11px;">Old</button>
+                    <button type="button" class="mossad-grok-ui-btn" data-mode="new" style="border:none; padding:4px 10px; cursor:pointer; font-size:11px;">New</button>
+                  </div>
+                </div>
+                ` : ''}
+
+                <div style="margin-top:6px;">
+                  <div style="font-size:11px; color:#9ca3af; margin-bottom:3px; display:flex; justify-content:space-between;">
                     <span>📝 Индивидуальный шаблон имени файла:</span>
                     <button id="mossad-btn-site-tpl-help" style="background:transparent; border:none; color:#60a5fa; cursor:pointer; font-size:11px; padding:0;">[Теги ?]</button>
                   </div>
@@ -17984,7 +18568,7 @@ return `
                 </div>
             </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-23</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-26</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -18439,6 +19023,35 @@ const saved = mossadSetSiteSubfolder(inSub.value);
 inSub.value = saved;
 showToast(`📁 Папка для ${rootDomain}: ${saved || 'корень Загрузок'}`);
 };
+}
+const inAcc = pane.querySelector('#mossad-site-account');
+const btnSaveAcc = pane.querySelector('#mossad-btn-save-site-account');
+const btnClearAcc = pane.querySelector('#mossad-btn-clear-site-account');
+if (btnSaveAcc && inAcc) {
+btnSaveAcc.onclick = () => {
+const saved = typeof mossadSetAccount === 'function' ? mossadSetAccount(inAcc.value) : inAcc.value.trim();
+inAcc.value = saved;
+showToast(saved ? `👤 Аккаунт сохранён: ${saved}` : '👤 Аккаунт очищен');
+};
+}
+if (btnClearAcc && inAcc) {
+btnClearAcc.onclick = () => {
+if (typeof mossadSetAccount === 'function') mossadSetAccount('');
+if (typeof mossadSetAccountSkipped === 'function') mossadSetAccountSkipped(false);
+inAcc.value = '';
+showToast('↺ Аккаунт сброшен (спросит при следующем скачивании)');
+};
+}
+if (rootDomain === 'grok.com') {
+pane.querySelectorAll('.mossad-grok-ui-btn').forEach(btn => {
+btn.onclick = () => {
+if (typeof grokSetUiMode === 'function') {
+const m = grokSetUiMode(btn.dataset.mode);
+showToast(`🤖 Интерфейс Grok: ${m === 'auto' ? `Auto (${grokEffectiveUiMode()})` : m.toUpperCase()}`);
+}
+};
+});
+if (typeof grokRefreshUiModeBadges === 'function') grokRefreshUiModeBadges();
 }
 const inTpl = pane.querySelector('#mossad-site-tpl');
 const btnSaveTpl = pane.querySelector('#mossad-btn-save-site-tpl');
@@ -19725,7 +20338,8 @@ return;
 }
 if (!_grokHomeWarnActive) {
 _grokHomeWarnActive = true;
-showToast('⚠️ Повторное нажатие Home в течение 5 сек перейдёт в Saved', false, 5000);
+const homeDest = (typeof grokEffectiveUiMode === 'function' && grokEffectiveUiMode() === 'new') ? 'Library' : 'Saved';
+showToast(`⚠️ Повторное нажатие Home в течение 5 сек перейдёт в ${homeDest}`, false, 5000);
 if (_grokHomeWarnTimer) clearTimeout(_grokHomeWarnTimer);
 _grokHomeWarnTimer = setTimeout(() => {
 _grokHomeWarnActive = false;
@@ -19814,7 +20428,12 @@ startSlideshow();
 return;
 }
 if (hotkeyMatches(e, config.hk.download)) {
-if (rootDomain === 'grok.com' && !isGrokPostPage()) return;
+if (rootDomain === 'grok.com') {
+const canGrokDl = isGrokPostPage()
+|| (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage())
+|| (typeof grokEffectiveUiMode === 'function' && grokEffectiveUiMode() === 'new' && typeof getGrokMedia === 'function' && !!getGrokMedia());
+if (!canGrokDl) return;
+}
 e.preventDefault();
 triggerDownload();
 }

@@ -752,9 +752,20 @@
                     ` : ''}
                 </div>
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size:11px; color:#9ca3af;">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size:11px; color:#9ca3af; gap:6px;">
                     <span title="Сквозной номер успешных закачек на текущем сайте">📥 Закачек: <b id="mossad-txt-site-dl-count" style="color:#38bdf8;">${typeof mossadGetSiteDlCount === 'function' ? mossadGetSiteDlCount() : 0}</b></span>
+                    <button id="mossad-panel-account-btn" type="button" style="background:#1f2937; border:1px solid #374151; border-radius:4px; color:#93c5fd; padding:1px 6px; cursor:pointer; font-size:10px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(typeof mossadGetAccount === 'function' && mossadGetAccount()) ? `Аккаунт контейнера ({account}): ${mossadGetAccount()} (клик — изменить)` : 'Задать аккаунт контейнера ({account})'}">${(typeof mossadGetAccount === 'function' && mossadGetAccount()) ? `👤 ${mossadGetAccount().length > 18 ? mossadGetAccount().slice(0, 17) + '…' : mossadGetAccount()}` : '👤 Задать'}</button>
                 </div>
+                ${rootDomain === 'grok.com' ? `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:11px; margin-top:2px;">
+                    <span style="color:#9ca3af;" title="Режим интерфейса Grok для этого контейнера (хранится локально в контейнере)">🤖 UI: <b class="mossad-grok-ui-eff" style="font-size:10px;"></b></span>
+                    <div role="group" style="display:inline-flex; border:1px solid #374151; border-radius:5px; overflow:hidden;">
+                        <button type="button" class="mossad-grok-ui-btn" data-mode="auto" title="Автоопределение (Library / Imagine)" style="border:none; border-right:1px solid #374151; padding:2px 7px; cursor:pointer; font-size:10px;">Auto</button>
+                        <button type="button" class="mossad-grok-ui-btn" data-mode="old" title="Старый интерфейс (/imagine/saved, слайдшоу)" style="border:none; border-right:1px solid #374151; padding:2px 7px; cursor:pointer; font-size:10px;">Old</button>
+                        <button type="button" class="mossad-grok-ui-btn" data-mode="new" title="Новый интерфейс (/library)" style="border:none; padding:2px 7px; cursor:pointer; font-size:10px;">New</button>
+                    </div>
+                </div>
+                ` : ''}
                 <div style="border-top: 1px solid #374151; margin: 4px 0;"></div>
                 <div style="display:flex; gap:6px;">
                     ${isAi ? `
@@ -1018,6 +1029,21 @@
                         Settings.set('deleteAutoconfirm', e.target.checked);
                     };
                 }
+                panel.querySelectorAll('.mossad-grok-ui-btn').forEach(btn => {
+                    btn.onclick = () => {
+                        if (typeof grokSetUiMode === 'function') {
+                            const m = grokSetUiMode(btn.dataset.mode);
+                            showToast(`🤖 Grok UI: ${m === 'auto' ? `Auto (${grokEffectiveUiMode()})` : m.toUpperCase()}`);
+                        }
+                    };
+                });
+                if (typeof grokRefreshUiModeBadges === 'function') grokRefreshUiModeBadges();
+            }
+            const btnPanelAcc = panel.querySelector('#mossad-panel-account-btn');
+            if (btnPanelAcc) {
+                btnPanelAcc.onclick = () => {
+                    if (typeof mossadOpenAccountPromptModal === 'function') mossadOpenAccountPromptModal({ force: true });
+                };
             }
             const inPlW = panel.querySelector('#mossad-in-playlist-w');
             if (inPlW) {

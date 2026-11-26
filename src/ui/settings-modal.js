@@ -826,6 +826,34 @@
 
                 <div style="margin-top:6px;">
                   <div style="font-size:11px; color:#9ca3af; margin-bottom:3px; display:flex; justify-content:space-between;">
+                    <span>👤 Аккаунт этого контейнера (<code style="color:#93c5fd;">{account}</code>):</span>
+                    <span style="font-size:10px; color:#6b7280;">локально в контейнере</span>
+                  </div>
+                  <div style="display:flex; gap:6px;">
+                    <input id="mossad-site-account" type="text" placeholder="name@gmail.com или имя аккаунта (пусто = спросит при скачивании)"
+                      style="flex:1; background:#111827; border:1px solid #374151; border-radius:4px; color:#e5e7eb; padding:4px 8px; font-size:12px;"
+                      value="${String(typeof mossadGetAccount === 'function' ? mossadGetAccount() : '').replace(/"/g, '&quot;')}">
+                    <button id="mossad-btn-save-site-account" type="button" style="background:#10b981; border:none; border-radius:4px; color:#fff; padding:4px 10px; cursor:pointer; font-size:12px; font-weight:bold;" title="Сохранить аккаунт для этого контейнера">💾</button>
+                    <button id="mossad-btn-clear-site-account" type="button" style="background:#374151; border:1px solid #4b5563; border-radius:4px; color:#f87171; padding:4px 8px; cursor:pointer; font-size:12px;" title="Сбросить аккаунт (спросит снова при следующем скачивании)">↺</button>
+                  </div>
+                </div>
+
+                ${rootDomain === 'grok.com' ? `
+                <div style="margin-top:6px; background:#111827; border:1px solid #374151; border-radius:6px; padding:8px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                  <div style="display:flex; flex-direction:column; gap:2px;">
+                    <span style="font-size:12px; font-weight:bold; color:#38bdf8;">🤖 Интерфейс Grok (контейнер):</span>
+                    <span style="font-size:10px; color:#9ca3af;">Сейчас активно: <b class="mossad-grok-ui-eff"></b> · Ручной выбор имеет приоритет над Auto</span>
+                  </div>
+                  <div role="group" style="display:inline-flex; border:1px solid #4b5563; border-radius:6px; overflow:hidden; flex-shrink:0;">
+                    <button type="button" class="mossad-grok-ui-btn" data-mode="auto" style="border:none; border-right:1px solid #4b5563; padding:4px 10px; cursor:pointer; font-size:11px;">Auto</button>
+                    <button type="button" class="mossad-grok-ui-btn" data-mode="old" style="border:none; border-right:1px solid #4b5563; padding:4px 10px; cursor:pointer; font-size:11px;">Old</button>
+                    <button type="button" class="mossad-grok-ui-btn" data-mode="new" style="border:none; padding:4px 10px; cursor:pointer; font-size:11px;">New</button>
+                  </div>
+                </div>
+                ` : ''}
+
+                <div style="margin-top:6px;">
+                  <div style="font-size:11px; color:#9ca3af; margin-bottom:3px; display:flex; justify-content:space-between;">
                     <span>📝 Индивидуальный шаблон имени файла:</span>
                     <button id="mossad-btn-site-tpl-help" style="background:transparent; border:none; color:#60a5fa; cursor:pointer; font-size:11px; padding:0;">[Теги ?]</button>
                   </div>
@@ -1049,7 +1077,7 @@
                 </div>
             </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-23</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-26</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>
@@ -1568,6 +1596,37 @@
                     inSub.value = saved;
                     showToast(`📁 Папка для ${rootDomain}: ${saved || 'корень Загрузок'}`);
                 };
+            }
+
+            const inAcc = pane.querySelector('#mossad-site-account');
+            const btnSaveAcc = pane.querySelector('#mossad-btn-save-site-account');
+            const btnClearAcc = pane.querySelector('#mossad-btn-clear-site-account');
+            if (btnSaveAcc && inAcc) {
+                btnSaveAcc.onclick = () => {
+                    const saved = typeof mossadSetAccount === 'function' ? mossadSetAccount(inAcc.value) : inAcc.value.trim();
+                    inAcc.value = saved;
+                    showToast(saved ? `👤 Аккаунт сохранён: ${saved}` : '👤 Аккаунт очищен');
+                };
+            }
+            if (btnClearAcc && inAcc) {
+                btnClearAcc.onclick = () => {
+                    if (typeof mossadSetAccount === 'function') mossadSetAccount('');
+                    if (typeof mossadSetAccountSkipped === 'function') mossadSetAccountSkipped(false);
+                    inAcc.value = '';
+                    showToast('↺ Аккаунт сброшен (спросит при следующем скачивании)');
+                };
+            }
+
+            if (rootDomain === 'grok.com') {
+                pane.querySelectorAll('.mossad-grok-ui-btn').forEach(btn => {
+                    btn.onclick = () => {
+                        if (typeof grokSetUiMode === 'function') {
+                            const m = grokSetUiMode(btn.dataset.mode);
+                            showToast(`🤖 Интерфейс Grok: ${m === 'auto' ? `Auto (${grokEffectiveUiMode()})` : m.toUpperCase()}`);
+                        }
+                    };
+                });
+                if (typeof grokRefreshUiModeBadges === 'function') grokRefreshUiModeBadges();
             }
 
             const inTpl = pane.querySelector('#mossad-site-tpl');

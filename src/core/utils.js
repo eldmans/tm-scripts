@@ -693,7 +693,7 @@
     // ШАБЛОН ИМЕНИ ФАЙЛА (v1.3.53: общие теги, buildFilenameVars, правило расширения)
     // ============================================
     // Старый общий шаблон по умолчанию '{id8}-{domain[4]}~{RadugaStud}' мигрирует в config.js (OLD_DEFAULT_TPL_V1336).
-    const MOSSAD_DEFAULT_TPL = '{id8}-{domain}';
+    const MOSSAD_DEFAULT_TPL = '{id8}-{domain}~{account}';
     const MOSSAD_DEFAULT_TPL_GROK = '{id8}-{domain}~{account}';
     // Расширение добавляется, если имя НЕ оканчивается на одно из этих (точки внутри имени не мешают)
     const MOSSAD_MEDIA_EXTS = ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'heic', 'mp3', 'm4a', 'txt'];
@@ -709,7 +709,8 @@
         { k: 'conv',       aliases: ['conversation'],           what: 'Grok: UUID беседы (на других сайтах пусто)' },
         { k: 'domain',     aliases: ['site'],                   what: 'Сайт одним словом: pinterest, grok, redgifs…' },
         { k: 'domainfull', aliases: [],                         what: 'Домен целиком: pinterest.com, grok.com…' },
-        { k: 'account',    aliases: ['email'],                  what: 'Grok: e-mail вошедшего аккаунта (если удалось узнать); на других сайтах пусто' },
+        { k: 'account',    aliases: ['email'],                  what: 'Аккаунт / e-mail текущего контейнера (для любого сайта; на Grok определяется также автоматически)' },
+        { k: 'srcname',    aliases: ['urlname', 'orig'],        what: 'Исходное имя файла из ссылки медиа (без расширения, например ovkrah)' },
         { k: 'username',   aliases: ['user', 'author'],         what: 'Автор (RedGifs, Instagram); иначе — первые 8 символов ID; Grok — grok' },
         { k: 'desc',       aliases: ['description'],            what: 'Описание: Pinterest — заголовок/описание пина, Grok — промпт; иначе пусто' },
         { k: 'title',      aliases: [],                         what: 'Заголовок вкладки (Grok — «Imagine - Grok»)' },
@@ -926,7 +927,7 @@
     /** Шаблон по умолчанию для текущего сайта (серый плейсхолдер; пустое поле = он). */
     function getDefaultFilenameTemplate() {
         if (rootDomain === 'grok.com') return MOSSAD_DEFAULT_TPL_GROK;
-        if (rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) return '{hf}-{space}-{subtype}-{id8}.{ext}';
+        if (rootDomain.includes('huggingface') || rootDomain.includes('hf.space')) return '{hf}-{space}-{subtype}-{id8}~{account}.{ext}';
         return MOSSAD_DEFAULT_TPL;
     }
     window.getDefaultFilenameTemplate = getDefaultFilenameTemplate;
@@ -983,6 +984,7 @@
             dupnum:     dupNum,
             dbl:        ctx.dblSuffix || '',
             oldname:    ctx.rootBase || '',
+            srcname:    mossadSafeNamePart(ctx.srcname || ''),
             input:      (ctx.isInput || ctx.input) ? 'input' : '',
         };
     }
@@ -1228,4 +1230,262 @@
         } catch (e) {}
     }
     window.sendPromptToVault = sendPromptToVault;
+
+    // ============================================
+    // v1.4.36: АККАУНТ КОНТЕЙНЕРА ({account}) ДЛЯ ВСЕХ САЙТОВ И ХЕШ-УТИЛИТЫ URL
+    // Хранится строго в localStorage конкретного сайта и контейнера (НЕ в общем GM).
+    // ============================================
+    const MOSSAD_ACCOUNT_LS_KEY = 'mossad_account';
+    const MOSSAD_ACCOUNT_SKIP_KEY = 'mossad_account_skipped';
+    const MOSSAD_LEGACY_GROK_ACCOUNT_KEY = 'mossad_grok_account';
+    const _mossadEmailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+
+    /** Детерминированный 12-символьный hex-хеш строки (для уникального ID из media URL). */
+    function mossadHashString12(str) {
+        if (!str) return '';
+        let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
+        for (let i = 0; i < str.length; i++) {
+            const ch = str.charCodeAt(i);
+            h1 = Math.imul(h1 ^ ch, 2654435761);
+            h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(12, '0').slice(-12);
+    }
+
+    /** Извлекает имя файла без расширения из media URL (например, ovkrah.mp4 -> ovkrah). */
+    function mossadExtractUrlFilenameStem(url) {
+        if (!url || typeof url !== 'string' || url.startsWith('blob:') || url.startsWith('data:')) return '';
+        try {
+            const u = new URL(url, location.origin);
+            const seg = u.pathname.split('/').filter(Boolean).pop() || '';
+            const decoded = decodeURIComponent(seg);
+            return decoded.replace(/\.[a-z0-9]{2,5}$/i, '').trim();
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function mossadAccountFromDom() {
+        try {
+            const nodes = document.querySelectorAll('[aria-label*="@"], [title*="@"], img[alt*="@"], header, nav, aside, [data-testid*="account" i], [data-testid*="user" i]');
+            for (const el of nodes) {
+                if (el.closest && el.closest('[id^="mossad"]')) continue;
+                const probe = [
+                    el.getAttribute && el.getAttribute('aria-label'),
+                    el.getAttribute && el.getAttribute('title'),
+                    el.getAttribute && el.getAttribute('alt'),
+                    (el.tagName === 'HEADER' || el.tagName === 'NAV' || el.tagName === 'ASIDE') ? (el.textContent || '').slice(0, 400) : ''
+                ].filter(Boolean).join(' ');
+                const m = probe.match(_mossadEmailRe);
+                if (m) return m[0];
+            }
+        } catch (e) {}
+        return '';
+    }
+
+    /** Подсказка аккаунта (не email, а возможный логин/хендл в меню) для предзаполнения окна ввода. */
+    function mossadGuessAccountHandle() {
+        const email = mossadAccountFromDom();
+        if (email) return email;
+        try {
+            if (rootDomain.includes('instagram.com')) {
+                const prof = document.querySelector('nav a[href^="/"][role="link"] span, a[href^="/"][aria-label*="Profile" i]');
+                const href = prof && prof.closest ? (prof.closest('a')?.getAttribute('href') || '') : '';
+                const m = href.match(/^\/([A-Za-z0-9_.]{2,30})\/?$/);
+                if (m && !['explore', 'reels', 'direct', 'accounts', 'stories'].includes(m[1])) return m[1];
+            }
+            if (rootDomain.includes('huggingface.co')) {
+                const a = document.querySelector('header a[href^="/"][title], header img[alt][src*="avatars"]');
+                const alt = a ? (a.getAttribute('alt') || a.getAttribute('title') || '').trim() : '';
+                if (alt && alt.length < 40) return alt;
+            }
+        } catch (e) {}
+        return '';
+    }
+
+    function mossadGetAccount() {
+        let v = '';
+        try { v = (localStorage.getItem(MOSSAD_ACCOUNT_LS_KEY) || '').trim(); } catch (e) {}
+        if (!v && rootDomain === 'grok.com') {
+            try {
+                const legacy = (localStorage.getItem(MOSSAD_LEGACY_GROK_ACCOUNT_KEY) || '').trim();
+                if (legacy) {
+                    v = legacy;
+                    localStorage.setItem(MOSSAD_ACCOUNT_LS_KEY, v);
+                }
+            } catch (e) {}
+        }
+        if (!v) {
+            const domAcc = mossadAccountFromDom();
+            if (domAcc) {
+                v = domAcc;
+                try {
+                    localStorage.setItem(MOSSAD_ACCOUNT_LS_KEY, v);
+                    if (rootDomain === 'grok.com') localStorage.setItem(MOSSAD_LEGACY_GROK_ACCOUNT_KEY, v);
+                } catch (e) {}
+            }
+        }
+        return v;
+    }
+
+    function mossadSetAccount(val) {
+        const clean = String(val == null ? '' : val).trim();
+        try {
+            if (clean) {
+                localStorage.setItem(MOSSAD_ACCOUNT_LS_KEY, clean);
+                localStorage.removeItem(MOSSAD_ACCOUNT_SKIP_KEY);
+                if (rootDomain === 'grok.com') localStorage.setItem(MOSSAD_LEGACY_GROK_ACCOUNT_KEY, clean);
+            } else {
+                localStorage.removeItem(MOSSAD_ACCOUNT_LS_KEY);
+                if (rootDomain === 'grok.com') localStorage.removeItem(MOSSAD_LEGACY_GROK_ACCOUNT_KEY);
+            }
+        } catch (e) {}
+        document.querySelectorAll('#mossad-site-account').forEach(el => {
+            if (el !== document.activeElement) el.value = clean;
+        });
+        document.querySelectorAll('#mossad-panel-account-btn').forEach(btn => {
+            btn.textContent = clean ? `👤 ${clean.length > 18 ? clean.slice(0, 17) + '…' : clean}` : '👤 Задать';
+            btn.title = clean ? `Аккаунт контейнера ({account}): ${clean} (клик — изменить)` : 'Задать аккаунт контейнера ({account})';
+        });
+        return clean;
+    }
+
+    function mossadIsAccountSkipped() {
+        try { return localStorage.getItem(MOSSAD_ACCOUNT_SKIP_KEY) === '1'; } catch (e) { return false; }
+    }
+
+    function mossadSetAccountSkipped(skipped) {
+        try {
+            if (skipped) localStorage.setItem(MOSSAD_ACCOUNT_SKIP_KEY, '1');
+            else localStorage.removeItem(MOSSAD_ACCOUNT_SKIP_KEY);
+        } catch (e) {}
+    }
+
+    async function mossadAutoDetectAccountAsync() {
+        const cur = mossadGetAccount();
+        if (cur) return cur;
+        if (rootDomain === 'grok.com' && typeof grokRefreshAccount === 'function') {
+            try {
+                const email = await grokRefreshAccount(false);
+                if (email) return mossadSetAccount(email);
+            } catch (e) {}
+        }
+        return mossadGetAccount();
+    }
+
+    let _mossadAccountPromptPromise = null;
+    /** Компактное модальное окно ввода аккаунта контейнера (promise -> 'saved' | 'skipped' | 'cancelled'). */
+    function mossadOpenAccountPromptModal(opts = {}) {
+        const forceAsk = !!opts.force;
+        if (!forceAsk && _mossadAccountPromptPromise) return _mossadAccountPromptPromise;
+
+        const existing = document.getElementById('mossad-account-modal');
+        if (existing) existing.remove();
+
+        const p = new Promise((resolve) => {
+            const current = mossadGetAccount();
+            const guess = current || mossadGuessAccountHandle();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'mossad-account-modal';
+            overlay.style.cssText = `
+                position: fixed; inset: 0; z-index: 2147483647;
+                background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(4px);
+                display: flex; align-items: center; justify-content: center;
+                font-family: system-ui, -apple-system, sans-serif; color: #e5e7eb;
+            `;
+
+            const box = document.createElement('div');
+            box.style.cssText = `
+                width: min(390px, calc(100vw - 32px));
+                background: #111827; border: 1px solid #374151; border-radius: 12px;
+                padding: 16px; box-shadow: 0 20px 50px rgba(0,0,0,0.75);
+                display: flex; flex-direction: column; gap: 10px;
+            `;
+            box.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-size:14px;font-weight:700;color:#f3f4f6;">👤 Аккаунт для ${rootDomain}</span>
+                    <button id="mossad-acc-close" type="button" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:16px;padding:0 4px;">✕</button>
+                </div>
+                <div style="font-size:12px;color:#9ca3af;line-height:1.4;">
+                    Укажите e-mail или имя аккаунта этого контейнера для тега <code style="color:#93c5fd;">{account}</code> в имени файла. Сохраняется отдельно для текущего контейнера.
+                </div>
+                <input id="mossad-acc-input" type="text" placeholder="например: name@gmail.com"
+                    style="width:100%;box-sizing:border-box;background:#1f2937;border:1px solid #4b5563;border-radius:6px;color:#fff;padding:8px 10px;font-size:13px;outline:none;">
+                <div id="mossad-acc-hint" style="font-size:11px;color:#60a5fa;display:none;"></div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:2px;">
+                    <button id="mossad-acc-skip" type="button" style="background:#1f2937;border:1px solid #374151;border-radius:6px;color:#9ca3af;padding:6px 10px;cursor:pointer;font-size:12px;" title="Не задавать аккаунт и больше не спрашивать в этом контейнере">Пропустить</button>
+                    <button id="mossad-acc-save" type="button" style="background:#10b981;border:none;border-radius:6px;color:#fff;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:700;">💾 Сохранить</button>
+                </div>
+            `;
+            overlay.appendChild(box);
+            (document.body || document.documentElement).appendChild(overlay);
+
+            const inp = box.querySelector('#mossad-acc-input');
+            const hint = box.querySelector('#mossad-acc-hint');
+            if (guess) {
+                inp.value = guess;
+                if (!current) {
+                    hint.textContent = `Подсказка со страницы: ${guess}`;
+                    hint.style.display = 'block';
+                }
+            }
+
+            let settled = false;
+            const finish = (status) => {
+                if (settled) return;
+                settled = true;
+                overlay.remove();
+                _mossadAccountPromptPromise = null;
+                resolve(status);
+            };
+
+            const onSave = () => {
+                const val = inp.value.trim();
+                if (!val) {
+                    inp.style.borderColor = '#ef4444';
+                    inp.focus();
+                    return;
+                }
+                mossadSetAccount(val);
+                showToast(`👤 Аккаунт сохранён: ${val}`);
+                finish('saved');
+            };
+
+            box.querySelector('#mossad-acc-save').onclick = onSave;
+            box.querySelector('#mossad-acc-skip').onclick = () => {
+                mossadSetAccount('');
+                mossadSetAccountSkipped(true);
+                showToast('👤 Без аккаунта для этого контейнера');
+                finish('skipped');
+            };
+            box.querySelector('#mossad-acc-close').onclick = () => finish('cancelled');
+            overlay.onclick = (e) => { if (e.target === overlay) finish('cancelled'); };
+            inp.addEventListener('keydown', (e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') { e.preventDefault(); onSave(); }
+                else if (e.key === 'Escape') { e.preventDefault(); finish('cancelled'); }
+            });
+            setTimeout(() => { try { inp.focus(); inp.select(); } catch (e) {} }, 20);
+        });
+        if (!forceAsk) _mossadAccountPromptPromise = p;
+        return p;
+    }
+
+    /** Гарантирует проверку/запрос аккаунта перед первым скачиванием в контейнере. false = пользователь отменил. */
+    async function mossadEnsureAccountForDownload() {
+        if (mossadGetAccount() || mossadIsAccountSkipped()) return true;
+        const detected = await mossadAutoDetectAccountAsync();
+        if (detected) return true;
+        const res = await mossadOpenAccountPromptModal();
+        return res !== 'cancelled';
+    }
+
+    window.mossadGetAccount = mossadGetAccount;
+    window.mossadSetAccount = mossadSetAccount;
+    window.mossadOpenAccountPromptModal = mossadOpenAccountPromptModal;
+    window.mossadEnsureAccountForDownload = mossadEnsureAccountForDownload;
+
 

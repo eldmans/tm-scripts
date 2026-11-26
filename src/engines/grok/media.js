@@ -40,45 +40,132 @@
         return '';
     }
 
+    function _grokIsVisibleEl(el) {
+        if (!el || !el.isConnected) return false;
+        try {
+            const st = getComputedStyle(el);
+            if (st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 20 && r.height > 20;
+        } catch (e) { return false; }
+    }
+
+    function _grokViewportArea(el) {
+        try {
+            const r = el.getBoundingClientRect();
+            const vh = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+            const vw = Math.max(0, Math.min(r.right, window.innerWidth) - Math.max(r.left, 0));
+            return vh * vw;
+        } catch (e) { return 0; }
+    }
+
+    function _grokCenterProximityBonus(el) {
+        try {
+            const r = el.getBoundingClientRect();
+            const cx = r.left + r.width / 2;
+            const cy = r.top + r.height / 2;
+            const dx = cx - window.innerWidth / 2;
+            const dy = cy - window.innerHeight / 2;
+            const maxDist = Math.hypot(window.innerWidth, window.innerHeight) / 2 || 1;
+            const norm = Math.min(1, Math.hypot(dx, dy) / maxDist);
+            return Math.max(0, 1 - norm);
+        } catch (e) { return 0; }
+    }
+
+    function _grokExtractVideoSrc(video) {
+        if (!video) return '';
+        let src = '';
+        const sources = Array.from(video.querySelectorAll('source'));
+        for (const s of sources) {
+            if (s.src) { src = s.src; break; }
+        }
+        if (!src && video.currentSrc) src = video.currentSrc;
+        if (!src && video.src) src = video.src;
+        return src;
+    }
+
+    function _grokIsValidMediaImg(img) {
+        if (!img || !img.isConnected) return false;
+        if (img.closest(GROK_FILMSTRIP_SEL) || img.closest('#mossad-widget, [id^="mossad-"]')) return false;
+        const src = img.currentSrc || img.src || '';
+        if (!src) return false;
+        const s = src.toLowerCase();
+        if (s.includes('avatar') || s.includes('profile') || s.includes('pfp') || s.includes('icon') || s.includes('logo') || s.includes('favicon') || s.endsWith('.svg')) return false;
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        return (w >= 150 && h >= 150) || s.includes('share-images') || s.includes('imagine-public') || s.includes('assets.grok.com') || s.includes('/generated/');
+    }
+
+    function _grokImgMediaObj(img) {
+        const src = img.currentSrc || img.src || '';
+        let ext = 'jpg';
+        const srcLower = src.toLowerCase();
+        if (srcLower.includes('.png')) ext = 'png';
+        else if (srcLower.includes('.webp')) ext = 'webp';
+        else if (srcLower.includes('.gif')) ext = 'gif';
+        return { url: src, type: 'photo', ext };
+    }
+
+    function _grokFindActiveMediaInContainer(root, preferVisibleOnly = true) {
+        const vids = Array.from(root.querySelectorAll('video')).filter(v =>
+            v.isConnected && !v.closest(GROK_FILMSTRIP_SEL) && !v.closest('#mossad-widget, [id^="mossad-"]') && !!_grokExtractVideoSrc(v));
+        const imgs = Array.from(root.querySelectorAll('img')).filter(_grokIsValidMediaImg);
+
+        const candidates = [];
+        for (const v of vids) {
+            if (!_grokIsVisibleEl(v)) continue;
+            const area = _grokViewportArea(v);
+            if (preferVisibleOnly && area <= 0) continue;
+            const prox = _grokCenterProximityBonus(v);
+            const score = area * (1 + prox * 0.5) * ((!v.paused && !v.ended) ? 1.35 : 1.2);
+            candidates.push({ score, media: { url: _grokExtractVideoSrc(v), type: 'video', ext: 'mp4' } });
+        }
+        for (const img of imgs) {
+            if (!_grokIsVisibleEl(img)) continue;
+            const area = _grokViewportArea(img);
+            if (preferVisibleOnly && area <= 0) continue;
+            const prox = _grokCenterProximityBonus(img);
+            const score = area * (1 + prox * 0.5);
+            candidates.push({ score, media: _grokImgMediaObj(img) });
+        }
+        candidates.sort((a, b) => b.score - a.score);
+        return candidates.length > 0 ? candidates[0].media : null;
+    }
+
     /**
-     * Находит активный медиа-элемент на странице поста Grok (видео или изображение).
+     * Находит активный медиа-элемент на странице Grok (видео или изображение).
+     * На старом /imagine/post/ — приоритет у главного плеера; в /library и новом UI — диалог или самое видимое медиа в viewport.
      */
     function getGrokMedia() {
-        // 1. Видео
+        // 1. Новый UI / Library / диалог-просмотрщик (не /imagine/post/)
+        if (!isGrokPostPage()) {
+            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], [aria-modal="true"]'))
+                .filter(d => !d.closest('[id^="mossad"]') && _grokIsVisibleEl(d));
+            for (let i = dialogs.length - 1; i >= 0; i--) {
+                const inDlg = _grokFindActiveMediaInContainer(dialogs[i], false);
+                if (inDlg) return inDlg;
+            }
+            const inViewport = _grokFindActiveMediaInContainer(document, true);
+            if (inViewport) return inViewport;
+        }
+
+        // 2. Классическая страница поста (/imagine/post/...) или фоллбэк: Видео
         const video = getActiveVideo() || document.querySelector('main video, div[role="dialog"] video, video');
         if (video) {
-            let src = '';
-            const sources = Array.from(video.querySelectorAll('source'));
-            for (const s of sources) {
-                if (s.src) { src = s.src; break; }
-            }
-            if (!src && video.currentSrc) src = video.currentSrc;
-            if (!src && video.src) src = video.src;
+            const src = _grokExtractVideoSrc(video);
             if (src) return { url: src, type: 'video', ext: 'mp4' };
         }
 
-        // 2. Изображение
+        // 3. Изображение
         const candidates = Array.from(document.querySelectorAll('main img, div[role="dialog"] img, [data-filmstrip-item="true"] img, img'));
-        const validImgs = candidates.filter(img => {
-            if (!img.src) return false;
-            const s = img.src.toLowerCase();
-            if (s.includes('avatar') || s.includes('profile') || s.includes('pfp') || s.includes('icon')) return false;
-            const w = img.naturalWidth || img.width || 0;
-            const h = img.naturalHeight || img.height || 0;
-            return (w >= 150 && h >= 150) || s.includes('share-images') || s.includes('imagine-public') || s.includes('assets.grok.com');
-        }).sort((a, b) => {
+        const validImgs = candidates.filter(_grokIsValidMediaImg).sort((a, b) => {
             const areaA = (a.naturalWidth || a.width || 0) * (a.naturalHeight || a.height || 0);
             const areaB = (b.naturalWidth || b.width || 0) * (b.naturalHeight || b.height || 0);
             return areaB - areaA;
         });
 
         if (validImgs.length > 0) {
-            const bestImg = validImgs[0];
-            let ext = 'jpg';
-            const srcLower = bestImg.src.toLowerCase();
-            if (srcLower.includes('.png')) ext = 'png';
-            else if (srcLower.includes('.webp')) ext = 'webp';
-            return { url: bestImg.src, type: 'photo', ext };
+            return _grokImgMediaObj(validImgs[0]);
         }
 
         return null;
@@ -196,11 +283,12 @@
                 area = vh * vw;
             } catch (e) {}
             let score = 0;
+            if (v.closest && v.closest('div[role="dialog"], [aria-modal="true"]') && _grokIsVisibleEl(v)) score += 20;
             if (uuid && src.includes(uuid)) score += 8;
             else if (grokIsForeignVideo(v)) score -= 8; // ролик другой генерации
             if (!v.paused && !v.ended) score += 4;
             if (v.readyState >= 2) score += 1;
-            if (area > 0) score += 2;
+            if (area > 0) score += 2 + _grokCenterProximityBonus(v) * 2;
             // площадь — только для различения равных (0..1)
             score += Math.min(1, area / Math.max(1, window.innerWidth * window.innerHeight));
             if (score > bestScore) { best = v; bestScore = score; }

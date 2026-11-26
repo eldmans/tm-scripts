@@ -52,7 +52,13 @@
         try {
             if (rootDomain === 'grok.com') {
                 if (!grokAccountEmail()) await grokRefreshAccount(true);
-                if (typeof isGrokPostPage === 'function' && isGrokPostPage()) return grokFilenameContext(getGrokMedia());
+                const onPost = (typeof isGrokPostPage === 'function' && isGrokPostPage());
+                const onLib = (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
+                const isNew = (typeof grokEffectiveUiMode === 'function' && grokEffectiveUiMode() === 'new');
+                if (onPost || onLib || isNew) {
+                    const gm = typeof getGrokMedia === 'function' ? getGrokMedia() : null;
+                    if (gm || onPost || onLib) return grokFilenameContext(gm);
+                }
                 return mossadFilenameContext({});
             }
             if (rootDomain.includes('pinterest.')) {
