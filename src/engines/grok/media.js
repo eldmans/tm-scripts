@@ -366,3 +366,78 @@
         } catch (e) {}
         return { video, staleVideo, soundBtn, mainImg: grokFindMainImage(), imageBtn, makeVideoBtn, settled };
     }
+
+    // ============================================================
+    // v1.4.37: Повтор видео на Grok (R1 = loopSingle всегда, либо videoLoops > 1 вне слайдшоу)
+    // ============================================================
+    function grokSyncVideoLoopState(targetVideo = null) {
+        if (rootDomain !== 'grok.com') return;
+        const v = targetVideo || (typeof getActiveVideo === 'function' ? getActiveVideo() : null);
+        if (!v || !v.isConnected) return;
+        const inSlideshow = (typeof slideshowActive !== 'undefined' && slideshowActive);
+        if (inSlideshow) {
+            if (v._mossadForcedLoop) {
+                v.loop = false;
+                v._mossadForcedLoop = false;
+            }
+            return;
+        }
+        if (config && config.loopSingle) {
+            v.loop = true;
+            v._mossadForcedLoop = true;
+            if (v.ended && !v._mossadUserPaused) {
+                try { v.currentTime = 0; v.play().catch(() => {}); } catch (e) {}
+            }
+        } else if (v._mossadForcedLoop) {
+            v.loop = false;
+            v._mossadForcedLoop = false;
+        }
+    }
+    window.grokSyncVideoLoopState = grokSyncVideoLoopState;
+
+    if (rootDomain === 'grok.com' && typeof document !== 'undefined') {
+        const _syncEv = (e) => {
+            const v = e && e.target;
+            if (!v || v.tagName !== 'VIDEO') return;
+            if (typeof slideshowActive !== 'undefined' && slideshowActive) return;
+            const src = v.currentSrc || v.src || '';
+            if (e.type === 'play' || e.type === 'loadeddata') {
+                if (v._mossadStandaloneSrc !== src || (v._mossadStandaloneDone && v.currentTime < 0.5)) {
+                    v._mossadStandaloneLoops = 0;
+                    v._mossadStandaloneDone = false;
+                    v._mossadStandaloneSrc = src;
+                }
+            }
+            grokSyncVideoLoopState(v);
+        };
+        document.addEventListener('play', _syncEv, true);
+        document.addEventListener('playing', _syncEv, true);
+        document.addEventListener('loadeddata', _syncEv, true);
+        document.addEventListener('ended', (e) => {
+            const v = e && e.target;
+            if (!v || v.tagName !== 'VIDEO') return;
+            if (typeof slideshowActive !== 'undefined' && slideshowActive) return;
+            if (v._mossadUserPaused) return;
+            if (config && config.loopSingle) {
+                v.loop = true;
+                v._mossadForcedLoop = true;
+                try { v.currentTime = 0; v.play().catch(() => {}); } catch (err) {}
+                return;
+            }
+            const needLoops = Math.max(1, parseInt(config && config.videoLoops, 10) || 1);
+            if (needLoops > 1) {
+                const src = v.currentSrc || v.src || '';
+                if (v._mossadStandaloneSrc !== src) {
+                    v._mossadStandaloneSrc = src;
+                    v._mossadStandaloneLoops = 0;
+                }
+                v._mossadStandaloneLoops = (v._mossadStandaloneLoops || 0) + 1;
+                if (v._mossadStandaloneLoops < needLoops) {
+                    v._mossadStandaloneDone = false;
+                    try { v.currentTime = 0; v.play().catch(() => {}); } catch (err) {}
+                } else {
+                    v._mossadStandaloneDone = true;
+                }
+            }
+        }, true);
+    }

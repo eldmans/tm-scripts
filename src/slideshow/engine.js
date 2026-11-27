@@ -265,6 +265,14 @@
 
     let lastUrlForSlideshow = location.href;
     let lastActiveVideo = null;
+    let lastLibMediaKey = '';
+
+    function grokLibraryMediaKey() {
+        if (rootDomain !== 'grok.com' || typeof isGrokLibraryPage !== 'function' || !isGrokLibraryPage()) return '';
+        if (typeof getGrokMedia !== 'function') return '';
+        const m = getGrokMedia();
+        return m && m.url ? `${m.type}:${m.url}` : '';
+    }
 
     /** Ключ «слайда» для монитора: на Grok — UUID поста (смена query/replaceState того же поста — не новый слайд). */
     function slideKeyOf(url) {
@@ -283,12 +291,29 @@
         const currentUrl = location.href;
         const urlChanged = currentUrl !== lastUrlForSlideshow;
         const slideChanged = urlChanged && slideKeyOf(currentUrl) !== slideKeyOf(lastUrlForSlideshow);
+
+        const isGrokLib = (rootDomain === 'grok.com' && typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
+        const curLibKey = isGrokLib ? grokLibraryMediaKey() : '';
+        const libMediaChanged = isGrokLib && !!curLibKey && curLibKey !== lastLibMediaKey;
         
         let videoChanged = false;
         let currentVideo = lastActiveVideo;
-        if (urlChanged || !lastActiveVideo || !document.body.contains(lastActiveVideo)) {
+        if (libMediaChanged || urlChanged || !lastActiveVideo || !document.body.contains(lastActiveVideo)) {
             currentVideo = getActiveVideo();
             videoChanged = currentVideo !== lastActiveVideo && (currentVideo !== null || lastActiveVideo !== null);
+        }
+
+        if (libMediaChanged) {
+            lastLibMediaKey = curLibKey;
+            lastUrlForSlideshow = currentUrl;
+            lastActiveVideo = currentVideo;
+            if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
+            if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+            isCountingDown = false;
+            countdownSeconds = 0;
+            mossadPerfSnapshot('slide');
+            requestSlideCycle(150, 'library-media-changed');
+            return;
         }
         
         if (urlChanged && !slideChanged && !videoChanged) {
@@ -346,6 +371,8 @@
             const ind = document.getElementById('mossad-gallery-indicator');
             if (ind) ind.remove();
             updateGalleryStatusBtn('idle');
+            lastLibMediaKey = '';
+            if (typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
         }
         if (window.updateWidgetUI) window.updateWidgetUI();
     }
@@ -360,8 +387,10 @@
                 sessionStorage.removeItem('mossad_gallery_paused');
                 const ind = document.getElementById('mossad-gallery-indicator');
                 if (ind) ind.remove();
+                lastLibMediaKey = grokLibraryMediaKey();
             }
             slideshowActive = true;
+            if (rootDomain === 'grok.com' && typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
             setSlideshowPaused(false);
             sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
             sessionStorage.setItem(SESSION_STATE_KEY, 'bar');
@@ -427,6 +456,9 @@
             // Малое слайдшоу управляется D-Pad и петлей R
             const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
             const startUrl = location.href;
+            const isGrokLib = (rootDomain === 'grok.com' && typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
+            const startMediaKey = isGrokLib ? grokLibraryMediaKey() : '';
+            const didAdvance = () => (location.href !== startUrl) || (isGrokLib && grokLibraryMediaKey() !== startMediaKey);
 
             const sendSlideStep = () => {
                 if (typeof performDpadStep === 'function') {
@@ -449,25 +481,25 @@
             // Проверяем через 1 секунду
             setTimeout(() => {
                 if (!slideshowActive || slideshowPaused || _isRewinding) return;
-                if (location.href !== startUrl) return; // Успешно перелистнулось с 1-й попытки
+                if (didAdvance()) return; // Успешно перелистнулось с 1-й попытки
 
-                // Попытка 2: URL не изменился через 1 секунду
+                // Попытка 2: URL / медиа не изменилось через 1 секунду
                 console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
                 sendSlideStep();
 
                 // Проверяем через 3 секунды (на 4-й секунде от начала)
                 setTimeout(() => {
                     if (!slideshowActive || slideshowPaused || _isRewinding) return;
-                    if (location.href !== startUrl) return; // Успешно перелистнулось со 2-й попытки
+                    if (didAdvance()) return; // Успешно перелистнулось со 2-й попытки
 
-                    // Попытка 3: URL всё ещё не изменился через 3 секунды
+                    // Попытка 3: URL / медиа всё ещё не изменилось через 3 секунды
                     console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
                     sendSlideStep();
 
                     // Даем 1 секунду на завершение 3-й попытки
                     setTimeout(() => {
                         if (!slideshowActive || slideshowPaused || _isRewinding) return;
-                        if (location.href !== startUrl) return; // Успешно перелистнулось с 3-й попытки
+                        if (didAdvance()) return; // Успешно перелистнулось с 3-й попытки
 
                         // URL так и не изменился после 3 попыток -> дошёл до конца ленты, упёрся
                         console.warn('[MOSSAD] Достигнут конец ленты (3 попытки без смены URL)');
@@ -616,6 +648,18 @@
             mossadPerfStep('grokDecideSlideMedia', _pt);
             if (res === true) return;
             grokVideo = res; // найден свежий <video> просмотрщика — это видео, что бы ни говорил сбор
+        } else if (rootDomain === 'grok.com' && typeof isGrokLibraryPage === 'function' && isGrokLibraryPage()) {
+            const libMedia = (typeof getGrokMedia === 'function') ? getGrokMedia() : null;
+            if (libMedia) {
+                lastLibMediaKey = `${libMedia.type}:${libMedia.url}`;
+                if (libMedia.type === 'photo') {
+                    startPhotoCountdown(initSec, 'grok-library:photo');
+                    return;
+                }
+                if (libMedia.type === 'video') {
+                    grokVideo = getActiveVideo();
+                }
+            }
         }
 
         const detectedType = grokVideo ? 'video' : getPinMediaType();
@@ -631,6 +675,11 @@
         }
 
         if (video) {
+            // Во время слайдшоу отключаем принудительный бесконечный loop (R1), чтобы видео крутилось ровно config.videoLoops раз и переходило дальше
+            if (rootDomain === 'grok.com' && video._mossadForcedLoop) {
+                video.loop = false;
+                video._mossadForcedLoop = false;
+            }
             if (video.paused) {
                 try { video.play().catch(() => {}); } catch(e) {}
             }
@@ -665,18 +714,19 @@
             _videoReachedEndZone = false;
             _videoDetachedSince = 0;
             _endedConsumed = false;
-            // v1.4.17: Прямой слушатель события ended для мгновенного авто-перехода (Shorts, Reels, хостинги)
+            // v1.4.17 / v1.4.37: Прямой слушатель события ended — перезапуск до config.videoLoops или переход на следующий слайд
             if (!video._mossadEndedWired) {
                 video._mossadEndedWired = true;
                 video.addEventListener('ended', () => {
-                    if (!slideshowActive) return;
-                    if (config.videoAutoAdvanceOnEnd !== false) {
-                        mossadDebug('ended', 'видео завершилось (событие onended)');
-                        _videoReachedEndZone = true;
-                        if (currentVideoNode === video && !_endedConsumed) {
-                            _endedConsumed = true;
-                            currentLoopCount++;
-                            if (currentLoopCount >= config.videoLoops) {
+                    if (!slideshowActive || slideshowPaused) return;
+                    if (currentVideoNode !== video) return;
+                    mossadDebug('ended', 'видео завершилось (событие onended)');
+                    _videoReachedEndZone = true;
+                    if (!_endedConsumed) {
+                        _endedConsumed = true;
+                        currentLoopCount++;
+                        if (currentLoopCount >= config.videoLoops) {
+                            if (config.videoAutoAdvanceOnEnd !== false) {
                                 countdownSeconds = config.delayAfterVideo;
                                 if (countdownSeconds > 0) {
                                     isCountingDown = true;
@@ -685,6 +735,12 @@
                                     triggerNextSlide('video-onended');
                                 }
                             }
+                        } else {
+                            // Незацикленный плеер (например, /library) и videoLoops > 1 — запускаем следующий круг
+                            _endedConsumed = false;
+                            _videoReachedEndZone = false;
+                            lastTime = 0;
+                            try { video.currentTime = 0; video.play().catch(() => {}); } catch (e) {}
                         }
                     }
                 });
@@ -771,6 +827,7 @@
         mossadDebug('cycle', 'сброс состояния слайдов (повтор)', { reason });
         _lastCycleSlideKey = '';
         _lastCycleVideoSrc = '';
+        lastLibMediaKey = '';
         lastActiveVideo = null;
         _stallNode = null;
         _grokDetectStartedAt = 0;

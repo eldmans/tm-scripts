@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MOSSAD (Media Objects Slideshow and Download)
 // @namespace    http://tampermonkey.net/
-// @version      1.4.36
+// @version      1.4.37
 // @description  Универсальный скрипт для авто-слайдшоу, скачивания медиа и горячих клавиш.
 // @author       Antigravity
 // @match        *://*/*
@@ -836,7 +836,7 @@ mossadLightRenderSettings(p.querySelector('[data-body]'));
 try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('🎬 MOSSAD: видео и DND', mossadLightOpenPanel); } catch (e) {}
 
 // ── src/core/domain.js ──
-const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.36';
+const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) ? GM_info.script.version : '1.4.37';
 console.log(`%c[MOSSAD v${SCRIPT_VERSION}] Скрипт загружен`, 'color:#10b981; font-weight:bold');
 const hostname = location.hostname.toLowerCase();
 function getRootDomain(host) {
@@ -1076,6 +1076,7 @@ slideshowMode: 'auto',
 slideshowOrientation: 'h',
 slideshowLoopMode: 'off',
 loopFeed: false,
+loopSingle: false,
 slideshowDirections: ['up'],
 videoLoops: 1,
 videoAutoAdvanceOnEnd: true,
@@ -1193,7 +1194,7 @@ try { GM_setValue(SITE_CONFIG_GM_KEY, JSON.stringify(config)); } catch (_) {}
 } catch (e) {}
 const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
 const GLOBAL_DEFAULT_KEYS = [
-'slideshowDelay', 'videoLoops', 'videoAutoAdvanceOnEnd', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
+'slideshowDelay', 'videoLoops', 'videoAutoAdvanceOnEnd', 'delayAfterVideo', 'slideshowDirections', 'loopFeed', 'loopSingle',
 'downloadType', 'pdAction', 'filenameTemplateEnabled',
 'stopOnTabSwitch', 'stopOnBrsrSwitch', 'playInWindowMode', 'floatOnTabSwitch', 'floatWinWidth', 'floatWinHeight', 'floatWinLeft', 'floatWinTop',
 'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'checkHistory', 'hfWarnUnsaved', 'hfDownloadInput', 'dblPosition',
@@ -2297,6 +2298,15 @@ window.MOSSAD_ENGINES.redgifs.navigate(dir);
 return true;
 }
 if (rootDomain === 'grok.com') {
+if (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage()) {
+const navBtn = findGrokNavButton(dir);
+if (navBtn) {
+triggerClick(navBtn, `Grok Library Nav (${dir})`);
+return true;
+}
+sendDpadKeyEvent(getArrowKey(dir));
+return true;
+}
 if ((dir === 'left' || dir === 'right') && isGrokPostPage()) {
 {
 const stepRes = grokStepFilmstrip(isFwd);
@@ -3301,6 +3311,7 @@ const LABEL_DEFS = [
 ['dpadRight', '▶', 'D-pad: листать вправо'],
 ['dpadDown', '▼', 'D-pad: листать вниз'],
 ['dpadLoop', 'R', 'D-pad: повторять ленту'],
+['dpadLoop1', 'R1', 'D-pad: повторять один файл (всегда повтор на Grok)'],
 ['loopsLabel', 'Видео (↺):', 'надпись у поля «кругов видео»'],
 ['photoLabel', 'Фото (сек):', 'надпись у поля «показ фото»'],
 ['pauseLabel', 'Пауза (сек):', 'надпись у поля «пауза после видео»'],
@@ -5789,6 +5800,76 @@ makeVideoBtn = Array.from(document.querySelectorAll('button, [role="button"], a'
 GROK_MAKE_VIDEO_RE.test([el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].map(x => x || '').join(' '))) || null;
 } catch (e) {}
 return { video, staleVideo, soundBtn, mainImg: grokFindMainImage(), imageBtn, makeVideoBtn, settled };
+}
+function grokSyncVideoLoopState(targetVideo = null) {
+if (rootDomain !== 'grok.com') return;
+const v = targetVideo || (typeof getActiveVideo === 'function' ? getActiveVideo() : null);
+if (!v || !v.isConnected) return;
+const inSlideshow = (typeof slideshowActive !== 'undefined' && slideshowActive);
+if (inSlideshow) {
+if (v._mossadForcedLoop) {
+v.loop = false;
+v._mossadForcedLoop = false;
+}
+return;
+}
+if (config && config.loopSingle) {
+v.loop = true;
+v._mossadForcedLoop = true;
+if (v.ended && !v._mossadUserPaused) {
+try { v.currentTime = 0; v.play().catch(() => {}); } catch (e) {}
+}
+} else if (v._mossadForcedLoop) {
+v.loop = false;
+v._mossadForcedLoop = false;
+}
+}
+window.grokSyncVideoLoopState = grokSyncVideoLoopState;
+if (rootDomain === 'grok.com' && typeof document !== 'undefined') {
+const _syncEv = (e) => {
+const v = e && e.target;
+if (!v || v.tagName !== 'VIDEO') return;
+if (typeof slideshowActive !== 'undefined' && slideshowActive) return;
+const src = v.currentSrc || v.src || '';
+if (e.type === 'play' || e.type === 'loadeddata') {
+if (v._mossadStandaloneSrc !== src || (v._mossadStandaloneDone && v.currentTime < 0.5)) {
+v._mossadStandaloneLoops = 0;
+v._mossadStandaloneDone = false;
+v._mossadStandaloneSrc = src;
+}
+}
+grokSyncVideoLoopState(v);
+};
+document.addEventListener('play', _syncEv, true);
+document.addEventListener('playing', _syncEv, true);
+document.addEventListener('loadeddata', _syncEv, true);
+document.addEventListener('ended', (e) => {
+const v = e && e.target;
+if (!v || v.tagName !== 'VIDEO') return;
+if (typeof slideshowActive !== 'undefined' && slideshowActive) return;
+if (v._mossadUserPaused) return;
+if (config && config.loopSingle) {
+v.loop = true;
+v._mossadForcedLoop = true;
+try { v.currentTime = 0; v.play().catch(() => {}); } catch (err) {}
+return;
+}
+const needLoops = Math.max(1, parseInt(config && config.videoLoops, 10) || 1);
+if (needLoops > 1) {
+const src = v.currentSrc || v.src || '';
+if (v._mossadStandaloneSrc !== src) {
+v._mossadStandaloneSrc = src;
+v._mossadStandaloneLoops = 0;
+}
+v._mossadStandaloneLoops = (v._mossadStandaloneLoops || 0) + 1;
+if (v._mossadStandaloneLoops < needLoops) {
+v._mossadStandaloneDone = false;
+try { v.currentTime = 0; v.play().catch(() => {}); } catch (err) {}
+} else {
+v._mossadStandaloneDone = true;
+}
+}
+}, true);
 }
 
 // ── src/engines/grok/download.js ──
@@ -13209,6 +13290,13 @@ return false;
 }
 let lastUrlForSlideshow = location.href;
 let lastActiveVideo = null;
+let lastLibMediaKey = '';
+function grokLibraryMediaKey() {
+if (rootDomain !== 'grok.com' || typeof isGrokLibraryPage !== 'function' || !isGrokLibraryPage()) return '';
+if (typeof getGrokMedia !== 'function') return '';
+const m = getGrokMedia();
+return m && m.url ? `${m.type}:${m.url}` : '';
+}
 function slideKeyOf(url) {
 if (rootDomain === 'grok.com') {
 try {
@@ -13223,11 +13311,26 @@ if (!slideshowActive || _isRewinding) return;
 const currentUrl = location.href;
 const urlChanged = currentUrl !== lastUrlForSlideshow;
 const slideChanged = urlChanged && slideKeyOf(currentUrl) !== slideKeyOf(lastUrlForSlideshow);
+const isGrokLib = (rootDomain === 'grok.com' && typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
+const curLibKey = isGrokLib ? grokLibraryMediaKey() : '';
+const libMediaChanged = isGrokLib && !!curLibKey && curLibKey !== lastLibMediaKey;
 let videoChanged = false;
 let currentVideo = lastActiveVideo;
-if (urlChanged || !lastActiveVideo || !document.body.contains(lastActiveVideo)) {
+if (libMediaChanged || urlChanged || !lastActiveVideo || !document.body.contains(lastActiveVideo)) {
 currentVideo = getActiveVideo();
 videoChanged = currentVideo !== lastActiveVideo && (currentVideo !== null || lastActiveVideo !== null);
+}
+if (libMediaChanged) {
+lastLibMediaKey = curLibKey;
+lastUrlForSlideshow = currentUrl;
+lastActiveVideo = currentVideo;
+if (slideshowTimeoutId) { clearTimeout(slideshowTimeoutId); slideshowTimeoutId = null; }
+if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+isCountingDown = false;
+countdownSeconds = 0;
+mossadPerfSnapshot('slide');
+requestSlideCycle(150, 'library-media-changed');
+return;
 }
 if (urlChanged && !slideChanged && !videoChanged) {
 lastUrlForSlideshow = currentUrl;
@@ -13271,6 +13374,8 @@ window._mossadGalleryPaused = false;
 const ind = document.getElementById('mossad-gallery-indicator');
 if (ind) ind.remove();
 updateGalleryStatusBtn('idle');
+lastLibMediaKey = '';
+if (typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
 }
 if (window.updateWidgetUI) window.updateWidgetUI();
 }
@@ -13283,8 +13388,10 @@ _gSS.removeItem(GALLERY_SS_KEY);
 sessionStorage.removeItem('mossad_gallery_paused');
 const ind = document.getElementById('mossad-gallery-indicator');
 if (ind) ind.remove();
+lastLibMediaKey = grokLibraryMediaKey();
 }
 slideshowActive = true;
+if (rootDomain === 'grok.com' && typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
 setSlideshowPaused(false);
 sessionStorage.setItem(SESSION_ACTIVE_KEY, 'true');
 sessionStorage.setItem(SESSION_STATE_KEY, 'bar');
@@ -13333,6 +13440,9 @@ return;
 }
 const dPadDir = (dirs && dirs.length) ? dirs[0] : 'down';
 const startUrl = location.href;
+const isGrokLib = (rootDomain === 'grok.com' && typeof isGrokLibraryPage === 'function' && isGrokLibraryPage());
+const startMediaKey = isGrokLib ? grokLibraryMediaKey() : '';
+const didAdvance = () => (location.href !== startUrl) || (isGrokLib && grokLibraryMediaKey() !== startMediaKey);
 const sendSlideStep = () => {
 if (typeof performDpadStep === 'function') {
 performDpadStep(dPadDir, true);
@@ -13350,17 +13460,17 @@ triggerUniversalFullScreen();
 sendSlideStep();
 setTimeout(() => {
 if (!slideshowActive || slideshowPaused || _isRewinding) return;
-if (location.href !== startUrl) return;
+if (didAdvance()) return;
 console.log('[MOSSAD] Конец ленты? Попытка 2 (через 1с)...');
 sendSlideStep();
 setTimeout(() => {
 if (!slideshowActive || slideshowPaused || _isRewinding) return;
-if (location.href !== startUrl) return;
+if (didAdvance()) return;
 console.log('[MOSSAD] Конец ленты? Попытка 3 (на 4-й секунде)...');
 sendSlideStep();
 setTimeout(() => {
 if (!slideshowActive || slideshowPaused || _isRewinding) return;
-if (location.href !== startUrl) return;
+if (didAdvance()) return;
 console.warn('[MOSSAD] Достигнут конец ленты (3 попытки без смены URL)');
 if (config.loopFeed) {
 showToast('🔄 Конец ленты: повтор плейлиста (R)...');
@@ -13478,6 +13588,18 @@ const res = grokDecideSlideMedia(initSec, retryCount);
 mossadPerfStep('grokDecideSlideMedia', _pt);
 if (res === true) return;
 grokVideo = res;
+} else if (rootDomain === 'grok.com' && typeof isGrokLibraryPage === 'function' && isGrokLibraryPage()) {
+const libMedia = (typeof getGrokMedia === 'function') ? getGrokMedia() : null;
+if (libMedia) {
+lastLibMediaKey = `${libMedia.type}:${libMedia.url}`;
+if (libMedia.type === 'photo') {
+startPhotoCountdown(initSec, 'grok-library:photo');
+return;
+}
+if (libMedia.type === 'video') {
+grokVideo = getActiveVideo();
+}
+}
 }
 const detectedType = grokVideo ? 'video' : getPinMediaType();
 const video = grokVideo || getActiveVideo();
@@ -13489,6 +13611,10 @@ runPhotoTimer('photo-timer');
 return;
 }
 if (video) {
+if (rootDomain === 'grok.com' && video._mossadForcedLoop) {
+video.loop = false;
+video._mossadForcedLoop = false;
+}
 if (video.paused) {
 try { video.play().catch(() => {}); } catch(e) {}
 }
@@ -13524,14 +13650,15 @@ _endedConsumed = false;
 if (!video._mossadEndedWired) {
 video._mossadEndedWired = true;
 video.addEventListener('ended', () => {
-if (!slideshowActive) return;
-if (config.videoAutoAdvanceOnEnd !== false) {
+if (!slideshowActive || slideshowPaused) return;
+if (currentVideoNode !== video) return;
 mossadDebug('ended', 'видео завершилось (событие onended)');
 _videoReachedEndZone = true;
-if (currentVideoNode === video && !_endedConsumed) {
+if (!_endedConsumed) {
 _endedConsumed = true;
 currentLoopCount++;
 if (currentLoopCount >= config.videoLoops) {
+if (config.videoAutoAdvanceOnEnd !== false) {
 countdownSeconds = config.delayAfterVideo;
 if (countdownSeconds > 0) {
 isCountingDown = true;
@@ -13540,6 +13667,11 @@ runPhotoTimer('video-onended');
 triggerNextSlide('video-onended');
 }
 }
+} else {
+_endedConsumed = false;
+_videoReachedEndZone = false;
+lastTime = 0;
+try { video.currentTime = 0; video.play().catch(() => {}); } catch (e) {}
 }
 }
 });
@@ -13601,6 +13733,7 @@ function resetSlideTrackingState(reason) {
 mossadDebug('cycle', 'сброс состояния слайдов (повтор)', { reason });
 _lastCycleSlideKey = '';
 _lastCycleVideoSrc = '';
+lastLibMediaKey = '';
 lastActiveVideo = null;
 _stallNode = null;
 _grokDetectStartedAt = 0;
@@ -15773,6 +15906,18 @@ Settings.save();
 showToast(config.loopFeed ? '🔁 Повтор (Loop): ВКЛ' : '➡️ Повтор (Loop): ВЫКЛ');
 window.updateSlideshowHud();
 };
+const btnHudLoop1 = document.createElement('button');
+btnHudLoop1.id = 'mossad-hud-loop1';
+btnHudLoop1.textContent = 'R1';
+btnHudLoop1.title = 'Повтор одного файла (R1): видео на Grok всегда зациклено; в слайдшоу — переход после кругов';
+btnHudLoop1.style.cssText = `background: #1f2937; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; cursor: pointer; padding: 3px 5px; font-size: 10px; font-weight: 700; transition: all 0.2s;`;
+btnHudLoop1.onclick = (e) => {
+e.stopPropagation();
+Settings.set('loopSingle', !config.loopSingle);
+if (rootDomain === 'grok.com' && typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
+showToast(config.loopSingle ? '🔂 Повтор одного файла (R1): ВКЛ' : '➡️ Повтор одного файла (R1): ВЫКЛ');
+window.updateSlideshowHud();
+};
 let _savedVideoSec = config.videoDuration || 15;
 const btnHudVideo = document.createElement('button');
 btnHudVideo.id = 'mossad-hud-video';
@@ -15824,7 +15969,7 @@ showToast(`⏸ Пауза: ${config.pauseDuration} с`);
 Settings.save();
 window.updateSlideshowHud();
 };
-hudRow.append(btnHudDL, hudArrow, btnHudRewind, btnHudLoop, btnHudVideo, btnHudPhoto, btnHudPause);
+hudRow.append(btnHudDL, hudArrow, btnHudRewind, btnHudLoop, btnHudLoop1, btnHudVideo, btnHudPhoto, btnHudPause);
 window.updateSlideshowHud = () => {
 const isRunning = !!(slideshowActive || window._mossadGalleryActive || (sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true'));
 if (!isRunning) {
@@ -15843,6 +15988,8 @@ hudArrow.textContent = arrows[dir] || '↓';
 hudArrow.title = `Направление слайд-шоу: ${dir}`;
 btnHudLoop.style.color = config.loopFeed ? '#3b82f6' : '#6b7280';
 btnHudLoop.style.borderColor = config.loopFeed ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)';
+btnHudLoop1.style.color = config.loopSingle ? '#10b981' : '#6b7280';
+btnHudLoop1.style.borderColor = config.loopSingle ? 'rgba(16,185,129,0.6)' : 'rgba(255,255,255,0.1)';
 btnHudVideo.textContent = `📹 ${config.videoDuration || 15}s`;
 btnHudVideo.style.borderColor = (config.videoDuration === 1) ? '#38bdf8' : 'rgba(255,255,255,0.1)';
 btnHudPhoto.textContent = `🖼 ${config.photoDuration || 5}s`;
@@ -15928,7 +16075,7 @@ panel.innerHTML = `
                     <div style="display: grid; grid-template-columns: 24px 24px 24px; grid-template-rows: 24px 24px 24px; gap: 2px; align-items: center; justify-items: center;">
                         <div></div>
                         <button class="mossad-dpad" data-dir="up" title="Листать вверх" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadUp">${LH('dpadUp')}</button>
-                        <div></div>
+                        <button id="mossad-dpad-loop1" title="Повтор одного файла (R1): видео на Grok всегда зациклено; в слайдшоу переходит к следующему после заданного числа кругов" style="background: ${config.loopSingle ? '#10b981' : '#1f2937'}; border: 1px solid ${config.loopSingle ? '#059669' : '#374151'}; color: ${config.loopSingle ? '#fff' : '#9ca3af'}; width:24px; height:24px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:10px; padding:0; display:flex; align-items:center; justify-content:center; transition:all 0.2s;" data-mossad-label="dpadLoop1">${LH('dpadLoop1')}</button>
                         <button class="mossad-dpad" data-dir="left" title="Листать влево" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadLeft">${LH('dpadLeft')}</button>
                         <button id="mossad-dpad-loop" title="Повторять плейлист (R): перемотка на начало при конце ленты" style="background: ${config.loopFeed ? '#10b981' : '#1f2937'}; border: 1px solid ${config.loopFeed ? '#059669' : '#374151'}; color: ${config.loopFeed ? '#fff' : '#9ca3af'}; width:24px; height:24px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px; padding:0; display:flex; align-items:center; justify-content:center; transition:all 0.2s;" data-mossad-label="dpadLoop">${LH('dpadLoop')}</button>
                         <button class="mossad-dpad" data-dir="right" title="Листать вправо" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadRight">${LH('dpadRight')}</button>
@@ -16068,6 +16215,16 @@ showToast(nextVal ? '🔁 Повтор плейлиста включен (R)' : 
 window.updateWidgetUI();
 };
 }
+const btnLoop1 = panel.querySelector('#mossad-dpad-loop1');
+if (btnLoop1) {
+btnLoop1.onclick = () => {
+const nextVal = !config.loopSingle;
+Settings.set('loopSingle', nextVal);
+if (rootDomain === 'grok.com' && typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
+showToast(nextVal ? '🔂 Повтор одного файла включен (R1)' : '➡️ Повтор одного файла выключен');
+window.updateWidgetUI();
+};
+}
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 if (isPinterest) {
 const paintPinterestSegs = () => {
@@ -16133,7 +16290,10 @@ cbFS.onchange = (e) => Settings.set('pinterestAutoFS', e.target.checked);
 }
 }
 const numOr = (v, fallback) => { const n = parseFloat(v); return isFinite(n) ? n : fallback; };
-panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, Math.round(numOr(e.target.value, config.videoLoops)))), 300);
+panel.querySelector('#mossad-in-loops').oninput = debounce((e) => {
+Settings.set('videoLoops', Math.max(1, Math.round(numOr(e.target.value, config.videoLoops))));
+if (rootDomain === 'grok.com' && typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
+}, 300);
 panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(0, numOr(e.target.value, config.slideshowDelay))), 300);
 panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, numOr(e.target.value, config.delayAfterVideo))), 300);
 const btnDlPhoto = panel.querySelector('#mossad-btn-dl-photo');
@@ -17893,6 +18053,7 @@ const GLOBAL_DEFAULTS_FIELDS = [
 { k: 'delayAfterVideo', t: 'num', label: 'Пауза после видео, сек', step: 0.5, min: 0 },
 { k: 'slideshowDirections', t: 'dirs', label: 'Направления D-pad' },
 { k: 'loopFeed', t: 'bool', label: 'R: повторять ленту' },
+{ k: 'loopSingle', t: 'bool', label: 'R1: повторять один файл' },
 { k: 'downloadType', t: 'sel', label: 'Скачивание', opts: [['none', 'Не скачивать'], ['all', 'Качать всё'], ['photo', 'Качать фото'], ['video', 'Качать видео']] },
 { k: 'pdAction', t: 'sel', label: 'После скачивания', opts: [['none', '—'], ['upns', 'Не СШ +1'], ['always', '+1 всегда'], ['del', 'Delete (Grok)']] },
 { k: 'filenameTemplateEnabled', t: 'bool', label: 'Использовать шаблон' },
@@ -18568,7 +18729,7 @@ return `
                 </div>
             </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-26</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-27</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>

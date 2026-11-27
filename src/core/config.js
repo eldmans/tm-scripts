@@ -6,6 +6,7 @@
         slideshowOrientation: 'h',
         slideshowLoopMode: 'off',
         loopFeed: false,              // R в D-pad: повторять текущий плейлист (перемотка в начало при конце ленты)
+        loopSingle: false,            // R1 в D-pad: повторять один файл (всегда зацикливать текущее видео на Grok)
         slideshowDirections: ['up'],  // листание вверх по умолчанию
         // v1.3.36: значения по умолчанию — по эталонной панели владельца (только для доменов без сохранённых настроек)
         videoLoops: 1,                // Видео (↺): 1 круг
@@ -134,7 +135,7 @@
     // Сохранённые настройки сайтов не трогаются. Заводские значения — запасной вариант.
     const GLOBAL_DEFAULTS_GM_KEY = 'mossad_global_defaults';
     const GLOBAL_DEFAULT_KEYS = [
-        'slideshowDelay', 'videoLoops', 'videoAutoAdvanceOnEnd', 'delayAfterVideo', 'slideshowDirections', 'loopFeed',
+        'slideshowDelay', 'videoLoops', 'videoAutoAdvanceOnEnd', 'delayAfterVideo', 'slideshowDirections', 'loopFeed', 'loopSingle',
         'downloadType', 'pdAction', 'filenameTemplateEnabled',
         'stopOnTabSwitch', 'stopOnBrsrSwitch', 'playInWindowMode', 'floatOnTabSwitch', 'floatWinWidth', 'floatWinHeight', 'floatWinLeft', 'floatWinTop',
         'deleteAutoconfirm', 'deleteHoldpost', 'allowDuplicates', 'checkHistory', 'hfWarnUnsaved', 'hfDownloadInput', 'dblPosition',

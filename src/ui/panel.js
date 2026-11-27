@@ -455,7 +455,7 @@
             showToast('⟲ Шаг назад (Alt+R)');
         };
 
-        // 4. Повтор (Loop / R)
+        // 4. Повтор (Loop / R) и Повтор одного файла (R1)
         const btnHudLoop = document.createElement('button');
         btnHudLoop.id = 'mossad-hud-loop';
         btnHudLoop.textContent = 'R';
@@ -466,6 +466,19 @@
             config.loopFeed = !config.loopFeed;
             Settings.save();
             showToast(config.loopFeed ? '🔁 Повтор (Loop): ВКЛ' : '➡️ Повтор (Loop): ВЫКЛ');
+            window.updateSlideshowHud();
+        };
+
+        const btnHudLoop1 = document.createElement('button');
+        btnHudLoop1.id = 'mossad-hud-loop1';
+        btnHudLoop1.textContent = 'R1';
+        btnHudLoop1.title = 'Повтор одного файла (R1): видео на Grok всегда зациклено; в слайдшоу — переход после кругов';
+        btnHudLoop1.style.cssText = `background: #1f2937; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; cursor: pointer; padding: 3px 5px; font-size: 10px; font-weight: 700; transition: all 0.2s;`;
+        btnHudLoop1.onclick = (e) => {
+            e.stopPropagation();
+            Settings.set('loopSingle', !config.loopSingle);
+            if (rootDomain === 'grok.com' && typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
+            showToast(config.loopSingle ? '🔂 Повтор одного файла (R1): ВКЛ' : '➡️ Повтор одного файла (R1): ВЫКЛ');
             window.updateSlideshowHud();
         };
 
@@ -526,7 +539,7 @@
             window.updateSlideshowHud();
         };
 
-        hudRow.append(btnHudDL, hudArrow, btnHudRewind, btnHudLoop, btnHudVideo, btnHudPhoto, btnHudPause);
+        hudRow.append(btnHudDL, hudArrow, btnHudRewind, btnHudLoop, btnHudLoop1, btnHudVideo, btnHudPhoto, btnHudPause);
 
         window.updateSlideshowHud = () => {
             const isRunning = !!(slideshowActive || window._mossadGalleryActive || (sessionStorage.getItem(SESSION_ACTIVE_KEY) === 'true'));
@@ -549,9 +562,11 @@
             hudArrow.textContent = arrows[dir] || '↓';
             hudArrow.title = `Направление слайд-шоу: ${dir}`;
 
-            // 4. Повтор R
+            // 4. Повтор R и R1
             btnHudLoop.style.color = config.loopFeed ? '#3b82f6' : '#6b7280';
             btnHudLoop.style.borderColor = config.loopFeed ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)';
+            btnHudLoop1.style.color = config.loopSingle ? '#10b981' : '#6b7280';
+            btnHudLoop1.style.borderColor = config.loopSingle ? 'rgba(16,185,129,0.6)' : 'rgba(255,255,255,0.1)';
 
             // 5. Видео
             btnHudVideo.textContent = `📹 ${config.videoDuration || 15}s`;
@@ -650,7 +665,7 @@
                     <div style="display: grid; grid-template-columns: 24px 24px 24px; grid-template-rows: 24px 24px 24px; gap: 2px; align-items: center; justify-items: center;">
                         <div></div>
                         <button class="mossad-dpad" data-dir="up" title="Листать вверх" style="background: ${dirs.includes('up') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadUp">${LH('dpadUp')}</button>
-                        <div></div>
+                        <button id="mossad-dpad-loop1" title="Повтор одного файла (R1): видео на Grok всегда зациклено; в слайдшоу переходит к следующему после заданного числа кругов" style="background: ${config.loopSingle ? '#10b981' : '#1f2937'}; border: 1px solid ${config.loopSingle ? '#059669' : '#374151'}; color: ${config.loopSingle ? '#fff' : '#9ca3af'}; width:24px; height:24px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:10px; padding:0; display:flex; align-items:center; justify-content:center; transition:all 0.2s;" data-mossad-label="dpadLoop1">${LH('dpadLoop1')}</button>
                         <button class="mossad-dpad" data-dir="left" title="Листать влево" style="background: ${dirs.includes('left') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadLeft">${LH('dpadLeft')}</button>
                         <button id="mossad-dpad-loop" title="Повторять плейлист (R): перемотка на начало при конце ленты" style="background: ${config.loopFeed ? '#10b981' : '#1f2937'}; border: 1px solid ${config.loopFeed ? '#059669' : '#374151'}; color: ${config.loopFeed ? '#fff' : '#9ca3af'}; width:24px; height:24px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px; padding:0; display:flex; align-items:center; justify-content:center; transition:all 0.2s;" data-mossad-label="dpadLoop">${LH('dpadLoop')}</button>
                         <button class="mossad-dpad" data-dir="right" title="Листать вправо" style="background: ${dirs.includes('right') ? '#10b981' : '#1f2937'}; border: 1px solid #374151; color: #fff; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:11px; padding:0; display:flex; align-items:center; justify-content:center;" data-mossad-label="dpadRight">${LH('dpadRight')}</button>
@@ -792,6 +807,16 @@
                     window.updateWidgetUI();
                 };
             }
+            const btnLoop1 = panel.querySelector('#mossad-dpad-loop1');
+            if (btnLoop1) {
+                btnLoop1.onclick = () => {
+                    const nextVal = !config.loopSingle;
+                    Settings.set('loopSingle', nextVal);
+                    if (rootDomain === 'grok.com' && typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
+                    showToast(nextVal ? '🔂 Повтор одного файла включен (R1)' : '➡️ Повтор одного файла выключен');
+                    window.updateWidgetUI();
+                };
+            }
             const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
             if (isPinterest) {
@@ -863,7 +888,10 @@
             // v1.3.41: 0 с — допустимое значение (раньше «0 || 3» / «0 || 2» превращало 0 в 3 / 2 с, а для фото min был 1).
             // Пустое/некорректное поле — значение не меняется.
             const numOr = (v, fallback) => { const n = parseFloat(v); return isFinite(n) ? n : fallback; };
-            panel.querySelector('#mossad-in-loops').oninput = debounce((e) => Settings.set('videoLoops', Math.max(1, Math.round(numOr(e.target.value, config.videoLoops)))), 300);
+            panel.querySelector('#mossad-in-loops').oninput = debounce((e) => {
+                Settings.set('videoLoops', Math.max(1, Math.round(numOr(e.target.value, config.videoLoops))));
+                if (rootDomain === 'grok.com' && typeof grokSyncVideoLoopState === 'function') grokSyncVideoLoopState();
+            }, 300);
             panel.querySelector('#mossad-in-pdelay').oninput = debounce((e) => Settings.set('slideshowDelay', Math.max(0, numOr(e.target.value, config.slideshowDelay))), 300);
             panel.querySelector('#mossad-in-vdelay').oninput = debounce((e) => Settings.set('delayAfterVideo', Math.max(0, numOr(e.target.value, config.delayAfterVideo))), 300);
             const btnDlPhoto = panel.querySelector('#mossad-btn-dl-photo');

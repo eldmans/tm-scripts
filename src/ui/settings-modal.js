@@ -360,6 +360,7 @@
         { k: 'delayAfterVideo',   t: 'num', label: 'Пауза после видео, сек', step: 0.5, min: 0 },
         { k: 'slideshowDirections', t: 'dirs', label: 'Направления D-pad' },
         { k: 'loopFeed',          t: 'bool', label: 'R: повторять ленту' },
+        { k: 'loopSingle',        t: 'bool', label: 'R1: повторять один файл' },
         { k: 'downloadType',      t: 'sel', label: 'Скачивание', opts: [['none', 'Не скачивать'], ['all', 'Качать всё'], ['photo', 'Качать фото'], ['video', 'Качать видео']] },
         { k: 'pdAction',          t: 'sel', label: 'После скачивания', opts: [['none', '—'], ['upns', 'Не СШ +1'], ['always', '+1 всегда'], ['del', 'Delete (Grok)']] },
         { k: 'filenameTemplateEnabled', t: 'bool', label: 'Использовать шаблон' },
@@ -1077,7 +1078,7 @@
                 </div>
             </details>
             <div style="font-size:10px; color:#6b7280; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span>v${SCRIPT_VERSION} · 2026-11-26</span>
+              <span>v${SCRIPT_VERSION} · 2026-11-27</span>
               <a href="https://raw.githubusercontent.com/eldmans/tm-scripts/grok/mossad.user.js" 
                  title="Обновить скрипт в Tampermonkey" 
                  style="color:#60a5fa; text-decoration:none; font-size:13px; font-weight:bold; cursor:pointer;" data-mossad-label="updateLink">${LH('updateLink')}</a>

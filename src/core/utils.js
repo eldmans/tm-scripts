@@ -434,6 +434,16 @@
 
         // 3. Grok
         if (rootDomain === 'grok.com') {
+            if (typeof isGrokLibraryPage === 'function' && isGrokLibraryPage()) {
+                const navBtn = findGrokNavButton(dir);
+                if (navBtn) {
+                    triggerClick(navBtn, `Grok Library Nav (${dir})`);
+                    return true;
+                }
+                sendDpadKeyEvent(getArrowKey(dir));
+                return true;
+            }
+
             // А. Горизонтальное листание кадров группы по киноплёнке (left / right)
             if ((dir === 'left' || dir === 'right') && isGrokPostPage()) {
                 {
